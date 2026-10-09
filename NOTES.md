@@ -39,6 +39,16 @@ user-facing description; this file is the part that bites.
   other axes; the shaders read that back from `Globals.CameraOffset`. That flag
   is what hides the HUD and draws the view in front of the world, for that
   player only.
+- **A view fills the window because `text.vsh` puts it there.** Its maps carry
+  the view's columns and rows in the two pixels right of the marker, and the
+  pointer is text whose red is `Shaders.POINTER_RED` with the columns and rows
+  in green and blue. While seated, each of their vertices goes to its distance
+  from the camera's axis, in blocks, over half the picture's size: the window
+  edge to edge, at any FOV or window shape. So the wall is placed to fill only
+  60% of the player's view (`Views.STRETCHED_FIT`): a frame the client thinks
+  is off screen is culled before any shader runs. The pointer sits ON the
+  picture's plane (the remap reads its distance from the axis there) and wins
+  the depth test by a larger factor than the picture.
 - **Depth direction is detected, not assumed.** The in-front trick scales
   `gl_FragCoord.z` towards "near"; the first port assumed reversed depth (26.2). The
   vertex shader passes `ProjMat[2][2] > -0.5` as `mcbReversed`, so the trick

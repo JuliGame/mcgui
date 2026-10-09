@@ -119,11 +119,17 @@ public final class Palette {
         out[129] = markerId[3];
     }
 
-    /** A copy of a HI tile marked as somebody's own fullscreen view: its bottom two marker colours swapped. */
-    public byte[] markOwn(byte[] hi) {
+    /**
+     * A copy of a HI tile marked as somebody's own fullscreen view of [cols] × [rows] maps: its bottom two
+     * marker colours swapped, and the two pixels right of the marker the symbols for its columns and
+     * rows, from which the shader stretches the view to the window. That 2×2 block shows the next one.
+     */
+    public byte[] markOwn(byte[] hi, int cols, int rows) {
         byte[] own = hi.clone();
         own[128] = markerId[3];
         own[129] = markerId[2];
+        own[2] = symbolId[Math.min(SYMBOLS - 1, cols)];
+        own[3] = symbolId[Math.min(SYMBOLS - 1, rows)];
         return own;
     }
 

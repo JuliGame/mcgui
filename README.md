@@ -19,7 +19,8 @@ plugins draw into it. UI Engine, which shows HTML pages, is the first.
 - **Views.** A player sits: their camera locks onto a picture only they can
   see, their mouse moves a pointer across it, the attack and use keys click, the
   wheel scrolls, movement keys are keys and sneaking gets up. They are put back
-  exactly where they stood.
+  exactly where they stood. With the pack the picture fills the whole window,
+  whatever its shape and their FOV.
 - **Colour.** With the pack, maps carry YCbCr 4:2:0 in 240 map colours and the
   pack's text shader decodes them, smoothly scaled, unlit and unfogged. Without
   it, players get dithered vanilla map colours.
@@ -30,7 +31,7 @@ plugins draw into it. UI Engine, which shows HTML pages, is the first.
 |---|---|
 | `/screens test wall [cols] [rows] [player]` | Puts a test picture on the wall you look at |
 | `/screens test view [cols] [rows] [player]` | Opens a test picture as a fullscreen view |
-| `/screens fov <degrees>` | Fits views to your FOV setting (the server cannot read it) |
+| `/screens fov <degrees>` | Fits views to your FOV setting, for players without the pack (the server cannot read it) |
 | `/screens pack` · `stats` · `clear` | Re-send the pack · bytes sent · remove test walls |
 | `/screens debug <player> point <x> <y>` · `click` · `scroll <n>` · `close` | Drive a player's view from the console |
 

@@ -82,6 +82,10 @@ import java.util.function.Predicate;
  *
  * <p>Players with the pack see the pointer as a text display in front of the picture, which their
  * client glides between updates at its own frame rate; players without it get it drawn into the maps.
+ *
+ * <p>With the pack the shader stretches the picture to fill the window (see {@link Shaders}), so it is
+ * placed to fill only part of the player's view: every frame then stays on screen even for a narrower
+ * FOV than they told us, and a frame the client thinks is off screen is never drawn at all.
  */
 public final class Views implements Listener {
     /** A standing player's eye height, which a mannequin shares. */
@@ -92,6 +96,8 @@ public final class Views implements Listener {
     private static final float TOP_Y = -10f;
     /** Ticks to wait for a view's picture before switching to it regardless. */
     private static final int REVEAL_TIMEOUT = 60;
+    /** How much of the window's height (at the player's FOV) a view is placed to fill when the shader stretches it. */
+    private static final double STRETCHED_FIT = 0.6;
 
     private final Plugin plugin;
     private final Settings settings;
@@ -218,7 +224,7 @@ public final class Views implements Listener {
         close(player, CloseReason.CLOSED);
         Canvas canvas = content.canvas();
         boolean withPack = hasPack.test(player.getUniqueId());
-        double fov = viewFov(player, withPack ? options.fill() : 1.0);
+        double fov = viewFov(player, withPack ? STRETCHED_FIT : 1.0);
         Location from = player.getLocation();
         MapWall wall = inFront(player, canvas.cols(), canvas.rows(), fov);
         if (wall == null) throw new IllegalStateException("There isn't enough room around " + player.getName() + " for a view");
@@ -421,13 +427,11 @@ public final class Views implements Listener {
                     new Vector3f((shape.advance() / 2f - shape.hotX) * GLYPH_PX * s, (TOP_Y + shape.hotY) * GLYPH_PX * s, 0f),
                     new Quaternionf(), new Vector3f(s, s, s), new Quaternionf()));
             pointer.text(shape == Pointer.HIDDEN ? Component.empty()
-                    : Component.text(String.valueOf(shape.glyph)).font(ResourcePack.POINTER_FONT).color(TextColor.color(Shaders.IN_FRONT_RGB)));
+                    : Component.text(String.valueOf(shape.glyph)).font(ResourcePack.POINTER_FONT)
+                            .color(TextColor.color(Shaders.pointerRgb(v.wall.cols, v.wall.rows))));
         }
-        // On the line from the camera to the pointer's spot on the picture, just in front of it, so it covers
-        // exactly the pixel a click lands on even though it floats off the surface.
-        Vector onScreen = v.wall.pointAt(v.cursorX, v.cursorY);
-        Vector eye = v.camera.getEyeLocation().toVector();
-        Vector at = onScreen.clone().add(eye.clone().subtract(onScreen).normalize().multiply(0.05));
+        // On the picture, at the cursor: the shader stretches it to the window along with the picture.
+        Vector at = v.wall.pointAt(v.cursorX, v.cursorY);
         Location current = pointer.getLocation();
         if (current.getX() != at.getX() || current.getY() != at.getY() || current.getZ() != at.getZ()) {
             pointer.teleport(new Location(pointer.getWorld(), at.getX(), at.getY(), at.getZ(), current.getYaw(), current.getPitch()));

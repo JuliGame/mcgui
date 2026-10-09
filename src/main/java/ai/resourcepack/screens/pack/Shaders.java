@@ -10,7 +10,8 @@ import java.util.regex.Pattern;
  *
  * <ol>
  *   <li>{@code text.fsh} decodes hi-colour maps (every item-frame map is drawn with the text
- *       pipeline), and draws a seated player's own view and pointer in front of the world.</li>
+ *       pipeline), and draws a seated player's own view and pointer in front of the world;
+ *       {@code text.vsh} stretches that view to fill their window.</li>
  *   <li>{@code position_tex_color} hides the hotbar, hearts, crosshair and vignette, but only for a
  *       seated player.</li>
  * </ol>
@@ -34,10 +35,16 @@ public final class Shaders {
     public static final double FLAG_PHASE = 3.0 / 128;
 
     /**
-     * Text colour (near enough white) of what a seated player sees in front of the world with their own
-     * view: the pointer. The text shader recognises it.
+     * The red of a seated player's pointer, which is text: the text shader draws text of this red in
+     * front of the world, in white, and reads its green and blue as the view's columns and rows so it
+     * can stretch the pointer exactly as it stretches the picture (see {@link #pointerRgb}).
      */
-    public static final int IN_FRONT_RGB = 0xFFFEFF;
+    public static final int POINTER_RED = 254;
+
+    /** The pointer's text colour on a view of [cols] × [rows] maps. */
+    public static int pointerRgb(int cols, int rows) {
+        return POINTER_RED << 16 | Math.min(255, cols) << 8 | Math.min(255, rows);
+    }
 
     private static String f6(double v) {
         return String.format(Locale.ROOT, "%.6f", v);
@@ -215,7 +222,7 @@ public final class Shaders {
 
     // ---------------------------------------------------------------- text
 
-    public static String textVsh(Dialect d) {
+    public static String textVsh(Dialect d, Palette palette) {
         return emit("""
                 #version 330
                 #extension GL_ARB_separate_shader_objects : require
@@ -236,6 +243,8 @@ public final class Shaders {
                 layout(location = 3) in ivec2 UV2;
                 #endif
 
+                uniform sampler2D Sampler0;
+
                 #if !defined(IS_GUI) && !defined(IS_SEE_THROUGH)
                 uniform sampler2D Sampler2;
                 layout(location = 0) out float sphericalVertexDistance;
@@ -250,37 +259,100 @@ public final class Shaders {
                 layout(location = 7) flat out float mcbPointer;
                 layout(location = 8) flat out float mcbReversed;
 
-                """ + helpers(VERTEX_HELPERS) + """
+                """ + helpers(VERTEX_HELPERS) + decoderCore(palette) + """
 
                 void main() {
                     gl_Position = ProjMat * ModelViewMat * vec4(Position, 1.0);
-                    // The in-front text colour (the pointer): drawn in front of the world like the view.
-                    mcbPointer = ivec3(round(Color.rgb * 255.0)) == ivec3(@R@, @G@, @B@) ? 1.0 : 0.0;
                     mcbReversed = mcb_reversed();
-
-                #if !defined(IS_GUI) && !defined(IS_SEE_THROUGH)
-                    sphericalVertexDistance = fog_spherical_distance(Position);
-                    cylindricalVertexDistance = fog_cylindrical_distance(Position);
-                    vertexColor = Color * sample_lightmap(Sampler2, UV2);
-                #else
-                    vertexColor = Color;
-                #endif
                     texCoord0 = UV0;
                     mcbPos = (ModelViewMat * vec4(Position, 1.0)).xy;
                     mcbSize = mcb_gui_size();
+                    mcbPointer = 0.0;
                 #ifdef IS_GUI
                     mcbSeated = mcb_seated_now();
+                    vertexColor = Color;
                 #else
                     mcbSeated = mcb_seated_flag();
+                    vec4 mcbTint = Color;
+                    if (mcbSeated > 0.5) {
+                        // The pointer: text in the pointer's red, its view's columns and rows in green and blue. Drawn white.
+                        ivec3 mcbRgb = ivec3(round(Color.rgb * 255.0));
+                        vec2 mcbGrid = vec2(0.0);
+                        if (mcbRgb.r == @PR@ && mcbRgb.g > 0 && mcbRgb.b > 0) {
+                            mcbPointer = 1.0;
+                            mcbGrid = vec2(mcbRgb.gb);
+                            mcbTint = vec4(1.0, 1.0, 1.0, Color.a);
+                        } else if (mcb_screen_map() == 2) {
+                            // Their own view's maps carry its columns and rows next to the marker.
+                            mcbGrid = vec2(float(mcb_symbol(ivec2(2, 0))), float(mcb_symbol(ivec2(3, 0))));
+                        }
+                        // Both fill the window whatever its shape and whatever the player's FOV. The picture is centred
+                        // on the camera's axis and square to it, so how far a vertex is from that axis, in blocks, as a
+                        // fraction of half the picture's size, is where it goes in the window.
+                        if (mcbGrid.x > 0.0 && mcbGrid.y > 0.0) {
+                            vec2 mcbBlocks = gl_Position.xy / vec2(ProjMat[0][0], ProjMat[1][1]);
+                            gl_Position.xy = mcbBlocks / (mcbGrid * 0.5) * gl_Position.w;
+                        }
+                    }
+                #ifdef IS_SEE_THROUGH
+                    vertexColor = mcbTint;
+                #else
+                    sphericalVertexDistance = fog_spherical_distance(Position);
+                    cylindricalVertexDistance = fog_cylindrical_distance(Position);
+                    vertexColor = mcbTint * sample_lightmap(Sampler2, UV2);
+                #endif
                 #endif
                 }
-                """.replace("@R@", String.valueOf(IN_FRONT_RGB >> 16 & 255))
-                .replace("@G@", String.valueOf(IN_FRONT_RGB >> 8 & 255))
-                .replace("@B@", String.valueOf(IN_FRONT_RGB & 255)), d);
+                """.replace("@PR@", String.valueOf(POINTER_RED)), d);
+    }
+
+    /**
+     * Map colour to symbol, and which maps are ours: both text shaders need it, the vertex one to find a
+     * seated player's own view (and its size), the fragment one to decode every screen.
+     */
+    private static String decoderCore(Palette palette) {
+        SymbolHash hash = new SymbolHash(palette.symbolRgb);
+        return """
+
+                // ---- Screen Engine hi-colour map decoder ----
+                // Colour -> symbol in two table reads (SymbolHash builds these tables).
+                const int MCB_D[@BUCKETS@] = @DISPLACE@;
+                const int MCB_S[@SLOTS@] = @SLOTTABLE@;
+
+                ivec3 mcb_fetch(ivec2 p) { return ivec3(round(texelFetch(Sampler0, p, 0).rgb * 255.0)); }
+
+                int mcb_symbol(ivec2 p) {
+                    uvec3 c = uvec3(mcb_fetch(p));
+                    uint k = (c.r << 16u) | (c.g << 8u) | c.b;
+                    uint b = ((k * @MULA@u) >> 16u) % @BUCKETS@u;
+                    uint slot = (((k * @MULB@u) >> 16u) + uint(MCB_D[b])) % @SLOTS@u;
+                    return max(MCB_S[slot], 0);
+                }
+
+                // 0: not ours. 1: a screen. 2: the view of whoever is seated at it (bottom markers swapped).
+                int mcb_screen_map() {
+                    if (textureSize(Sampler0, 0) != ivec2(128, 128)
+                        || mcb_fetch(ivec2(0, 0)) != @M0@ || mcb_fetch(ivec2(1, 0)) != @M1@) return 0;
+                    ivec3 a = mcb_fetch(ivec2(0, 1));
+                    ivec3 b = mcb_fetch(ivec2(1, 1));
+                    if (a == @M2@ && b == @M3@) return 1;
+                    if (a == @M3@ && b == @M2@) return 2;
+                    return 0;
+                }
+                """
+                .replace("@BUCKETS@", String.valueOf(SymbolHash.BUCKETS))
+                .replace("@SLOTS@", String.valueOf(SymbolHash.SLOTS))
+                .replace("@DISPLACE@", ints(hash.displace))
+                .replace("@SLOTTABLE@", ints(hash.slots))
+                .replace("@MULA@", Integer.toUnsignedString(hash.mulA))
+                .replace("@MULB@", Integer.toUnsignedString(hash.mulB))
+                .replace("@M0@", ivec3(palette.markerRgb[0]))
+                .replace("@M1@", ivec3(palette.markerRgb[1]))
+                .replace("@M2@", ivec3(palette.markerRgb[2]))
+                .replace("@M3@", ivec3(palette.markerRgb[3]));
     }
 
     public static String textFsh(Dialect d, Palette palette) {
-        SymbolHash hash = new SymbolHash(palette.symbolRgb);
         String head = """
                 #version 330
                 #extension GL_ARB_separate_shader_objects : require
@@ -313,46 +385,21 @@ public final class Shaders {
                 #endif
                 """ : "out vec4 fragColor;\n");
 
-        String decoder = """
-
-                // ---- Screen Engine hi-colour map decoder ----
-                // Colour -> symbol in two table reads (SymbolHash builds these tables).
-                const int MCB_D[@BUCKETS@] = @DISPLACE@;
-                const int MCB_S[@SLOTS@] = @SLOTTABLE@;
-
-                ivec3 mcb_fetch(ivec2 p) { return ivec3(round(texelFetch(Sampler0, p, 0).rgb * 255.0)); }
-
-                int mcb_symbol(ivec2 p) {
-                    uvec3 c = uvec3(mcb_fetch(p));
-                    uint k = (c.r << 16u) | (c.g << 8u) | c.b;
-                    uint b = ((k * @MULA@u) >> 16u) % @BUCKETS@u;
-                    uint slot = (((k * @MULB@u) >> 16u) + uint(MCB_D[b])) % @SLOTS@u;
-                    return max(MCB_S[slot], 0);
-                }
-
-                // 0: not ours. 1: a screen. 2: the view of whoever is seated at it (bottom markers swapped).
-                int mcb_screen_map() {
-                    if (textureSize(Sampler0, 0) != ivec2(128, 128)
-                        || mcb_fetch(ivec2(0, 0)) != @M0@ || mcb_fetch(ivec2(1, 0)) != @M1@) return 0;
-                    ivec3 a = mcb_fetch(ivec2(0, 1));
-                    ivec3 b = mcb_fetch(ivec2(1, 1));
-                    if (a == @M2@ && b == @M3@) return 1;
-                    if (a == @M3@ && b == @M2@) return 2;
-                    return 0;
-                }
+        String decoder = decoderCore(palette) + """
 
                 // A seated player's own view and pointer win over any block between them and the camera,
-                // so no blocks need clearing. Scaling depth towards "near" keeps the pointer in front of
-                // the picture and both in front of anything more than a few centimetres from the eye.
-                float mcb_in_front() {
-                    return mcbReversed > 0.5 ? min(gl_FragCoord.z * 64.0, 1.0) : gl_FragCoord.z / 64.0;
+                // so no blocks need clearing. Scaling depth towards "near" puts both in front of anything
+                // more than a few centimetres from the eye, and the pointer (more) in front of the picture.
+                float mcb_in_front(float k) {
+                    return mcbReversed > 0.5 ? min(gl_FragCoord.z * k, 1.0) : gl_FragCoord.z / k;
                 }
 
                 // The screen is almost never drawn at one map pixel per window pixel. Instead of the
                 // nearest pixel (uneven, shimmering text), average the map pixels under this window
                 // pixel's footprint, weighted by overlap. Averaging in YCbCr is exact: the conversion to
-                // RGB is linear. Pixels come in 2x2 blocks that share one chroma value.
-                vec3 mcb_sample(vec2 t, vec2 fw) {
+                // RGB is linear. Pixels come in 2x2 blocks that share one chroma value. The first [info]
+                // + 1 blocks of the top row are the marker (and a view's size): they show the next one.
+                vec3 mcb_sample(vec2 t, vec2 fw, int info) {
                     vec2 halfFw = clamp(fw, vec2(0.02), vec2(2.0)) * 0.5;
                     vec2 lo = clamp(t - halfFw, vec2(0.0), vec2(128.0));
                     vec2 hi = clamp(t + halfFw, vec2(0.0), vec2(128.0));
@@ -363,7 +410,7 @@ public final class Shaders {
                     for (int by = b0.y; by <= b1.y; by++) {
                         for (int bx = b0.x; bx <= b1.x; bx++) {
                             ivec2 base = ivec2(bx, by) * 2;
-                            ivec2 src = (bx == 0 && by == 0) ? ivec2(2, 0) : base; // the marker block shows its neighbour
+                            ivec2 src = (by == 0 && bx <= info) ? ivec2(2 * info + 2, 0) : base;
                             int s00 = mcb_symbol(src);
                             int s10 = mcb_symbol(src + ivec2(1, 0));
                             int s01 = mcb_symbol(src + ivec2(0, 1));
@@ -387,16 +434,6 @@ public final class Shaders {
 
                 bool mcb_in(vec2 p, vec2 a, vec2 b) { return p.x >= a.x && p.x <= b.x && p.y >= a.y && p.y <= b.y; }
                 """
-                .replace("@BUCKETS@", String.valueOf(SymbolHash.BUCKETS))
-                .replace("@SLOTS@", String.valueOf(SymbolHash.SLOTS))
-                .replace("@DISPLACE@", ints(hash.displace))
-                .replace("@SLOTTABLE@", ints(hash.slots))
-                .replace("@MULA@", Integer.toUnsignedString(hash.mulA))
-                .replace("@MULB@", Integer.toUnsignedString(hash.mulB))
-                .replace("@M0@", ivec3(palette.markerRgb[0]))
-                .replace("@M1@", ivec3(palette.markerRgb[1]))
-                .replace("@M2@", ivec3(palette.markerRgb[2]))
-                .replace("@M3@", ivec3(palette.markerRgb[3]))
                 .replace("@DIGITS@", String.valueOf(Palette.DIGITS))
                 .replace("@LUMAMAX@", String.format(Locale.ROOT, "%.1f", (float) (Palette.LUMA_LEVELS - 1)));
 
@@ -407,7 +444,7 @@ public final class Shaders {
                     vec2 mcbFootprint = fwidth(texCoord0 * 128.0);
                     float mcbDepth = gl_FragCoord.z;
                 #ifndef IS_GUI
-                    if (mcbSeated > 0.5 && mcbPointer > 0.5) mcbDepth = mcb_in_front();
+                    if (mcbSeated > 0.5 && mcbPointer > 0.5) mcbDepth = mcb_in_front(128.0);
                     // A shader that writes gl_FragDepth anywhere must write it on every path.
                     gl_FragDepth = mcbDepth;
                 #endif
@@ -422,10 +459,10 @@ public final class Shaders {
                     int mcbMap = mcb_screen_map();
                     if (mcbMap > 0) {
                         // A screen emits its own light: no lightmap, tint or fog, so colours are exact day and night.
-                        vec4 mcbColor = vec4(mcb_sample(texCoord0 * 128.0, mcbFootprint), 1.0);
+                        vec4 mcbColor = vec4(mcb_sample(texCoord0 * 128.0, mcbFootprint, mcbMap == 2 ? 1 : 0), 1.0);
                 #ifndef IS_GUI
                         if (mcbMap == 2 && mcbSeated > 0.5) {
-                            mcbDepth = mcb_in_front();
+                            mcbDepth = mcb_in_front(64.0);
                             gl_FragDepth = mcbDepth;
                         }
                 #endif

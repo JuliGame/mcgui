@@ -153,7 +153,7 @@ public final class Canvas {
                 byte[] base = hi.get(index);
                 Own own = hiOwn.get(index);
                 if (own == null || own.base != base) {
-                    own = new Own(base, palette.markOwn(base));
+                    own = new Own(base, palette.markOwn(base, cols, rows));
                     hiOwn.set(index, own);
                 }
                 yield own.tile;

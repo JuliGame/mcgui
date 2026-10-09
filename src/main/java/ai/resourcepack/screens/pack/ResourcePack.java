@@ -139,7 +139,7 @@ public final class ResourcePack implements AutoCloseable {
                     """.formatted(FORMAT_26_2, FORMAT_26_3, OVERLAY_26_2, FORMAT_26_2, FORMAT_26_3 - 1));
             for (Shaders.Dialect d : Shaders.Dialect.values()) {
                 String root = (d == Shaders.Dialect.V26_3 ? "" : OVERLAY_26_2 + "/") + "assets/minecraft/shaders/core/";
-                e.put(root + "text.vsh", Shaders.textVsh(d));
+                e.put(root + "text.vsh", Shaders.textVsh(d, palette));
                 e.put(root + "text.fsh", Shaders.textFsh(d, palette));
                 e.put(root + "position_tex_color.vsh", Shaders.positionTexColorVsh(d));
                 e.put(root + "position_tex_color.fsh", Shaders.positionTexColorFsh(d));
