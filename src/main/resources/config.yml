@@ -1,0 +1,39 @@
+# UI Engine: HTML pages in game. Pages live in plugins/UIEngine/<pages-folder>/.
+
+pages-folder: pages
+
+# Edit a page (or its CSS or images) and it updates in game within a second.
+live-reload: true
+
+# Let pages load stylesheets, fonts and images from the web (Google Fonts, image hosts). They are
+# fetched once and kept in plugins/UIEngine/cache/.
+allow-web: true
+
+# Threads that draw pages. Drawing happens off the server thread.
+render-threads: 2
+
+# A click sound when a link or button does something.
+click-sound: true
+
+# How far one notch of the scroll wheel scrolls a page, in CSS pixels.
+scroll-step: 80
+
+views:
+  # Size of a fullscreen page, in maps (128 pixels each). A page can set its own with
+  # <meta name="ui:size" content="12x7">.
+  size: 16x9
+  # The page is laid out as if the view were this many CSS pixels tall (16x9 maps at 576 makes a
+  # 1024 x 576 page drawn at twice the sharpness). A page can set its own with <meta name="ui:height">.
+  height: 576
+  # How much of the player's screen the page fills; the world shows round it. <meta name="ui:fill">.
+  fill: 0.9
+
+walls:
+  # A wall screen's page is laid out this many CSS pixels per map tall, unless the page says
+  # otherwise with <meta name="ui:height">.
+  pixels-per-map: 128
+  # Whether the scroll wheel scrolls a wall screen you are looking at (it then does not change your
+  # hotbar slot while you look at one).
+  scroll-wheel: true
+
+debug: false

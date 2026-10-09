@@ -1,0 +1,660 @@
+package ai.resourcepack.ui.html.paint;
+
+import ai.resourcepack.ui.html.css.Values;
+import ai.resourcepack.ui.html.layout.Box;
+import ai.resourcepack.ui.html.res.Resources;
+import ai.resourcepack.ui.html.style.Len;
+import ai.resourcepack.ui.html.style.Style;
+import ai.resourcepack.ui.html.text.Fonts;
+import ai.resourcepack.ui.html.text.TextShaper;
+import org.jsoup.nodes.Element;
+
+import java.awt.AlphaComposite;
+import java.awt.BasicStroke;
+import java.awt.Color;
+import java.awt.Composite;
+import java.awt.Font;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
+import java.awt.Shape;
+import java.awt.Stroke;
+import java.awt.font.LineMetrics;
+import java.awt.geom.AffineTransform;
+import java.awt.geom.Area;
+import java.awt.geom.Ellipse2D;
+import java.awt.geom.Line2D;
+import java.awt.geom.Path2D;
+import java.awt.geom.Rectangle2D;
+import java.awt.image.BufferedImage;
+import java.awt.image.DataBufferInt;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+
+/**
+ * Paints a laid-out box tree with Java2D, in CSS pixels (the caller scales), in CSS's painting order:
+ * a stacking context's own background, then its negative z-index children, then the normal flow
+ * (block backgrounds, then inline content), then positioned children by z-index. Records, in the
+ * same order, a hit region per box so a point can be traced back to the element on top.
+ */
+public final class Painter {
+    private final TextShaper shaper;
+    private final Resources res;
+    private final double viewportW, viewportH;
+    private final double scrollY;
+    /** The surface being painted on, for backdrop-filter. */
+    private BufferedImage surface;
+    private double deviceScale = 1;
+
+    /** Where something was drawn, in page coordinates, and which element it belongs to. */
+    public record Hit(Shape shape, Shape clip, Element element) {}
+
+    public final List<Hit> hits = new ArrayList<>();
+    /** Page-space clip in force (for hit regions); null for none. */
+    private Shape pageClip;
+    /** Page-space transform in force (for hit regions). */
+    private AffineTransform pageTx = new AffineTransform();
+
+    public Painter(TextShaper shaper, Resources res, double viewportW, double viewportH, double scrollY) {
+        this.shaper = shaper;
+        this.res = res;
+        this.viewportW = viewportW;
+        this.viewportH = viewportH;
+        this.scrollY = scrollY;
+    }
+
+    /** Paints the page into [g] (already scaled to CSS pixels) over [surface], the image [g] draws on. */
+    public void paint(Graphics2D g, Box root, BufferedImage surface, double scale) {
+        this.surface = surface;
+        this.deviceScale = scale;
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+        g.setRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS, RenderingHints.VALUE_FRACTIONALMETRICS_ON);
+        g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+        g.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE);
+        // The canvas: the root's background, or the body's when the root has none (CSS propagates it).
+        Box canvasSource = root;
+        if (transparent(root.style)) {
+            for (Box c : root.children) {
+                if (c.element != null && c.element.normalName().equals("body")) {
+                    canvasSource = c;
+                    break;
+                }
+            }
+        }
+        g.setColor(Color.WHITE);
+        g.fill(new Rectangle2D.Double(0, 0, viewportW, viewportH));
+        if (!transparent(canvasSource.style)) {
+            Rectangle2D page = new Rectangle2D.Double(0, 0, viewportW, Math.max(viewportH, root.overflowBottom));
+            AffineTransform saved = g.getTransform();
+            g.translate(0, -scrollY);
+            if (canvasSource.style.backgroundColor != 0) {
+                g.setColor(new Color(canvasSource.style.backgroundColor, true));
+                g.fill(page);
+            }
+            if (!canvasSource.style.backgroundImages.isEmpty()) {
+                Rectangle2D area = canvasSource == root ? page : new Rectangle2D.Double(0, 0, viewportW, Math.max(viewportH, root.overflowBottom));
+                Backgrounds.paint(g, canvasSource.style, res, area, page);
+            }
+            g.setTransform(saved);
+        }
+        propagated = canvasSource;
+        g.translate(0, -scrollY);
+        pageTx = new AffineTransform();
+        context(g, root, root.x, root.y);
+    }
+
+    private Box propagated;
+
+    private static boolean transparent(Style s) {
+        return (s.backgroundColor >>> 24) == 0 && s.backgroundImages.isEmpty();
+    }
+
+    // ---------------------------------------------------------------- stacking
+
+    private record Deferred(Box box, double x, double y, Shape clip, Shape pageClip, int order) {}
+
+    /** Paints a stacking context (or a positioned box treated as one) whose border box is at (x, y). */
+    private void context(Graphics2D g, Box box, double x, double y) {
+        Style s = box.style;
+        if (box.fixed) y += scrollY;
+        AffineTransform savedTx = g.getTransform();
+        AffineTransform savedPage = pageTx;
+        Shape savedPageClip = pageClip;
+        AffineTransform t = transform(box, x, y);
+        if (t != null) {
+            g.transform(t);
+            pageTx = new AffineTransform(pageTx);
+            pageTx.concatenate(t);
+        }
+        boolean layer = s.opacity < 1 || !s.filter.equals("none");
+        if (layer && s.opacity <= 0) {
+            g.setTransform(savedTx);
+            pageTx = savedPage;
+            return;
+        }
+        if (layer) {
+            layered(g, box, x, y);
+        } else {
+            contextBody(g, box, x, y);
+        }
+        g.setTransform(savedTx);
+        pageTx = savedPage;
+        pageClip = savedPageClip;
+    }
+
+    private void contextBody(Graphics2D g, Box box, double x, double y) {
+        if (box != propagated || box.element == null || !box.element.normalName().equals("html")) {
+            if (box != propagated) background(g, box, x, y);
+            else bordersOnly(g, box, x, y);
+        } else {
+            bordersOnly(g, box, x, y);
+        }
+        List<Deferred> deferred = new ArrayList<>();
+        Shape clip = g.getClip();
+        flow(g, box, x, y, deferred);
+        g.setClip(clip);
+        deferred.sort((a, b) -> {
+            int za = a.box.style.zIndex == null ? 0 : a.box.style.zIndex, zb = b.box.style.zIndex == null ? 0 : b.box.style.zIndex;
+            return za != zb ? Integer.compare(za, zb) : Integer.compare(a.order, b.order);
+        });
+        // Negative z-index first would belong under the flow; painting them here in order is close enough
+        // for pages, which use negative z-index for decorations behind their own siblings.
+        for (Deferred d : deferred) {
+            Shape old = g.getClip();
+            Shape oldPage = pageClip;
+            g.setClip(d.clip);
+            pageClip = d.pageClip;
+            context(g, d.box, d.x, d.y);
+            g.setClip(old);
+            pageClip = oldPage;
+        }
+    }
+
+    /** Opacity and filters: the subtree painted on a layer of its own, then blended in. */
+    private void layered(Graphics2D g, Box box, double x, double y) {
+        AffineTransform dev = g.getTransform();
+        // The layer covers the surface being painted (the screen, or an enclosing layer), cut to the clip.
+        java.awt.Rectangle r = new java.awt.Rectangle(0, 0, surface.getWidth(), surface.getHeight());
+        if (g.getClipBounds() != null) {
+            java.awt.Rectangle clipDev = dev.createTransformedShape(g.getClip()).getBounds();
+            r = r.intersection(clipDev);
+        }
+        if (r.width <= 0 || r.height <= 0) return;
+        BufferedImage img = new BufferedImage(r.width, r.height, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D lg = img.createGraphics();
+        lg.setRenderingHints(g.getRenderingHints());
+        lg.translate(-r.x, -r.y);
+        lg.transform(dev);
+        if (g.getClip() != null) lg.setClip(g.getClip());
+        BufferedImage savedSurface = surface;
+        surface = img;
+        contextBody(lg, box, x, y);
+        surface = savedSurface;
+        lg.dispose();
+        Filters.apply(img, box.style.filter, deviceScale, box.style);
+        AffineTransform saved = g.getTransform();
+        g.setTransform(new AffineTransform());
+        Composite old = g.getComposite();
+        g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, (float) box.style.opacity));
+        g.drawImage(img, r.x, r.y, null);
+        g.setComposite(old);
+        g.setTransform(saved);
+    }
+
+    private AffineTransform transform(Box box, double x, double y) {
+        String t = box.style.transform;
+        if (t.equals("none")) return null;
+        AffineTransform a = Transforms.parse(t, box.w, box.h, box.style);
+        if (a == null || a.isIdentity()) return null;
+        double[] origin = Transforms.origin(box.style.transformOrigin, box.w, box.h, box.style);
+        AffineTransform full = new AffineTransform();
+        full.translate(x + origin[0], y + origin[1]);
+        full.concatenate(a);
+        full.translate(-(x + origin[0]), -(y + origin[1]));
+        return full;
+    }
+
+    /** True for a box painted later, in its stacking context's positioned pass. */
+    private static boolean deferredBox(Box c) {
+        return c.style.isPositioned() || c.style.createsStackingContext();
+    }
+
+    /** The normal flow inside [box]: block children, then lines, collecting positioned ones. */
+    private void flow(Graphics2D g, Box box, double x, double y, List<Deferred> deferred) {
+        Shape savedClip = g.getClip();
+        Shape savedPageClip = pageClip;
+        if (box.style.clips() && box.parent != null) {
+            Shape inner = padding(box, x, y);
+            g.clip(inner);
+            Shape pageShape = pageTx.createTransformedShape(inner);
+            pageClip = pageClip == null ? pageShape : intersect(pageClip, pageShape);
+        }
+        if (box.marker != null) marker(g, box, x, y);
+        for (Box c : box.children) {
+            if (c.isText() || c.inner == Box.Inner.BREAK) continue;
+            if (c.isInline()) {
+                collectInline(g, c, x, y, deferred);
+                continue;
+            }
+            if (c.atomic && box.lines != null && !deferredBox(c)) continue; // painted with its line
+            double cx = x + c.x, cy = y + c.y;
+            if (deferredBox(c)) {
+                deferred.add(new Deferred(c, cx, cy, g.getClip(), pageClip, deferred.size()));
+                continue;
+            }
+            if (c.style.hidden() && c.children.isEmpty()) continue;
+            background(g, c, cx, cy);
+            flow(g, c, cx, cy, deferred);
+        }
+        if (box.lines != null) lines(g, box, x, y, deferred);
+        g.setClip(savedClip);
+        pageClip = savedPageClip;
+    }
+
+    /** An inline box's positioned or block descendants, which it does not paint itself. */
+    private void collectInline(Graphics2D g, Box inline, double x, double y, List<Deferred> deferred) {
+        for (Box c : inline.children) {
+            if (c.isText() || c.inner == Box.Inner.BREAK) continue;
+            if (c.isInline()) {
+                collectInline(g, c, x, y, deferred);
+            } else if (deferredBox(c)) {
+                deferred.add(new Deferred(c, x + c.x, y + c.y, g.getClip(), pageClip, deferred.size()));
+            }
+        }
+    }
+
+    private static Shape intersect(Shape a, Shape b) {
+        Area area = new Area(a);
+        area.intersect(new Area(b));
+        return area;
+    }
+
+    // ---------------------------------------------------------------- lines
+
+    private void lines(Graphics2D g, Box block, double x, double y, List<Deferred> deferred) {
+        // Inline boxes' backgrounds and borders under the text.
+        inlineDecorations(g, block, x, y);
+        for (Box.Line line : block.lines) {
+            for (Box.Item it : line.items) {
+                if (it.text != null) {
+                    text(g, it, x, y);
+                } else if (it.box != null) {
+                    Box ab = it.box;
+                    if (deferredBox(ab)) continue; // collected with the tree walk
+                    if (ab.style.hidden()) continue;
+                    double ax = x + ab.x, ay = y + ab.y;
+                    // An inline-block paints as if it were a stacking context of its own.
+                    context(g, ab, ax, ay);
+                }
+            }
+        }
+    }
+
+    private void inlineDecorations(Graphics2D g, Box parent, double x, double y) {
+        for (Box c : parent.children) {
+            if (!c.isInline() || c.isText()) continue;
+            if (c.fragments != null && !c.style.hidden()) {
+                for (Box.Fragment f : c.fragments) fragment(g, c, f, x, y);
+            }
+            inlineDecorations(g, c, x, y);
+        }
+    }
+
+    private void fragment(Graphics2D g, Box box, Box.Fragment f, double x, double y) {
+        Style s = box.style;
+        double fx = x + f.x, fy = y + f.y;
+        Rectangle2D r = new Rectangle2D.Double(fx, fy, Math.max(0, f.w), f.h);
+        double[] radii = Shapes.radii(box);
+        Shape shape = Shapes.rect(r.getX(), r.getY(), r.getWidth(), r.getHeight(), radii);
+        if ((s.backgroundColor >>> 24) != 0) {
+            g.setColor(new Color(s.backgroundColor, true));
+            g.fill(shape);
+        }
+        if (!s.backgroundImages.isEmpty()) Backgrounds.paint(g, s, res, r, shape);
+        double left = f.first ? box.b[3] : 0, right = f.last ? box.b[1] : 0;
+        drawBorders(g, s, r, radii, new double[]{box.b[0], right, box.b[2], left});
+        hit(shape, box.element != null ? box.element : box.owner);
+    }
+
+    private void text(Graphics2D g, Box.Item it, double x, double y) {
+        Style s = it.style;
+        if (s.hidden()) return;
+        String text = it.text;
+        if (text.isBlank() && s.textDecorationLine.equals("none")) {
+            hit(new Rectangle2D.Double(x + it.x, y + it.baselineY - s.fontSize, it.w, s.fontSize * 1.2), it.box.owner);
+            return;
+        }
+        double tx = x + it.x, ty = y + it.baselineY;
+        Font font = it.font;
+        // text-shadow, first one on top.
+        List<Shadows.Shadow> shadows = Shadows.parse(s.textShadow, s);
+        for (int i = shadows.size() - 1; i >= 0; i--) {
+            Shadows.Shadow sh = shadows.get(i);
+            Shadows.text(g, shaper, text, font, tx + sh.x(), ty + sh.y(), sh, deviceScale);
+        }
+        Integer fill = s.textFillColor;
+        boolean clipText = s.backgroundClips.contains("text") && !s.backgroundImages.isEmpty();
+        Box owner = backgroundOwner(it.box, s);
+        if (clipText && owner != null) {
+            // Gradient text: the element's background, seen through the letters. Drawn as an
+            // antialiased mask, because a clip to the glyph outlines would have jagged edges.
+            Rectangle2D area = ownerArea(owner, x, y, it);
+            gradientText(g, s, text, font, tx, ty, area);
+        } else {
+            int color = fill != null ? fill : s.color;
+            if ((color >>> 24) != 0) {
+                g.setColor(new Color(color, true));
+                if (it.spacing != 0) {
+                    double cx = tx;
+                    for (String word : text.split("(?<= )")) {
+                        shaper.draw(g, word, font, cx, ty);
+                        cx += shaper.width(word, font) + (word.endsWith(" ") ? it.spacing : 0);
+                    }
+                } else {
+                    shaper.draw(g, text, font, tx, ty);
+                }
+            }
+        }
+        decorations(g, it, tx, ty);
+        Fonts.Metrics m = shaper.fonts().metrics(font);
+        hit(new Rectangle2D.Double(tx, ty - m.ascent(), it.w, m.ascent() + m.descent()), it.box.owner);
+    }
+
+    private void gradientText(Graphics2D g, Style s, String text, Font font, double tx, double ty, Rectangle2D area) {
+        AffineTransform dev = g.getTransform();
+        Shape glyphs = shaper.outline(text, font, tx, ty);
+        java.awt.Rectangle r = dev.createTransformedShape(glyphs.getBounds2D()).getBounds();
+        r.grow(2, 2);
+        if (r.width <= 0 || r.height <= 0 || (long) r.width * r.height > 16_000_000L) return;
+        BufferedImage mask = new BufferedImage(r.width, r.height, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D mg = mask.createGraphics();
+        mg.setRenderingHints(g.getRenderingHints());
+        mg.translate(-r.x, -r.y);
+        mg.transform(dev);
+        mg.setColor(Color.WHITE);
+        shaper.draw(mg, text, font, tx, ty);
+        // Keep the mask's alpha, take the background's colour.
+        mg.setComposite(AlphaComposite.SrcIn);
+        if ((s.backgroundColor >>> 24) != 0) {
+            mg.setColor(new Color(s.backgroundColor, true));
+            mg.fill(area);
+        }
+        Backgrounds.paint(mg, s, res, area, area);
+        mg.dispose();
+        AffineTransform saved = g.getTransform();
+        g.setTransform(new AffineTransform());
+        g.drawImage(mask, r.x, r.y, null);
+        g.setTransform(saved);
+    }
+
+    /** The box whose background shows through gradient text: the nearest ancestor with that background. */
+    private static Box backgroundOwner(Box textBox, Style s) {
+        for (Box b = textBox; b != null; b = b.parent) if (b.style == s && !b.isText()) return b;
+        return textBox.parent;
+    }
+
+    private static Rectangle2D ownerArea(Box owner, double x, double y, Box.Item it) {
+        if (owner.isInline() && owner.fragments != null && !owner.fragments.isEmpty()) {
+            Box.Fragment f = owner.fragments.get(0);
+            double minX = f.x, maxX = f.x + f.w, minY = f.y, maxY = f.y + f.h;
+            for (Box.Fragment fr : owner.fragments) {
+                minX = Math.min(minX, fr.x);
+                maxX = Math.max(maxX, fr.x + fr.w);
+                minY = Math.min(minY, fr.y);
+                maxY = Math.max(maxY, fr.y + fr.h);
+            }
+            return new Rectangle2D.Double(x + minX, y + minY, maxX - minX, maxY - minY);
+        }
+        // A block's own text: its lines are relative to it, so its border box is at (x, y).
+        return new Rectangle2D.Double(x, y, Math.max(owner.w, it.x + it.w), Math.max(owner.h, 1));
+    }
+
+    private void decorations(Graphics2D g, Box.Item it, double tx, double ty) {
+        Style s = it.style;
+        String line = s.textDecorationLine;
+        if (line.equals("none")) return;
+        int color = s.textDecorationColor != null ? s.textDecorationColor : s.color;
+        LineMetrics lm = it.font.getLineMetrics("x", Fonts.FRC);
+        double thick = Math.max(1, s.fontSize / 15);
+        g.setColor(new Color(color, true));
+        Stroke old = g.getStroke();
+        float[] dash = switch (s.textDecorationStyle) {
+            case "dashed" -> new float[]{(float) (thick * 3), (float) (thick * 2)};
+            case "dotted" -> new float[]{(float) thick, (float) thick};
+            default -> null;
+        };
+        g.setStroke(new BasicStroke((float) thick, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER, 10, dash, 0));
+        double w = it.w;
+        String text = it.text;
+        // Trailing spaces are not underlined.
+        if (text.endsWith(" ")) w -= shaper.width(" ", it.font) * (text.length() - text.stripTrailing().length());
+        if (line.contains("underline")) {
+            double uy = ty + Math.max(thick, lm.getUnderlineOffset() + thick / 2);
+            g.draw(new Line2D.Double(tx, uy, tx + w, uy));
+        }
+        if (line.contains("line-through")) {
+            double sy = ty + lm.getStrikethroughOffset();
+            g.draw(new Line2D.Double(tx, sy, tx + w, sy));
+        }
+        if (line.contains("overline")) {
+            double oy = ty - lm.getAscent() + thick;
+            g.draw(new Line2D.Double(tx, oy, tx + w, oy));
+        }
+        g.setStroke(old);
+    }
+
+    private void marker(Graphics2D g, Box li, double x, double y) {
+        if (Double.isNaN(li.baseline)) return;
+        Style s = li.markerStyle != null ? li.markerStyle : li.style;
+        Font font = shaper.withSpacing(shaper.fonts().font(s.fontFamilies, s.fontWeight, s.italic, s.fontSize), 0);
+        String text = li.marker;
+        boolean bullet = text.length() == 1 && !Character.isLetterOrDigit(text.charAt(0));
+        double by = y + li.baseline;
+        g.setColor(new Color(s.color, true));
+        if (bullet) {
+            // Bullets drawn as shapes, like browsers do, so every font gets the same dot.
+            double size = s.fontSize * 0.35;
+            double cx = x + li.contentX() - s.fontSize * 0.5 - size / 2;
+            if (s.listStylePosition.equals("inside")) cx = x + li.contentX() + size;
+            double cy = by - s.fontSize * 0.3;
+            Shape dot = switch (text) {
+                case "◦" -> new Ellipse2D.Double(cx - size / 2, cy - size / 2, size, size);
+                case "▪" -> new Rectangle2D.Double(cx - size / 2, cy - size / 2, size, size);
+                default -> new Ellipse2D.Double(cx - size / 2, cy - size / 2, size, size);
+            };
+            if (text.equals("◦")) {
+                g.setStroke(new BasicStroke((float) Math.max(1, s.fontSize / 16)));
+                g.draw(dot);
+            } else {
+                g.fill(dot);
+            }
+            return;
+        }
+        double w = shaper.width(text + " ", font);
+        double mx = x + li.contentX() - w;
+        shaper.draw(g, text, font, mx, by);
+    }
+
+    // ---------------------------------------------------------------- boxes
+
+    private Shape padding(Box b, double x, double y) {
+        double[] r = Shapes.inset(Shapes.radii(b), b.b[0], b.b[1], b.b[2], b.b[3]);
+        return Shapes.rect(x + b.b[3], y + b.b[0], b.w - b.b[1] - b.b[3], b.h - b.b[0] - b.b[2], r);
+    }
+
+    private void background(Graphics2D g, Box b, double x, double y) {
+        Style s = b.style;
+        double[] radii = Shapes.radii(b);
+        Shape border = Shapes.rect(x, y, b.w, b.h, radii);
+        if (!s.hidden()) {
+            List<Shadows.Shadow> shadows = Shadows.parse(s.boxShadow, s);
+            for (int i = shadows.size() - 1; i >= 0; i--) {
+                Shadows.Shadow sh = shadows.get(i);
+                if (!sh.inset()) Shadows.outer(g, x, y, b.w, b.h, radii, sh, deviceScale);
+            }
+            if (!s.backdropFilter.equals("none") && surface != null) Filters.backdrop(g, surface, border, s, deviceScale);
+            Shape clipBox = switch (Backgrounds.pick(s.backgroundClips, 0, "border-box")) {
+                case "padding-box" -> padding(b, x, y);
+                case "content-box" -> Shapes.rect(x + b.contentX(), y + b.contentY(), b.contentW(), b.contentH(),
+                        Shapes.inset(radii, b.b[0] + b.p[0], b.b[1] + b.p[1], b.b[2] + b.p[2], b.b[3] + b.p[3]));
+                default -> border;
+            };
+            boolean textClip = s.backgroundClips.contains("text");
+            if (!textClip && (s.backgroundColor >>> 24) != 0) {
+                g.setColor(new Color(s.backgroundColor, true));
+                g.fill(clipBox);
+            }
+            if (!textClip && !s.backgroundImages.isEmpty()) {
+                Rectangle2D area = new Rectangle2D.Double(x + b.b[3], y + b.b[0], b.w - b.b[1] - b.b[3], b.h - b.b[0] - b.b[2]);
+                Backgrounds.paint(g, s, res, area, clipBox);
+            }
+            if (b.inner == Box.Inner.REPLACED) replaced(g, b, x, y, radii);
+            for (Shadows.Shadow sh : shadows) if (sh.inset()) Shadows.inner(g, padding(b, x, y), sh, deviceScale);
+            drawBorders(g, s, new Rectangle2D.Double(x, y, b.w, b.h), radii, b.b);
+        }
+        if (!s.pointerEvents.equals("none")) hit(border, b.element != null ? b.element : b.owner);
+    }
+
+    private void bordersOnly(Graphics2D g, Box b, double x, double y) {
+        double[] radii = Shapes.radii(b);
+        drawBorders(g, b.style, new Rectangle2D.Double(x, y, b.w, b.h), radii, b.b);
+        hit(Shapes.rect(x, y, b.w, b.h, radii), b.element);
+    }
+
+    private void hit(Shape s, Element e) {
+        if (e == null) return;
+        hits.add(new Hit(pageTx.createTransformedShape(s), pageClip, e));
+    }
+
+    /** Borders: a ring per side, or one ring when all four match; dashed and dotted ones stroked. */
+    private void drawBorders(Graphics2D g, Style s, Rectangle2D r, double[] radii, double[] widths) {
+        boolean any = false;
+        for (int i = 0; i < 4; i++) if (widths[i] > 0 && (s.borderColor[i] >>> 24) != 0) any = true;
+        if (!any) return;
+        double t = widths[0], rt = widths[1], bt = widths[2], lt = widths[3];
+        Shape outer = Shapes.rect(r.getX(), r.getY(), r.getWidth(), r.getHeight(), radii);
+        Shape inner = Shapes.rect(r.getX() + lt, r.getY() + t, r.getWidth() - lt - rt, r.getHeight() - t - bt, Shapes.inset(radii, t, rt, bt, lt));
+        boolean same = true;
+        for (int i = 1; i < 4; i++) {
+            if (s.borderColor[i] != s.borderColor[0] || !s.borderStyle[i].equals(s.borderStyle[0]) || (widths[i] > 0) != (widths[0] > 0)) same = false;
+        }
+        String style = s.borderStyle[0];
+        if (same && (style.equals("dashed") || style.equals("dotted"))) {
+            double w = widths[0];
+            g.setColor(new Color(s.borderColor[0], true));
+            float[] dash = style.equals("dotted") ? new float[]{0.01f, (float) (w * 2)} : new float[]{(float) (w * 3), (float) (w * 2)};
+            Stroke old = g.getStroke();
+            g.setStroke(new BasicStroke((float) w, style.equals("dotted") ? BasicStroke.CAP_ROUND : BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER, 10, dash, 0));
+            g.draw(Shapes.rect(r.getX() + w / 2, r.getY() + w / 2, r.getWidth() - w, r.getHeight() - w, Shapes.inset(radii, w / 2, w / 2, w / 2, w / 2)));
+            g.setStroke(old);
+            return;
+        }
+        if (same) {
+            Area ring = new Area(outer);
+            ring.subtract(new Area(inner));
+            g.setColor(new Color(shade(s.borderColor[0], style, 0), true));
+            g.fill(ring);
+            return;
+        }
+        // Different sides: each side is the ring cut by the diagonals from the corners.
+        double x0 = r.getX(), y0 = r.getY(), x1 = r.getMaxX(), y1 = r.getMaxY();
+        double ix0 = x0 + lt, iy0 = y0 + t, ix1 = x1 - rt, iy1 = y1 - bt;
+        Area ring = new Area(outer);
+        ring.subtract(new Area(inner));
+        double[][] quads = {
+                {x0, y0, x1, y0, ix1, iy0, ix0, iy0},
+                {x1, y0, x1, y1, ix1, iy1, ix1, iy0},
+                {x1, y1, x0, y1, ix0, iy1, ix1, iy1},
+                {x0, y1, x0, y0, ix0, iy0, ix0, iy1}};
+        for (int i = 0; i < 4; i++) {
+            if (widths[i] <= 0 || (s.borderColor[i] >>> 24) == 0 || s.borderStyle[i].equals("none") || s.borderStyle[i].equals("hidden")) continue;
+            Path2D.Double q = new Path2D.Double();
+            double[] p = quads[i];
+            // Pushed outward a little so neighbouring sides meet without a hairline gap.
+            q.moveTo(p[0], p[1]);
+            q.lineTo(p[2], p[3]);
+            q.lineTo(p[4], p[5]);
+            q.lineTo(p[6], p[7]);
+            q.closePath();
+            Area side = new Area(q);
+            side.intersect(ring);
+            g.setColor(new Color(shade(s.borderColor[i], s.borderStyle[i], i), true));
+            g.fill(side);
+        }
+    }
+
+    /** inset/outset/groove/ridge borders: darker on two sides, like browsers draw them. */
+    private static int shade(int argb, String style, int side) {
+        boolean dark = switch (style) {
+            case "inset", "groove" -> side == 0 || side == 3;
+            case "outset", "ridge" -> side == 1 || side == 2;
+            default -> false;
+        };
+        if (!dark) return argb;
+        int r = (argb >> 16 & 255) * 2 / 3, gg = (argb >> 8 & 255) * 2 / 3, b = (argb & 255) * 2 / 3;
+        return (argb & 0xFF000000) | (r << 16) | (gg << 8) | b;
+    }
+
+    // ---------------------------------------------------------------- replaced content
+
+    private void replaced(Graphics2D g, Box b, double x, double y, double[] radii) {
+        double cx = x + b.contentX(), cy = y + b.contentY(), cw = b.contentW(), ch = b.contentH();
+        if (b.picture != null) {
+            Shape old = g.getClip();
+            g.clip(Shapes.rect(cx, cy, cw, ch, Shapes.inset(radii, b.b[0] + b.p[0], b.b[1] + b.p[1], b.b[2] + b.p[2], b.b[3] + b.p[3])));
+            double nw = b.picture.width(), nh = b.picture.height();
+            if (nw <= 0 || nh <= 0) {
+                nw = cw;
+                nh = ch;
+            }
+            double dw = cw, dh = ch;
+            switch (b.style.objectFit) {
+                case "contain", "scale-down" -> {
+                    double sc = Math.min(cw / nw, ch / nh);
+                    if (b.style.objectFit.equals("scale-down")) sc = Math.min(sc, 1);
+                    dw = nw * sc;
+                    dh = nh * sc;
+                }
+                case "cover" -> {
+                    double sc = Math.max(cw / nw, ch / nh);
+                    dw = nw * sc;
+                    dh = nh * sc;
+                }
+                case "none" -> {
+                    dw = nw;
+                    dh = nh;
+                }
+                default -> {}
+            }
+            double[] pos = objectPosition(b.style, cw - dw, ch - dh);
+            b.picture.draw(g, cx + pos[0], cy + pos[1], dw, dh);
+            g.setClip(old);
+            return;
+        }
+        if (b.control != null) Controls.draw(g, b, cx, cy, cw, ch, shaper);
+    }
+
+    private static double[] objectPosition(Style s, double freeX, double freeY) {
+        List<String> p = Values.splitSpaces(s.objectPosition.toLowerCase(Locale.ROOT));
+        String a = p.isEmpty() ? "50%" : p.get(0), b = p.size() > 1 ? p.get(1) : "50%";
+        return new double[]{pos(a, freeX, s), pos(b, freeY, s)};
+    }
+
+    private static double pos(String v, double free, Style s) {
+        return switch (v) {
+            case "left", "top" -> 0;
+            case "center" -> free / 2;
+            case "right", "bottom" -> free;
+            default -> {
+                Len l = Len.parse(v, s.context);
+                yield l == null ? free / 2 : l.of(free);
+            }
+        };
+    }
+
+    static int[] pixels(BufferedImage img) {
+        return ((DataBufferInt) img.getRaster().getDataBuffer()).getData();
+    }
+}

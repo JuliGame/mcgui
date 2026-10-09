@@ -1,0 +1,4 @@
+rootProject.name = 'ui-engine'
+
+// Screen Engine, the framework UI Engine draws through, built from source beside this one.
+includeBuild('../screen-engine')

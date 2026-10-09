@@ -1,0 +1,75 @@
+plugins {
+    id 'java'
+    id 'com.gradleup.shadow' version '8.3.5'
+}
+
+group = 'ai.resourcepack'
+version = '0.1.0'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.release = 21
+    options.encoding = 'UTF-8'
+}
+
+repositories {
+    mavenCentral()
+    maven { url = 'https://repo.papermc.io/repository/maven-public/' }
+}
+
+dependencies {
+    compileOnly 'io.papermc.paper:paper-api:1.21.8-R0.1-SNAPSHOT'
+    // A plugin of its own on the server (it owns the pack, the map ids and the seats), so never shaded.
+    compileOnly 'ai.resourcepack:screen-engine:0.1.0'
+
+    // HTML parsing, and SVG drawing for <svg> and .svg images. Shaded and relocated below.
+    implementation 'org.jsoup:jsoup:1.23.2'
+    implementation 'com.github.weisj:jsvg:2.2.0'
+
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.11.0'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+shadowJar {
+    archiveBaseName.set('UIEngine')
+    archiveClassifier.set('')
+    relocate 'org.jsoup', 'ai.resourcepack.ui.libs.jsoup'
+    relocate 'com.github.weisj.jsvg', 'ai.resourcepack.ui.libs.jsvg'
+}
+
+jar {
+    enabled = false
+}
+
+build {
+    dependsOn shadowJar
+}
+
+test {
+    useJUnitPlatform()
+    maxHeapSize = '2g'
+    systemProperty 'java.awt.headless', 'true'
+    testLogging { showStandardStreams = true }
+}
+
+processResources {
+    inputs.property('version', project.version)
+    filesMatching('plugin.yml') {
+        expand(version: project.version)
+    }
+}
+
+// Renders every samples/*.html to build/samples/*.png: how the renderer is checked by eye.
+tasks.register('renderSamples', JavaExec) {
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'ai.resourcepack.ui.html.RenderSamples'
+    // -Pdir=<folder> renders another folder (src/main/resources/pages, say); -Ponly=<name> one page.
+    def dir = project.findProperty('dir') ?: 'samples'
+    args = [file(dir).absolutePath, layout.buildDirectory.dir('samples').get().asFile.absolutePath] + (project.findProperty('only') ? [project.findProperty('only')] : [])
+    systemProperty 'java.awt.headless', 'true'
+}

@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Poppins', sans-serif; background: #fff; color: #1f2937; }
+  nav { display: flex; align-items: center; justify-content: space-between; padding: 18px 48px; border-bottom: 1px solid #eee; }
+  nav .brand { font-weight: 800; font-size: 22px; color: #16a34a; }
+  nav ul { list-style: none; display: flex; gap: 28px; }
+  nav a { color: #374151; text-decoration: none; font-size: 15px; }
+  .hero { display: grid; grid-template-columns: 1.2fr 1fr; gap: 40px; padding: 56px 48px; align-items: center;
+          background: linear-gradient(180deg, #f0fdf4 0%, #ffffff 100%); }
+  .hero h1 { font-size: 46px; line-height: 1.1; margin-bottom: 16px; }
+  .hero h1 span { color: #16a34a; }
+  .hero p { color: #6b7280; font-size: 17px; margin-bottom: 26px; }
+  .cta { display: inline-block; background: #16a34a; color: #fff; padding: 14px 28px; border-radius: 10px; font-weight: 600; text-decoration: none; box-shadow: 0 10px 20px -5px rgba(22,163,74,.5); }
+  .cta.secondary { background: transparent; color: #16a34a; box-shadow: none; border: 2px solid #16a34a; margin-left: 12px; }
+  .art { height: 260px; border-radius: 20px; background: conic-gradient(from 45deg, #22c55e, #3b82f6, #a855f7, #22c55e); position: relative; overflow: hidden; }
+  .art::after { content: "26.3"; position: absolute; right: 18px; bottom: 12px; font-size: 64px; font-weight: 800; color: rgba(255,255,255,.85); }
+  .features { display: flex; flex-wrap: wrap; gap: 20px; padding: 40px 48px; }
+  .feature { flex: 1 1 260px; padding: 24px; border-radius: 16px; border: 1px solid #e5e7eb; }
+  .feature h3 { margin-bottom: 8px; }
+  .feature p { color: #6b7280; font-size: 14px; }
+  footer { text-align: center; padding: 30px; color: #9ca3af; font-size: 13px; background: #111827; }
+</style>
+</head>
+<body>
+<nav><div class="brand">BlockLand</div><ul><li><a href="#">Home</a></li><li><a href="#">Worlds</a></li><li><a href="#">Store</a></li><li><a href="#">Discord</a></li></ul></nav>
+<section class="hero">
+  <div>
+    <h1>The friendliest <span>survival</span> server you'll ever join</h1>
+    <p>Land claims, a real economy, weekly events and staff who actually answer. Bedrock and Java welcome.</p>
+    <a class="cta" href="#">Start playing</a><a class="cta secondary" href="#">See the map</a>
+  </div>
+  <div class="art"></div>
+</section>
+<section class="features">
+  <div class="feature"><h3>Grief-proof</h3><p>Claim land with a golden shovel. Nobody touches your builds.</p></div>
+  <div class="feature"><h3>Player shops</h3><p>Sell what you farm. Prices are set by players, not by us.</p></div>
+  <div class="feature"><h3>Events</h3><p>Build battles, dragon raids and treasure hunts every weekend.</p></div>
+</section>
+<footer>&copy; 2026 BlockLand. Not affiliated with Mojang.</footer>
+</body>
+</html>

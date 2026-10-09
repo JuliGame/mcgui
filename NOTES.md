@@ -1,0 +1,70 @@
+# UI Engine: notes for whoever works on it
+
+HTML pages in game (2026-10-09), drawn through Screen Engine (`../screen-engine`).
+`README.md` is the user-facing description; this is the part that bites. Paths under `rigs/` are test rigs kept outside this repository.
+
+## There is no browser, on purpose
+
+The owner's brief was static pages, and no Chromium. The Java options were checked:
+Flying Saucer and OpenHTMLtoPDF stop at CSS 2.1 (no flexbox, no grid), JavaFX
+WebView is a browser with native libraries, and CSSBox (pure Java, claims flex
+and grid) lost variables, grid, the flex header, radii and shadows on an
+ordinary modern page. So jsoup parses and everything after that is ours,
+in `html/`, which has **no Bukkit in it** and is tested on its own:
+`./gradlew renderSamples` renders `samples/*.html` to `build/samples/` at 1x
+and 2x (and scrolled to the end, when a page scrolls). Judge changes there,
+by eye, before going near a server. `-Pdir=src/main/resources/pages` renders
+the example pages the plugin ships; `-Ponly=<name>` one page.
+
+| Package | What |
+|---|---|
+| `html/css` | Parsing (`CssParser`, `Selector`, `Media`), shorthand expansion, colour and value reading |
+| `html/style` | The cascade (`Styler`, with the browser's default sheet `UA_CSS`), computed styles (`Style`), lengths (`Len`: px, %, and calc/min/max/clamp kept symbolic until layout) |
+| `html/layout` | The box tree (`BoxBuilder`), and `Layout` with `InlineLayout`, `FlexLayout`, `GridLayout`, `TableLayout` |
+| `html/paint` | `Painter` (stacking order, hit regions), backgrounds and gradients, shadows and blur, filters, transforms, form controls |
+| `html/text` | Fonts (bundled OFL fonts, `@font-face`, fallback per character) and text measuring |
+| `html` | `Page` (a file and everything it loads), `HtmlRenderer` (one call: style, lay out, paint) |
+| top level | The plugin: `PageStore` (the folder, live reload), `Session` (one player's page on one screen), `Screens` (walls and views), `Placeholders`, `UiCommand` |
+
+## Things that are not obvious
+
+- **Coordinates in the box tree are relative to the box that laid a box out**:
+  its nearest ancestor that is not an inline box. Inline boxes have no
+  rectangle, only per-line fragments relative to the block owning the lines.
+  Painting and hit testing add offsets only on entering a non-inline box. Get
+  this wrong and things inside a `<span>` drift.
+- **`Layout.layout` is memoised on its inputs** (`Box.laidOutWith`). Flex and
+  grid lay an item out several times (measure, size, stretch), and without the
+  memo nested flex containers cost 2^depth. A layout that depends on something
+  other than its four inputs breaks the memo.
+- **Measuring must not disturb a layout in progress**: `minContent`/
+  `maxContent` resolve edges with an unknown containing block, so
+  `intrinsicPair` saves and restores the box's margins, borders and paddings.
+- **Rendering happens off the server thread**, one picture at a time per
+  session (`Session.render` coalesces), into the session's own Screen Engine
+  `Canvas`. Each session renders its own copy of the page's document (with the
+  player's placeholders filled in), and anything a click changes (`<details>`,
+  a checkbox) changes a fresh copy, so a picture being drawn never sees its
+  document move.
+- **Gradient text is a mask**, not a clip: Java2D clips are not antialiased,
+  and clipping a gradient to glyph outlines gave jagged letters.
+- **Map pixels are not screen pixels.** A view is 16×9 maps (2048×1152) by
+  default and the page is laid out at 576 CSS px tall, so it is drawn at 2x.
+  Small text stays legible because Screen Engine's shader averages the map
+  pixels under each window pixel.
+- **Google Fonts send TrueType to a user agent they do not recognise**, which is
+  why `Page` asks for their CSS as plain "Mozilla/5.0": Java cannot read WOFF.
+  Web fetches are cached in `plugins/UIEngine/cache/` and switched off with
+  `allow-web: false`.
+- **`data-console` runs as the console** with placeholders already filled in.
+  Built-in placeholders are safe (Minecraft names are `[A-Za-z0-9_]`); a
+  PlaceholderAPI placeholder that can contain spaces or semicolons is the
+  owner's to keep out of console commands.
+
+## Testing in game
+
+Mineflayer cannot speak 26.3 and ViaBackwards kicks it for movement, so the
+bot is no use here. Use a real client and drive the view from the console:
+`/screens debug <player> point <x> <y>` then `click`, in canvas pixels (2048
+wide for a default view). `/ui place <page> <cols> <rows> <name> <x> <y> <z>
+<facing> [world]` places a wall without anybody aiming.

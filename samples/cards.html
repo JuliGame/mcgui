@@ -1,0 +1,24 @@
+<!doctype html>
+<html><head><style>
+:root { --accent: #6366f1; --bg: #0f172a; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: Inter, Arial, sans-serif; background: var(--bg); color: #e2e8f0; padding: 32px; }
+.header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+.logo { font-size: 28px; font-weight: 800; background: linear-gradient(90deg, #6366f1, #ec4899); -webkit-background-clip: text; color: transparent; }
+.btn { background: var(--accent); color: white; padding: 10px 20px; border-radius: 999px; font-weight: 600; box-shadow: 0 8px 24px rgba(99,102,241,.4); }
+.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.card { background: linear-gradient(135deg, #1e293b, #334155); border: 1px solid #475569; border-radius: 16px; padding: 20px; }
+.card h3 { font-size: 18px; margin-bottom: 8px; }
+.card p { font-size: 14px; color: #94a3b8; line-height: 1.5; }
+.tag { display: inline-block; margin-top: 12px; padding: 4px 10px; border-radius: 6px; background: rgba(99,102,241,.2); color: #a5b4fc; font-size: 12px; }
+.footer { margin-top: 24px; display: flex; gap: 12px; }
+.footer div { flex: 1; height: 40px; border-radius: 8px; background: #1e293b; }
+</style></head><body>
+<div class="header"><div class="logo">CraftHub</div><a class="btn">Play now</a></div>
+<div class="grid">
+  <div class="card"><h3>Survival</h3><p>Classic survival with land claims and a player economy.</p><span class="tag">120 online</span></div>
+  <div class="card"><h3>Skyblock</h3><p>Start on an island, grow an empire in the sky.</p><span class="tag">87 online</span></div>
+  <div class="card"><h3>Minigames</h3><p>Bedwars, Skywars, parkour and more, all in one lobby.</p><span class="tag">203 online</span></div>
+</div>
+<div class="footer"><div></div><div></div><div></div></div>
+</body></html>

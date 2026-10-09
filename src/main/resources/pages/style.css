@@ -1,0 +1,40 @@
+/* Shared by rules.html and shop.html: a page can link any CSS file in this folder. */
+:root {
+  --bg: #0b1020;
+  --panel: #131a2e;
+  --line: rgba(255, 255, 255, 0.08);
+  --text: #e2e8f0;
+  --muted: #94a3b8;
+  --gold: #fbbf24;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 32px 48px;
+  font-family: Inter, system-ui, sans-serif;
+  color: var(--text);
+  background: linear-gradient(160deg, #111a35 0%, var(--bg) 60%);
+  min-height: 100vh;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+}
+
+header h1 { margin: 0; font-size: 30px; font-weight: 800; }
+
+.back {
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 14px;
+  padding: 8px 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+
+.back:hover { color: var(--text); border-color: var(--gold); }

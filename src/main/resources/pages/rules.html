@@ -1,0 +1,41 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Rules</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  .rules { max-width: 760px; line-height: 1.6; }
+  ol { padding-left: 22px; }
+  li { margin-bottom: 8px; }
+  li::marker { color: var(--gold); }
+  code { background: rgba(255,255,255,.08); padding: 2px 6px; border-radius: 4px; }
+  details { margin-top: 18px; padding: 12px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+  summary { cursor: pointer; font-weight: 600; }
+  table { width: 100%; border-collapse: collapse; margin-top: 18px; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 600; }
+</style>
+</head>
+<body>
+  <header><h1>Server rules</h1><a class="back" href="menu.html">&larr; Menu</a></header>
+  <div class="rules">
+    <ol>
+      <li>Be kind. No spam, slurs or advertising in chat.</li>
+      <li>No griefing or stealing outside the arena.</li>
+      <li>No hacked clients, x-ray packs or macros. Minimaps are fine.</li>
+      <li>Report rule breakers with <code>/report &lt;player&gt;</code>.</li>
+    </ol>
+    <details>
+      <summary>What happens if I break a rule? (click)</summary>
+      <table>
+        <tr><th>Offence</th><th>First time</th><th>Second time</th></tr>
+        <tr><td>Griefing</td><td>3 day ban</td><td>Permanent</td></tr>
+        <tr><td>Hacking</td><td>Permanent</td><td>&mdash;</td></tr>
+        <tr><td>Spam</td><td>Mute 1 hour</td><td>Mute 1 day</td></tr>
+      </table>
+    </details>
+    <p style="color: var(--muted); font-size: 13px; margin-top: 24px">Scroll with the mouse wheel. Press F to go back.</p>
+  </div>
+</body>
+</html>

@@ -1,0 +1,46 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Shop</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+  .card { position: relative; padding: 22px; border-radius: 18px; background: var(--panel); border: 1px solid var(--line); overflow: hidden; }
+  .card:hover { border-color: var(--gold); box-shadow: 0 12px 40px rgba(251, 191, 36, .18); }
+  .card .tag { position: absolute; top: 14px; right: -34px; transform: rotate(35deg); background: #ef4444; color: #fff;
+               font-size: 11px; font-weight: 700; padding: 4px 40px; letter-spacing: .08em; }
+  .card h2 { margin: 0 0 4px; font-size: 22px; }
+  .price { font-size: 30px; font-weight: 800; margin: 10px 0 14px; }
+  .price small { font-size: 14px; color: var(--muted); font-weight: 500; }
+  .card ul { list-style: none; padding: 0; margin: 0 0 18px; color: var(--muted); font-size: 14px; }
+  .card li { padding: 4px 0; }
+  .card li::before { content: "\2713  "; color: #34d399; font-weight: 700; }
+  .buy { display: block; text-align: center; padding: 10px; border-radius: 10px; background: rgba(255,255,255,.08); color: var(--text);
+         font-weight: 700; text-decoration: none; cursor: pointer; }
+  .card:hover .buy { background: var(--gold); color: #1c1917; }
+  .vip h2 { color: #a78bfa; } .mvp h2 { color: #38bdf8; } .legend h2 { color: var(--gold); }
+</style>
+</head>
+<body>
+  <header><h1>Ranks</h1><a class="back" href="menu.html">&larr; Menu</a></header>
+  <div class="cards">
+    <div class="card vip">
+      <h2>VIP</h2><div class="price">&pound;4.99 <small>/ month</small></div>
+      <ul><li>Coloured name</li><li>2 homes</li><li>/hat</li></ul>
+      <a class="buy" data-message="<light_purple>VIP: buy it at store.example.com">Choose VIP</a>
+    </div>
+    <div class="card mvp">
+      <span class="tag">POPULAR</span>
+      <h2>MVP</h2><div class="price">&pound;9.99 <small>/ month</small></div>
+      <ul><li>Everything in VIP</li><li>5 homes</li><li>/fly in the lobby</li></ul>
+      <a class="buy" data-message="<aqua>MVP: buy it at store.example.com">Choose MVP</a>
+    </div>
+    <div class="card legend">
+      <h2>Legend</h2><div class="price">&pound;19.99 <small>/ month</small></div>
+      <ul><li>Everything in MVP</li><li>Unlimited homes</li><li>A pet that follows you</li></ul>
+      <a class="buy" data-message="<gold>Legend: buy it at store.example.com">Choose Legend</a>
+    </div>
+  </div>
+</body>
+</html>

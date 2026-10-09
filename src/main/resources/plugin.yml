@@ -1,0 +1,25 @@
+name: UIEngine
+version: ${version}
+main: ai.resourcepack.ui.UIEnginePlugin
+api-version: '1.21'
+depend: [ScreenEngine]
+softdepend: [PlaceholderAPI]
+description: Put HTML pages in plugins/UIEngine/pages/ and see them in game, on walls and fullscreen.
+website: https://resourcepack.ai
+commands:
+  ui:
+    description: Open, place and reload HTML pages.
+    usage: /ui open <page> [player] | close | place <page> [cols] [rows] [name] [shared] | remove [name] | list | reload
+permissions:
+  uiengine.open:
+    description: Open pages for yourself with /ui open.
+    default: op
+  uiengine.open.others:
+    description: Open and close pages for other players.
+    default: op
+  uiengine.admin:
+    description: Place and remove screens, list and reload pages.
+    default: op
+    children:
+      uiengine.open: true
+      uiengine.open.others: true
