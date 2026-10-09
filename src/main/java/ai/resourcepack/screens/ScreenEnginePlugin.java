@@ -65,7 +65,7 @@ public final class ScreenEnginePlugin extends JavaPlugin implements ScreenEngine
             getLogger().log(Level.SEVERE, "Could not build or serve the resource pack", e);
         }
         sender = new MapSender(nms, palette, settings.bytesPerSecond);
-        pipeline = new Pipeline(nms);
+        pipeline = new Pipeline(nms, getLogger());
         views = new Views(this, settings, nms, pipeline, id -> pack != null && pack.has(id), sender, settings.mapIdBase);
         walls = new Walls(this, settings.mapIdBase + VIEW_ID_SPAN, settings.viewDistance, settings.reach, views::seated);
         var pm = getServer().getPluginManager();

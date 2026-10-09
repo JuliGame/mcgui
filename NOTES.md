@@ -49,6 +49,14 @@ user-facing description; this file is the part that bites.
   is off screen is culled before any shader runs. The pointer sits ON the
   picture's plane (the remap reads its distance from the axis there) and wins
   the depth test by a larger factor than the picture.
+- **The mouse skips the tick.** `Pipeline.watch` reads a seated player's
+  rotation packets on the netty thread as they arrive, and the pointer's move
+  is written straight back (`Pipeline.sendNow`); the server's own position
+  updates for the pointer are dropped for that player, or one worked out a
+  moment earlier would pull it back. So the pointer is spawned for them already
+  in place (`Views.reveal`). The client sends its rotation once per client tick
+  (20 a second, whatever the server's tick rate): raising the server's TPS
+  would not make it send more often.
 - **Depth direction is detected, not assumed.** The in-front trick scales
   `gl_FragCoord.z` towards "near"; the first port assumed reversed depth (26.2). The
   vertex shader passes `ProjMat[2][2] > -0.5` as `mcbReversed`, so the trick

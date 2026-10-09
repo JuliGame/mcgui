@@ -54,6 +54,18 @@ public final class Nms {
     final Field containerMenu;                     // Player#containerMenu
     final Field menuContainerId, menuSlots;
 
+    // A seated player's mouse, read off the wire, and the pointer moves sent straight back.
+    private final Class<?> movePacket;             // ServerboundMovePlayerPacket
+    private final Field moveYRot, moveXRot, moveHasRot;
+    private final MethodHandle newTeleport;        // new ClientboundTeleportEntityPacket(id, PositionMoveRotation, Set<Relative>, onGround)
+    private final MethodHandle newPositionMoveRotation;
+    private final MethodHandle newVec3;
+    private final MethodHandle newPlayerRotation;  // new ClientboundPlayerRotationPacket(yRot, relativeY, xRot, relativeX)
+    private final Class<?> moveEntityPacket;       // ClientboundMoveEntityPacket and its Pos/PosRot/Rot
+    private final Field moveEntityId;
+    private final Class<?> positionSyncPacket, teleportPacket;
+    private final MethodHandle positionSyncId, teleportId;
+
     public Nms(org.bukkit.Server server) throws ReflectiveOperationException {
         String craft = server.getClass().getPackageName();
         craftHandle = L.unreflect(Class.forName(craft + ".entity.CraftEntity").getMethod("getHandle"));
@@ -103,6 +115,25 @@ public final class Nms {
         Class<?> menu = Class.forName("net.minecraft.world.inventory.AbstractContainerMenu");
         menuContainerId = menu.getField("containerId");
         menuSlots = menu.getField("slots");
+
+        String game = "net.minecraft.network.protocol.game.";
+        movePacket = Class.forName(game + "ServerboundMovePlayerPacket");
+        moveYRot = open(movePacket, "yRot");
+        moveXRot = open(movePacket, "xRot");
+        moveHasRot = open(movePacket, "hasRot");
+        Class<?> vec3 = Class.forName("net.minecraft.world.phys.Vec3");
+        Class<?> pmr = Class.forName("net.minecraft.world.entity.PositionMoveRotation");
+        newVec3 = L.findConstructor(vec3, MethodType.methodType(void.class, double.class, double.class, double.class));
+        newPositionMoveRotation = L.findConstructor(pmr, MethodType.methodType(void.class, vec3, vec3, float.class, float.class));
+        teleportPacket = Class.forName(game + "ClientboundTeleportEntityPacket");
+        newTeleport = L.findConstructor(teleportPacket, MethodType.methodType(void.class, int.class, pmr, java.util.Set.class, boolean.class));
+        teleportId = L.unreflect(teleportPacket.getMethod("id"));
+        positionSyncPacket = Class.forName(game + "ClientboundEntityPositionSyncPacket");
+        positionSyncId = L.unreflect(positionSyncPacket.getMethod("id"));
+        moveEntityPacket = Class.forName(game + "ClientboundMoveEntityPacket");
+        moveEntityId = open(moveEntityPacket, "entityId");
+        newPlayerRotation = L.findConstructor(Class.forName(game + "ClientboundPlayerRotationPacket"),
+                MethodType.methodType(void.class, float.class, boolean.class, float.class, boolean.class));
     }
 
     private static Field open(Class<?> owner, String name) throws NoSuchFieldException {
@@ -190,6 +221,43 @@ public final class Nms {
         if (!pongClass.isInstance(msg)) return null;
         try {
             return (int) pongId.invoke(msg);
+        } catch (Throwable t) {
+            throw rethrow(t);
+        }
+    }
+
+    /** {yaw, pitch} if [msg] is a player turning (a move packet with a rotation), else null. */
+    public float[] rotation(Object msg) {
+        if (!movePacket.isInstance(msg) || !(boolean) get(moveHasRot, msg)) return null;
+        return new float[]{(float) get(moveYRot, msg), (float) get(moveXRot, msg)};
+    }
+
+    /** The entity a position packet moves, or -1 if [msg] is not one. */
+    public int movedEntity(Object msg) {
+        try {
+            if (moveEntityPacket.isInstance(msg)) return (int) moveEntityId.get(msg);
+            if (positionSyncPacket.isInstance(msg)) return (int) positionSyncId.invoke(msg);
+            if (teleportPacket.isInstance(msg)) return (int) teleportId.invoke(msg);
+            return -1;
+        } catch (Throwable t) {
+            throw rethrow(t);
+        }
+    }
+
+    /** Puts entity [id] at (x, y, z), gliding there over its teleport duration. */
+    public Object teleport(int id, double x, double y, double z) {
+        try {
+            Object pmr = newPositionMoveRotation.invoke(newVec3.invoke(x, y, z), newVec3.invoke(0.0, 0.0, 0.0), 0f, 0f);
+            return newTeleport.invoke(id, pmr, java.util.Set.of(), false);
+        } catch (Throwable t) {
+            throw rethrow(t);
+        }
+    }
+
+    /** Sets a player's pitch and leaves their yaw alone (a relative turn of nothing). */
+    public Object pitch(float pitch) {
+        try {
+            return newPlayerRotation.invoke(0f, true, pitch, false);
         } catch (Throwable t) {
             throw rethrow(t);
         }

@@ -15,8 +15,13 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
-/** The two netty handlers the engine puts in a player's connection: ping answers, and the hidden inventory. */
+/**
+ * The two netty handlers the engine puts in a player's connection: ping answers, and one for a seated
+ * player that hides their inventory, reads their mouse the moment it arrives, and moves their pointer.
+ */
 public final class Pipeline {
     private static final String PONGS = "screenengine_pong";
     private static final String FILTER = "screenengine_conceal";
@@ -27,9 +32,43 @@ public final class Pipeline {
     private final Map<Integer, Runnable> waiting = new ConcurrentHashMap<>();
     private final AtomicInteger pingIds = new AtomicInteger(0x5345_0000);
     private final Set<UUID> concealed = ConcurrentHashMap.newKeySet();
+    private final Map<UUID, Mouse> mice = new ConcurrentHashMap<>();
+    private final Map<UUID, Integer> pinned = new ConcurrentHashMap<>();
+    private final Map<UUID, Filter> filters = new ConcurrentHashMap<>();
+    private final Logger log;
 
-    public Pipeline(Nms nms) {
+    public Pipeline(Nms nms, Logger log) {
         this.nms = nms;
+        this.log = log;
+    }
+
+    /** A seated player turned their head to (yaw, pitch). Runs on the netty thread, as the packet arrives. */
+    public interface Mouse {
+        void turned(float yaw, float pitch);
+    }
+
+    /**
+     * Hand [player]'s turning to [mouse] as each packet arrives rather than a tick later, and stop the
+     * server's own position updates for entity [pointer] (if not -1) reaching them: the engine moves it
+     * itself, with {@link #sendNow}, and an update the server worked out a moment earlier would pull it
+     * back. Needs the handler {@link #conceal} puts in.
+     */
+    public void watch(Player player, Mouse mouse, int pointer) {
+        mice.put(player.getUniqueId(), mouse);
+        if (pointer >= 0) pinned.put(player.getUniqueId(), pointer);
+        else pinned.remove(player.getUniqueId());
+    }
+
+    public void unwatch(UUID player) {
+        mice.remove(player);
+        pinned.remove(player);
+    }
+
+    /** Write [packet] to [player] now, from any thread, past the filter (so a pinned entity's move goes through). */
+    public void sendNow(UUID player, Object packet) {
+        Filter f = filters.get(player);
+        ChannelHandlerContext ctx = f == null ? null : f.ctx;
+        if (ctx != null) ctx.writeAndFlush(packet, ctx.voidPromise());
     }
 
     /**
@@ -78,7 +117,11 @@ public final class Pipeline {
             channel.eventLoop().execute(() -> {
                 ChannelPipeline p = channel.pipeline();
                 // The anchor is only missing once netty has torn the channel down; then there is nothing to filter.
-                if (p.get(FILTER) == null && p.get(nms.packetHandlerName) != null) p.addBefore(nms.packetHandlerName, FILTER, new Filter(player.getUniqueId(), handle));
+                if (p.get(FILTER) == null && p.get(nms.packetHandlerName) != null) {
+                    Filter f = new Filter(player.getUniqueId(), handle);
+                    p.addBefore(nms.packetHandlerName, FILTER, f);
+                    filters.put(player.getUniqueId(), f);
+                }
             });
         } else if (!concealed.remove(player.getUniqueId())) {
             return;
@@ -88,12 +131,15 @@ public final class Pipeline {
 
     public void forget(UUID player) {
         concealed.remove(player);
+        unwatch(player);
+        filters.remove(player);
     }
 
     /** Stays in the pipeline once added; it passes everything through untouched while its player is not seated. */
     private final class Filter extends ChannelDuplexHandler {
         private final UUID id;
         private final Object player;
+        volatile ChannelHandlerContext ctx;
 
         Filter(UUID id, Object player) {
             this.id = id;
@@ -101,7 +147,34 @@ public final class Pipeline {
         }
 
         @Override
+        public void handlerAdded(ChannelHandlerContext ctx) {
+            this.ctx = ctx;
+        }
+
+        @Override
+        public void channelRead(ChannelHandlerContext ctx, Object msg) {
+            Mouse mouse = mice.get(id);
+            if (mouse != null) {
+                float[] turn = nms.rotation(msg);
+                if (turn != null) {
+                    try {
+                        mouse.turned(turn[0], turn[1]);
+                    } catch (RuntimeException e) {
+                        // Never take the connection down with it.
+                        log.log(Level.WARNING, "A view's mouse handler failed", e);
+                    }
+                }
+            }
+            ctx.fireChannelRead(msg);
+        }
+
+        @Override
         public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
+            Integer pin = pinned.get(id);
+            if (pin != null && nms.movedEntity(msg) == pin) {
+                promise.trySuccess();
+                return;
+            }
             ctx.write(concealed.contains(id) ? blank(msg) : msg, promise);
         }
 

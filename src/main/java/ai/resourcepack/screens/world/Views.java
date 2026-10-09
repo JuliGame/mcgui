@@ -82,6 +82,9 @@ import java.util.function.Predicate;
  *
  * <p>Players with the pack see the pointer as a text display in front of the picture, which their
  * client glides between updates at its own frame rate; players without it get it drawn into the maps.
+ * The mouse is read off the wire as each packet arrives and the pointer's move goes straight back,
+ * rather than both waiting for the next tick; the client only sends its rotation 20 times a second,
+ * whatever the server's tick rate, so that is as fresh as the pointer can be.
  *
  * <p>With the pack the shader stretches the picture to fill the window (see {@link Shaders}), so it is
  * placed to fill only part of the player's view: every frame then stays on screen even for a narrower
@@ -98,6 +101,8 @@ public final class Views implements Listener {
     private static final int REVEAL_TIMEOUT = 60;
     /** How much of the window's height (at the player's FOV) a view is placed to fill when the shader stretches it. */
     private static final double STRETCHED_FIT = 0.6;
+    /** Pitch beyond which the player's head is put back level, so the client's clamp at ±90° never stops the pointer. */
+    private static final float PITCH_LIMIT = 60;
 
     private final Plugin plugin;
     private final Settings settings;
@@ -141,16 +146,21 @@ public final class Views implements Listener {
         final Location returnTo;
         final PrivateView privateView;
         final int deadline;
-        double cursorX, cursorY;
+        final int pointerId;
+        /** Written under the view's lock on the netty thread as the mouse moves, read by the server thread. */
+        volatile double cursorX, cursorY;
         float lastYaw, lastPitch;
         boolean primed;
+        /** A level head has been sent and the client's rotation may still come from before it. */
+        boolean pitchReset;
         Input lastInput;
         final Map<Key, Boolean> held = new EnumMap<>(Key.class);
         long lastClickTick = -10, lastRightClickTick = -10;
         Pointer shape = Pointer.ARROW;
         Pointer shownShape = null;
         int lastPointerX = -1, lastPointerY = -1;
-        boolean revealed, pinged, closed;
+        boolean pinged;
+        volatile boolean revealed, closed;
         volatile boolean caughtUp;
 
         ViewImpl(Player p, ViewContent content, Canvas canvas, MapWall wall, ViewOptions options, boolean withPack, ArmorStand vehicle,
@@ -170,6 +180,7 @@ public final class Views implements Listener {
             this.returnTo = returnTo;
             this.privateView = new PrivateView(wall, cameraAt, !withPack);
             this.deadline = Bukkit.getCurrentTick() + REVEAL_TIMEOUT;
+            this.pointerId = pointer == null ? -1 : pointer.getEntityId();
             this.cursorX = canvas.width() / 2.0;
             this.cursorY = canvas.height() / 2.0;
         }
@@ -273,6 +284,7 @@ public final class Views implements Listener {
         player.setGameMode(GameMode.ADVENTURE);
         // An empty hotbar until they get up, or scrolling would pop up the held item's name.
         pipeline.conceal(player, true);
+        pipeline.watch(player, (yaw, pitch) -> turned(view, yaw, pitch), view.pointerId);
         // Hides the first-person arm; nobody else sees the seated player at all.
         player.addPotionEffect(new PotionEffect(PotionEffectType.INVISIBILITY, PotionEffect.INFINITE_DURATION, 0, false, false, false));
         // Rain and snow are drawn between the camera and the picture: clear skies for this player only.
@@ -360,7 +372,7 @@ public final class Views implements Listener {
                 }
                 reveal(p, v);
             }
-            mouse(p, v);
+            report(v);
             movePointer(v);
             if (now % 40 == 0) v.privateView.refresh(p);
         }
@@ -371,7 +383,12 @@ public final class Views implements Listener {
         // All in one tick, so the client applies them together with the camera switch.
         v.wall.showTo(plugin, p);
         v.privateView.open(plugin, p);
-        if (v.pointer != null) p.showEntity(plugin, v.pointer);
+        if (v.pointer != null) {
+            // Spawned for them where it belongs: the server's later moves of it never reach them (see Pipeline.watch).
+            movePointer(v);
+            p.showEntity(plugin, v.pointer);
+            sendPointer(v);
+        }
         p.teleport(v.vehicle.getLocation());
         v.vehicle.addPassenger(p);
         nms.setCamera(p, v.camera);
@@ -382,29 +399,57 @@ public final class Views implements Listener {
         p.sendActionBar(Component.text("Sneak to leave", NamedTextColor.GRAY));
     }
 
-    private void mouse(Player p, ViewImpl v) {
-        Location loc = p.getLocation();
-        if (!v.primed) {
-            v.lastYaw = loc.getYaw();
-            v.lastPitch = loc.getPitch();
-            v.primed = true;
-            return;
+    /**
+     * The player turned their head to (yaw, pitch), on the netty thread as the packet arrives: move the
+     * cursor by how far they turned, and the pointer with it.
+     */
+    private void turned(ViewImpl v, float yaw, float pitch) {
+        synchronized (v) {
+            if (!v.revealed || v.closed) return;
+            if (!v.primed) {
+                v.lastYaw = yaw;
+                v.lastPitch = pitch;
+                v.primed = true;
+                return;
+            }
+            float dyaw = wrap(yaw - v.lastYaw);
+            float dpitch = pitch - v.lastPitch;
+            // After a level head was sent, the first rotation from after the client took it starts from 0.
+            // Turns are small next to the jump back to level, so whichever start is nearer is the right one.
+            if (v.pitchReset && Math.abs(pitch) < Math.abs(dpitch)) {
+                dpitch = pitch;
+                v.pitchReset = false;
+            }
+            v.lastYaw = yaw;
+            v.lastPitch = pitch;
+            if (dyaw != 0 || dpitch != 0) {
+                // In pixels per degree, scaled with the picture so the pointer crosses it at the same pace at any size.
+                double speed = settings.cursorSpeed * v.canvas.height() / 768.0;
+                v.cursorX = Math.max(0, Math.min(v.canvas.width() - 1.0, v.cursorX + dyaw * speed));
+                v.cursorY = Math.max(0, Math.min(v.canvas.height() - 1.0, v.cursorY + dpitch * speed));
+                sendPointer(v);
+            }
+            if (!v.pitchReset && Math.abs(pitch) > PITCH_LIMIT) {
+                v.pitchReset = true;
+                pipeline.sendNow(v.player, nms.pitch(0f));
+            }
         }
-        float dyaw = wrap(loc.getYaw() - v.lastYaw);
-        float dpitch = loc.getPitch() - v.lastPitch;
-        v.lastYaw = loc.getYaw();
-        v.lastPitch = loc.getPitch();
-        if (dyaw != 0 || dpitch != 0) {
-            // In pixels per degree, scaled with the picture so the pointer crosses it at the same pace at any size.
-            double speed = settings.cursorSpeed * v.canvas.height() / 768.0;
-            v.cursorX = Math.max(0, Math.min(v.canvas.width() - 1.0, v.cursorX + dyaw * speed));
-            v.cursorY = Math.max(0, Math.min(v.canvas.height() - 1.0, v.cursorY + dpitch * speed));
-        }
-        // Keep pitch away from the client's ±90° clamp so the pointer never sticks at an edge.
-        if (Math.abs(loc.getPitch()) > 60) {
-            p.setRotation(loc.getYaw(), 0f);
-            v.lastPitch = 0f;
-        }
+    }
+
+    /** Sends the pointer to where the cursor is, now; the client glides it there over a tick. */
+    private void sendPointer(ViewImpl v) {
+        if (v.pointerId < 0) return;
+        Vector at = pointerSpot(v);
+        pipeline.sendNow(v.player, nms.teleport(v.pointerId, at.getX(), at.getY(), at.getZ()));
+    }
+
+    /** On the picture, at the cursor: the shader stretches it to the window along with the picture. */
+    private static Vector pointerSpot(ViewImpl v) {
+        return v.wall.pointAt(v.cursorX, v.cursorY);
+    }
+
+    /** Tell the content where the pointer is, on the server thread, whenever it is over a new pixel. */
+    private void report(ViewImpl v) {
         int x = (int) v.cursorX, y = (int) v.cursorY;
         if (x != v.lastPointerX || y != v.lastPointerY) {
             v.lastPointerX = x;
@@ -430,8 +475,9 @@ public final class Views implements Listener {
                     : Component.text(String.valueOf(shape.glyph)).font(ResourcePack.POINTER_FONT)
                             .color(TextColor.color(Shaders.pointerRgb(v.wall.cols, v.wall.rows))));
         }
-        // On the picture, at the cursor: the shader stretches it to the window along with the picture.
-        Vector at = v.wall.pointAt(v.cursorX, v.cursorY);
+        // The server's copy follows too, for anyone it is (re)spawned for; its own position updates never
+        // reach the player (see Pipeline.watch), the moves sent from turned() do.
+        Vector at = pointerSpot(v);
         Location current = pointer.getLocation();
         if (current.getX() != at.getX() || current.getY() != at.getY() || current.getZ() != at.getZ()) {
             pointer.teleport(new Location(pointer.getWorld(), at.getX(), at.getY(), at.getZ(), current.getYaw(), current.getPitch()));
@@ -455,6 +501,7 @@ public final class Views implements Listener {
         ViewImpl v = views.remove(player.getUniqueId());
         if (v == null) return;
         v.closed = true;
+        pipeline.unwatch(player.getUniqueId());
         for (Map.Entry<Key, Boolean> held : v.held.entrySet()) if (held.getValue()) v.content.key(v, held.getKey(), false);
         if (player.isOnline()) {
             nms.setCamera(player, player);
@@ -686,8 +733,11 @@ public final class Views implements Listener {
     public void debugPoint(Player player, int x, int y) {
         ViewImpl v = views.get(player.getUniqueId());
         if (v == null) return;
-        v.cursorX = Math.max(0, Math.min(v.canvas.width() - 1.0, x));
-        v.cursorY = Math.max(0, Math.min(v.canvas.height() - 1.0, y));
+        synchronized (v) {
+            v.cursorX = Math.max(0, Math.min(v.canvas.width() - 1.0, x));
+            v.cursorY = Math.max(0, Math.min(v.canvas.height() - 1.0, y));
+            sendPointer(v);
+        }
         v.lastPointerX = (int) v.cursorX;
         v.lastPointerY = (int) v.cursorY;
         v.content.pointer(v, v.lastPointerX, v.lastPointerY);
