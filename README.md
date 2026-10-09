@@ -28,7 +28,10 @@ Permissions: `uiengine.open` (yourself), `uiengine.open.others`,
 `uiengine.admin` (place, remove, list, reload). All op by default.
 
 Wall screens are kept in `screens.yml`. Each player browses their own copy of a
-wall's page unless it was placed `shared`.
+wall's page unless it was placed `shared`. Left-click a wall screen to click the
+page; right-click it to sit down at that page fullscreen
+(`walls.right-click-fullscreen`). Fullscreen pages fill the whole window,
+whatever its shape and the player's FOV.
 
 ## In a page
 

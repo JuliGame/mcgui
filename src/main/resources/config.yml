@@ -33,5 +33,8 @@ walls:
   # Whether the scroll wheel scrolls a wall screen you are looking at (it then does not change your
   # hotbar slot while you look at one).
   scroll-wheel: true
+  # Right-clicking a wall screen opens the page it is on fullscreen; sneak to get back up. Off, a
+  # right click clicks the page like a left click does.
+  right-click-fullscreen: true
 
 debug: false

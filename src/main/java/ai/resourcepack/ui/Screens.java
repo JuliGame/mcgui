@@ -12,6 +12,8 @@ import ai.resourcepack.screens.api.ViewOptions;
 import ai.resourcepack.screens.api.WallContent;
 import ai.resourcepack.screens.api.WallScreen;
 import ai.resourcepack.ui.html.Page;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.World;
@@ -119,7 +121,18 @@ public final class Screens {
 
         @Override
         public void click(Player viewer, int x, int y, Click click) {
-            session(viewer).click(x, y);
+            Session s = session(viewer);
+            if (click == Click.RIGHT && plugin.wallFullscreen()) {
+                // Sit down at it: the page this screen is on for them, fullscreen.
+                String at = s.pageName() != null ? s.pageName() : page;
+                try {
+                    open(viewer, at);
+                } catch (IllegalStateException e) {
+                    viewer.sendActionBar(Component.text(e.getMessage(), NamedTextColor.RED));
+                }
+                return;
+            }
+            s.click(x, y);
         }
 
         @Override

@@ -128,6 +128,11 @@ public final class UIEnginePlugin extends JavaPlugin {
         return cfg.getBoolean("walls.scroll-wheel", true);
     }
 
+    /** Whether right-clicking a wall screen opens its page fullscreen (else it clicks, like the left button). */
+    boolean wallFullscreen() {
+        return cfg.getBoolean("walls.right-click-fullscreen", true);
+    }
+
     /** A wall's design height when its page does not say: so many CSS pixels per map row. */
     double wallHeight(int rows) {
         return rows * cfg.getDouble("walls.pixels-per-map", 128);
@@ -149,4 +154,5 @@ public final class UIEnginePlugin extends JavaPlugin {
             return new int[]{16, 9};
         }
     }
+
 }
