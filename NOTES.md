@@ -1,0 +1,63 @@
+# Screen Engine: notes for whoever works on it
+
+The framework under UI Engine (2026-10-09): pictures on walls of maps and in
+seated fullscreen views. `README.md` is the
+user-facing description; this file is the part that bites.
+
+## Layout
+
+| Path | What |
+|---|---|
+| `api/` | The public surface: `ScreenEngine`, `Canvas`, `WallContent`/`WallScreen`, `ViewContent`/`View`, `Pointer`, `Click`, `Key` |
+| `render/Palette` | The map colour table, and the HI (YCbCr in 240 colours) and PLAIN encodings |
+| `pack/` | `Shaders` (both GLSL dialects), `SymbolHash` (the shader's colour lookup), `ResourcePack` (build, serve, who has it) |
+| `net/` | `Nms` (every server internal, by reflection), `MapSender` (diffed map patches, per-player budget), `Pipeline` (ping answers, the hidden inventory) |
+| `world/` | `MapWall` (the frames), `Walls` (placed walls and crosshair input), `Views` (seating, camera, pointer, input), `PrivateView` (fake air for players without the pack) |
+
+## Things that are not obvious
+
+- **The server internals are reached by reflection**, like RP Engine's
+  `DialogPackets`, so the plugin compiles against the plain 1.21.8 API and needs
+  no paperweight. Every member is looked up once in `Nms`'s constructor; a
+  missing one disables the plugin at startup with the reason. They were checked
+  against Paper 26.2 and 26.3, which agree on all of them.
+- **26.3 rewrote the shader dialect**: `layout(location = N)` on every varying,
+  `#include` for `#moj_import`, both uniform blocks reordered, and order-
+  independent transparency in `text.fsh`. `Shaders` is written once in the 26.3
+  form and `to262` derives the old one; the pack ships 26.3 at its root and
+  26.2 in the overlay `screens_26_2` (formats 88 to 96). An integer
+  `max_format` of 97 covers 97.1 (checked against 26.3's own codec). A third
+  dialect means a third overlay and a look at `include/globals.glsl` and
+  `dynamictransforms.glsl` for that version: std140 member order IS the layout.
+- **The pack replaces `text.fsh`/`text.vsh` and `position_tex_color`**. So do
+  3D Engine (its effects) and RP Engine's shader objects (Studio packs). Two
+  packs that both replace `text.fsh` on one client cannot both work: whichever
+  is applied last wins and the other's feature silently draws nothing. Nothing
+  composes them yet.
+- **"Seated" is a camera position, not a uniform.** The view's camera sits at
+  k/16 + 3/128 of a block along the picture's normal and on a 0/0.5 grid on the
+  other axes; the shaders read that back from `Globals.CameraOffset`. That flag
+  is what hides the HUD and draws the view in front of the world, for that
+  player only.
+- **Depth direction is detected, not assumed.** The in-front trick scales
+  `gl_FragCoord.z` towards "near"; the first port assumed reversed depth (26.2). The
+  vertex shader passes `ProjMat[2][2] > -0.5` as `mcbReversed`, so the trick
+  holds either way. A shader that writes `gl_FragDepth` anywhere writes it on
+  every path (3D Engine learned this the hard way).
+- **Map ids**: views share `[map-id-base, +1024)` (each player only ever sees
+  their own view's frames), walls count up from there, fresh each start. They
+  have no saved data, so vanilla never sends anything for them.
+- **The mannequin camera** (1.21.9+) has a player's eye height. An armour stand
+  (the fallback) makes the client glide its eye height for most of a second,
+  off the flagged position the whole time.
+- **Paper resends the held item after every cancelled entity click**, which is
+  every right-click while seated, and scrolling then pops its name over the
+  view. `Pipeline.conceal` rewrites inventory packets to empty for a seated
+  player; the server keeps the real items.
+
+## Testing
+
+`/screens test wall` and `/screens test view` need nothing else installed.
+`/screens debug <player> point|click|scroll|close` drives a view from the
+console, which is how a harness tests one without anybody at the mouse. The
+shaders can only be judged in the real client.

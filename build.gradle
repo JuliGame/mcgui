@@ -1,0 +1,47 @@
+plugins {
+    id 'java'
+    id 'java-library'
+}
+
+group = 'ai.resourcepack'
+version = '0.1.0'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+    withSourcesJar()
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.release = 21
+    options.encoding = 'UTF-8'
+}
+
+repositories {
+    mavenCentral()
+    maven { url = 'https://repo.papermc.io/repository/maven-public/' }
+}
+
+dependencies {
+    compileOnly 'io.papermc.paper:paper-api:1.21.8-R0.1-SNAPSHOT'
+    // The server ships netty; the map sender and the packet filters are netty handlers.
+    compileOnly 'io.netty:netty-transport:4.2.7.Final'
+
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.11.0'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+base { archivesName = 'ScreenEngine' }
+
+test {
+    useJUnitPlatform()
+    testLogging { showStandardStreams = true }
+}
+
+processResources {
+    inputs.property('version', project.version)
+    filesMatching('plugin.yml') {
+        expand(version: project.version)
+    }
+}

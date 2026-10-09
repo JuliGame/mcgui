@@ -1,0 +1,36 @@
+# Screen Engine: pictures on walls of maps, and fullscreen views a player sits at.
+
+resource-pack:
+  # serve: the engine serves its pack itself and sends it to players on join.
+  # external: the engine serves nothing; host plugins/ScreenEngine/pack.zip yourself (or merge it into
+  #   your own pack) and set public-url, which players are sent on join.
+  # off: no pack. Screens fall back to dithered vanilla map colours, and views are cut through the world.
+  mode: serve
+  # Where the built-in server listens. It only ever serves /pack.zip.
+  bind: 0.0.0.0
+  port: 25602
+  # The URL players download the pack from. Blank means http://127.0.0.1:<port>/pack.zip, which only
+  # works for a player on the same machine: set this on a real server.
+  public-url: ""
+  required: false
+  prompt: "This server's screens need a small resource pack for full colour."
+
+screens:
+  # Map data sent to each player, in bytes per second, before Minecraft's own compression. One map pixel
+  # is one byte and only changed areas are sent, so a static page costs its size once.
+  max-bytes-per-second-per-player: 16000000
+  # Players further than this many blocks from a wall screen get no updates for it.
+  view-distance: 48
+  # How far away a player can point at and click a wall screen, in blocks.
+  reach: 8
+
+views:
+  # A view is fitted to the player's field of view. Minecraft does not tell the server what a player's
+  # FOV setting is, so this is assumed until they set theirs with /screens fov.
+  default-fov: 70
+  # Pointer speed: how far it moves per degree of mouse turn, for a view 768 pixels tall.
+  cursor-speed: 8.0
+
+# Map ids this engine owns. They never get saved-map files, so they cannot collide with real maps as
+# long as the world has fewer maps than this.
+map-id-base: 2000000000
