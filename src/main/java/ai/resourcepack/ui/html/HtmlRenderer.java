@@ -33,7 +33,7 @@ public final class HtmlRenderer {
      * @param scrollY        where the view actually is, after clamping
      */
     public record Frame(BufferedImage image, double scale, double viewportWidth, double viewportHeight, double pageHeight, double scrollY,
-                        List<Painter.Hit> hits, Map<Element, Style> styles) {
+                        List<Painter.Hit> hits, Map<Element, Style> styles, org.jsoup.nodes.Document document, Page page) {
 
         /** The topmost element at (x, y) in CSS pixels of the viewport, or null. */
         public Element elementAt(double x, double y) {
@@ -86,6 +86,16 @@ public final class HtmlRenderer {
      * using the page's styles, fonts and images.
      */
     public static Frame render(Page page, org.jsoup.nodes.Document document, int width, int height, double scale, double scrollY, Selector.State state) {
+        return render(page, document, width, height, scale, scrollY, state, null, null);
+    }
+
+    /**
+     * Repaints only [clip] (CSS pixels of the viewport) of [base], the image of an earlier frame of the
+     * same page at the same scroll: what a change of hover state needs. Everything is still styled
+     * and laid out, so the frame's hit regions are whole; only the pixels outside the clip are skipped.
+     */
+    public static Frame render(Page page, org.jsoup.nodes.Document document, int width, int height, double scale, double scrollY,
+                               Selector.State state, BufferedImage base, java.awt.geom.Rectangle2D clip) {
         double vw = width / scale, vh = height / scale;
         Element html = document.selectFirst("html");
         if (html == null) html = document;
@@ -95,12 +105,13 @@ public final class HtmlRenderer {
         Layout layout = new Layout(page.shaper, vw, vh);
         double pageHeight = layout.run(root);
         double scroll = Math.max(0, Math.min(scrollY, pageHeight - vh));
-        BufferedImage img = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+        BufferedImage img = base != null ? base : new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
         Graphics2D g = img.createGraphics();
         g.scale(scale, scale);
+        if (clip != null) g.clip(clip);
         Painter painter = new Painter(page.shaper, page, vw, vh, scroll);
         painter.paint(g, root, img, scale);
         g.dispose();
-        return new Frame(img, scale, vw, vh, pageHeight, scroll, painter.hits, new IdentityHashMap<>(styler.styles));
+        return new Frame(img, scale, vw, vh, pageHeight, scroll, painter.hits, new IdentityHashMap<>(styler.styles), document, page);
     }
 }

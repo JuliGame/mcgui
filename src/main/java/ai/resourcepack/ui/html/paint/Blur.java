@@ -20,6 +20,34 @@ final class Blur {
         }
     }
 
+    /**
+     * How much smaller to work for a blur of [sigma] pixels. A wide blur leaves nothing finer than a
+     * few pixels, so it is computed on a picture shrunk to keep sigma about 3 and scaled back up:
+     * the same look at a fraction of the cost.
+     */
+    static double shrink(double sigma) {
+        return sigma > 6 ? Math.min(16, sigma / 3) : 1;
+    }
+
+    /** [src] blurred by [sigma]: [src] itself (blurred in place) or a smaller blurred copy to draw at [src]'s size. */
+    static BufferedImage blurredCopy(BufferedImage src, double sigma) {
+        double k = shrink(sigma);
+        if (k <= 1) {
+            blur(src, sigma);
+            return src;
+        }
+        int w = Math.max(1, (int) Math.ceil(src.getWidth() / k)), h = Math.max(1, (int) Math.ceil(src.getHeight() / k));
+        BufferedImage small = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
+        java.awt.Graphics2D g = small.createGraphics();
+        g.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION, java.awt.RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+        g.setRenderingHint(java.awt.RenderingHints.KEY_RENDERING, java.awt.RenderingHints.VALUE_RENDER_QUALITY);
+        g.setComposite(java.awt.AlphaComposite.Src);
+        g.drawImage(src, 0, 0, w, h, null);
+        g.dispose();
+        blur(small, sigma / k);
+        return small;
+    }
+
     /** Three box sizes whose combined blur matches a Gaussian of [sigma]. */
     private static int[] boxes(double sigma) {
         double ideal = Math.sqrt(12 * sigma * sigma / 3 + 1);

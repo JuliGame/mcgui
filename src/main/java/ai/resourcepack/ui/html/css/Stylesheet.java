@@ -19,6 +19,8 @@ public final class Stylesheet {
     final List<Rule> universal = new ArrayList<>();
     /** Whether any rule depends on :hover or :active, so a page without one never re-renders on hover. */
     public boolean dynamic;
+    /** The selector parts that say :hover (or :active): what decides whether a move of the pointer changes anything. */
+    private final List<Selector.Compound> hoverParts = new ArrayList<>(), activeParts = new ArrayList<>();
 
     /** One selector of a rule, with its declarations: a rule with three selectors is three of these. */
     public record Rule(Selector selector, List<Declaration> declarations, Media media, int order) {}
@@ -28,6 +30,12 @@ public final class Stylesheet {
             Rule r = new Rule(s, declarations, media, all.size());
             all.add(r);
             if (s.dynamic()) dynamic = true;
+            for (Selector.Compound c : s.compounds) {
+                for (Selector.Pseudo p : c.pseudos) {
+                    if (p.name().equals("hover") && !hoverParts.contains(c)) hoverParts.add(c);
+                    if (p.name().equals("active") && !activeParts.contains(c)) activeParts.add(c);
+                }
+            }
             Selector.Compound key = s.subject();
             if (key.id != null) byId.computeIfAbsent(key.id, k -> new ArrayList<>()).add(r);
             else if (!key.classes.isEmpty()) byClass.computeIfAbsent(key.classes.get(0), k -> new ArrayList<>()).add(r);
@@ -38,6 +46,27 @@ public final class Stylesheet {
 
     public int size() {
         return all.size();
+    }
+
+    /**
+     * The elements whose :hover (or :active) state would change how the page looks, of [e] and its
+     * ancestors, innermost first. Two pointer positions with the same list draw the same picture, so
+     * moving the pointer within a button redraws nothing.
+     */
+    public List<org.jsoup.nodes.Element> stateKey(org.jsoup.nodes.Element e, boolean active) {
+        List<Selector.Compound> parts = active ? activeParts : hoverParts;
+        if (e == null || parts.isEmpty()) return List.of();
+        List<org.jsoup.nodes.Element> out = new ArrayList<>();
+        for (org.jsoup.nodes.Element p = e; p != null; p = p.parent()) {
+            Selector.State st = active ? new Selector.State(java.util.Set.of(), java.util.Set.of(p)) : new Selector.State(java.util.Set.of(p), java.util.Set.of());
+            for (Selector.Compound c : parts) {
+                if (Selector.matchCompound(c, p, st)) {
+                    out.add(p);
+                    break;
+                }
+            }
+        }
+        return out;
     }
 
     /** Every rule, in order. */

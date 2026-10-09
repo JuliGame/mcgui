@@ -4,6 +4,7 @@ import ai.resourcepack.screens.api.Canvas;
 import ai.resourcepack.screens.api.Pointer;
 import ai.resourcepack.ui.html.HtmlRenderer;
 import ai.resourcepack.ui.html.Page;
+import ai.resourcepack.ui.html.paint.Painter;
 import ai.resourcepack.ui.html.style.Style;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.event.ClickEvent;
@@ -14,9 +15,14 @@ import org.bukkit.entity.Player;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 
+import java.awt.geom.Rectangle2D;
 import java.util.ArrayDeque;
+import java.util.Collections;
 import java.util.Deque;
+import java.util.IdentityHashMap;
+import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.function.Consumer;
@@ -155,33 +161,76 @@ public final class Session {
         submit();
     }
 
+    /** The hover and press keys of the picture last drawn (render thread only). */
+    private List<Element> drawnHover = List.of(), drawnPress = List.of();
+
+    private List<Element> key(Element e, boolean active) {
+        return page == null ? List.of() : page.styles.stateKey(e, active);
+    }
+
     private void submit() {
         Page p = page;
         Document d = doc;
         double s = scrollY;
         var state = HtmlRenderer.state(hover, pressed);
+        List<Element> hoverKey = key(hover, false), pressKey = key(pressed, true);
         String fragment = pendingFragment;
         pendingFragment = null;
         double scale = scale();
         renderers.execute(() -> {
             try {
-                HtmlRenderer.Frame f = HtmlRenderer.render(p, d, canvas.width(), canvas.height(), scale, s, state);
-                if (fragment != null && !fragment.isEmpty()) {
-                    Element target = d.getElementById(fragment);
-                    double top = target == null ? Double.NaN : f.topOf(target);
-                    if (!Double.isNaN(top)) {
-                        f = HtmlRenderer.render(p, d, canvas.width(), canvas.height(), scale, top, state);
-                        double scrolled = f.scrollY();
-                        Bukkit.getScheduler().runTask(plugin, () -> scrollY = scrolled);
+                long t0 = System.nanoTime();
+                HtmlRenderer.Frame before = frame;
+                HtmlRenderer.Frame f = null;
+                Rectangle2D changed = null;
+                boolean partial = false;
+                if (fragment == null && before != null && before.document() == d && before.page() == p && before.scale() == scale
+                        && Math.abs(before.scrollY() - Math.max(0, Math.min(s, before.maxScroll()))) < 0.01) {
+                    // Only the hover or press state moved: repaint just what it touches.
+                    changed = dirtyRegion(before, hoverKey, pressKey);
+                    if (changed != null && changed.isEmpty()) {
+                        drawnHover = hoverKey;
+                        drawnPress = pressKey;
+                        return;
+                    }
+                    if (changed != null && changed.getWidth() * changed.getHeight() < 0.6 * before.viewportWidth() * before.viewportHeight()) {
+                        f = HtmlRenderer.render(p, d, canvas.width(), canvas.height(), scale, s, state, before.image(), changed);
+                        if (sameLayout(before, f, changed)) partial = true;
+                        else f = null;
                     }
                 }
-                canvas.draw(f.image(), 0, 0);
-                HtmlRenderer.Frame previous = frame;
+                if (f == null) {
+                    f = HtmlRenderer.render(p, d, canvas.width(), canvas.height(), scale, s, state);
+                    if (fragment != null && !fragment.isEmpty()) {
+                        Element target = d.getElementById(fragment);
+                        double top = target == null ? Double.NaN : f.topOf(target);
+                        if (!Double.isNaN(top)) {
+                            f = HtmlRenderer.render(p, d, canvas.width(), canvas.height(), scale, top, state);
+                            double scrolled = f.scrollY();
+                            Bukkit.getScheduler().runTask(plugin, () -> scrollY = scrolled);
+                        }
+                    }
+                }
+                if (partial) {
+                    // Only the changed rectangle goes to the canvas, so only its tiles are re-encoded and re-sent.
+                    int x0 = Math.max(0, (int) Math.floor(changed.getX() * scale)), y0 = Math.max(0, (int) Math.floor(changed.getY() * scale));
+                    int x1 = Math.min(canvas.width(), (int) Math.ceil(changed.getMaxX() * scale));
+                    int y1 = Math.min(canvas.height(), (int) Math.ceil(changed.getMaxY() * scale));
+                    if (x1 > x0 && y1 > y0) canvas.draw(f.image().getSubimage(x0, y0, x1 - x0, y1 - y0), x0, y0);
+                } else {
+                    canvas.draw(f.image(), 0, 0);
+                }
+                drawnHover = hoverKey;
+                drawnPress = pressKey;
                 frame = f;
+                if (plugin.debug()) {
+                    plugin.getLogger().info(String.format("Drew %s for %s in %d ms%s", pageName, viewer, (System.nanoTime() - t0) / 1_000_000,
+                            partial ? String.format(" (only %.0f x %.0f)", changed.getWidth(), changed.getHeight()) : ""));
+                }
                 // A new page under a still pointer: what it is over has changed.
-                if (previous == null || previous.hits() != f.hits()) Bukkit.getScheduler().runTask(plugin, this::repoint);
+                if (!partial) Bukkit.getScheduler().runTask(plugin, this::repoint);
             } catch (RuntimeException | Error e) {
-                plugin.getLogger().warning("Could not draw page '" + pageName + "': " + e);
+                plugin.getLogger().warning("Could not draw page " + pageName + ": " + e);
                 if (plugin.debug()) e.printStackTrace();
             } finally {
                 synchronized (Session.this) {
@@ -200,6 +249,52 @@ public final class Session {
                 }
             }
         });
+    }
+
+    /** Room round a changed element for what it may draw outside itself on hover: a shadow, a glow, a lift. */
+    private static final double DIRTY_MARGIN = 48;
+
+    /**
+     * The part of the viewport (CSS pixels) a change from the drawn hover and press state to [hoverKey]
+     * and [pressKey] can touch: the elements that changed state and everything inside them. Empty
+     * when nothing changed; null when it cannot be told (draw it all).
+     */
+    private Rectangle2D dirtyRegion(HtmlRenderer.Frame before, List<Element> hoverKey, List<Element> pressKey) {
+        Set<Element> changed = Collections.newSetFromMap(new IdentityHashMap<>());
+        for (Element e : drawnHover) if (!hoverKey.contains(e)) changed.add(e);
+        for (Element e : hoverKey) if (!drawnHover.contains(e)) changed.add(e);
+        for (Element e : drawnPress) if (!pressKey.contains(e)) changed.add(e);
+        for (Element e : pressKey) if (!drawnPress.contains(e)) changed.add(e);
+        if (changed.isEmpty()) return new Rectangle2D.Double();
+        Rectangle2D area = null;
+        for (Painter.Hit h : before.hits()) {
+            boolean inside = false;
+            for (Element e = h.element(); e != null && !inside; e = e.parent()) inside = changed.contains(e);
+            if (!inside) continue;
+            Rectangle2D b = h.shape().getBounds2D();
+            if (area == null) area = new Rectangle2D.Double(b.getX(), b.getY(), b.getWidth(), b.getHeight());
+            else area.add(b);
+        }
+        if (area == null) return null;
+        Rectangle2D view = new Rectangle2D.Double(0, 0, before.viewportWidth(), before.viewportHeight());
+        Rectangle2D padded = new Rectangle2D.Double(area.getX() - DIRTY_MARGIN, area.getY() - before.scrollY() - DIRTY_MARGIN,
+                area.getWidth() + 2 * DIRTY_MARGIN, area.getHeight() + 2 * DIRTY_MARGIN);
+        Rectangle2D out = padded.createIntersection(view);
+        return out.isEmpty() ? null : out;
+    }
+
+    /** Whether nothing outside [region] moved between two frames: if something did, a partial repaint is not enough. */
+    private static boolean sameLayout(HtmlRenderer.Frame a, HtmlRenderer.Frame b, Rectangle2D region) {
+        if (a.hits().size() != b.hits().size()) return false;
+        for (int i = 0; i < a.hits().size(); i++) {
+            Rectangle2D ra = a.hits().get(i).shape().getBounds2D(), rb = b.hits().get(i).shape().getBounds2D();
+            if (Math.abs(ra.getX() - rb.getX()) < 0.5 && Math.abs(ra.getY() - rb.getY()) < 0.5
+                    && Math.abs(ra.getWidth() - rb.getWidth()) < 0.5 && Math.abs(ra.getHeight() - rb.getHeight()) < 0.5) continue;
+            Rectangle2D va = new Rectangle2D.Double(ra.getX(), ra.getY() - a.scrollY(), ra.getWidth(), ra.getHeight());
+            Rectangle2D vb = new Rectangle2D.Double(rb.getX(), rb.getY() - b.scrollY(), rb.getWidth(), rb.getHeight());
+            if (!region.contains(va) || !region.contains(vb)) return false;
+        }
+        return true;
     }
 
     public boolean ready() {
@@ -235,17 +330,19 @@ public final class Session {
         pointerY = y;
         Element e = at(x, y);
         pointerShape.accept(cursorFor(e));
-        if (e != hover) {
-            hover = e;
-            if (page != null && page.styles.dynamic) render();
-        }
+        if (e == hover) return;
+        // Only a move that changes what :hover matches is worth a picture.
+        boolean differs = !key(hover, false).equals(key(e, false));
+        hover = e;
+        if (differs) render();
     }
 
     public void pointerGone() {
         pointerX = pointerY = -1;
         if (hover != null) {
+            boolean differs = !key(hover, false).isEmpty();
             hover = null;
-            if (page != null && page.styles.dynamic) render();
+            if (differs) render();
         }
     }
 
@@ -279,18 +376,9 @@ public final class Session {
         if (closed || pointerX < 0) return;
         Element e = at(pointerX, pointerY);
         pointerShape.accept(cursorFor(e));
-        // Only a different element needs drawing again; the same one is already drawn hovered.
-        if (e != hover && (hover == null || e == null || !sameElement(e, hover))) {
-            hover = e;
-            if (page != null && page.styles.dynamic) render();
-        } else {
-            hover = e;
-        }
-    }
-
-    /** The same element in two copies of the page: same tag and position in the tree. */
-    private static boolean sameElement(Element a, Element b) {
-        return a.normalName().equals(b.normalName()) && a.cssSelector().equals(b.cssSelector());
+        boolean differs = !key(e, false).equals(drawnHover);
+        hover = e;
+        if (differs) render();
     }
 
     public void scroll(int notches) {

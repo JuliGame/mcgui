@@ -114,26 +114,33 @@ final class Shadows {
         }
         r.grow(pad, pad);
         if ((long) r.width * r.height > 25_000_000L) return;
-        BufferedImage img = new BufferedImage(r.width, r.height, BufferedImage.TYPE_INT_ARGB);
+        // A wide blur is worked out small and scaled back up (see Blur.shrink).
+        double k = Blur.shrink(sigma);
+        int w = Math.max(1, (int) Math.ceil(r.width / k)), h = Math.max(1, (int) Math.ceil(r.height / k));
+        BufferedImage img = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
         Graphics2D ig = img.createGraphics();
         // Fill with the shadow's colour at zero alpha first, so blurring only ever mixes alpha.
         ig.setComposite(AlphaComposite.Src);
         ig.setColor(new Color(color & 0xFFFFFF, true));
-        ig.fillRect(0, 0, r.width, r.height);
+        ig.fillRect(0, 0, w, h);
         ig.setComposite(AlphaComposite.SrcOver);
         ig.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         ig.setColor(new Color(color | 0xFF000000));
+        ig.scale(1 / k, 1 / k);
         ig.translate(-r.x, -r.y);
         ig.fill(devShape);
         ig.dispose();
-        Blur.blur(img, sigma);
+        Blur.blur(img, sigma / k);
         AffineTransform saved = g.getTransform();
         g.setTransform(new AffineTransform());
         java.awt.Composite oldComposite = g.getComposite();
+        Object oldInterpolation = g.getRenderingHint(RenderingHints.KEY_INTERPOLATION);
+        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
         float alpha = (color >>> 24) / 255f;
         g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, alpha * (oldComposite instanceof AlphaComposite ac ? ac.getAlpha() : 1)));
-        g.drawImage(img, r.x, r.y, null);
+        g.drawImage(img, r.x, r.y, r.width, r.height, null);
         g.setComposite(oldComposite);
+        if (oldInterpolation != null) g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, oldInterpolation);
         g.setTransform(saved);
     }
 

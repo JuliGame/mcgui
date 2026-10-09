@@ -124,11 +124,18 @@ final class Filters {
         int pad = (int) Math.ceil(blur * scale * 1.5);
         java.awt.Rectangle grab = new java.awt.Rectangle(r);
         grab.grow(pad, pad);
+        // Only what can be seen: a partial repaint clips to the part that changed.
+        if (g.getClip() != null) {
+            java.awt.Rectangle clipDev = dev.createTransformedShape(g.getClip()).getBounds();
+            clipDev.grow(pad, pad);
+            grab = grab.intersection(clipDev);
+            if (grab.isEmpty()) return;
+        }
         grab = grab.intersection(new java.awt.Rectangle(0, 0, surface.getWidth(), surface.getHeight()));
         BufferedImage copy = new BufferedImage(grab.width, grab.height, BufferedImage.TYPE_INT_ARGB);
         surface.getSubimage(grab.x, grab.y, grab.width, grab.height).copyData(copy.getRaster());
-        // A backdrop is opaque where something was drawn; blur it like a photo.
-        Blur.blur(copy, blur / 2 * scale);
+        // A backdrop is opaque where something was drawn; blur it like a photo (small, for a wide blur).
+        copy = Blur.blurredCopy(copy, blur / 2 * scale);
         for (String fn : Values.splitSpaces(filter)) {
             String l = fn.toLowerCase(Locale.ROOT);
             int open = l.indexOf('(');
@@ -142,7 +149,10 @@ final class Filters {
         Shape devClip = g.getClip() == null ? null : dev.createTransformedShape(g.getClip());
         g.setTransform(new AffineTransform());
         if (devClip != null) g.setClip(devClip);
-        g.drawImage(copy, grab.x, grab.y, null);
+        Object oldInterpolation = g.getRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION);
+        g.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION, java.awt.RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+        g.drawImage(copy, grab.x, grab.y, grab.width, grab.height, null);
+        if (oldInterpolation != null) g.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION, oldInterpolation);
         g.setTransform(saved);
         g.setClip(old);
     }
