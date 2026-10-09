@@ -25,8 +25,6 @@ views:
   # The page is laid out as if the view were this many CSS pixels tall (16x9 maps at 576 makes a
   # 1024 x 576 page drawn at twice the sharpness). A page can set its own with <meta name="ui:height">.
   height: 576
-  # How much of the player's screen the page fills; the world shows round it. <meta name="ui:fill">.
-  fill: 0.9
 
 walls:
   # A wall screen's page is laid out this many CSS pixels per map tall, unless the page says

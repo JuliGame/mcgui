@@ -149,13 +149,4 @@ public final class UIEnginePlugin extends JavaPlugin {
             return new int[]{16, 9};
         }
     }
-
-    double viewFill(Page p) {
-        String v = p.meta("ui:fill");
-        try {
-            return v != null ? Double.parseDouble(v.trim()) : cfg.getDouble("views.fill", 0.9);
-        } catch (NumberFormatException e) {
-            return 0.9;
-        }
-    }
 }

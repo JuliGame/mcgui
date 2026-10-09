@@ -298,7 +298,7 @@ public final class Screens {
         Seated old = views.put(player.getUniqueId(), seated);
         if (old != null && old.view != null) old.view.close();
         try {
-            seated.view = ScreenEngine.get().openView(player, seated, new ViewOptions(plugin.viewFill(p), 0));
+            seated.view = ScreenEngine.get().openView(player, seated, ViewOptions.DEFAULT);
         } catch (IllegalStateException e) {
             views.remove(player.getUniqueId());
             session.dispose();

@@ -50,7 +50,6 @@ Page settings, all optional:
 ```html
 <meta name="ui:size" content="12x7">    <!-- fullscreen size in maps (config: views.size) -->
 <meta name="ui:height" content="576">   <!-- the page is laid out this many CSS px tall -->
-<meta name="ui:fill" content="0.9">     <!-- how much of the player's screen it fills -->
 <meta name="ui:refresh" content="5">    <!-- refill placeholders every 5 seconds -->
 ```
 
