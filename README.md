@@ -8,9 +8,10 @@ No browser runs. UI Engine has its own HTML and CSS renderer, so what works is
 **static** HTML and CSS: no JavaScript. Links, commands, hover states, scrolling
 and a few form bits are made to work in game instead (below).
 
-**Needs** [Screen Engine](../screen-engine) (it draws the pictures) on Paper
-26.2 or 26.3. PlaceholderAPI is optional. Build with
-`./gradlew build --offline` (JDK 17 or 21 to run Gradle); `./gradlew
+**Needs** [Screen Engine](https://github.com/resourcepack-ai/ui-framework) (it draws the pictures) on Paper
+26.2 or 26.3. PlaceholderAPI is optional. Build with a clone of
+[ui-framework](https://github.com/resourcepack-ai/ui-framework) beside this one
+(`../ui-framework`), then `./gradlew build` (JDK 17 or 21 to run Gradle); `./gradlew
 renderSamples` renders `samples/*.html` to `build/samples/` to check the
 renderer by eye.
 

@@ -1,11 +1,13 @@
 # UI Engine: notes for whoever works on it
 
-HTML pages in game (2026-10-09), drawn through Screen Engine (`../screen-engine`).
+HTML pages in game (2026-10-09), drawn through Screen Engine
+([ui-framework](https://github.com/resourcepack-ai/ui-framework), built from a
+clone beside this one at `../ui-framework`).
 `README.md` is the user-facing description; this is the part that bites. Paths under `rigs/` are test rigs kept outside this repository.
 
 ## There is no browser, on purpose
 
-The owner's brief was static pages, and no Chromium. The Java options were checked:
+It shows static pages and runs no Chromium. The Java options were checked:
 Flying Saucer and OpenHTMLtoPDF stop at CSS 2.1 (no flexbox, no grid), JavaFX
 WebView is a browser with native libraries, and CSSBox (pure Java, claims flex
 and grid) lost variables, grid, the flex header, radii and shadows on an
@@ -59,7 +61,7 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
 - **`data-console` runs as the console** with placeholders already filled in.
   Built-in placeholders are safe (Minecraft names are `[A-Za-z0-9_]`); a
   PlaceholderAPI placeholder that can contain spaces or semicolons is the
-  owner's to keep out of console commands.
+  server owner's to keep out of console commands.
 
 ## Testing in game
 
