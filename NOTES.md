@@ -1,6 +1,6 @@
 # Screen Engine: notes for whoever works on it
 
-The framework under UI Engine (2026-10-09): pictures on walls of maps and in
+The framework under [UI Engine](https://github.com/resourcepack-ai/ui-engine): pictures on walls of maps and in
 seated fullscreen views. `README.md` is the
 user-facing description; this file is the part that bites.
 
@@ -16,8 +16,7 @@ user-facing description; this file is the part that bites.
 
 ## Things that are not obvious
 
-- **The server internals are reached by reflection**, like RP Engine's
-  `DialogPackets`, so the plugin compiles against the plain 1.21.8 API and needs
+- **The server internals are reached by reflection**, so the plugin compiles against the plain 1.21.8 API and needs
   no paperweight. Every member is looked up once in `Nms`'s constructor; a
   missing one disables the plugin at startup with the reason. They were checked
   against Paper 26.2 and 26.3, which agree on all of them.
@@ -30,7 +29,7 @@ user-facing description; this file is the part that bites.
   dialect means a third overlay and a look at `include/globals.glsl` and
   `dynamictransforms.glsl` for that version: std140 member order IS the layout.
 - **The pack replaces `text.fsh`/`text.vsh` and `position_tex_color`**. So do
-  3D Engine (its effects) and RP Engine's shader objects (Studio packs). Two
+  other plugins that draw effects through the text shader. Two
   packs that both replace `text.fsh` on one client cannot both work: whichever
   is applied last wins and the other's feature silently draws nothing. Nothing
   composes them yet.
@@ -61,7 +60,7 @@ user-facing description; this file is the part that bites.
   `gl_FragCoord.z` towards "near"; the first port assumed reversed depth (26.2). The
   vertex shader passes `ProjMat[2][2] > -0.5` as `mcbReversed`, so the trick
   holds either way. A shader that writes `gl_FragDepth` anywhere writes it on
-  every path (3D Engine learned this the hard way).
+  every path, or the driver may drop the whole shader.
 - **Map ids**: views share `[map-id-base, +1024)` (each player only ever sees
   their own view's frames), walls count up from there, fresh each start. They
   have no saved data, so vanilla never sends anything for them.

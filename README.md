@@ -8,7 +8,7 @@ It is a framework. On its own it shows a test picture (`/screens test`); other
 plugins draw into it. UI Engine, which shows HTML pages, is the first.
 
 **Needs** Paper 26.2 or 26.3 (Java 25). Build with
-`./gradlew build --offline` (JDK 17 or 21 to run Gradle).
+`./gradlew build` (JDK 17 or 21 to run Gradle).
 
 ## What it does
 
