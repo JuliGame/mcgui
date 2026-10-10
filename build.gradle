@@ -32,7 +32,7 @@ dependencies {
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
-base { archivesName = 'ScreenEngine' }
+base { archivesName = 'UIFramework' }
 
 test {
     useJUnitPlatform()

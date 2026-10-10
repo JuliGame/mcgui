@@ -1,19 +1,19 @@
-package ai.resourcepack.screens.world;
+package ai.resourcepack.uiframework.world;
 
-import ai.resourcepack.screens.Settings;
-import ai.resourcepack.screens.api.Canvas;
-import ai.resourcepack.screens.api.Click;
-import ai.resourcepack.screens.api.CloseReason;
-import ai.resourcepack.screens.api.Key;
-import ai.resourcepack.screens.api.Pointer;
-import ai.resourcepack.screens.api.View;
-import ai.resourcepack.screens.api.ViewContent;
-import ai.resourcepack.screens.api.ViewOptions;
-import ai.resourcepack.screens.net.MapSender;
-import ai.resourcepack.screens.net.Nms;
-import ai.resourcepack.screens.net.Pipeline;
-import ai.resourcepack.screens.pack.ResourcePack;
-import ai.resourcepack.screens.pack.Shaders;
+import ai.resourcepack.uiframework.Settings;
+import ai.resourcepack.uiframework.api.Canvas;
+import ai.resourcepack.uiframework.api.Click;
+import ai.resourcepack.uiframework.api.CloseReason;
+import ai.resourcepack.uiframework.api.Key;
+import ai.resourcepack.uiframework.api.Pointer;
+import ai.resourcepack.uiframework.api.View;
+import ai.resourcepack.uiframework.api.ViewContent;
+import ai.resourcepack.uiframework.api.ViewOptions;
+import ai.resourcepack.uiframework.net.MapSender;
+import ai.resourcepack.uiframework.net.Nms;
+import ai.resourcepack.uiframework.net.Pipeline;
+import ai.resourcepack.uiframework.pack.ResourcePack;
+import ai.resourcepack.uiframework.pack.Shaders;
 import io.papermc.paper.event.player.AsyncChatEvent;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -215,7 +215,7 @@ public final class Views implements Listener {
         return views.containsKey(player.getUniqueId());
     }
 
-    /** The player's FOV setting, as they told us with /screens fov; the server cannot read it. */
+    /** The player's FOV setting, as they told us with /uif fov; the server cannot read it. */
     public int fovOf(Player player) {
         Integer fov = player.getPersistentDataContainer().get(fovKey, PersistentDataType.INTEGER);
         return fov == null ? settings.defaultFov : fov;
@@ -729,7 +729,7 @@ public final class Views implements Listener {
         pipeline.forget(e.getPlayer().getUniqueId());
     }
 
-    /** For /screens debug: put a view's pointer at (x, y) as if the mouse had moved there. */
+    /** For /uif debug: put a view's pointer at (x, y) as if the mouse had moved there. */
     public void debugPoint(Player player, int x, int y) {
         ViewImpl v = views.get(player.getUniqueId());
         if (v == null) return;

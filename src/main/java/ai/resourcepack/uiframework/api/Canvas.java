@@ -1,6 +1,6 @@
-package ai.resourcepack.screens.api;
+package ai.resourcepack.uiframework.api;
 
-import ai.resourcepack.screens.render.Palette;
+import ai.resourcepack.uiframework.render.Palette;
 
 import java.awt.image.BufferedImage;
 import java.awt.image.DataBufferInt;
@@ -20,7 +20,7 @@ import java.util.stream.IntStream;
  * once it has arrived, and hovering a button re-sends a few tiles. Published tile arrays are never
  * mutated, so the sender compares them by identity.
  *
- * <p>Make one with {@link ScreenEngine#canvas(int, int)}. One canvas may be shown on any number of
+ * <p>Make one with {@link UIFramework#canvas(int, int)}. One canvas may be shown on any number of
  * screens and views at once.
  */
 public final class Canvas {

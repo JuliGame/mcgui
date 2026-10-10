@@ -1,4 +1,4 @@
-package ai.resourcepack.screens.net;
+package ai.resourcepack.uiframework.net;
 
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFutureListener;
@@ -13,7 +13,7 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Everything Screen Engine needs that the Paper API cannot do, reached by reflection on the
+ * Everything UI Framework needs that the Paper API cannot do, reached by reflection on the
  * Mojang-mapped server (Paper 1.20.5 and newer run Mojang's names), so the plugin compiles against
  * the plain API and survives a server update that leaves these few members alone. Every handle is
  * looked up once, at startup: a missing one fails the whole engine there, loudly, rather than the

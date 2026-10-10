@@ -1,4 +1,4 @@
-package ai.resourcepack.screens;
+package ai.resourcepack.uiframework;
 
 import org.bukkit.configuration.file.FileConfiguration;
 

@@ -1,4 +1,4 @@
-package ai.resourcepack.screens.net;
+package ai.resourcepack.uiframework.net;
 
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelDuplexHandler;
@@ -23,8 +23,8 @@ import java.util.logging.Logger;
  * player that hides their inventory, reads their mouse the moment it arrives, and moves their pointer.
  */
 public final class Pipeline {
-    private static final String PONGS = "screenengine_pong";
-    private static final String FILTER = "screenengine_conceal";
+    private static final String PONGS = "uiframework_pong";
+    private static final String FILTER = "uiframework_conceal";
     /** The player's own 36 slots, which every container other than the inventory itself ends with. */
     private static final int PLAYER_SLOTS = 36;
 

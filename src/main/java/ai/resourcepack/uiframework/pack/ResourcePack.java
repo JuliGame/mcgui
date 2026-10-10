@@ -1,8 +1,8 @@
-package ai.resourcepack.screens.pack;
+package ai.resourcepack.uiframework.pack;
 
-import ai.resourcepack.screens.Settings;
-import ai.resourcepack.screens.api.Pointer;
-import ai.resourcepack.screens.render.Palette;
+import ai.resourcepack.uiframework.Settings;
+import ai.resourcepack.uiframework.api.Pointer;
+import ai.resourcepack.uiframework.render.Palette;
 import com.sun.net.httpserver.HttpServer;
 import net.kyori.adventure.key.Key;
 import net.kyori.adventure.resource.ResourcePackInfo;
@@ -37,12 +37,12 @@ import java.util.zip.ZipOutputStream;
  * them hi-colour maps or plain ones.
  */
 public final class ResourcePack implements AutoCloseable {
-    public static final UUID PACK_ID = UUID.nameUUIDFromBytes("screenengine:pack".getBytes(StandardCharsets.UTF_8));
-    public static final Key POINTER_FONT = Key.key("screenengine", "pointer");
+    public static final UUID PACK_ID = UUID.nameUUIDFromBytes("uiframework:pack".getBytes(StandardCharsets.UTF_8));
+    public static final Key POINTER_FONT = Key.key("uiframework", "pointer");
     /** 26.2's pack format; 26.3 is 97.1, and an integer max_format of 97 covers every 97.x. */
     static final int FORMAT_26_2 = 88;
     static final int FORMAT_26_3 = 97;
-    static final String OVERLAY_26_2 = "screens_26_2";
+    static final String OVERLAY_26_2 = "uiframework_26_2";
 
     private final Settings settings;
     private final Logger logger;
@@ -80,7 +80,7 @@ public final class ResourcePack implements AutoCloseable {
             }
         });
         server.setExecutor(Executors.newFixedThreadPool(2, r -> {
-            Thread t = new Thread(r, "ScreenEngine-pack");
+            Thread t = new Thread(r, "UIFramework-pack");
             t.setDaemon(true);
             return t;
         }));
@@ -133,7 +133,7 @@ public final class ResourcePack implements AutoCloseable {
             Entries e = new Entries(zip);
             e.put("pack.mcmeta", """
                     {
-                      "pack": {"description": "Screen Engine", "min_format": %d, "max_format": %d},
+                      "pack": {"description": "UI Framework", "min_format": %d, "max_format": %d},
                       "overlays": {"entries": [{"directory": "%s", "min_format": %d, "max_format": %d}]}
                     }
                     """.formatted(FORMAT_26_2, FORMAT_26_3, OVERLAY_26_2, FORMAT_26_2, FORMAT_26_3 - 1));
@@ -148,10 +148,10 @@ public final class ResourcePack implements AutoCloseable {
             // view. Text, unlike an item, gets no directional shading, so the arrow stays white.
             StringBuilder chars = new StringBuilder();
             for (Pointer p : Pointer.values()) chars.append("\\u").append(String.format("%04x", (int) p.glyph));
-            e.put("assets/screenengine/font/pointer.json", """
-                    {"providers": [{"type": "bitmap", "file": "screenengine:font/pointer.png", "ascent": 7, "height": 16, "chars": ["%s"]}]}
+            e.put("assets/uiframework/font/pointer.json", """
+                    {"providers": [{"type": "bitmap", "file": "uiframework:font/pointer.png", "ascent": 7, "height": 16, "chars": ["%s"]}]}
                     """.formatted(chars));
-            e.put("assets/screenengine/textures/font/pointer.png", png(pointerSheet()));
+            e.put("assets/uiframework/textures/font/pointer.png", png(pointerSheet()));
         }
         return out.toByteArray();
     }

@@ -1,6 +1,6 @@
-package ai.resourcepack.screens.pack;
+package ai.resourcepack.uiframework.pack;
 
-import ai.resourcepack.screens.render.Palette;
+import ai.resourcepack.uiframework.render.Palette;
 
 import java.util.Locale;
 import java.util.regex.Pattern;
@@ -314,7 +314,7 @@ public final class Shaders {
         SymbolHash hash = new SymbolHash(palette.symbolRgb);
         return """
 
-                // ---- Screen Engine hi-colour map decoder ----
+                // ---- UI Framework hi-colour map decoder ----
                 // Colour -> symbol in two table reads (SymbolHash builds these tables).
                 const int MCB_D[@BUCKETS@] = @DISPLACE@;
                 const int MCB_S[@SLOTS@] = @SLOTTABLE@;

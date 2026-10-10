@@ -1,9 +1,9 @@
-package ai.resourcepack.screens.api;
+package ai.resourcepack.uiframework.api;
 
 import org.bukkit.Location;
 import org.bukkit.block.BlockFace;
 
-/** A placed wall of maps. Made with {@link ScreenEngine#placeWall}; gone after {@link #remove()} or a restart. */
+/** A placed wall of maps. Made with {@link UIFramework#placeWall}; gone after {@link #remove()} or a restart. */
 public interface WallScreen {
     int cols();
 

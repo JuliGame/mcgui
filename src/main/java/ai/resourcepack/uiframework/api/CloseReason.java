@@ -1,4 +1,4 @@
-package ai.resourcepack.screens.api;
+package ai.resourcepack.uiframework.api;
 
 /** Why a view closed. */
 public enum CloseReason {

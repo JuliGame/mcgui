@@ -1,10 +1,10 @@
-package ai.resourcepack.screens.api;
+package ai.resourcepack.uiframework.api;
 
 import org.bukkit.entity.Player;
 
 /**
  * A fullscreen view: the player sits, their camera locks onto a picture only they can see, and their
- * mouse moves a pointer across it. Made with {@link ScreenEngine#openView}.
+ * mouse moves a pointer across it. Made with {@link UIFramework#openView}.
  */
 public interface View {
     Player player();

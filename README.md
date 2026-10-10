@@ -1,10 +1,10 @@
-# Screen Engine
+# UI Framework
 
 Full-colour pictures in vanilla Minecraft, on walls of maps and in fullscreen
 views a player sits at and drives with their mouse. No mods: a Paper plugin and
 a small resource pack it builds and serves itself.
 
-It is a framework. On its own it shows a test picture (`/screens test`); other
+It is a framework. On its own it shows a test picture (`/uif test`); other
 plugins draw into it. UI Engine, which shows HTML pages, is the first.
 
 **Needs** Paper 26.2 or 26.3 (Java 25). Build with
@@ -29,20 +29,20 @@ plugins draw into it. UI Engine, which shows HTML pages, is the first.
 
 | Command | Does |
 |---|---|
-| `/screens test wall [cols] [rows] [player]` | Puts a test picture on the wall you look at |
-| `/screens test view [cols] [rows] [player]` | Opens a test picture as a fullscreen view |
-| `/screens fov <degrees>` | Fits views to your FOV setting, for players without the pack (the server cannot read it) |
-| `/screens pack` · `stats` · `clear` | Re-send the pack · bytes sent · remove test walls |
-| `/screens debug <player> point <x> <y>` · `click` · `scroll <n>` · `close` | Drive a player's view from the console |
+| `/uif test wall [cols] [rows] [player]` | Puts a test picture on the wall you look at |
+| `/uif test view [cols] [rows] [player]` | Opens a test picture as a fullscreen view |
+| `/uif fov <degrees>` | Fits views to your FOV setting, for players without the pack (the server cannot read it) |
+| `/uif pack` · `stats` · `clear` | Re-send the pack · bytes sent · remove test walls |
+| `/uif debug <player> point <x> <y>` · `click` · `scroll <n>` · `close` | Drive a player's view from the console |
 
-`/screens` needs `screenengine.admin` (op), except `fov` and `pack`.
+`/uif` needs `uiframework.admin` (op), except `fov` and `pack`.
 
 ## API
 
-Depend on `ScreenEngine` in your `plugin.yml`, compile against this jar, then:
+Depend on `UIFramework` in your `plugin.yml`, compile against this jar, then:
 
 ```java
-ScreenEngine engine = ScreenEngine.get();
+UIFramework engine = UIFramework.get();
 Canvas canvas = engine.canvas(4, 3);               // 512 x 384 pixels
 canvas.draw(image, 0, 0);                          // only changed tiles are re-sent
 engine.placeWall(topLeft, BlockFace.SOUTH, 4, 3, viewer -> canvas);

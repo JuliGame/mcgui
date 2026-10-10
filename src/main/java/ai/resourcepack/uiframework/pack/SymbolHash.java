@@ -1,4 +1,4 @@
-package ai.resourcepack.screens.pack;
+package ai.resourcepack.uiframework.pack;
 
 import java.util.ArrayList;
 import java.util.Arrays;

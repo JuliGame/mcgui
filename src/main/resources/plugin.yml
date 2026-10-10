@@ -1,14 +1,15 @@
-name: ScreenEngine
+name: UIFramework
 version: ${version}
-main: ai.resourcepack.screens.ScreenEnginePlugin
+main: ai.resourcepack.uiframework.UIFrameworkPlugin
 api-version: '1.21'
 description: Full-colour pictures on walls of maps and in fullscreen views you drive with your mouse, for vanilla clients.
 website: https://resourcepack.ai
 commands:
-  screens:
+  uiframework:
+    aliases: [uif]
     description: Test screens, set your field of view, re-send the pack.
-    usage: /screens test wall|view [cols] [rows] | fov <degrees> | pack | stats | clear
+    usage: /uif test wall|view [cols] [rows] | fov <degrees> | pack | stats | clear
 permissions:
-  screenengine.admin:
-    description: Use /screens test, stats and clear.
+  uiframework.admin:
+    description: Use /uif test, stats and clear.
     default: op

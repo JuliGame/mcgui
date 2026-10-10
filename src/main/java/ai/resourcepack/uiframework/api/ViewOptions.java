@@ -1,9 +1,9 @@
-package ai.resourcepack.screens.api;
+package ai.resourcepack.uiframework.api;
 
 /**
  * How a view looks. It always fills the player's window: with the resource pack the shader stretches
  * it to the window whatever its shape and the player's FOV; without, it is fitted to the FOV they gave
- * with {@code /screens fov}, for a 16:9 window.
+ * with {@code /uif fov}, for a 16:9 window.
  *
  * @param pointerSize the pointer's height in canvas pixels; 0 picks one from the canvas height.
  */

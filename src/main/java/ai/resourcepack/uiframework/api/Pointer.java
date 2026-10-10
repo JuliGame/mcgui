@@ -1,4 +1,4 @@
-package ai.resourcepack.screens.api;
+package ai.resourcepack.uiframework.api;
 
 /**
  * What the pointer looks like in a seated view: an arrow, or a hand over something that can be

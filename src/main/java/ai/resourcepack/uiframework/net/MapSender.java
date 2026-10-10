@@ -1,9 +1,9 @@
-package ai.resourcepack.screens.net;
+package ai.resourcepack.uiframework.net;
 
-import ai.resourcepack.screens.api.Canvas;
-import ai.resourcepack.screens.api.Pointer;
-import ai.resourcepack.screens.render.Palette;
-import ai.resourcepack.screens.world.MapWall;
+import ai.resourcepack.uiframework.api.Canvas;
+import ai.resourcepack.uiframework.api.Pointer;
+import ai.resourcepack.uiframework.render.Palette;
+import ai.resourcepack.uiframework.world.MapWall;
 import io.netty.channel.ChannelFutureListener;
 import org.bukkit.entity.Player;
 
@@ -74,7 +74,7 @@ public final class MapSender implements AutoCloseable {
     private final AtomicReference<List<Assignment>> latest = new AtomicReference<>(List.of());
     private final AtomicLong bytesSent = new AtomicLong();
     private final ScheduledExecutorService loop = Executors.newSingleThreadScheduledExecutor(r -> {
-        Thread t = new Thread(r, "ScreenEngine-send");
+        Thread t = new Thread(r, "UIFramework-send");
         t.setDaemon(true);
         return t;
     });

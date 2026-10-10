@@ -1,6 +1,6 @@
-package ai.resourcepack.screens.world;
+package ai.resourcepack.uiframework.world;
 
-import ai.resourcepack.screens.pack.Shaders;
+import ai.resourcepack.uiframework.pack.Shaders;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;

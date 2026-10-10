@@ -1,8 +1,8 @@
-# Screen Engine: pictures on walls of maps, and fullscreen views a player sits at.
+# UI Framework: pictures on walls of maps, and fullscreen views a player sits at.
 
 resource-pack:
   # serve: the engine serves its pack itself and sends it to players on join.
-  # external: the engine serves nothing; host plugins/ScreenEngine/pack.zip yourself (or merge it into
+  # external: the engine serves nothing; host plugins/UIFramework/pack.zip yourself (or merge it into
   #   your own pack) and set public-url, which players are sent on join.
   # off: no pack. Screens fall back to dithered vanilla map colours, and views are cut through the world.
   mode: serve
@@ -26,7 +26,7 @@ screens:
 
 views:
   # A view is fitted to the player's field of view. Minecraft does not tell the server what a player's
-  # FOV setting is, so this is assumed until they set theirs with /screens fov.
+  # FOV setting is, so this is assumed until they set theirs with /uif fov.
   default-fov: 70
   # Pointer speed: how far it moves per degree of mouse turn, for a view 768 pixels tall.
   cursor-speed: 8.0

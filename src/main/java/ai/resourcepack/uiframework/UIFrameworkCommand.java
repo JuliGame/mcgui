@@ -1,14 +1,14 @@
-package ai.resourcepack.screens;
+package ai.resourcepack.uiframework;
 
-import ai.resourcepack.screens.api.Canvas;
-import ai.resourcepack.screens.api.Click;
-import ai.resourcepack.screens.api.Pointer;
-import ai.resourcepack.screens.api.View;
-import ai.resourcepack.screens.api.ViewContent;
-import ai.resourcepack.screens.api.ViewOptions;
-import ai.resourcepack.screens.api.WallContent;
-import ai.resourcepack.screens.api.WallScreen;
-import ai.resourcepack.screens.world.MapWall;
+import ai.resourcepack.uiframework.api.Canvas;
+import ai.resourcepack.uiframework.api.Click;
+import ai.resourcepack.uiframework.api.Pointer;
+import ai.resourcepack.uiframework.api.View;
+import ai.resourcepack.uiframework.api.ViewContent;
+import ai.resourcepack.uiframework.api.ViewOptions;
+import ai.resourcepack.uiframework.api.WallContent;
+import ai.resourcepack.uiframework.api.WallScreen;
+import ai.resourcepack.uiframework.world.MapWall;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.block.Block;
@@ -30,16 +30,16 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * /screens test wall [cols] [rows] · test view [cols] [rows] · fov &lt;degrees&gt; · pack · stats · clear
+ * /uif test wall [cols] [rows] · test view [cols] [rows] · fov &lt;degrees&gt; · pack · stats · clear
  *
  * <p>The test picture is drawn with plain Java2D: a gradient, some text and one button that lights up
  * under the pointer and counts clicks. It is how to see the engine working without any other plugin.
  */
-final class ScreensCommand implements TabExecutor {
-    private final ScreenEnginePlugin plugin;
+final class UIFrameworkCommand implements TabExecutor {
+    private final UIFrameworkPlugin plugin;
     private final List<WallScreen> testWalls = new ArrayList<>();
 
-    ScreensCommand(ScreenEnginePlugin plugin) {
+    UIFrameworkCommand(UIFrameworkPlugin plugin) {
         this.plugin = plugin;
     }
 
@@ -50,7 +50,7 @@ final class ScreensCommand implements TabExecutor {
             case "test" -> test(sender, args);
             case "fov" -> {
                 if (!(sender instanceof Player p)) return say(sender, "Only players have a field of view.", NamedTextColor.RED);
-                if (args.length < 2) return say(sender, "Your FOV here is " + plugin.views().fovOf(p) + ". Set it with /screens fov <degrees> to match your video settings.", NamedTextColor.GRAY);
+                if (args.length < 2) return say(sender, "Your FOV here is " + plugin.views().fovOf(p) + ". Set it with /uif fov <degrees> to match your video settings.", NamedTextColor.GRAY);
                 try {
                     int fov = Integer.parseInt(args[1]);
                     if (fov < 30 || fov > 110) throw new NumberFormatException();
@@ -71,7 +71,7 @@ final class ScreensCommand implements TabExecutor {
                 say(sender, "Removed " + testWalls.size() + " test wall(s).", NamedTextColor.GREEN);
                 testWalls.clear();
             }
-            default -> say(sender, "/screens test wall|view [cols] [rows] · fov <degrees> · pack · stats · clear", NamedTextColor.GRAY);
+            default -> say(sender, "/uif test wall|view [cols] [rows] · fov <degrees> · pack · stats · clear", NamedTextColor.GRAY);
         }
         return true;
     }
@@ -80,7 +80,7 @@ final class ScreensCommand implements TabExecutor {
         // A fifth argument names the player, so the console (and a test harness) can run it.
         Player p = args.length > 4 ? org.bukkit.Bukkit.getPlayerExact(args[4]) : sender instanceof Player self ? self : null;
         if (p == null) {
-            say(sender, "Run this as a player, or name one: /screens test wall|view <cols> <rows> <player>.", NamedTextColor.RED);
+            say(sender, "Run this as a player, or name one: /uif test wall|view <cols> <rows> <player>.", NamedTextColor.RED);
             return;
         }
         boolean view = args.length > 1 && args[1].equalsIgnoreCase("view");
@@ -105,14 +105,14 @@ final class ScreensCommand implements TabExecutor {
     }
 
     /**
-     * /screens debug &lt;player&gt; point &lt;x&gt; &lt;y&gt; | click [right] | scroll &lt;notches&gt; | close: drive a
+     * /uif debug &lt;player&gt; point &lt;x&gt; &lt;y&gt; | click [right] | scroll &lt;notches&gt; | close: drive a
      * player's view from the console, for testing without anybody at the mouse.
      */
     private void debug(CommandSender sender, String[] args) {
         Player p = args.length > 1 ? org.bukkit.Bukkit.getPlayerExact(args[1]) : null;
         View view = p == null ? null : plugin.viewOf(p);
         if (view == null || args.length < 3) {
-            say(sender, "/screens debug <player> point <x> <y> | click [right] | scroll <n> | close (the player needs an open view)", NamedTextColor.RED);
+            say(sender, "/uif debug <player> point <x> <y> | click [right] | scroll <n> | close (the player needs an open view)", NamedTextColor.RED);
             return;
         }
         switch (args[2].toLowerCase(Locale.ROOT)) {
@@ -182,7 +182,7 @@ final class ScreensCommand implements TabExecutor {
             }
             g.setColor(Color.WHITE);
             g.setFont(new Font(Font.SANS_SERIF, Font.BOLD, h / 9));
-            centre(g, "Screen Engine", w / 2, h / 4);
+            centre(g, "UI Framework", w / 2, h / 4);
             g.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, h / 22));
             centre(g, canvas.cols() + " x " + canvas.rows() + " maps, " + w + " x " + h + " pixels", w / 2, h / 2);
             g.setColor(hover ? new Color(0x22C55E) : new Color(0x16A34A));

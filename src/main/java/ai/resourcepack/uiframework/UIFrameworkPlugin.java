@@ -1,20 +1,20 @@
-package ai.resourcepack.screens;
+package ai.resourcepack.uiframework;
 
-import ai.resourcepack.screens.api.Canvas;
-import ai.resourcepack.screens.api.CloseReason;
-import ai.resourcepack.screens.api.ScreenEngine;
-import ai.resourcepack.screens.api.View;
-import ai.resourcepack.screens.api.ViewContent;
-import ai.resourcepack.screens.api.ViewOptions;
-import ai.resourcepack.screens.api.WallContent;
-import ai.resourcepack.screens.api.WallScreen;
-import ai.resourcepack.screens.net.MapSender;
-import ai.resourcepack.screens.net.Nms;
-import ai.resourcepack.screens.net.Pipeline;
-import ai.resourcepack.screens.pack.ResourcePack;
-import ai.resourcepack.screens.render.Palette;
-import ai.resourcepack.screens.world.Views;
-import ai.resourcepack.screens.world.Walls;
+import ai.resourcepack.uiframework.api.Canvas;
+import ai.resourcepack.uiframework.api.CloseReason;
+import ai.resourcepack.uiframework.api.UIFramework;
+import ai.resourcepack.uiframework.api.View;
+import ai.resourcepack.uiframework.api.ViewContent;
+import ai.resourcepack.uiframework.api.ViewOptions;
+import ai.resourcepack.uiframework.api.WallContent;
+import ai.resourcepack.uiframework.api.WallScreen;
+import ai.resourcepack.uiframework.net.MapSender;
+import ai.resourcepack.uiframework.net.Nms;
+import ai.resourcepack.uiframework.net.Pipeline;
+import ai.resourcepack.uiframework.pack.ResourcePack;
+import ai.resourcepack.uiframework.render.Palette;
+import ai.resourcepack.uiframework.world.Views;
+import ai.resourcepack.uiframework.world.Walls;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.block.BlockFace;
@@ -32,7 +32,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Level;
 
-public final class ScreenEnginePlugin extends JavaPlugin implements ScreenEngine, Listener {
+public final class UIFrameworkPlugin extends JavaPlugin implements UIFramework, Listener {
     /** View walls share one range: each player only ever sees their own view's frames. */
     private static final int VIEW_ID_SPAN = 1024;
 
@@ -53,7 +53,7 @@ public final class ScreenEnginePlugin extends JavaPlugin implements ScreenEngine
         try {
             nms = new Nms(getServer());
         } catch (ReflectiveOperationException | LinkageError e) {
-            getLogger().log(Level.SEVERE, "This server is not one Screen Engine can drive (Paper 1.21.9 or newer is needed): " + e, e);
+            getLogger().log(Level.SEVERE, "This server is not one UI Framework can drive (Paper 1.21.9 or newer is needed): " + e, e);
             getServer().getPluginManager().disablePlugin(this);
             return;
         }
@@ -74,17 +74,17 @@ public final class ScreenEnginePlugin extends JavaPlugin implements ScreenEngine
         pm.registerEvents(views, this);
         tasks.add(Bukkit.getScheduler().runTaskTimer(this, this::tick, 1, 1));
         sender.start();
-        var command = new ScreensCommand(this);
-        getCommand("screens").setExecutor(command);
-        getCommand("screens").setTabCompleter(command);
+        var command = new UIFrameworkCommand(this);
+        getCommand("uiframework").setExecutor(command);
+        getCommand("uiframework").setTabCompleter(command);
         // Players already online (a reload): hand them the pack again.
         for (Player p : Bukkit.getOnlinePlayers()) if (pack != null) pack.send(p);
-        ScreenEngine.Holder.set(this);
+        UIFramework.Holder.set(this);
     }
 
     @Override
     public void onDisable() {
-        ScreenEngine.Holder.set(null);
+        UIFramework.Holder.set(null);
         tasks.forEach(BukkitTask::cancel);
         tasks.clear();
         if (views != null) views.closeAll(CloseReason.SHUTDOWN);

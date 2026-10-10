@@ -1,8 +1,8 @@
-package ai.resourcepack.screens.world;
+package ai.resourcepack.uiframework.world;
 
-import ai.resourcepack.screens.api.Click;
-import ai.resourcepack.screens.api.WallContent;
-import ai.resourcepack.screens.api.WallScreen;
+import ai.resourcepack.uiframework.api.Click;
+import ai.resourcepack.uiframework.api.WallContent;
+import ai.resourcepack.uiframework.api.WallScreen;
 import org.bukkit.Bukkit;
 import org.bukkit.FluidCollisionMode;
 import org.bukkit.Location;

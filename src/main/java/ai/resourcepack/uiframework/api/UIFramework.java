@@ -1,26 +1,26 @@
-package ai.resourcepack.screens.api;
+package ai.resourcepack.uiframework.api;
 
 import org.bukkit.Location;
 import org.bukkit.block.BlockFace;
 import org.bukkit.entity.Player;
 
 /**
- * Screen Engine: pictures in vanilla Minecraft, drawn on walls of maps and in fullscreen views that a
+ * UI Framework: pictures in vanilla Minecraft, drawn on walls of maps and in fullscreen views that a
  * player sits at and drives with their mouse. A plugin draws into a {@link Canvas}; the engine gets it
  * to the players looking at it, changed tiles only, in full colour for players with its resource pack.
  *
  * <pre>{@code
- * ScreenEngine engine = ScreenEngine.get();
+ * UIFramework engine = UIFramework.get();
  * Canvas canvas = engine.canvas(4, 3);           // 512 x 384 pixels
  * canvas.draw(myImage, 0, 0);
  * engine.placeWall(topLeft, BlockFace.SOUTH, 4, 3, viewer -> canvas);
  * }</pre>
  */
-public interface ScreenEngine {
-    /** The running engine. Depend on the {@code ScreenEngine} plugin to have it enabled first. */
-    static ScreenEngine get() {
-        ScreenEngine engine = Holder.engine;
-        if (engine == null) throw new IllegalStateException("Screen Engine is not enabled");
+public interface UIFramework {
+    /** The running engine. Depend on the {@code UIFramework} plugin to have it enabled first. */
+    static UIFramework get() {
+        UIFramework engine = Holder.engine;
+        if (engine == null) throw new IllegalStateException("UI Framework is not enabled");
         return engine;
     }
 
@@ -55,9 +55,9 @@ public interface ScreenEngine {
     final class Holder {
         private Holder() {}
 
-        static volatile ScreenEngine engine;
+        static volatile UIFramework engine;
 
-        public static void set(ScreenEngine e) {
+        public static void set(UIFramework e) {
             engine = e;
         }
     }

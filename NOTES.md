@@ -1,4 +1,4 @@
-# Screen Engine: notes for whoever works on it
+# UI Framework: notes for whoever works on it
 
 The framework under [UI Engine](https://github.com/resourcepack-ai/ui-engine): pictures on walls of maps and in
 seated fullscreen views. `README.md` is the
@@ -8,7 +8,7 @@ user-facing description; this file is the part that bites.
 
 | Path | What |
 |---|---|
-| `api/` | The public surface: `ScreenEngine`, `Canvas`, `WallContent`/`WallScreen`, `ViewContent`/`View`, `Pointer`, `Click`, `Key` |
+| `api/` | The public surface: `UIFramework`, `Canvas`, `WallContent`/`WallScreen`, `ViewContent`/`View`, `Pointer`, `Click`, `Key` |
 | `render/Palette` | The map colour table, and the HI (YCbCr in 240 colours) and PLAIN encodings |
 | `pack/` | `Shaders` (both GLSL dialects), `SymbolHash` (the shader's colour lookup), `ResourcePack` (build, serve, who has it) |
 | `net/` | `Nms` (every server internal, by reflection), `MapSender` (diffed map patches, per-player budget), `Pipeline` (ping answers, the hidden inventory) |
@@ -24,7 +24,7 @@ user-facing description; this file is the part that bites.
   `#include` for `#moj_import`, both uniform blocks reordered, and order-
   independent transparency in `text.fsh`. `Shaders` is written once in the 26.3
   form and `to262` derives the old one; the pack ships 26.3 at its root and
-  26.2 in the overlay `screens_26_2` (formats 88 to 96). An integer
+  26.2 in the overlay `uiframework_26_2` (formats 88 to 96). An integer
   `max_format` of 97 covers 97.1 (checked against 26.3's own codec). A third
   dialect means a third overlay and a look at `include/globals.glsl` and
   `dynamictransforms.glsl` for that version: std140 member order IS the layout.
@@ -74,7 +74,7 @@ user-facing description; this file is the part that bites.
 
 ## Testing
 
-`/screens test wall` and `/screens test view` need nothing else installed.
-`/screens debug <player> point|click|scroll|close` drives a view from the
+`/uif test wall` and `/uif test view` need nothing else installed.
+`/uif debug <player> point|click|scroll|close` drives a view from the
 console, which is how a harness tests one without anybody at the mouse. The
 shaders can only be judged in the real client.

@@ -1,4 +1,4 @@
-package ai.resourcepack.screens.world;
+package ai.resourcepack.uiframework.world;
 
 import io.papermc.paper.math.Position;
 import org.bukkit.Location;

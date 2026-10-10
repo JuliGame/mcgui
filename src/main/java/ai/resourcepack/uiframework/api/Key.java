@@ -1,4 +1,4 @@
-package ai.resourcepack.screens.api;
+package ai.resourcepack.uiframework.api;
 
 /**
  * The keys a seated player can press, as Minecraft reports them: movement, jump, sprint, and the

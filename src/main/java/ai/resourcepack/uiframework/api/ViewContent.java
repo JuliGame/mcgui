@@ -1,4 +1,4 @@
-package ai.resourcepack.screens.api;
+package ai.resourcepack.uiframework.api;
 
 /**
  * What a fullscreen view shows, and what the seated player does with it. Every method runs on the

@@ -1,4 +1,4 @@
-package ai.resourcepack.screens.render;
+package ai.resourcepack.uiframework.render;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;

@@ -1,4 +1,4 @@
-package ai.resourcepack.screens.api;
+package ai.resourcepack.uiframework.api;
 
 import org.bukkit.entity.Player;
 
