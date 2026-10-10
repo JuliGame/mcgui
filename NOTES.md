@@ -1,6 +1,6 @@
 # UI Engine: notes for whoever works on it
 
-HTML pages in game (2026-10-09), drawn through Screen Engine
+HTML pages in game (2026-10-09), drawn through UI Framework
 ([ui-framework](https://github.com/resourcepack-ai/ui-framework), built from a
 clone beside this one at `../ui-framework`).
 `README.md` is the user-facing description; this is the part that bites. Paths under `rigs/` are test rigs kept outside this repository.
@@ -43,7 +43,7 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
   `maxContent` resolve edges with an unknown containing block, so
   `intrinsicPair` saves and restores the box's margins, borders and paddings.
 - **Rendering happens off the server thread**, one picture at a time per
-  session (`Session.render` coalesces), into the session's own Screen Engine
+  session (`Session.render` coalesces), into the session's own UI Framework
   `Canvas`. Each session renders its own copy of the page's document (with the
   player's placeholders filled in), and anything a click changes (`<details>`,
   a checkbox) changes a fresh copy, so a picture being drawn never sees its
@@ -52,7 +52,7 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
   and clipping a gradient to glyph outlines gave jagged letters.
 - **Map pixels are not screen pixels.** A view is 16×9 maps (2048×1152) by
   default and the page is laid out at 576 CSS px tall, so it is drawn at 2x.
-  Small text stays legible because Screen Engine's shader averages the map
+  Small text stays legible because UI Framework's shader averages the map
   pixels under each window pixel.
 - **Google Fonts send TrueType to a user agent they do not recognise**, which is
   why `Page` asks for their CSS as plain "Mozilla/5.0": Java cannot read WOFF.
@@ -67,6 +67,6 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
 
 Mineflayer cannot speak 26.3 and ViaBackwards kicks it for movement, so the
 bot is no use here. Use a real client and drive the view from the console:
-`/screens debug <player> point <x> <y>` then `click`, in canvas pixels (2048
+`/uif debug <player> point <x> <y>` then `click`, in canvas pixels (2048
 wide for a default view). `/ui place <page> <cols> <rows> <name> <x> <y> <z>
 <facing> [world]` places a wall without anybody aiming.

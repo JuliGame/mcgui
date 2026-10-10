@@ -20,7 +20,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * UI Engine: HTML pages from {@code plugins/UIEngine/pages/}, shown in game on wall screens and in
- * fullscreen views, through Screen Engine. No browser: the pages are laid out and painted by the
+ * fullscreen views, through UI Framework. No browser: the pages are laid out and painted by the
  * plugin's own renderer, so what works is static HTML and CSS (no JavaScript), with links,
  * commands and hover states made to work in game.
  */

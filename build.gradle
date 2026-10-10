@@ -25,7 +25,7 @@ repositories {
 dependencies {
     compileOnly 'io.papermc.paper:paper-api:1.21.8-R0.1-SNAPSHOT'
     // A plugin of its own on the server (it owns the pack, the map ids and the seats), so never shaded.
-    compileOnly 'ai.resourcepack:screen-engine:0.1.0'
+    compileOnly 'ai.resourcepack:ui-framework:0.1.0'
 
     // HTML parsing, and SVG drawing for <svg> and .svg images. Shaded and relocated below.
     implementation 'org.jsoup:jsoup:1.23.2'

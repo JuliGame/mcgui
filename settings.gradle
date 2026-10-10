@@ -1,5 +1,5 @@
 rootProject.name = 'ui-engine'
 
-// Screen Engine, the framework UI Engine draws through, built from a clone of
+// UI Framework, the framework UI Engine draws through, built from a clone of
 // github.com/resourcepack-ai/ui-framework beside this one.
 includeBuild('../ui-framework')

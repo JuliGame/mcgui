@@ -1,16 +1,16 @@
 package ai.resourcepack.ui;
 
-import ai.resourcepack.screens.api.Canvas;
-import ai.resourcepack.screens.api.Click;
-import ai.resourcepack.screens.api.CloseReason;
-import ai.resourcepack.screens.api.Key;
-import ai.resourcepack.screens.api.Pointer;
-import ai.resourcepack.screens.api.ScreenEngine;
-import ai.resourcepack.screens.api.View;
-import ai.resourcepack.screens.api.ViewContent;
-import ai.resourcepack.screens.api.ViewOptions;
-import ai.resourcepack.screens.api.WallContent;
-import ai.resourcepack.screens.api.WallScreen;
+import ai.resourcepack.uiframework.api.Canvas;
+import ai.resourcepack.uiframework.api.Click;
+import ai.resourcepack.uiframework.api.CloseReason;
+import ai.resourcepack.uiframework.api.Key;
+import ai.resourcepack.uiframework.api.Pointer;
+import ai.resourcepack.uiframework.api.UIFramework;
+import ai.resourcepack.uiframework.api.View;
+import ai.resourcepack.uiframework.api.ViewContent;
+import ai.resourcepack.uiframework.api.ViewOptions;
+import ai.resourcepack.uiframework.api.WallContent;
+import ai.resourcepack.uiframework.api.WallScreen;
 import ai.resourcepack.ui.html.Page;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -88,7 +88,7 @@ public final class Screens {
         private Session newSession(UUID id) {
             Page p = plugin.pages().get(page);
             double designHeight = designHeight(p, height > 0 ? height : plugin.wallHeight(rows));
-            Canvas canvas = ScreenEngine.get().canvas(cols, rows);
+            Canvas canvas = UIFramework.get().canvas(cols, rows);
             Session s = new Session(plugin, renderers, canvas, id, designHeight);
             s.close = () -> {
                 if (s.pageName() != null && !s.pageName().equals(plugin.pages().normalise(page))) s.open(page, null, false);
@@ -175,7 +175,7 @@ public final class Screens {
         Wall old = walls.remove(name.toLowerCase());
         if (old != null) old.remove();
         Wall w = new Wall(name, page, topLeft, facing, cols, rows, shared, height);
-        w.screen = ScreenEngine.get().placeWall(topLeft, facing, cols, rows, w);
+        w.screen = UIFramework.get().placeWall(topLeft, facing, cols, rows, w);
         walls.put(name.toLowerCase(), w);
         save();
         return w;
@@ -223,7 +223,7 @@ public final class Screens {
                 Wall w = new Wall(key, s.getString("page", "menu"), new Location(world, s.getInt("x"), s.getInt("y"), s.getInt("z")),
                         BlockFace.valueOf(s.getString("facing", "NORTH")), s.getInt("columns", 4), s.getInt("rows", 3),
                         s.getBoolean("shared", false), s.getDouble("height", 0));
-                w.screen = ScreenEngine.get().placeWall(w.topLeft, w.facing, w.cols, w.rows, w);
+                w.screen = UIFramework.get().placeWall(w.topLeft, w.facing, w.cols, w.rows, w);
                 walls.put(key.toLowerCase(), w);
             } catch (RuntimeException e) {
                 plugin.getLogger().warning("Could not put screen '" + key + "' back: " + e.getMessage());
@@ -296,7 +296,7 @@ public final class Screens {
         Page p = plugin.pages().get(page);
         if (p == null) return false;
         int[] size = plugin.viewSize(p);
-        Canvas canvas = ScreenEngine.get().canvas(size[0], size[1]);
+        Canvas canvas = UIFramework.get().canvas(size[0], size[1]);
         Session session = new Session(plugin, renderers, canvas, player.getUniqueId(), designHeight(p, plugin.viewHeight()));
         Seated seated = new Seated(session);
         session.pointerShape = shape -> {
@@ -311,7 +311,7 @@ public final class Screens {
         Seated old = views.put(player.getUniqueId(), seated);
         if (old != null && old.view != null) old.view.close();
         try {
-            seated.view = ScreenEngine.get().openView(player, seated, ViewOptions.DEFAULT);
+            seated.view = UIFramework.get().openView(player, seated, ViewOptions.DEFAULT);
         } catch (IllegalStateException e) {
             views.remove(player.getUniqueId());
             session.dispose();

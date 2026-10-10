@@ -2,7 +2,7 @@ name: UIEngine
 version: ${version}
 main: ai.resourcepack.ui.UIEnginePlugin
 api-version: '1.21'
-depend: [ScreenEngine]
+depend: [UIFramework]
 softdepend: [PlaceholderAPI]
 description: Put HTML pages in plugins/UIEngine/pages/ and see them in game, on walls and fullscreen.
 website: https://resourcepack.ai
