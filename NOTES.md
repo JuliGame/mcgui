@@ -62,6 +62,13 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
   Built-in placeholders are safe (Minecraft names are `[A-Za-z0-9_]`); a
   PlaceholderAPI placeholder that can contain spaces or semicolons is the
   server owner's to keep out of console commands.
+- **Permissions are one node per subcommand** (`uiengine.<sub>`, plus
+  `.others` when the command names another player), checked in `UiCommand`
+  through `permissionFor`. `uiengine.admin` is a parent in `plugin.yml` that
+  grants them all and is never checked itself; `uiengine.open.others` is also
+  a parent of `uiengine.close.others`, so whoever may open a page for somebody
+  may close it again. A new subcommand needs its node in `plugin.yml`, under
+  the parent too.
 
 ## Testing in game
 

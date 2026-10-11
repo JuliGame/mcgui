@@ -11,15 +11,41 @@ commands:
     description: Open, place and reload HTML pages.
     usage: /ui open <page> [player] | close | place <page> [cols] [rows] [name] [shared] | remove [name] | list | reload
 permissions:
-  uiengine.open:
-    description: Open pages for yourself with /ui open.
-    default: op
-  uiengine.open.others:
-    description: Open and close pages for other players.
-    default: op
+  # One node per subcommand, checked as uiengine.<subcommand>, and a separate
+  # .others node for pointing one at somebody else. uiengine.admin is only a
+  # parent: nothing checks it, it grants all of them in one line. Closing your
+  # OWN page needs nothing, as sneaking out of it needs nothing.
   uiengine.admin:
-    description: Place and remove screens, list and reload pages.
+    description: Everything below. A convenience parent, not a node anything checks.
     default: op
     children:
       uiengine.open: true
       uiengine.open.others: true
+      uiengine.close.others: true
+      uiengine.place: true
+      uiengine.remove: true
+      uiengine.list: true
+      uiengine.reload: true
+  uiengine.open:
+    description: Open a page fullscreen for yourself with /ui open.
+    default: op
+  uiengine.open.others:
+    description: Open a page for another player with /ui open <page> <player>, and close it again.
+    default: op
+    children:
+      uiengine.close.others: true
+  uiengine.close.others:
+    description: Close another player's page with /ui close <player>.
+    default: op
+  uiengine.place:
+    description: Put a page on a wall with /ui place.
+    default: op
+  uiengine.remove:
+    description: Take a wall screen down with /ui remove.
+    default: op
+  uiengine.list:
+    description: List the pages and every placed screen, with where it is, with /ui list.
+    default: op
+  uiengine.reload:
+    description: Read the config and every page again with /ui reload.
+    default: op

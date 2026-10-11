@@ -25,8 +25,26 @@ renderer by eye.
 | `/ui remove [name]` | Takes a wall screen down (or the one you look at) |
 | `/ui list` · `/ui reload` | Pages and screens · read everything again |
 
-Permissions: `uiengine.open` (yourself), `uiengine.open.others`,
-`uiengine.admin` (place, remove, list, reload). All op by default.
+### Permissions
+
+Each subcommand has its own node, so a server can hand out one tool without
+the rest. Pointing a command at another player needs that command's `.others`
+node as well. All are op by default.
+
+| Node | Allows |
+|---|---|
+| `uiengine.open` | `/ui open <page>` for yourself |
+| `uiengine.open.others` | `/ui open <page> <player>`; also grants `uiengine.close.others` |
+| `uiengine.close.others` | `/ui close <player>` |
+| `uiengine.place` | `/ui place` |
+| `uiengine.remove` | `/ui remove` |
+| `uiengine.list` | `/ui list` (pages, and where every screen is) |
+| `uiengine.reload` | `/ui reload` |
+| `uiengine.admin` | all of the above, in one line |
+
+Closing your own page needs no permission, just as sneaking out of it needs
+none. `uiengine.admin` is only a parent: the plugin checks the nodes it grants,
+never `uiengine.admin` itself. Tab completion offers only what you may run.
 
 Wall screens are kept in `screens.yml`. Each player browses their own copy of a
 wall's page unless it was placed `shared`. Left-click a wall screen to click the

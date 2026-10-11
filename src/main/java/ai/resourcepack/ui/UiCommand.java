@@ -18,6 +18,10 @@ import java.util.Set;
 /**
  * /ui open &lt;page&gt; [player] · close [player] · place &lt;page&gt; [cols] [rows] [name] [shared] ·
  * remove [name] · list · reload
+ *
+ * <p>Each subcommand checks its own node, {@code uiengine.<subcommand>}, and one pointed at another
+ * player also needs {@code uiengine.<subcommand>.others}. {@code uiengine.admin} is only a parent in
+ * {@code plugin.yml} that grants them all; nothing here checks it. Closing your own page needs nothing.
  */
 final class UiCommand implements TabExecutor {
     private static final Set<BlockFace> WALL = Set.of(BlockFace.NORTH, BlockFace.SOUTH, BlockFace.EAST, BlockFace.WEST);
@@ -25,6 +29,28 @@ final class UiCommand implements TabExecutor {
 
     UiCommand(UIEnginePlugin plugin) {
         this.plugin = plugin;
+    }
+
+    /** The node a subcommand needs: {@code uiengine.<subcommand>}. */
+    static String permissionFor(String sub) {
+        return "uiengine." + sub;
+    }
+
+    /** What pointing a subcommand at somebody else needs on top: {@code uiengine.<subcommand>.others}. */
+    static String othersPermissionFor(String sub) {
+        return permissionFor(sub) + ".others";
+    }
+
+    /** Whether the sender holds {@code node}; tells them which one they lack when not. */
+    private static boolean permitted(CommandSender sender, String node) {
+        if (sender.hasPermission(node)) return true;
+        say(sender, "You need " + node + " for that.", NamedTextColor.RED);
+        return false;
+    }
+
+    /** Whether the sender may run {@code sub} at all, which is what tab completion offers. */
+    private static boolean mayRun(CommandSender sender, String sub) {
+        return sub.equals("close") || sender.hasPermission(permissionFor(sub));
     }
 
     private static boolean say(CommandSender to, String text, NamedTextColor color) {
@@ -40,13 +66,13 @@ final class UiCommand implements TabExecutor {
             case "close" -> {
                 Player target = args.length > 1 ? Bukkit.getPlayerExact(args[1]) : sender instanceof Player p ? p : null;
                 if (target == null) return say(sender, "Name a player.", NamedTextColor.RED);
-                if (target != sender && !sender.hasPermission("uiengine.open.others")) return say(sender, "You can't close other players' pages.", NamedTextColor.RED);
+                if (target != sender && !permitted(sender, othersPermissionFor("close"))) return true;
                 if (!plugin.screens().close(target)) say(sender, target.getName() + " has no page open.", NamedTextColor.GRAY);
             }
             case "place" -> place(sender, args);
             case "remove" -> remove(sender, args);
             case "list" -> {
-                if (!sender.hasPermission("uiengine.admin")) return say(sender, "You can't do that.", NamedTextColor.RED);
+                if (!permitted(sender, permissionFor("list"))) return true;
                 List<String> names = plugin.pages().names();
                 say(sender, names.isEmpty() ? "No pages yet: put .html files in " + plugin.pages().root() : "Pages: " + String.join(", ", names), NamedTextColor.GRAY);
                 for (Screens.Wall w : plugin.screens().walls()) {
@@ -55,7 +81,7 @@ final class UiCommand implements TabExecutor {
                 }
             }
             case "reload" -> {
-                if (!sender.hasPermission("uiengine.admin")) return say(sender, "You can't do that.", NamedTextColor.RED);
+                if (!permitted(sender, permissionFor("reload"))) return true;
                 plugin.reload();
                 say(sender, "Reloaded the config and every page.", NamedTextColor.GREEN);
             }
@@ -66,6 +92,7 @@ final class UiCommand implements TabExecutor {
     }
 
     private void open(CommandSender sender, String[] args) {
+        if (!permitted(sender, permissionFor("open"))) return;
         if (args.length < 2) {
             say(sender, "/ui open <page> [player]", NamedTextColor.RED);
             return;
@@ -75,14 +102,7 @@ final class UiCommand implements TabExecutor {
             say(sender, args.length > 2 ? "No player called " + args[2] + "." : "Name a player.", NamedTextColor.RED);
             return;
         }
-        if (target != sender && !sender.hasPermission("uiengine.open.others")) {
-            say(sender, "You can't open pages for other players.", NamedTextColor.RED);
-            return;
-        }
-        if (!sender.hasPermission("uiengine.open")) {
-            say(sender, "You can't open pages.", NamedTextColor.RED);
-            return;
-        }
+        if (target != sender && !permitted(sender, othersPermissionFor("open"))) return;
         String page = args[1];
         if (!plugin.pages().exists(page)) {
             say(sender, "There is no page called '" + page + "' in " + plugin.pages().root().getFileName() + "/.", NamedTextColor.RED);
@@ -96,10 +116,7 @@ final class UiCommand implements TabExecutor {
     }
 
     private void place(CommandSender sender, String[] args) {
-        if (!sender.hasPermission("uiengine.admin")) {
-            say(sender, "You can't do that.", NamedTextColor.RED);
-            return;
-        }
+        if (!permitted(sender, permissionFor("place"))) return;
         // From the console (or a script): /ui place <page> <cols> <rows> <name> <x> <y> <z> <facing> [world] [shared]
         if (args.length >= 9) {
             placeAt(sender, args);
@@ -155,10 +172,7 @@ final class UiCommand implements TabExecutor {
     }
 
     private void remove(CommandSender sender, String[] args) {
-        if (!sender.hasPermission("uiengine.admin")) {
-            say(sender, "You can't do that.", NamedTextColor.RED);
-            return;
-        }
+        if (!permitted(sender, permissionFor("remove"))) return;
         String name = args.length > 1 ? args[1] : null;
         if (name == null && sender instanceof Player p) {
             Block block = p.getTargetBlockExact(16);
@@ -186,8 +200,19 @@ final class UiCommand implements TabExecutor {
 
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String label, String[] args) {
-        if (args.length == 1) return filter(List.of("open", "close", "place", "remove", "list", "reload"), args[0]);
+        // Only what the sender may run is offered.
+        if (args.length == 1) {
+            List<String> subs = new ArrayList<>();
+            for (String sub : List.of("open", "close", "place", "remove", "list", "reload")) if (mayRun(sender, sub)) subs.add(sub);
+            return filter(subs, args[0]);
+        }
         String sub = args[0].toLowerCase(Locale.ROOT);
+        if (!mayRun(sender, sub)) return List.of();
+        boolean playerArg = (args.length == 3 && sub.equals("open")) || (args.length == 2 && sub.equals("close"));
+        if (playerArg && !sender.hasPermission(othersPermissionFor(sub))) {
+            // Somebody who may act only on themselves is offered their own name, not the server's.
+            return sender instanceof Player self ? filter(List.of(self.getName()), args[args.length - 1]) : List.of();
+        }
         if (args.length == 2 && (sub.equals("open") || sub.equals("place"))) return filter(plugin.pages().names(), args[1]);
         if (args.length == 2 && sub.equals("remove")) {
             List<String> names = new ArrayList<>();
