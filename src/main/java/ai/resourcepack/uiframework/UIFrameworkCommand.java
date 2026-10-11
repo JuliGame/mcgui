@@ -34,18 +34,43 @@ import java.util.Locale;
  *
  * <p>The test picture is drawn with plain Java2D: a gradient, some text and one button that lights up
  * under the pointer and counts clicks. It is how to see the engine working without any other plugin.
+ *
+ * <p>Each subcommand checks its own node, {@code uiframework.<subcommand>}, and one pointed at another
+ * player also needs {@code uiframework.<subcommand>.others}. {@code uiframework.admin} is only a parent in
+ * {@code plugin.yml} that grants them all; nothing here checks it.
  */
 final class UIFrameworkCommand implements TabExecutor {
     private final UIFrameworkPlugin plugin;
     private final List<WallScreen> testWalls = new ArrayList<>();
 
+    /** Every subcommand, in the order help and tab completion list them. */
+    private static final List<String> SUBCOMMANDS = List.of("test", "fov", "pack", "stats", "clear", "debug");
+
     UIFrameworkCommand(UIFrameworkPlugin plugin) {
         this.plugin = plugin;
+    }
+
+    /** The node a subcommand needs: {@code uiframework.<subcommand>}. */
+    static String permissionFor(String sub) {
+        return "uiframework." + sub;
+    }
+
+    /** What pointing a subcommand at somebody else needs on top: {@code uiframework.<subcommand>.others}. */
+    static String othersPermissionFor(String sub) {
+        return permissionFor(sub) + ".others";
+    }
+
+    /** Whether the sender holds {@code node}; tells them which one they lack when not. */
+    private static boolean permitted(CommandSender sender, String node) {
+        if (sender.hasPermission(node)) return true;
+        say(sender, "You need " + node + " for that.", NamedTextColor.RED);
+        return false;
     }
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         String sub = args.length == 0 ? "help" : args[0].toLowerCase(Locale.ROOT);
+        if (SUBCOMMANDS.contains(sub) && !permitted(sender, permissionFor(sub))) return true;
         switch (sub) {
             case "test" -> test(sender, args);
             case "fov" -> {
@@ -83,6 +108,7 @@ final class UIFrameworkCommand implements TabExecutor {
             say(sender, "Run this as a player, or name one: /uif test wall|view <cols> <rows> <player>.", NamedTextColor.RED);
             return;
         }
+        if (p != sender && !permitted(sender, othersPermissionFor("test"))) return;
         boolean view = args.length > 1 && args[1].equalsIgnoreCase("view");
         int cols = parse(args, 2, view ? 8 : 4), rows = parse(args, 3, view ? 5 : 3);
         Demo demo = new Demo(plugin.canvas(cols, rows));
@@ -115,6 +141,7 @@ final class UIFrameworkCommand implements TabExecutor {
             say(sender, "/uif debug <player> point <x> <y> | click [right] | scroll <n> | close (the player needs an open view)", NamedTextColor.RED);
             return;
         }
+        if (p != sender && !permitted(sender, othersPermissionFor("debug"))) return;
         switch (args[2].toLowerCase(Locale.ROOT)) {
             case "point" -> plugin.views().debugPoint(p, parse(args, 3, 0, 1 << 14), parse(args, 4, 0, 1 << 14));
             case "click" -> view.content().click(view, view.pointerX(), view.pointerY(), args.length > 3 ? Click.RIGHT : Click.LEFT);
@@ -148,8 +175,15 @@ final class UIFrameworkCommand implements TabExecutor {
 
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String label, String[] args) {
-        if (args.length == 1) return List.of("test", "fov", "pack", "stats", "clear", "debug");
-        if (args.length == 2 && args[0].equalsIgnoreCase("test")) return List.of("wall", "view");
+        // Only what the sender may run is offered.
+        if (args.length == 1) {
+            List<String> out = new ArrayList<>();
+            for (String sub : SUBCOMMANDS) {
+                if (sender.hasPermission(permissionFor(sub)) && sub.startsWith(args[0].toLowerCase(Locale.ROOT))) out.add(sub);
+            }
+            return out;
+        }
+        if (args.length == 2 && args[0].equalsIgnoreCase("test") && sender.hasPermission(permissionFor("test"))) return List.of("wall", "view");
         return List.of();
     }
 

@@ -10,6 +10,42 @@ commands:
     description: Test screens, set your field of view, re-send the pack.
     usage: /uif test wall|view [cols] [rows] | fov <degrees> | pack | stats | clear
 permissions:
+  # One node per subcommand, checked as uiframework.<subcommand>, and a
+  # separate .others node for pointing one at somebody else. uiframework.admin
+  # is only a parent: nothing checks it, it grants all of them in one line.
   uiframework.admin:
-    description: Use /uif test, stats and clear.
+    description: Everything below. A convenience parent, not a node anything checks.
     default: op
+    children:
+      uiframework.test: true
+      uiframework.test.others: true
+      uiframework.stats: true
+      uiframework.clear: true
+      uiframework.debug: true
+      uiframework.debug.others: true
+      uiframework.fov: true
+      uiframework.pack: true
+  uiframework.test:
+    description: Put a test picture on a wall or open one as a view, with /uif test.
+    default: op
+  uiframework.test.others:
+    description: Open a test view or place a test wall for another player, with /uif test ... <player>.
+    default: op
+  uiframework.stats:
+    description: See how many walls there are and how much map data has been sent, with /uif stats.
+    default: op
+  uiframework.clear:
+    description: Remove every test wall, whoever placed it, with /uif clear.
+    default: op
+  uiframework.debug:
+    description: Drive your own open view with /uif debug (point, click, scroll, close), for testing.
+    default: op
+  uiframework.debug.others:
+    description: Drive another player's open view with /uif debug <player>.
+    default: op
+  uiframework.fov:
+    description: Fit views to your field of view with /uif fov.
+    default: true
+  uiframework.pack:
+    description: Have the resource pack sent to you again with /uif pack.
+    default: true

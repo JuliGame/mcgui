@@ -71,6 +71,12 @@ user-facing description; this file is the part that bites.
   every right-click while seated, and scrolling then pops its name over the
   view. `Pipeline.conceal` rewrites inventory packets to empty for a seated
   player; the server keeps the real items.
+- **Permissions are one node per subcommand** (`uiframework.<sub>`, plus
+  `.others` when the command names another player), checked in
+  `UIFrameworkCommand` through `permissionFor`. `uiframework.admin` is a parent
+  in `plugin.yml` that grants them all and is never checked itself. A new
+  subcommand needs its node in `plugin.yml`, under the parent too, and in
+  `SUBCOMMANDS` so the check and tab completion see it.
 
 ## Testing
 

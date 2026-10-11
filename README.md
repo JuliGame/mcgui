@@ -35,7 +35,27 @@ plugins draw into it. UI Engine, which shows HTML pages, is the first.
 | `/uif pack` · `stats` · `clear` | Re-send the pack · bytes sent · remove test walls |
 | `/uif debug <player> point <x> <y>` · `click` · `scroll <n>` · `close` | Drive a player's view from the console |
 
-`/uif` needs `uiframework.admin` (op), except `fov` and `pack`.
+### Permissions
+
+Each subcommand has its own node, so a server can hand out one tool without
+the rest. Pointing a command at another player needs that command's `.others`
+node as well.
+
+| Node | Allows | Default |
+|---|---|---|
+| `uiframework.test` | `/uif test` for yourself | op |
+| `uiframework.test.others` | `/uif test ... <player>` for somebody else | op |
+| `uiframework.stats` | `/uif stats` | op |
+| `uiframework.clear` | `/uif clear` (removes every test wall, whoever placed it) | op |
+| `uiframework.debug` | `/uif debug` on your own view | op |
+| `uiframework.debug.others` | `/uif debug` on another player's view | op |
+| `uiframework.fov` | `/uif fov` | everyone |
+| `uiframework.pack` | `/uif pack` | everyone |
+| `uiframework.admin` | all of the above, in one line | op |
+
+`uiframework.admin` is only a parent: the plugin checks the nodes it grants,
+never `uiframework.admin` itself. Tab completion offers only the subcommands
+you may run.
 
 ## API
 
