@@ -222,13 +222,20 @@ public final class Nms {
         if (channel == null || !channel.isActive()) return false;
         try {
             channel.eventLoop().execute(() -> {
-                if (!channel.isActive() || !accepting(listener)) {
+                ChannelFuture last;
+                try {
+                    if (!channel.isActive() || !accepting(listener)) {
+                        done.accept(false);
+                        return;
+                    }
+                    last = null;
+                    for (Object p : packets) last = channel.write(p);
+                    channel.flush();
+                } catch (RuntimeException e) {
+                    // [done] must always run, or the bytes stay counted as in flight and the player's pictures stall.
                     done.accept(false);
                     return;
                 }
-                ChannelFuture last = null;
-                for (Object p : packets) last = channel.write(p);
-                channel.flush();
                 last.addListener(f -> done.accept(f.isSuccess()));
             });
         } catch (RejectedExecutionException e) {
