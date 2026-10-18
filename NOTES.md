@@ -68,6 +68,11 @@ user-facing description; this file is the part that bites.
   `UIFramework.serverThread()`, the server's own task queue, which Paper
   drains while it waits for the next tick: still the server thread, but not up
   to 50 ms late.
+- **`Canvas.draw` converts on every core**, in bands of 32 rows on a shared
+  pool. It reads `INT_RGB`, `INT_ARGB` and `INT_ARGB_PRE` rasters in place,
+  sub-images included; any other type goes through `getRGB`, which is several
+  times slower. Only HI tiles are made when a picture is drawn: a PLAIN tile is
+  made the first time somebody without the pack looks at it.
 - **Depth direction is detected, not assumed.** The in-front trick scales
   `gl_FragCoord.z` towards "near"; the first port assumed reversed depth (26.2). The
   vertex shader passes `ProjMat[2][2] > -0.5` as `mcbReversed`, so the trick
