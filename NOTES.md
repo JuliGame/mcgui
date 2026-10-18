@@ -73,6 +73,16 @@ user-facing description; this file is the part that bites.
   sub-images included; any other type goes through `getRGB`, which is several
   times slower. Only HI tiles are made when a picture is drawn: a PLAIN tile is
   made the first time somebody without the pack looks at it.
+- **Content is not trusted.** Every call into a `WallContent` or
+  `ViewContent` from the tick, the sender or `Views.close` is guarded and
+  logged, `LinkageError` included: a content whose plugin was disabled first
+  throws `NoClassDefFoundError`. `Views.close` puts the player back (camera,
+  game mode, potion, inventory) before it calls the content, so a content that
+  throws cannot strand them.
+- **The pointer waits for the seat teleport.** After a view appears, rotations
+  are ignored until the client accepts the teleport to the seat (or 20 ticks
+  pass): until then they still carry the old look direction and would throw the
+  pointer across the screen.
 - **Depth direction is detected, not assumed.** The in-front trick scales
   `gl_FragCoord.z` towards "near"; the first port assumed reversed depth (26.2). The
   vertex shader passes `ProjMat[2][2] > -0.5` as `mcbReversed`, so the trick
