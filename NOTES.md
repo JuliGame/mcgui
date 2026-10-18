@@ -47,7 +47,10 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
   `Canvas`. Each session renders its own copy of the page's document (with the
   player's placeholders filled in), and anything a click changes (`<details>`,
   a checkbox) changes a fresh copy, so a picture being drawn never sees its
-  document move.
+  document move. Whatever has to go back to the server thread (the next queued
+  picture, a hover worked out again, a fragment scroll) goes through UI
+  Framework's `serverThread()`, which runs between ticks, rather than
+  `runTask`, which would wait for the next one.
 - **Gradient text is a mask**, not a clip: Java2D clips are not antialiased,
   and clipping a gradient to glyph outlines gave jagged letters.
 - **Map pixels are not screen pixels.** A view is 16×9 maps (2048×1152) by
