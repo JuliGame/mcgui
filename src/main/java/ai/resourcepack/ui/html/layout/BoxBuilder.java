@@ -235,10 +235,12 @@ public final class BoxBuilder {
             case "square" -> "▪";
             case "decimal" -> index + ".";
             case "decimal-leading-zero" -> (index < 10 ? "0" : "") + index + ".";
-            case "lower-alpha", "lower-latin" -> alpha(index, 'a') + ".";
-            case "upper-alpha", "upper-latin" -> alpha(index, 'A') + ".";
-            case "lower-roman" -> roman(index).toLowerCase(Locale.ROOT) + ".";
-            case "upper-roman" -> roman(index) + ".";
+            // Out of their ranges these counters fall back to decimal, as CSS says: roman stops at
+            // 3999, and <ol start=2147483647 type=I> would otherwise be two million M's.
+            case "lower-alpha", "lower-latin" -> (index < 1 ? Integer.toString(index) : alpha(index, 'a')) + ".";
+            case "upper-alpha", "upper-latin" -> (index < 1 ? Integer.toString(index) : alpha(index, 'A')) + ".";
+            case "lower-roman" -> (index < 1 || index > 3999 ? Integer.toString(index) : roman(index).toLowerCase(Locale.ROOT)) + ".";
+            case "upper-roman" -> (index < 1 || index > 3999 ? Integer.toString(index) : roman(index)) + ".";
             case "disclosure-closed" -> "▸";
             case "disclosure-open" -> "▾";
             default -> type.startsWith("\"") || type.startsWith("'") ? cssString(type) : "•";
