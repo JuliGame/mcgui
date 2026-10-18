@@ -183,7 +183,7 @@ public final class Styler {
             String value = w.d.value();
             if (value.contains("var(")) {
                 if (expanded == null) expanded = new HashMap<>();
-                value = substitute(value, customs, expanded, 0);
+                value = substitute(value, customs, expanded, 0, Integer.MAX_VALUE);
                 if (value == null) value = "unset";
             }
             Shorthands.expand(prop, value, out::put);
@@ -207,15 +207,19 @@ public final class Styler {
         return out;
     }
 
-    /** How long a value may grow by var() substitution; longer is invalid, as browsers treat it. */
-    private static final int MAX_SUBSTITUTED = 64 * 1024;
+    /**
+     * How long a custom property may grow by substituting the var()s in its own value; longer is invalid,
+     * as in browsers (both use 1 MB). Only these can grow exponentially, one level doubling the next.
+     */
+    private static final int MAX_EXPANDED = 1024 * 1024;
 
     /**
      * Replaces every var(--x, fallback); null if one has neither a value nor a fallback, or the result
-     * is too long. [expanded] holds each custom property already substituted for these [customs] (empty
-     * if it was invalid), so one used twice at every level of a chain is worked out once, not 2^levels times.
+     * is longer than [limit]. [expanded] holds each custom property already substituted for these
+     * [customs] (empty if it was invalid), so one used twice at every level of a chain is worked out
+     * once, not 2^levels times.
      */
-    private static String substitute(String value, Map<String, String> customs, Map<String, Optional<String>> expanded, int depth) {
+    private static String substitute(String value, Map<String, String> customs, Map<String, Optional<String>> expanded, int depth, int limit) {
         if (depth > 16) return null;
         StringBuilder b = new StringBuilder();
         int i = 0;
@@ -223,7 +227,7 @@ public final class Styler {
             int at = value.indexOf("var(", i);
             if (at < 0) {
                 b.append(value, i, value.length());
-                return b.length() > MAX_SUBSTITUTED ? null : b.toString();
+                return b.length() > limit ? null : b.toString();
             }
             b.append(value, i, at);
             int close = closeParen(value, at + 3);
@@ -237,11 +241,11 @@ public final class Styler {
             if (custom != null && !(custom.isBlank() && fallback != null)) {
                 v = custom.contains("var(") ? expand(name, custom, customs, expanded, depth) : custom;
             } else {
-                v = fallback != null && fallback.contains("var(") ? substitute(fallback, customs, expanded, depth + 1) : fallback;
+                v = fallback != null && fallback.contains("var(") ? substitute(fallback, customs, expanded, depth + 1, limit) : fallback;
             }
             if (v == null) return null;
             b.append(v);
-            if (b.length() > MAX_SUBSTITUTED) return null;
+            if (b.length() > limit) return null;
             i = close + 1;
         }
     }
@@ -251,7 +255,7 @@ public final class Styler {
         if (done != null) return done.orElse(null);
         // Invalid while it is being worked out: a property that refers back to itself is a cycle.
         expanded.put(name, Optional.empty());
-        String v = substitute(custom, customs, expanded, depth + 1);
+        String v = substitute(custom, customs, expanded, depth + 1, MAX_EXPANDED);
         expanded.put(name, Optional.ofNullable(v));
         return v;
     }
