@@ -58,6 +58,7 @@ public final class UIEnginePlugin extends JavaPlugin {
         Page.Loader loader = new Page.Loader(cfg.getBoolean("allow-web", true), getDataFolder().toPath().resolve("cache"));
         pages = new PageStore(folder, loader, getLogger());
         screens = new Screens(this, renderers);
+        getServer().getPluginManager().registerEvents(screens, this);
         pages.onReload = name -> Bukkit.getScheduler().runTask(this, () -> screens.reloaded(name));
         // Warm the renderer (fonts, the default stylesheet) so the first page a player opens is quick.
         renderers.execute(() -> ai.resourcepack.ui.html.text.Fonts.bundled());

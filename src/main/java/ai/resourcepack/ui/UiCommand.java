@@ -133,7 +133,7 @@ final class UiCommand implements TabExecutor {
             return;
         }
         int cols = number(args, 2, 4), rows = number(args, 3, 3);
-        String name = args.length > 4 ? args[4] : plugin.pages().normalise(page).replace('/', '-') + "-" + (plugin.screens().walls().size() + 1);
+        String name = args.length > 4 ? args[4] : plugin.pages().normalise(page).replace('/', '-').replace('.', '-') + "-" + (plugin.screens().walls().size() + 1);
         boolean shared = args.length > 5 && args[5].equalsIgnoreCase("shared");
         Block block = p.getTargetBlockExact(16);
         BlockFace face = p.getTargetBlockFace(16);

@@ -21,6 +21,9 @@ import org.bukkit.block.BlockFace;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.Listener;
+import org.bukkit.event.world.WorldLoadEvent;
 
 import java.io.File;
 import java.io.IOException;
@@ -36,11 +39,16 @@ import java.util.concurrent.ExecutorService;
  * Pages on screens: placed wall screens (saved in screens.yml, each viewer browsing their own copy
  * unless the screen is shared) and fullscreen views a player sits at.
  */
-public final class Screens {
+public final class Screens implements Listener {
     private final UIEnginePlugin plugin;
     private final ExecutorService renderers;
     private final File file;
     private final Map<String, Wall> walls = new ConcurrentHashMap<>();
+    /**
+     * Screens in screens.yml whose world is not loaded (yet: a multiworld plugin may load it after this
+     * plugin starts), by lower-case name. Placed when their world loads, and written back meanwhile.
+     */
+    private final Map<String, ConfigurationSection> waiting = new ConcurrentHashMap<>();
     private final Map<UUID, Seated> views = new ConcurrentHashMap<>();
 
     Screens(UIEnginePlugin plugin, ExecutorService renderers) {
@@ -171,9 +179,12 @@ public final class Screens {
         return fallback;
     }
 
+    /** Places (or replaces) screen [name]. A '.' in the name is refused: screens.yml would read it back as a path. */
     public Wall place(String name, String page, Location topLeft, BlockFace facing, int cols, int rows, boolean shared, double height) {
+        if (name.indexOf('.') >= 0) throw new IllegalArgumentException("a screen's name cannot have a '.' in it");
         Wall old = walls.remove(name.toLowerCase());
         if (old != null) old.remove();
+        waiting.remove(name.toLowerCase());
         Wall w = new Wall(name, page, topLeft, facing, cols, rows, shared, height);
         w.screen = UIFramework.get().placeWall(topLeft, facing, cols, rows, w);
         walls.put(name.toLowerCase(), w);
@@ -183,8 +194,9 @@ public final class Screens {
 
     public boolean remove(String name) {
         Wall w = walls.remove(name.toLowerCase());
-        if (w == null) return false;
-        w.remove();
+        boolean wasWaiting = waiting.remove(name.toLowerCase()) != null;
+        if (w == null && !wasWaiting) return false;
+        if (w != null) w.remove();
         save();
         return true;
     }
@@ -216,20 +228,39 @@ public final class Screens {
             if (s == null) continue;
             World world = Bukkit.getWorld(s.getString("world", ""));
             if (world == null) {
-                plugin.getLogger().warning("Screen '" + key + "' is in world '" + s.getString("world") + "', which is not loaded; skipping it");
+                plugin.getLogger().info("Screen '" + key + "' is in world '" + s.getString("world") + "', which is not loaded; it goes up when that world loads");
+                waiting.put(key.toLowerCase(), s);
                 continue;
             }
-            try {
-                Wall w = new Wall(key, s.getString("page", "menu"), new Location(world, s.getInt("x"), s.getInt("y"), s.getInt("z")),
-                        BlockFace.valueOf(s.getString("facing", "NORTH")), s.getInt("columns", 4), s.getInt("rows", 3),
-                        s.getBoolean("shared", false), s.getDouble("height", 0));
-                w.screen = UIFramework.get().placeWall(w.topLeft, w.facing, w.cols, w.rows, w);
-                walls.put(key.toLowerCase(), w);
-            } catch (RuntimeException e) {
-                plugin.getLogger().warning("Could not put screen '" + key + "' back: " + e.getMessage());
-            }
+            putBack(s, world);
         }
         plugin.getLogger().info("Placed " + walls.size() + " screen(s)");
+    }
+
+    /** Places the screen saved as [s] in [world]; one that cannot be is kept as it was in screens.yml. */
+    private void putBack(ConfigurationSection s, World world) {
+        String key = s.getName();
+        try {
+            Wall w = new Wall(key, s.getString("page", "menu"), new Location(world, s.getInt("x"), s.getInt("y"), s.getInt("z")),
+                    BlockFace.valueOf(s.getString("facing", "NORTH")), s.getInt("columns", 4), s.getInt("rows", 3),
+                    s.getBoolean("shared", false), s.getDouble("height", 0));
+            w.screen = UIFramework.get().placeWall(w.topLeft, w.facing, w.cols, w.rows, w);
+            walls.put(key.toLowerCase(), w);
+        } catch (RuntimeException e) {
+            plugin.getLogger().warning("Could not put screen '" + key + "' back: " + e.getMessage());
+            waiting.put(key.toLowerCase(), s);
+        }
+    }
+
+    /** A world loaded after this plugin started (a multiworld plugin's): its screens go up. */
+    @EventHandler
+    public void onWorldLoad(WorldLoadEvent event) {
+        World world = event.getWorld();
+        for (Map.Entry<String, ConfigurationSection> e : waiting.entrySet()) {
+            if (!world.getName().equals(e.getValue().getString("world"))) continue;
+            waiting.remove(e.getKey());
+            putBack(e.getValue(), world);
+        }
     }
 
     void save() {
@@ -246,6 +277,10 @@ public final class Screens {
             yaml.set(p + ".rows", w.rows);
             yaml.set(p + ".shared", w.shared);
             if (w.height > 0) yaml.set(p + ".height", w.height);
+        }
+        // Screens not up yet are written back as they were read, or they would be lost on the first save.
+        for (ConfigurationSection s : waiting.values()) {
+            for (String k : s.getKeys(true)) if (!s.isConfigurationSection(k)) yaml.set("screens." + s.getName() + "." + k, s.get(k));
         }
         try {
             plugin.getDataFolder().mkdirs();
