@@ -179,11 +179,20 @@ public final class Painter {
     /** Opacity and filters: the subtree painted on a layer of its own, then blended in. */
     private void layered(Graphics2D g, Box box, double x, double y) {
         AffineTransform dev = g.getTransform();
-        // The layer covers the surface being painted (the screen, or an enclosing layer), cut to the clip.
+        // The layer covers what the subtree can paint, within the surface being painted (the screen, or an
+        // enclosing layer) and the clip: not the whole surface for every translucent badge.
         java.awt.Rectangle r = new java.awt.Rectangle(0, 0, surface.getWidth(), surface.getHeight());
         if (g.getClipBounds() != null) {
             java.awt.Rectangle clipDev = dev.createTransformedShape(g.getClip()).getBounds();
             r = r.intersection(clipDev);
+        }
+        Reach reach = new Reach();
+        reach(box, x, y, reach);
+        // A backdrop-filter inside reads what is painted round it, which a smaller layer would cut off.
+        if (!reach.backdrop) {
+            java.awt.Rectangle painted = dev.createTransformedShape(reach.area).getBounds();
+            painted.grow(2, 2);
+            r = r.intersection(painted);
         }
         if (r.width <= 0 || r.height <= 0) return;
         // Colour filters work on straight colour, so a filtered layer stays plain ARGB; opacity alone blends faster premultiplied.
@@ -206,6 +215,76 @@ public final class Painter {
         g.drawImage(img, r.x, r.y, null);
         g.setComposite(old);
         g.setTransform(saved);
+    }
+
+    /** Where a subtree can paint, in the user space it is painted in; and whether it has a backdrop-filter. */
+    private static final class Reach {
+        Rectangle2D area;
+        boolean backdrop;
+
+        void add(Rectangle2D r, double grow) {
+            Rectangle2D g = new Rectangle2D.Double(r.getX() - grow, r.getY() - grow, r.getWidth() + 2 * grow, r.getHeight() + 2 * grow);
+            if (area == null) area = g;
+            else area.add(g);
+        }
+    }
+
+    /** Room round every box for what is drawn just outside it: antialiased edges, a range's knob, a checked box's rim. */
+    private static final double SLACK = 8;
+
+    /**
+     * Adds to [reach] where [box] (its border box at (x, y)) and everything it paints can draw, generously:
+     * every box, its outer shadows, its text with an em to spare, its list marker, and the spread of any
+     * filter blur, with nested transforms applied. Walks the tree the way painting does: anything new
+     * that paints outside its own box must be added here too, or a translucent ancestor cuts it off.
+     */
+    private void reach(Box box, double x, double y, Reach reach) {
+        Style s = box.style;
+        Reach own = new Reach();
+        own.add(new Rectangle2D.Double(x, y, box.w, box.h), SLACK);
+        if (!s.backdropFilter.equals("none")) reach.backdrop = true;
+        for (Shadows.Shadow sh : Shadows.parse(s.boxShadow, s)) {
+            if (!sh.inset()) own.add(new Rectangle2D.Double(x + sh.x(), y + sh.y(), box.w, box.h), Math.max(0, sh.spread()) + 2 * sh.blur() + SLACK);
+        }
+        if (box.marker != null) {
+            double fs = (box.markerStyle != null ? box.markerStyle : s).fontSize;
+            own.add(new Rectangle2D.Double(x - 10 * fs, y, 10 * fs + box.w, box.h), SLACK);
+        }
+        if (box.lines != null) {
+            for (Box.Line line : box.lines) {
+                for (Box.Item it : line.items) {
+                    if (it.text == null) continue;
+                    double fs = it.style.fontSize;
+                    Rectangle2D t = new Rectangle2D.Double(x + it.x - fs, y + it.baselineY - 2 * fs, it.w + 2 * fs, 3 * fs);
+                    own.add(t, SLACK);
+                    for (Shadows.Shadow sh : Shadows.parse(it.style.textShadow, it.style)) {
+                        own.add(new Rectangle2D.Double(t.getX() + sh.x(), t.getY() + sh.y(), t.getWidth(), t.getHeight()), 2 * sh.blur() + SLACK);
+                    }
+                }
+            }
+        }
+        reachChildren(box, x, y, own);
+        reach.backdrop |= own.backdrop;
+        // A blur spreads the picture about three times its radius.
+        reach.add(own.area, 3 * Filters.blurRadius(s.filter, s) + 1);
+    }
+
+    private void reachChildren(Box parent, double x, double y, Reach reach) {
+        for (Box c : parent.children) {
+            if (c.isText() || c.inner == Box.Inner.BREAK) continue;
+            if (c.isInline()) {
+                // No rectangle of its own: its pieces, and what is inside it, are placed from the block.
+                if (c.fragments != null) for (Box.Fragment f : c.fragments) reach.add(new Rectangle2D.Double(x + f.x, y + f.y, f.w, f.h), SLACK);
+                reachChildren(c, x, y, reach);
+                continue;
+            }
+            double cx = x + c.x, cy = y + c.y + (c.fixed ? scrollY : 0);
+            Reach inner = new Reach();
+            reach(c, cx, cy, inner);
+            AffineTransform t = transform(c, cx, cy);
+            reach.add(t == null ? inner.area : t.createTransformedShape(inner.area).getBounds2D(), 0);
+            reach.backdrop |= inner.backdrop;
+        }
     }
 
     private AffineTransform transform(Box box, double x, double y) {
