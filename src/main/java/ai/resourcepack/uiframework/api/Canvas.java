@@ -4,6 +4,8 @@ import ai.resourcepack.uiframework.render.Palette;
 
 import java.awt.image.BufferedImage;
 import java.awt.image.DataBufferInt;
+import java.awt.image.SinglePixelPackedSampleModel;
+import java.awt.image.WritableRaster;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -34,7 +36,8 @@ public final class Canvas {
     private final AtomicReferenceArray<byte[]> hi;
     /** HI_OWN tiles with the HI array each was made from, so a stale one is never handed out. */
     private final AtomicReferenceArray<Own> hiOwn;
-    private final AtomicReferenceArray<byte[]> plain;
+    /** PLAIN tiles with the HI array each was made with: made only when somebody without the pack looks. */
+    private final AtomicReferenceArray<Own> plain;
     private volatile long version;
     /** Told whenever new tiles are published, so they go out at once (the engine's sender). */
     private final Runnable published;
@@ -79,31 +82,60 @@ public final class Canvas {
 
     /**
      * Draw [image] with its top-left at (x, y). Alpha is ignored: pixels replace what was there, so
-     * flatten a translucent picture onto a background first.
+     * flatten a translucent picture onto a background first (a premultiplied image's colours are already
+     * flattened onto black). An int RGB or ARGB image, or a sub-image of one, is read in place.
      */
     public void draw(BufferedImage image, int x, int y) {
         int w = image.getWidth(), h = image.getHeight();
-        int[] argb;
-        if (image.getType() == BufferedImage.TYPE_INT_RGB || image.getType() == BufferedImage.TYPE_INT_ARGB) {
-            argb = ((DataBufferInt) image.getRaster().getDataBuffer()).getData();
-            if (argb.length != w * h) argb = image.getRGB(0, 0, w, h, null, 0, w);
+        int type = image.getType();
+        WritableRaster r = image.getRaster();
+        if ((type == BufferedImage.TYPE_INT_RGB || type == BufferedImage.TYPE_INT_ARGB || type == BufferedImage.TYPE_INT_ARGB_PRE)
+                && r.getSampleModel() instanceof SinglePixelPackedSampleModel sm && r.getDataBuffer() instanceof DataBufferInt db) {
+            // A sub-image shares its parent's array: start where it does, and step by the parent's row length.
+            int stride = sm.getScanlineStride();
+            int offset = db.getOffset() - r.getSampleModelTranslateY() * stride - r.getSampleModelTranslateX();
+            draw(db.getData(), offset, stride, w, h, x, y);
         } else {
-            argb = image.getRGB(0, 0, w, h, null, 0, w);
+            draw(image.getRGB(0, 0, w, h, null, 0, w), 0, w, w, h, x, y);
         }
-        draw(argb, w, h, x, y);
     }
 
     /** Draw a [w] × [h] block of RGB pixels (row-major; the top byte is ignored) with its top-left at (x, y). */
     public void draw(int[] rgb, int w, int h, int x, int y) {
+        draw(rgb, 0, w, w, h, x, y);
+    }
+
+    /** Rows per piece of work when converting a big drawing on several cores. */
+    private static final int BAND = 32;
+
+    /** [rgb] holds the drawing's pixel (i, j) at [offset] + j × [stride] + i. */
+    private void draw(int[] rgb, int offset, int stride, int w, int h, int x, int y) {
         int x0 = Math.max(0, x), y0 = Math.max(0, y);
         int x1 = Math.min(width, x + w), y1 = Math.min(height, y + h);
         if (x0 >= x1 || y0 >= y1) return;
+        boolean[] dirty = new boolean[cols * rows];
+        int bands = (y1 - y0 + BAND - 1) / BAND;
+        // Rows are independent: a big drawing (a whole new page) is converted on several cores at once.
+        if (bands > 1 && (long) (x1 - x0) * (y1 - y0) >= 128 * 128) {
+            run(() -> IntStream.range(0, bands).parallel().forEach(b ->
+                    convert(rgb, offset, stride, x, y, x0, x1, y0 + b * BAND, Math.min(y1, y0 + (b + 1) * BAND), dirty)));
+        } else {
+            convert(rgb, offset, stride, x, y, x0, x1, y0, y1, dirty);
+        }
+        List<Integer> changed = new ArrayList<>();
+        for (int t = 0; t < dirty.length; t++) if (dirty[t]) changed.add(t);
+        if (changed.isEmpty()) return;
+        encode(changed);
+        version++;
+        published.run();
+    }
+
+    /** Rows [from, to) of the canvas: convert, compare with what is there, store, and mark changed tiles. */
+    private void convert(int[] rgb, int offset, int stride, int x, int y, int x0, int x1, int from, int to, boolean[] dirty) {
         int cw = x1 - x0;
         byte[] row = new byte[cw * 3];
-        boolean[] dirty = new boolean[cols * rows];
-        boolean any = false;
-        for (int py = y0; py < y1; py++) {
-            int s = (py - y) * w + (x0 - x);
+        for (int py = from; py < to; py++) {
+            int s = offset + (py - y) * stride + (x0 - x);
             for (int i = 0; i < cw; i++) Palette.rgbToYcc(rgb[s + i], row, i * 3);
             int d = (py * width + x0) * 3;
             if (Arrays.equals(row, 0, row.length, ycc, d, d + row.length)) continue;
@@ -113,20 +145,11 @@ public final class Canvas {
             while (px < x1) {
                 int end = Math.min(x1, (px / 128 + 1) * 128);
                 int a = (px - x0) * 3, b = (end - x0) * 3;
-                if (!Arrays.equals(row, a, b, ycc, d + a, d + b)) {
-                    dirty[tileRow + px / 128] = true;
-                    any = true;
-                }
+                if (!Arrays.equals(row, a, b, ycc, d + a, d + b)) dirty[tileRow + px / 128] = true;
                 px = end;
             }
             System.arraycopy(row, 0, ycc, d, row.length);
         }
-        if (!any) return;
-        List<Integer> changed = new ArrayList<>();
-        for (int t = 0; t < dirty.length; t++) if (dirty[t]) changed.add(t);
-        encode(changed);
-        version++;
-        published.run();
     }
 
     /** The picture shrunk to [w] × [h] RGB pixels, each the average of the area it covers. */
@@ -156,7 +179,18 @@ public final class Canvas {
     public byte[] tile(int index, Encoding encoding) {
         return switch (encoding) {
             case HI -> hi.get(index);
-            case PLAIN -> plain.get(index);
+            case PLAIN -> {
+                // Derived from the picture when first asked for, and kept until the HI tile changes.
+                byte[] base = hi.get(index);
+                Own own = plain.get(index);
+                if (own == null || own.base != base) {
+                    byte[] out = new byte[TILE];
+                    palette.encodePlain(ycc, width, (index % cols) * 128, (index / cols) * 128, out);
+                    own = new Own(base, out);
+                    plain.set(index, own);
+                }
+                yield own.tile;
+            }
             case HI_OWN -> {
                 // Derived lazily from the HI tile and kept until that changes: only views need it.
                 byte[] base = hi.get(index);
@@ -174,13 +208,14 @@ public final class Canvas {
 
     /** Tiles are independent, so a full-screen change is encoded on several cores at once. */
     private void encode(List<Integer> list) {
-        if (list.isEmpty()) return;
-        if (list.size() == 1) {
-            encode(list.get(0));
-            return;
-        }
+        if (list.size() == 1) encode(list.get(0));
+        else run(() -> IntStream.range(0, list.size()).parallel().forEach(i -> encode(list.get(i))));
+    }
+
+    /** Runs [work] (which splits itself up) on the shared encoder pool and waits for it. */
+    private static void run(Runnable work) {
         try {
-            ENCODERS.submit(() -> IntStream.range(0, list.size()).parallel().forEach(i -> encode(list.get(i)))).get();
+            ENCODERS.submit(work).get();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         } catch (java.util.concurrent.ExecutionException e) {
@@ -189,14 +224,10 @@ public final class Canvas {
     }
 
     private void encode(int t) {
-        int ox = (t % cols) * 128, oy = (t / cols) * 128;
-        // Fresh arrays each time: the sender may still hold the old ones.
+        // A fresh array each time: the sender may still hold the old one. PLAIN is made from it when asked for.
         byte[] h = new byte[TILE];
-        byte[] p = new byte[TILE];
-        palette.encodeHi(ycc, width, ox, oy, h);
-        palette.encodePlain(ycc, width, ox, oy, p);
+        palette.encodeHi(ycc, width, (t % cols) * 128, (t / cols) * 128, h);
         hi.set(t, h);
-        plain.set(t, p);
     }
 
     /** How a tile is sent: which colours mean what to the player's client. */
