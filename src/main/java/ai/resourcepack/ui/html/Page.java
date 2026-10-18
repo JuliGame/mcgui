@@ -17,6 +17,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.URI;
+import java.net.UnknownHostException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -28,6 +29,7 @@ import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.Collections;
 import java.util.HexFormat;
@@ -41,7 +43,10 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.Flow;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Function;
@@ -107,7 +112,12 @@ public final class Page implements Resources {
                         if (cached != null && Files.isRegularFile(cached)) return Files.readAllBytes(cached);
                         Long retry = failed.get(key);
                         if (retry != null && retry > System.currentTimeMillis()) return null;
-                        byte[] body = download(uri, userAgent);
+                        byte[] body;
+                        try {
+                            body = download(uri, userAgent);
+                        } catch (IOException | RuntimeException e) {
+                            body = null;
+                        }
                         if (body == null) {
                             remember(key);
                             return null;
@@ -134,7 +144,7 @@ public final class Page implements Resources {
             for (int hop = 0; hop <= 5; hop++) {
                 String scheme = at.getScheme() == null ? "" : at.getScheme().toLowerCase(Locale.ROOT);
                 if (!scheme.equals("http") && !scheme.equals("https")) return null;
-                if (!privateHosts && !publicHost(at.getHost())) return null;
+                if (!privateHosts && !publicHost(at.getHost(), deadline)) return null;
                 HttpRequest req = HttpRequest.newBuilder(at).header("User-Agent", userAgent == null ? "Mozilla/5.0 (UI Engine)" : userAgent).build();
                 CompletableFuture<HttpResponse<byte[]>> pending = http.sendAsync(req,
                         info -> info.statusCode() == 200 ? new Capped(MAX_BYTES) : HttpResponse.BodySubscribers.replacing(null));
@@ -162,22 +172,57 @@ public final class Page implements Resources {
             return null;
         }
 
-        /** Whether every address [host] has is out on the internet: not this machine, its network, or a cloud's metadata service. */
-        private static boolean publicHost(String host) throws IOException {
+        /** Name lookups, so a slow DNS server counts against a fetch's deadline. Threads go when idle. */
+        private static final ExecutorService LOOKUPS = Executors.newCachedThreadPool(r -> {
+            Thread t = new Thread(r, "UIEngine-lookup");
+            t.setDaemon(true);
+            return t;
+        });
+
+        /**
+         * Whether every address [host] has is out on the internet: not this machine, its network, or a
+         * cloud's metadata service. False too when the name cannot be looked up by [deadline].
+         */
+        private static boolean publicHost(String host, long deadline) throws InterruptedException {
             if (host == null || host.isEmpty()) return false;
-            for (InetAddress a : InetAddress.getAllByName(host)) {
-                if (a.isAnyLocalAddress() || a.isLoopbackAddress() || a.isLinkLocalAddress() || a.isSiteLocalAddress() || a.isMulticastAddress()) return false;
-                byte[] b = a.getAddress();
-                if (b.length == 4) {
-                    int b0 = b[0] & 0xFF, b1 = b[1] & 0xFF;
-                    // 0.0.0.0/8, carrier-grade NAT 100.64.0.0/10, and the reserved 240.0.0.0/4.
-                    if (b0 == 0 || (b0 == 100 && (b1 & 0xC0) == 64) || b0 >= 240) return false;
-                } else if ((b[0] & 0xFE) == 0xFC) {
-                    // IPv6 unique local addresses (fc00::/7), the IPv6 private networks.
-                    return false;
-                }
+            Future<InetAddress[]> lookup = LOOKUPS.submit(() -> InetAddress.getAllByName(host));
+            InetAddress[] all;
+            try {
+                all = lookup.get(Math.max(0, deadline - System.nanoTime()), TimeUnit.NANOSECONDS);
+            } catch (TimeoutException | ExecutionException e) {
+                lookup.cancel(true);
+                return false;
             }
+            for (InetAddress a : all) if (!publicAddress(a)) return false;
             return true;
+        }
+
+        static boolean publicAddress(InetAddress a) {
+            if (a.isAnyLocalAddress() || a.isLoopbackAddress() || a.isLinkLocalAddress() || a.isSiteLocalAddress() || a.isMulticastAddress()) return false;
+            byte[] b = a.getAddress();
+            if (b.length == 16) {
+                // An IPv4 address inside an IPv6 one (::ffff:a.b.c.d, ::a.b.c.d, NAT64's 64:ff9b::a.b.c.d) reaches
+                // that IPv4 address. Java unwraps only literals, not what DNS returns, so it is judged here.
+                if (embedsIpv4(b)) {
+                    try {
+                        return publicAddress(InetAddress.getByAddress(Arrays.copyOfRange(b, 12, 16)));
+                    } catch (UnknownHostException e) {
+                        return false;
+                    }
+                }
+                // IPv6 unique local addresses (fc00::/7), the IPv6 private networks.
+                return (b[0] & 0xFE) != 0xFC;
+            }
+            int b0 = b[0] & 0xFF, b1 = b[1] & 0xFF;
+            // 0.0.0.0/8, carrier-grade NAT 100.64.0.0/10, and the reserved 240.0.0.0/4.
+            return !(b0 == 0 || (b0 == 100 && (b1 & 0xC0) == 64) || b0 >= 240);
+        }
+
+        private static boolean embedsIpv4(byte[] b) {
+            boolean nat64 = b[0] == 0 && b[1] == 0x64 && (b[2] & 0xFF) == 0xFF && (b[3] & 0xFF) == 0x9B;
+            for (int i = nat64 ? 4 : 0; i < 10; i++) if (b[i] != 0) return false;
+            int b10 = b[10] & 0xFF, b11 = b[11] & 0xFF;
+            return nat64 ? b10 == 0 && b11 == 0 : (b10 == 0xFF && b11 == 0xFF) || (b10 == 0 && b11 == 0);
         }
 
         private void remember(String key) {

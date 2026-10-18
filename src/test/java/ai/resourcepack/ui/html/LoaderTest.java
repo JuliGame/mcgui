@@ -8,6 +8,8 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.io.OutputStream;
+import java.net.Inet6Address;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -17,7 +19,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class LoaderTest {
     private HttpServer server;
@@ -66,6 +70,27 @@ class LoaderTest {
         assertNull(new Page.Loader(true, null, false, null).fetch(URI.create("http://localhost:" + server.getAddress().getPort() + "/small"), null));
         assertEquals(0, requests.get());
         assertArrayEquals("ok".getBytes(StandardCharsets.UTF_8), new Page.Loader(true, null, true, null).fetch(URI.create(base + "/small"), null));
+    }
+
+    /** An IPv6 address as DNS would hand it back: Inet6Address.getByAddress does not unwrap an IPv4 inside, as InetAddress.getByAddress would. */
+    private static InetAddress v6(int... bytes) throws IOException {
+        byte[] b = new byte[16];
+        for (int i = 0; i < 16; i++) b[i] = (byte) bytes[i];
+        return Inet6Address.getByAddress(null, b, -1);
+    }
+
+    @Test
+    void ipv4InsideIpv6IsJudgedAsIpv4() throws IOException {
+        // ::ffff:127.0.0.1, ::ffff:169.254.169.254, ::10.0.0.1, 64:ff9b::192.168.1.1
+        assertFalse(Page.Loader.publicAddress(v6(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xFF, 0xFF, 127, 0, 0, 1)));
+        assertFalse(Page.Loader.publicAddress(v6(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xFF, 0xFF, 169, 254, 169, 254)));
+        assertFalse(Page.Loader.publicAddress(v6(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10, 0, 0, 1)));
+        assertFalse(Page.Loader.publicAddress(v6(0, 0x64, 0xFF, 0x9B, 0, 0, 0, 0, 0, 0, 0, 0, 192, 168, 1, 1)));
+        // The same wrappings round public addresses stay public, as does an ordinary global IPv6 address.
+        assertTrue(Page.Loader.publicAddress(v6(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xFF, 0xFF, 8, 8, 8, 8)));
+        assertTrue(Page.Loader.publicAddress(v6(0, 0x64, 0xFF, 0x9B, 0, 0, 0, 0, 0, 0, 0, 0, 8, 8, 8, 8)));
+        assertTrue(Page.Loader.publicAddress(v6(0x26, 0x06, 0x47, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x68, 0x10, 0x84, 0xe5)));
+        assertFalse(Page.Loader.publicAddress(v6(0xFD, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1)));
     }
 
     @Test
