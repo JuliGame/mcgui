@@ -63,10 +63,13 @@ final class Blur {
 
     /** One horizontal box blur of radius [r] over every channel, writing transposed (so two calls do both axes). */
     private static void pass(int[] src, int[] dst, int w, int h, int r) {
-        double scale = 1.0 / (r + r + 1);
+        int d = r + r + 1;
+        // Each output is round(sum / d), worked out as (2 sum + d) / 2d with a multiply instead of four
+        // double divisions: exact, since sums are at most 255 d and an odd d never leaves a half to round.
+        long m = ((1L << 40) + 2L * d - 1) / (2L * d);
         for (int y = 0; y < h; y++) {
             int row = y * w;
-            long a = 0, rr = 0, g = 0, b = 0;
+            int a = 0, rr = 0, g = 0, b = 0;
             for (int i = -r; i <= r; i++) {
                 int p = src[row + Math.min(w - 1, Math.max(0, i))];
                 a += p >>> 24;
@@ -75,7 +78,8 @@ final class Blur {
                 b += p & 255;
             }
             for (int x = 0; x < w; x++) {
-                dst[x * h + y] = ((int) (a * scale + 0.5) << 24) | ((int) (rr * scale + 0.5) << 16) | ((int) (g * scale + 0.5) << 8) | (int) (b * scale + 0.5);
+                dst[x * h + y] = (int) ((2L * a + d) * m >>> 40) << 24 | (int) ((2L * rr + d) * m >>> 40) << 16
+                        | (int) ((2L * g + d) * m >>> 40) << 8 | (int) ((2L * b + d) * m >>> 40);
                 int out = src[row + Math.max(0, x - r)];
                 int in = src[row + Math.min(w - 1, x + r + 1)];
                 a += (in >>> 24) - (out >>> 24);
