@@ -2,6 +2,7 @@ package ai.resourcepack.ui;
 
 import ai.resourcepack.uiframework.api.Canvas;
 import ai.resourcepack.uiframework.api.Pointer;
+import ai.resourcepack.uiframework.api.UIFramework;
 import ai.resourcepack.ui.html.HtmlRenderer;
 import ai.resourcepack.ui.html.Page;
 import ai.resourcepack.ui.html.paint.Painter;
@@ -24,6 +25,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.function.Consumer;
 
@@ -36,6 +38,11 @@ import java.util.function.Consumer;
 public final class Session {
     private final UIEnginePlugin plugin;
     private final ExecutorService renderers;
+    /**
+     * Back to the server thread as soon as it is free, which between ticks is at once: the Bukkit
+     * scheduler would hold each hop (the next picture, what is under the pointer now) for the next tick.
+     */
+    private final Executor serverThread;
     public final Canvas canvas;
     /** The player this session belongs to, or null for a screen everyone shares. */
     public final UUID viewer;
@@ -63,6 +70,10 @@ public final class Session {
     Session(UIEnginePlugin plugin, ExecutorService renderers, Canvas canvas, UUID viewer, double designHeight) {
         this.plugin = plugin;
         this.renderers = renderers;
+        Executor main = UIFramework.get().serverThread();
+        this.serverThread = task -> main.execute(() -> {
+            if (plugin.isEnabled()) task.run();
+        });
         this.canvas = canvas;
         this.viewer = viewer;
         this.designHeight = designHeight;
@@ -207,7 +218,7 @@ public final class Session {
                         if (!Double.isNaN(top)) {
                             f = HtmlRenderer.render(p, d, canvas.width(), canvas.height(), scale, top, state);
                             double scrolled = f.scrollY();
-                            Bukkit.getScheduler().runTask(plugin, () -> scrollY = scrolled);
+                            serverThread.execute(() -> scrollY = scrolled);
                         }
                     }
                 }
@@ -228,7 +239,7 @@ public final class Session {
                             partial ? String.format(" (only %.0f x %.0f)", changed.getWidth(), changed.getHeight()) : ""));
                 }
                 // A new page under a still pointer: what it is over has changed.
-                if (!partial) Bukkit.getScheduler().runTask(plugin, this::repoint);
+                if (!partial) serverThread.execute(this::repoint);
             } catch (RuntimeException | Error e) {
                 plugin.getLogger().warning("Could not draw page " + pageName + ": " + e);
                 if (plugin.debug()) e.printStackTrace();
@@ -237,7 +248,7 @@ public final class Session {
                     if (dirty && !closed) {
                         dirty = false;
                         // The state moved on while drawing: draw again, reading it on the server thread.
-                        Bukkit.getScheduler().runTask(plugin, () -> {
+                        serverThread.execute(() -> {
                             synchronized (Session.this) {
                                 if (!closed) submit();
                                 else rendering = false;
