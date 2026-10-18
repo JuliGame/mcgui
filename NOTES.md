@@ -51,6 +51,18 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
   picture, a hover worked out again, a fragment scroll) goes through UI
   Framework's `serverThread()`, which runs between ticks, rather than
   `runTask`, which would wait for the next one.
+- **Surfaces are premultiplied** (`TYPE_INT_ARGB_PRE`), which Java2D blends
+  fastest and UI Framework's `Canvas` reads in place. A layer with a `filter`
+  stays straight `TYPE_INT_ARGB`, because `Filters` edits its pixels as
+  straight colour.
+- **A full picture is painted in up to four bands at once**
+  (`HtmlRenderer.paintBands`), each by its own `Painter` into its own image,
+  with a margin above and below as deep as the furthest backdrop blur can reach.
+  The bands are deliberately not clipped: an extra clip changes how Java2D
+  rounds overflow clips, by a pixel at their edges. Hit regions come from the
+  first band, which lays out the whole page. Partial (hover) repaints are still
+  one painter. `sh gradlew renderBench` times a page's full render, its
+  `Canvas.draw` and a hover repaint.
 - **Gradient text is a mask**, not a clip: Java2D clips are not antialiased,
   and clipping a gradient to glyph outlines gave jagged letters.
 - **Map pixels are not screen pixels.** A view is 16×9 maps (2048×1152) by
