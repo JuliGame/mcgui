@@ -103,8 +103,11 @@ public final class Placeholders {
         return out;
     }
 
-    /** One placeholder: a built-in {name} or a PlaceholderAPI %name%. */
-    private static final Pattern PLACEHOLDER = Pattern.compile("\\{[a-z_]+}|%[^%\\s]+%");
+    /**
+     * One placeholder: a built-in {name}, or a PlaceholderAPI %identifier_params%, whose params may
+     * hold spaces (%math_{player_level} * 10%), as PlaceholderAPI's own parser allows.
+     */
+    private static final Pattern PLACEHOLDER = Pattern.compile("\\{[a-z_]+}|%[^%\\s_]+_[^%]*%|%[^%\\s]+%");
 
     /**
      * [command], for the console to run, with its placeholders filled for [player]; or null, with the
