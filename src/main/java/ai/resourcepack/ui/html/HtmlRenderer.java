@@ -113,7 +113,7 @@ public final class HtmlRenderer {
         // every pixel both ways on every fill. The page is painted on opaque white, so nothing reads alpha.
         BufferedImage img = base != null ? base : new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB_PRE);
         List<Painter.Hit> hits;
-        int bands = base == null && clip == null ? Math.min(MAX_BANDS, height / MIN_BAND_ROWS) : 1;
+        int bands = base == null && clip == null ? Math.min(maxBands, height / MIN_BAND_ROWS) : 1;
         if (bands > 1) {
             hits = paintBands(page, root, img, bands, Painter.blurReach(styler.styles.values(), scale), scale, vw, vh, scroll);
         } else {
@@ -128,8 +128,9 @@ public final class HtmlRenderer {
         return new Frame(img, scale, vw, vh, pageHeight, scroll, hits, new IdentityHashMap<>(styler.styles), document, page);
     }
 
-    /** Full pictures are painted as up to this many horizontal bands at once, none under this many rows. */
-    private static final int MAX_BANDS = 4, MIN_BAND_ROWS = 192;
+    /** Full pictures are painted as up to this many horizontal bands at once (1: one painter), none under MIN_BAND_ROWS rows. LoadBench changes it. */
+    static volatile int maxBands = 4;
+    private static final int MIN_BAND_ROWS = 192;
     /** Shared by every session's full repaints; leaves a core for the game. */
     private static final ForkJoinPool PAINTERS = new ForkJoinPool(Math.max(1, Runtime.getRuntime().availableProcessors() - 1));
 
