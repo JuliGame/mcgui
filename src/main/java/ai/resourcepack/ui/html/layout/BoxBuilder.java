@@ -23,6 +23,8 @@ public final class BoxBuilder {
     private final Styler styler;
     private final Resources res;
     private final URI base;
+    /** Per list, the last item numbered and how many list items come before it: items are built in order, so each counts on from there. */
+    private final java.util.IdentityHashMap<Element, Object[]> counted = new java.util.IdentityHashMap<>();
 
     public BoxBuilder(Styler styler, Resources res, URI base) {
         this.styler = styler;
@@ -215,13 +217,7 @@ public final class BoxBuilder {
                 // keep 1
             }
         }
-        if (list != null) {
-            for (Element sib : list.children()) {
-                if (sib == e) break;
-                Style ss = styler.styles.get(sib);
-                if (ss != null && ss.display.equals("list-item")) index++;
-            }
-        }
+        if (list != null) index += itemsBefore(list, e);
         if (e.hasAttr("value")) {
             try {
                 index = Integer.parseInt(e.attr("value").trim());
@@ -257,6 +253,34 @@ public final class BoxBuilder {
         }
         box.marker = text;
         box.markerStyle = ms;
+    }
+
+    /** How many list items [list] has before its child [e]: counted on from the item before, not from the start, so a long list costs linear time. */
+    private int itemsBefore(Element list, Element e) {
+        Object[] last = counted.get(list);
+        Element from = list.firstElementChild();
+        int n = 0;
+        if (last != null && ((Element) last[0]).parent() == list) {
+            Element prev = (Element) last[0];
+            Style ps = styler.styles.get(prev);
+            from = prev.nextElementSibling();
+            n = (int) last[1] + (ps != null && ps.display.equals("list-item") ? 1 : 0);
+        }
+        Element sib = from;
+        for (; sib != null && sib != e; sib = sib.nextElementSibling()) {
+            Style ss = styler.styles.get(sib);
+            if (ss != null && ss.display.equals("list-item")) n++;
+        }
+        if (sib == null) {
+            // [e] came before the item last numbered: count from the start.
+            n = 0;
+            for (sib = list.firstElementChild(); sib != null && sib != e; sib = sib.nextElementSibling()) {
+                Style ss = styler.styles.get(sib);
+                if (ss != null && ss.display.equals("list-item")) n++;
+            }
+        }
+        counted.put(list, new Object[]{e, n});
+        return n;
     }
 
     private static String alpha(int n, char base) {
