@@ -182,7 +182,8 @@ public final class Painter {
             r = r.intersection(clipDev);
         }
         if (r.width <= 0 || r.height <= 0) return;
-        BufferedImage img = new BufferedImage(r.width, r.height, BufferedImage.TYPE_INT_ARGB);
+        // Colour filters work on straight colour, so a filtered layer stays plain ARGB; opacity alone blends faster premultiplied.
+        BufferedImage img = new BufferedImage(r.width, r.height, box.style.filter.equals("none") ? BufferedImage.TYPE_INT_ARGB_PRE : BufferedImage.TYPE_INT_ARGB);
         Graphics2D lg = img.createGraphics();
         lg.setRenderingHints(g.getRenderingHints());
         lg.translate(-r.x, -r.y);
@@ -368,7 +369,7 @@ public final class Painter {
         java.awt.Rectangle r = dev.createTransformedShape(glyphs.getBounds2D()).getBounds();
         r.grow(2, 2);
         if (r.width <= 0 || r.height <= 0 || (long) r.width * r.height > 16_000_000L) return;
-        BufferedImage mask = new BufferedImage(r.width, r.height, BufferedImage.TYPE_INT_ARGB);
+        BufferedImage mask = new BufferedImage(r.width, r.height, BufferedImage.TYPE_INT_ARGB_PRE);
         Graphics2D mg = mask.createGraphics();
         mg.setRenderingHints(g.getRenderingHints());
         mg.translate(-r.x, -r.y);

@@ -132,8 +132,12 @@ final class Filters {
             if (grab.isEmpty()) return;
         }
         grab = grab.intersection(new java.awt.Rectangle(0, 0, surface.getWidth(), surface.getHeight()));
+        // Drawn rather than copied raw, so a premultiplied surface arrives as straight colour for the filters below.
         BufferedImage copy = new BufferedImage(grab.width, grab.height, BufferedImage.TYPE_INT_ARGB);
-        surface.getSubimage(grab.x, grab.y, grab.width, grab.height).copyData(copy.getRaster());
+        java.awt.Graphics2D cg = copy.createGraphics();
+        cg.setComposite(java.awt.AlphaComposite.Src);
+        cg.drawImage(surface.getSubimage(grab.x, grab.y, grab.width, grab.height), 0, 0, null);
+        cg.dispose();
         // A backdrop is opaque where something was drawn; blur it like a photo (small, for a wide blur).
         copy = Blur.blurredCopy(copy, blur / 2 * scale);
         for (String fn : Values.splitSpaces(filter)) {

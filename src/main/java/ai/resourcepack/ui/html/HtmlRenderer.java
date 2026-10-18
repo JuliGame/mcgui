@@ -105,7 +105,9 @@ public final class HtmlRenderer {
         Layout layout = new Layout(page.shaper, vw, vh);
         double pageHeight = layout.run(root);
         double scroll = Math.max(0, Math.min(scrollY, pageHeight - vh));
-        BufferedImage img = base != null ? base : new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+        // Premultiplied: Java2D blends onto it directly, where a plain ARGB surface costs a conversion of
+        // every pixel both ways on every fill. The page is painted on opaque white, so nothing reads alpha.
+        BufferedImage img = base != null ? base : new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB_PRE);
         Graphics2D g = img.createGraphics();
         g.scale(scale, scale);
         if (clip != null) g.clip(clip);

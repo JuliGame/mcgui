@@ -37,7 +37,7 @@ final class Blur {
             return src;
         }
         int w = Math.max(1, (int) Math.ceil(src.getWidth() / k)), h = Math.max(1, (int) Math.ceil(src.getHeight() / k));
-        BufferedImage small = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
+        BufferedImage small = new BufferedImage(w, h, src.getType());
         java.awt.Graphics2D g = small.createGraphics();
         g.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION, java.awt.RenderingHints.VALUE_INTERPOLATION_BILINEAR);
         g.setRenderingHint(java.awt.RenderingHints.KEY_RENDERING, java.awt.RenderingHints.VALUE_RENDER_QUALITY);

@@ -117,7 +117,7 @@ final class Shadows {
         // A wide blur is worked out small and scaled back up (see Blur.shrink).
         double k = Blur.shrink(sigma);
         int w = Math.max(1, (int) Math.ceil(r.width / k)), h = Math.max(1, (int) Math.ceil(r.height / k));
-        BufferedImage img = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
+        BufferedImage img = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB_PRE);
         Graphics2D ig = img.createGraphics();
         // Fill with the shadow's colour at zero alpha first, so blurring only ever mixes alpha.
         ig.setComposite(AlphaComposite.Src);
