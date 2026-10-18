@@ -115,7 +115,7 @@ public final class HtmlRenderer {
         List<Painter.Hit> hits;
         int bands = base == null && clip == null ? Math.min(MAX_BANDS, height / MIN_BAND_ROWS) : 1;
         if (bands > 1) {
-            hits = paintBands(page, root, img, bands, Painter.backdropReach(styler.styles.values(), scale), scale, vw, vh, scroll);
+            hits = paintBands(page, root, img, bands, Painter.blurReach(styler.styles.values(), scale), scale, vw, vh, scroll);
         } else {
             Graphics2D g = img.createGraphics();
             g.scale(scale, scale);
@@ -147,7 +147,7 @@ public final class HtmlRenderer {
         List<ForkJoinTask<List<Painter.Hit>>> tasks = new ArrayList<>(bands);
         for (int b = 0; b < bands; b++) {
             int y0 = height * b / bands, y1 = height * (b + 1) / bands;
-            // Twice the reach: a backdrop in the margin itself reads up to one reach further out.
+            // Twice the reach: a blur in the margin itself reads up to one reach further out.
             int top = Math.max(0, y0 - 2 * reach), bottom = Math.min(height, y1 + 2 * reach);
             tasks.add(PAINTERS.submit(() -> {
                 BufferedImage band = new BufferedImage(width, bottom - top, BufferedImage.TYPE_INT_ARGB_PRE);

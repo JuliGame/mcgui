@@ -57,7 +57,7 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
   straight colour.
 - **A full picture is painted in up to four bands at once**
   (`HtmlRenderer.paintBands`), each by its own `Painter` into its own image,
-  with a margin above and below as deep as the furthest backdrop blur can reach.
+  with a margin above and below as deep as the furthest blur can reach.
   The bands are deliberately not clipped: an extra clip changes how Java2D
   rounds overflow clips, by a pixel at their edges. Hit regions come from the
   first band, which lays out the whole page. Partial (hover) repaints are still

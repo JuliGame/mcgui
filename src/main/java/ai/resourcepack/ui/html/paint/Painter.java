@@ -656,12 +656,16 @@ public final class Painter {
     }
 
     /**
-     * How far (device px) any backdrop-filter among [styles] reads what is painted past the clip: a
-     * picture painted in pieces needs this much painted round each piece for its backdrops to match.
+     * How far (device px) a blur among [styles] reads what is painted round it: a backdrop-filter past
+     * its clip, a filter past its element. A picture painted in pieces needs this much painted round
+     * each piece for those blurs to match.
      */
-    public static int backdropReach(Iterable<Style> styles, double scale) {
+    public static int blurReach(Iterable<Style> styles, double scale) {
         int reach = 0;
-        for (Style s : styles) if (!s.backdropFilter.equals("none")) reach = Math.max(reach, Filters.backdropPad(Filters.backdropBlur(s), scale));
+        for (Style s : styles) {
+            if (!s.backdropFilter.equals("none")) reach = Math.max(reach, Filters.backdropPad(Filters.backdropBlur(s), scale));
+            if (!s.filter.equals("none")) reach = Math.max(reach, (int) Math.ceil(3 * Filters.blurRadius(s.filter, s) * scale) + 2);
+        }
         return reach;
     }
 

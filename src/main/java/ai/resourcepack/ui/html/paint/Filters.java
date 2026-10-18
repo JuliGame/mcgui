@@ -32,6 +32,19 @@ final class Filters {
         }
     }
 
+    /** How much [filter] blurs, in CSS px (each blur() is a sigma, as {@link #apply} uses it): a picture spreads about three times this. */
+    static double blurRadius(String filter, Style s) {
+        if (filter == null || filter.equals("none")) return 0;
+        double sum = 0;
+        for (String fn : Values.splitSpaces(filter)) {
+            if (!fn.toLowerCase(Locale.ROOT).startsWith("blur(") || !fn.endsWith(")")) continue;
+            String arg = fn.substring(5, fn.length() - 1).trim();
+            Len l = Len.parse(arg.isEmpty() ? "0" : arg, s.context);
+            if (l != null) sum += Math.max(0, l.of(0));
+        }
+        return sum;
+    }
+
     private static double amount(String arg, String name) {
         if (arg.isEmpty()) return name.equals("hue-rotate") ? 0 : 1;
         if (name.equals("hue-rotate")) {
