@@ -86,3 +86,15 @@ tasks.register('renderBench', JavaExec) {
     systemProperty 'only', project.findProperty('only') ?: ''
     maxHeapSize = '2g'
 }
+
+// Hostile pages, each on its own thread with a timeout, in child JVMs replaced after a timeout or OOM (Torture).
+// -Psrc=cases (generated pathological pages, the default), a folder, or fuzz:<count>:<seed>; several separated by ','.
+// -Ptimeout=<s> -Pheap=<size> -Ponly=<substring> -Pout=<tsv>.
+tasks.register('torture', JavaExec) {
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'ai.resourcepack.ui.html.Torture'
+    args = (project.findProperty('src') ?: 'cases').toString().split(',').toList()
+    systemProperty 'java.awt.headless', 'true'
+    ['timeout', 'heap', 'only', 'out'].each { if (project.findProperty(it)) systemProperty it, project.findProperty(it) }
+    maxHeapSize = '1g'
+}
