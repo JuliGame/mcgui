@@ -294,33 +294,43 @@ public final class Selector {
     // ---------------------------------------------------------------- matching
 
     public boolean matches(Element e, State state) {
-        return matchFrom(compounds.size() - 1, e, state);
+        return matchFrom(compounds.size() - 1, e, state) == MATCH;
     }
 
-    private boolean matchFrom(int index, Element e, State state) {
-        if (!matchCompound(compounds.get(index), e, state)) return false;
-        if (index == 0) return true;
+    /**
+     * What trying compound [index] (and those left of it) on an element found: a match, a failure only
+     * there, or a failure that no sibling further back (no ancestor further up) can mend. The last two
+     * stop the search, as WebKit's SelectorChecker does: without them {@code ol ul ul} tried on a chain of
+     * nested lists walks every ancestor from every ancestor, and a page of nested lists styles for minutes.
+     */
+    private static final int MATCH = 0, FAILS_HERE = 1, FAILS_ALL_SIBLINGS = 2, FAILS_COMPLETELY = 3;
+
+    private int matchFrom(int index, Element e, State state) {
+        if (!matchCompound(compounds.get(index), e, state)) return FAILS_HERE;
+        if (index == 0) return MATCH;
         char comb = combinators.get(index - 1);
         switch (comb) {
             case '>' -> {
                 Element p = e.parent();
-                return p != null && matchFrom(index - 1, p, state);
+                return p == null ? FAILS_COMPLETELY : matchFrom(index - 1, p, state);
             }
             case '+' -> {
                 Element s = e.previousElementSibling();
-                return s != null && matchFrom(index - 1, s, state);
+                return s == null ? FAILS_ALL_SIBLINGS : matchFrom(index - 1, s, state);
             }
             case '~' -> {
                 for (Element s = e.previousElementSibling(); s != null; s = s.previousElementSibling()) {
-                    if (matchFrom(index - 1, s, state)) return true;
+                    int r = matchFrom(index - 1, s, state);
+                    if (r != FAILS_HERE) return r;
                 }
-                return false;
+                return FAILS_ALL_SIBLINGS;
             }
             default -> {
                 for (Element p = e.parent(); p != null; p = p.parent()) {
-                    if (matchFrom(index - 1, p, state)) return true;
+                    int r = matchFrom(index - 1, p, state);
+                    if (r == MATCH || r == FAILS_COMPLETELY) return r;
                 }
-                return false;
+                return FAILS_COMPLETELY;
             }
         }
     }
