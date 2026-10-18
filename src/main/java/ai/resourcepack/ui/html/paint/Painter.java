@@ -46,8 +46,12 @@ public final class Painter {
     private BufferedImage surface;
     private double deviceScale = 1;
 
-    /** Where something was drawn, in page coordinates, and which element it belongs to. */
-    public record Hit(Shape shape, Shape clip, Element element) {}
+    /**
+     * Where something was drawn, in page coordinates, and which element it belongs to. [pointer] is false
+     * where the pointer goes through it (visibility: hidden, pointer-events: none), as browsers hit-test;
+     * such a region still says where its element is (to scroll to it, or to repaint round it).
+     */
+    public record Hit(Shape shape, Shape clip, Element element, boolean pointer) {}
 
     public final List<Hit> hits = new ArrayList<>();
     /** Page-space clip in force (for hit regions); null for none. */
@@ -316,7 +320,7 @@ public final class Painter {
         if (!s.backgroundImages.isEmpty()) Backgrounds.paint(g, s, res, r, shape, surfaceBounds());
         double left = f.first ? box.b[3] : 0, right = f.last ? box.b[1] : 0;
         drawBorders(g, s, r, radii, new double[]{box.b[0], right, box.b[2], left});
-        hit(shape, box.element != null ? box.element : box.owner);
+        hit(shape, s, box.element != null ? box.element : box.owner);
     }
 
     private void text(Graphics2D g, Box.Item it, double x, double y) {
@@ -324,7 +328,7 @@ public final class Painter {
         if (s.hidden()) return;
         String text = it.text;
         if (text.isBlank() && s.textDecorationLine.equals("none")) {
-            hit(new Rectangle2D.Double(x + it.x, y + it.baselineY - s.fontSize, it.w, s.fontSize * 1.2), it.box.owner);
+            hit(new Rectangle2D.Double(x + it.x, y + it.baselineY - s.fontSize, it.w, s.fontSize * 1.2), s, it.box.owner);
             return;
         }
         double tx = x + it.x, ty = y + it.baselineY;
@@ -360,7 +364,7 @@ public final class Painter {
         }
         decorations(g, it, tx, ty);
         Fonts.Metrics m = shaper.fonts().metrics(font);
-        hit(new Rectangle2D.Double(tx, ty - m.ascent(), it.w, m.ascent() + m.descent()), it.box.owner);
+        hit(new Rectangle2D.Double(tx, ty - m.ascent(), it.w, m.ascent() + m.descent()), s, it.box.owner);
     }
 
     private void gradientText(Graphics2D g, Style s, String text, Font font, double tx, double ty, Rectangle2D area) {
@@ -515,18 +519,18 @@ public final class Painter {
             for (Shadows.Shadow sh : shadows) if (sh.inset()) Shadows.inner(g, padding(b, x, y), sh, deviceScale, surfaceBounds());
             drawBorders(g, s, new Rectangle2D.Double(x, y, b.w, b.h), radii, b.b);
         }
-        if (!s.pointerEvents.equals("none")) hit(border, b.element != null ? b.element : b.owner);
+        hit(border, s, b.element != null ? b.element : b.owner);
     }
 
     private void bordersOnly(Graphics2D g, Box b, double x, double y) {
         double[] radii = Shapes.radii(b);
         drawBorders(g, b.style, new Rectangle2D.Double(x, y, b.w, b.h), radii, b.b);
-        hit(Shapes.rect(x, y, b.w, b.h, radii), b.element);
+        hit(Shapes.rect(x, y, b.w, b.h, radii), b.style, b.element);
     }
 
-    private void hit(Shape s, Element e) {
+    private void hit(Shape s, Style style, Element e) {
         if (e == null) return;
-        hits.add(new Hit(pageTx.createTransformedShape(s), pageClip, e));
+        hits.add(new Hit(pageTx.createTransformedShape(s), pageClip, e, !style.hidden() && !style.pointerEvents.equals("none")));
     }
 
     /** The device bounds of the surface being painted on. */
