@@ -138,7 +138,8 @@ final class GridLayout {
                 }
             }
             boolean fit = n < 0;
-            n = Math.abs(n);
+            // A typo like repeat(100000, 1fr) must not cost minutes of track sizing.
+            n = Math.min(Math.abs(n), Math.max(1, (MAX_TRACKS - out.size()) / unit.size()));
             for (int i = 0; i < n; i++) for (Track t : unit) out.add(copy(t));
             if (fit) autoFitStart = out.size() - n * unit.size();
             else autoFitStart = -1;
@@ -148,6 +149,9 @@ final class GridLayout {
 
     /** Where the auto-fit repetition starts in the track list just parsed, or -1. */
     private int autoFitStart = -1;
+
+    /** repeat() adds no tracks past this many in one list. Browsers cap grids too; a screen needs far fewer. */
+    private static final int MAX_TRACKS = 500;
 
     private static Track copy(Track t) {
         Track c = new Track();
@@ -352,26 +356,35 @@ final class GridLayout {
                 for (Track t : tracks) if (t.maxKind.equals("fr") && t.fr > 0) unit = Math.max(unit, t.base / t.fr);
                 for (Track t : tracks) if (t.maxKind.equals("fr")) t.size = Math.max(t.base, unit * t.fr);
             } else {
-                List<Track> flex = new ArrayList<>();
-                for (Track t : tracks) if (t.maxKind.equals("fr")) flex.add(t);
-                for (int round = 0; round < flex.size() + 1; round++) {
+                // Which tracks still flex, by index: tracks frozen at their base size drop out.
+                boolean[] flex = new boolean[tracks.size()];
+                int flexing = 0;
+                for (int i = 0; i < flex.length; i++) {
+                    if (tracks.get(i).maxKind.equals("fr")) {
+                        flex[i] = true;
+                        flexing++;
+                    }
+                }
+                for (int round = 0; round < flexing + 1; round++) {
                     double fixed = gaps, sum = 0;
-                    for (Track t : tracks) {
-                        if (flex.contains(t)) sum += t.fr;
-                        else fixed += t.size;
+                    for (int i = 0; i < flex.length; i++) {
+                        if (flex[i]) sum += tracks.get(i).fr;
+                        else fixed += tracks.get(i).size;
                     }
                     double unit = sum <= 0 ? 0 : Math.max(0, space - fixed) / Math.max(1, sum);
                     if (sum > 0 && sum < 1) unit = Math.max(0, space - fixed);
                     boolean changed = false;
-                    for (Track t : new ArrayList<>(flex)) {
-                        if (t.fr * unit < t.base) {
+                    for (int i = 0; i < flex.length; i++) {
+                        Track t = tracks.get(i);
+                        if (flex[i] && t.fr * unit < t.base) {
                             t.size = t.base;
-                            flex.remove(t);
+                            flex[i] = false;
+                            flexing--;
                             changed = true;
                         }
                     }
                     if (!changed) {
-                        for (Track t : flex) t.size = t.fr * unit;
+                        for (int i = 0; i < flex.length; i++) if (flex[i]) tracks.get(i).size = tracks.get(i).fr * unit;
                         break;
                     }
                 }

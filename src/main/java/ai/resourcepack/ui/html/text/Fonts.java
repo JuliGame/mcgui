@@ -174,15 +174,28 @@ public final class Fonts {
         return best;
     }
 
-    /** The bundled fallback that can draw [cp], or null. */
+    /**
+     * The bundled fallback that can draw [cp], or null: one Font per fallback face and [like], so a run
+     * of characters falling back together stays one segment (one draw, shaped as a whole).
+     */
     public Font fallbackFor(int cp, Font like) {
         for (Font f : fallbacks) {
             if (!f.canDisplay(cp)) continue;
-            Font d = f.deriveFont(like.getSize2D());
-            return like.isTransformed() ? d.deriveFont(like.getTransform()) : d;
+            return derived.computeIfAbsent(new Derived(f, like), k -> {
+                // [like]'s size, slant, letter spacing, kerning, ligatures and synthetic bold, on the fallback face.
+                Map<TextAttribute, Object> attrs = new HashMap<>();
+                like.getAttributes().forEach((a, v) -> {
+                    if (v != null && a != TextAttribute.FAMILY) attrs.put((TextAttribute) a, v);
+                });
+                return f.deriveFont(attrs);
+            });
         }
         return null;
     }
+
+    private record Derived(Font fallback, Font like) {}
+
+    private final Map<Derived, Font> derived = new ConcurrentHashMap<>();
 
     /** Ascent, descent and line gap in pixels, and the height CSS calls "normal". */
     public record Metrics(double ascent, double descent, double normalLineHeight, double xHeight) {}

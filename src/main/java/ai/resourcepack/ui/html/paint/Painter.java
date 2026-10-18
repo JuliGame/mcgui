@@ -46,8 +46,12 @@ public final class Painter {
     private BufferedImage surface;
     private double deviceScale = 1;
 
-    /** Where something was drawn, in page coordinates, and which element it belongs to. */
-    public record Hit(Shape shape, Shape clip, Element element) {}
+    /**
+     * Where something was drawn, in page coordinates, and which element it belongs to. [pointer] is false
+     * where the pointer goes through it (visibility: hidden, pointer-events: none), as browsers hit-test;
+     * such a region still says where its element is (to scroll to it, or to repaint round it).
+     */
+    public record Hit(Shape shape, Shape clip, Element element, boolean pointer) {}
 
     public final List<Hit> hits = new ArrayList<>();
     /** Page-space clip in force (for hit regions); null for none. */
@@ -95,7 +99,7 @@ public final class Painter {
             }
             if (!canvasSource.style.backgroundImages.isEmpty()) {
                 Rectangle2D area = canvasSource == root ? page : new Rectangle2D.Double(0, 0, viewportW, Math.max(viewportH, root.overflowBottom));
-                Backgrounds.paint(g, canvasSource.style, res, area, page);
+                Backgrounds.paint(g, canvasSource.style, res, area, page, surfaceBounds());
             }
             g.setTransform(saved);
         }
@@ -175,11 +179,22 @@ public final class Painter {
     /** Opacity and filters: the subtree painted on a layer of its own, then blended in. */
     private void layered(Graphics2D g, Box box, double x, double y) {
         AffineTransform dev = g.getTransform();
-        // The layer covers the surface being painted (the screen, or an enclosing layer), cut to the clip.
+        // The layer covers what the subtree can paint, within the surface being painted (the screen, or an
+        // enclosing layer) and the clip: not the whole surface for every translucent badge.
         java.awt.Rectangle r = new java.awt.Rectangle(0, 0, surface.getWidth(), surface.getHeight());
         if (g.getClipBounds() != null) {
             java.awt.Rectangle clipDev = dev.createTransformedShape(g.getClip()).getBounds();
             r = r.intersection(clipDev);
+        }
+        Reach reach = new Reach();
+        reach(box, x, y, reach);
+        // A backdrop-filter inside reads what is painted round it, which a smaller layer would cut off.
+        if (!reach.backdrop) {
+            java.awt.Rectangle painted = dev.createTransformedShape(reach.area).getBounds();
+            // Blurs spread in device pixels whatever the transforms, so their room is added after mapping.
+            int pad = (int) Math.ceil(reach.blur) + 2;
+            painted.grow(pad, pad);
+            r = r.intersection(painted);
         }
         if (r.width <= 0 || r.height <= 0) return;
         // Colour filters work on straight colour, so a filtered layer stays plain ARGB; opacity alone blends faster premultiplied.
@@ -202,6 +217,93 @@ public final class Painter {
         g.drawImage(img, r.x, r.y, null);
         g.setComposite(old);
         g.setTransform(saved);
+    }
+
+    /**
+     * Where a subtree can paint, in the user space it is painted in; how far (device px) its blurs spread
+     * past that; and whether it has a backdrop-filter.
+     */
+    private static final class Reach {
+        Rectangle2D area;
+        double blur;
+        boolean backdrop;
+
+        void add(Rectangle2D r, double grow) {
+            Rectangle2D g = new Rectangle2D.Double(r.getX() - grow, r.getY() - grow, r.getWidth() + 2 * grow, r.getHeight() + 2 * grow);
+            if (area == null) area = g;
+            else area.add(g);
+        }
+    }
+
+    /** Room round every box for what is drawn just outside it: antialiased edges, a range's knob, a checked box's rim. */
+    private static final double SLACK = 8;
+
+    /**
+     * Adds to [reach] where [box] (its border box at (x, y)) and everything it paints can draw, generously:
+     * every box, its outer shadows, its text with an em to spare, its list marker, with nested transforms
+     * applied; and how far blurred shadows and filter blurs spread from that. Walks the tree the way
+     * painting does: anything new that paints outside its own box must be added here too, or a
+     * translucent ancestor cuts it off.
+     */
+    private void reach(Box box, double x, double y, Reach reach) {
+        Style s = box.style;
+        Reach own = new Reach();
+        own.add(new Rectangle2D.Double(x, y, box.w, box.h), SLACK);
+        if (!s.backdropFilter.equals("none")) reach.backdrop = true;
+        for (Shadows.Shadow sh : Shadows.parse(s.boxShadow, s)) {
+            if (sh.inset()) continue;
+            own.add(new Rectangle2D.Double(x + sh.x(), y + sh.y(), box.w, box.h), Math.max(0, sh.spread()) + SLACK);
+            own.blur = Math.max(own.blur, shadowSpread(sh));
+        }
+        if (box.marker != null) {
+            double fs = (box.markerStyle != null ? box.markerStyle : s).fontSize;
+            own.add(new Rectangle2D.Double(x - 10 * fs, y, 10 * fs + box.w, box.h), SLACK);
+        }
+        if (box.lines != null) {
+            for (Box.Line line : box.lines) {
+                for (Box.Item it : line.items) {
+                    if (it.text == null) continue;
+                    double fs = it.style.fontSize;
+                    Rectangle2D t = new Rectangle2D.Double(x + it.x - fs, y + it.baselineY - 2 * fs, it.w + 2 * fs, 3 * fs);
+                    own.add(t, SLACK);
+                    for (Shadows.Shadow sh : Shadows.parse(it.style.textShadow, it.style)) {
+                        own.add(new Rectangle2D.Double(t.getX() + sh.x(), t.getY() + sh.y(), t.getWidth(), t.getHeight()), SLACK);
+                        own.blur = Math.max(own.blur, shadowSpread(sh));
+                    }
+                }
+            }
+        }
+        reachChildren(box, x, y, own);
+        reach.backdrop |= own.backdrop;
+        reach.add(own.area, 0);
+        // A filter blur (sigma, device px) spreads everything inside, blurs included, about three sigma further;
+        // Blur's three boxes reach a pixel or so more each.
+        double filter = Filters.blurRadius(s.filter, s) * deviceScale;
+        reach.blur = Math.max(reach.blur, own.blur + (filter > 0 ? 3 * filter + 4 : 0));
+    }
+
+    /** How far (device px) a blurred shadow spreads past its shape, as {@link Shadows#blurred} pads it. */
+    private double shadowSpread(Shadows.Shadow sh) {
+        return sh.blur() <= 0.25 ? 0 : Math.ceil(sh.blur() / 2 * deviceScale * 3) + 2;
+    }
+
+    private void reachChildren(Box parent, double x, double y, Reach reach) {
+        for (Box c : parent.children) {
+            if (c.isText() || c.inner == Box.Inner.BREAK) continue;
+            if (c.isInline()) {
+                // No rectangle of its own: its pieces, and what is inside it, are placed from the block.
+                if (c.fragments != null) for (Box.Fragment f : c.fragments) reach.add(new Rectangle2D.Double(x + f.x, y + f.y, f.w, f.h), SLACK);
+                reachChildren(c, x, y, reach);
+                continue;
+            }
+            double cx = x + c.x, cy = y + c.y + (c.fixed ? scrollY : 0);
+            Reach inner = new Reach();
+            reach(c, cx, cy, inner);
+            AffineTransform t = transform(c, cx, cy);
+            reach.add(t == null ? inner.area : t.createTransformedShape(inner.area).getBounds2D(), 0);
+            reach.backdrop |= inner.backdrop;
+            reach.blur = Math.max(reach.blur, inner.blur);
+        }
     }
 
     private AffineTransform transform(Box box, double x, double y) {
@@ -313,10 +415,10 @@ public final class Painter {
             g.setColor(new Color(s.backgroundColor, true));
             g.fill(shape);
         }
-        if (!s.backgroundImages.isEmpty()) Backgrounds.paint(g, s, res, r, shape);
+        if (!s.backgroundImages.isEmpty()) Backgrounds.paint(g, s, res, r, shape, surfaceBounds());
         double left = f.first ? box.b[3] : 0, right = f.last ? box.b[1] : 0;
         drawBorders(g, s, r, radii, new double[]{box.b[0], right, box.b[2], left});
-        hit(shape, box.element != null ? box.element : box.owner);
+        hit(shape, s, box.element != null ? box.element : box.owner);
     }
 
     private void text(Graphics2D g, Box.Item it, double x, double y) {
@@ -324,7 +426,7 @@ public final class Painter {
         if (s.hidden()) return;
         String text = it.text;
         if (text.isBlank() && s.textDecorationLine.equals("none")) {
-            hit(new Rectangle2D.Double(x + it.x, y + it.baselineY - s.fontSize, it.w, s.fontSize * 1.2), it.box.owner);
+            hit(new Rectangle2D.Double(x + it.x, y + it.baselineY - s.fontSize, it.w, s.fontSize * 1.2), s, it.box.owner);
             return;
         }
         double tx = x + it.x, ty = y + it.baselineY;
@@ -333,7 +435,7 @@ public final class Painter {
         List<Shadows.Shadow> shadows = Shadows.parse(s.textShadow, s);
         for (int i = shadows.size() - 1; i >= 0; i--) {
             Shadows.Shadow sh = shadows.get(i);
-            Shadows.text(g, shaper, text, font, tx + sh.x(), ty + sh.y(), sh, deviceScale);
+            Shadows.text(g, shaper, text, font, tx + sh.x(), ty + sh.y(), sh, deviceScale, surfaceBounds());
         }
         Integer fill = s.textFillColor;
         boolean clipText = s.backgroundClips.contains("text") && !s.backgroundImages.isEmpty();
@@ -360,7 +462,7 @@ public final class Painter {
         }
         decorations(g, it, tx, ty);
         Fonts.Metrics m = shaper.fonts().metrics(font);
-        hit(new Rectangle2D.Double(tx, ty - m.ascent(), it.w, m.ascent() + m.descent()), it.box.owner);
+        hit(new Rectangle2D.Double(tx, ty - m.ascent(), it.w, m.ascent() + m.descent()), s, it.box.owner);
     }
 
     private void gradientText(Graphics2D g, Style s, String text, Font font, double tx, double ty, Rectangle2D area) {
@@ -382,7 +484,7 @@ public final class Painter {
             mg.setColor(new Color(s.backgroundColor, true));
             mg.fill(area);
         }
-        Backgrounds.paint(mg, s, res, area, area);
+        Backgrounds.paint(mg, s, res, area, area, new java.awt.Rectangle(r.width, r.height));
         mg.dispose();
         AffineTransform saved = g.getTransform();
         g.setTransform(new AffineTransform());
@@ -493,7 +595,7 @@ public final class Painter {
             List<Shadows.Shadow> shadows = Shadows.parse(s.boxShadow, s);
             for (int i = shadows.size() - 1; i >= 0; i--) {
                 Shadows.Shadow sh = shadows.get(i);
-                if (!sh.inset()) Shadows.outer(g, x, y, b.w, b.h, radii, sh, deviceScale);
+                if (!sh.inset()) Shadows.outer(g, x, y, b.w, b.h, radii, sh, deviceScale, surfaceBounds());
             }
             if (!s.backdropFilter.equals("none") && surface != null) Filters.backdrop(g, surface, border, s, deviceScale);
             Shape clipBox = switch (Backgrounds.pick(s.backgroundClips, 0, "border-box")) {
@@ -509,24 +611,45 @@ public final class Painter {
             }
             if (!textClip && !s.backgroundImages.isEmpty()) {
                 Rectangle2D area = new Rectangle2D.Double(x + b.b[3], y + b.b[0], b.w - b.b[1] - b.b[3], b.h - b.b[0] - b.b[2]);
-                Backgrounds.paint(g, s, res, area, clipBox);
+                Backgrounds.paint(g, s, res, area, clipBox, surfaceBounds());
             }
             if (b.inner == Box.Inner.REPLACED) replaced(g, b, x, y, radii);
-            for (Shadows.Shadow sh : shadows) if (sh.inset()) Shadows.inner(g, padding(b, x, y), sh, deviceScale);
+            for (Shadows.Shadow sh : shadows) if (sh.inset()) Shadows.inner(g, padding(b, x, y), sh, deviceScale, surfaceBounds());
             drawBorders(g, s, new Rectangle2D.Double(x, y, b.w, b.h), radii, b.b);
         }
-        if (!s.pointerEvents.equals("none")) hit(border, b.element != null ? b.element : b.owner);
+        hit(border, s, b.element != null ? b.element : b.owner);
     }
 
     private void bordersOnly(Graphics2D g, Box b, double x, double y) {
         double[] radii = Shapes.radii(b);
         drawBorders(g, b.style, new Rectangle2D.Double(x, y, b.w, b.h), radii, b.b);
-        hit(Shapes.rect(x, y, b.w, b.h, radii), b.element);
+        hit(Shapes.rect(x, y, b.w, b.h, radii), b.style, b.element);
     }
 
-    private void hit(Shape s, Element e) {
+    private void hit(Shape s, Style style, Element e) {
         if (e == null) return;
-        hits.add(new Hit(pageTx.createTransformedShape(s), pageClip, e));
+        hits.add(new Hit(pageTx.createTransformedShape(s), pageClip, e, !style.hidden() && !style.pointerEvents.equals("none")));
+    }
+
+    /** The device bounds of the surface being painted on. */
+    private java.awt.Rectangle surfaceBounds() {
+        return new java.awt.Rectangle(surface.getWidth(), surface.getHeight());
+    }
+
+    /**
+     * What [g] can still change of [surface] (the device bounds of what it draws on), in [g]'s user
+     * space: the surface, within the clip if there is one. Null when that is nothing.
+     */
+    static Rectangle2D visible(Graphics2D g, java.awt.Rectangle surface) {
+        Rectangle2D r;
+        try {
+            r = g.getTransform().createInverse().createTransformedShape(surface).getBounds2D();
+        } catch (java.awt.geom.NoninvertibleTransformException e) {
+            return null;
+        }
+        Shape clip = g.getClip();
+        if (clip != null) Rectangle2D.intersect(r, clip.getBounds2D(), r);
+        return r.isEmpty() ? null : r;
     }
 
     /** Borders: a ring per side, or one ring when all four match; dashed and dotted ones stroked. */

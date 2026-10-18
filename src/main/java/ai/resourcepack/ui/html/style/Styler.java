@@ -16,6 +16,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * The cascade: which declarations win for each element, with {@code var()} substituted and
@@ -175,12 +176,14 @@ public final class Styler {
     /** The winning value of each longhand, vars substituted. */
     private Map<String, String> resolve(List<Weighted> list, Map<String, String> customs, Element parent) {
         Map<String, String> out = new LinkedHashMap<>();
+        Map<String, Optional<String>> expanded = null;
         for (Weighted w : list) {
             String prop = w.d.property();
             if (prop.startsWith("--")) continue;
             String value = w.d.value();
             if (value.contains("var(")) {
-                value = substitute(value, customs, 0);
+                if (expanded == null) expanded = new HashMap<>();
+                value = substitute(value, customs, expanded, 0, Integer.MAX_VALUE);
                 if (value == null) value = "unset";
             }
             Shorthands.expand(prop, value, out::put);
@@ -204,8 +207,19 @@ public final class Styler {
         return out;
     }
 
-    /** Replaces every var(--x, fallback); null if one has neither a value nor a fallback. */
-    static String substitute(String value, Map<String, String> customs, int depth) {
+    /**
+     * How long a custom property may grow by substituting the var()s in its own value; longer is invalid,
+     * as in browsers (both use 1 MB). Only these can grow exponentially, one level doubling the next.
+     */
+    private static final int MAX_EXPANDED = 1024 * 1024;
+
+    /**
+     * Replaces every var(--x, fallback); null if one has neither a value nor a fallback, or the result
+     * is longer than [limit]. [expanded] holds each custom property already substituted for these
+     * [customs] (empty if it was invalid), so one used twice at every level of a chain is worked out
+     * once, not 2^levels times.
+     */
+    private static String substitute(String value, Map<String, String> customs, Map<String, Optional<String>> expanded, int depth, int limit) {
         if (depth > 16) return null;
         StringBuilder b = new StringBuilder();
         int i = 0;
@@ -213,7 +227,7 @@ public final class Styler {
             int at = value.indexOf("var(", i);
             if (at < 0) {
                 b.append(value, i, value.length());
-                return b.toString();
+                return b.length() > limit ? null : b.toString();
             }
             b.append(value, i, at);
             int close = closeParen(value, at + 3);
@@ -222,16 +236,28 @@ public final class Styler {
             int comma = topComma(inside);
             String name = (comma < 0 ? inside : inside.substring(0, comma)).trim();
             String fallback = comma < 0 ? null : inside.substring(comma + 1).trim();
-            String v = customs.get(name);
-            if (v == null || v.isBlank() && fallback != null) v = fallback;
-            if (v == null) return null;
-            if (v.contains("var(")) {
-                v = substitute(v, customs, depth + 1);
-                if (v == null) return null;
+            String custom = customs.get(name);
+            String v;
+            if (custom != null && !(custom.isBlank() && fallback != null)) {
+                v = custom.contains("var(") ? expand(name, custom, customs, expanded, depth) : custom;
+            } else {
+                v = fallback != null && fallback.contains("var(") ? substitute(fallback, customs, expanded, depth + 1, limit) : fallback;
             }
+            if (v == null) return null;
             b.append(v);
+            if (b.length() > limit) return null;
             i = close + 1;
         }
+    }
+
+    private static String expand(String name, String custom, Map<String, String> customs, Map<String, Optional<String>> expanded, int depth) {
+        Optional<String> done = expanded.get(name);
+        if (done != null) return done.orElse(null);
+        // Invalid while it is being worked out: a property that refers back to itself is a cycle.
+        expanded.put(name, Optional.empty());
+        String v = substitute(custom, customs, expanded, depth + 1, MAX_EXPANDED);
+        expanded.put(name, Optional.ofNullable(v));
+        return v;
     }
 
     private static int closeParen(String s, int open) {

@@ -39,12 +39,12 @@ public final class HtmlRenderer {
     public record Frame(BufferedImage image, double scale, double viewportWidth, double viewportHeight, double pageHeight, double scrollY,
                         List<Painter.Hit> hits, Map<Element, Style> styles, org.jsoup.nodes.Document document, Page page) {
 
-        /** The topmost element at (x, y) in CSS pixels of the viewport, or null. */
+        /** The topmost element at (x, y) in CSS pixels of the viewport that takes the pointer, or null. */
         public Element elementAt(double x, double y) {
             Point2D p = new Point2D.Double(x, y + scrollY);
             for (int i = hits.size() - 1; i >= 0; i--) {
                 Painter.Hit h = hits.get(i);
-                if (h.clip() != null && !h.clip().contains(p)) continue;
+                if (!h.pointer() || h.clip() != null && !h.clip().contains(p)) continue;
                 if (h.shape().contains(p)) return h.element();
             }
             return null;
