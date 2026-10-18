@@ -156,6 +156,7 @@ final class Filters {
             if (grab.isEmpty()) return;
         }
         grab = grab.intersection(new java.awt.Rectangle(0, 0, surface.getWidth(), surface.getHeight()));
+        if (grab.isEmpty()) return;
         // Drawn rather than copied raw, so a premultiplied surface arrives as straight colour for the filters below.
         BufferedImage copy = new BufferedImage(grab.width, grab.height, BufferedImage.TYPE_INT_ARGB);
         java.awt.Graphics2D cg = copy.createGraphics();

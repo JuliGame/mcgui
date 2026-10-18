@@ -377,7 +377,9 @@ final class Backgrounds {
 
     /** A conic gradient as a fan of thin wedges. */
     private static Paint conic(List<String> args, Style s, Rectangle2D r) {
-        return new ConicPaint(args, s, r);
+        ConicPaint p = new ConicPaint(args, s, r);
+        // No readable colour at all: no gradient, as linear() and radial() say with null.
+        return p.stops.isEmpty() ? null : p;
     }
 
     private static double[] at(String at, Rectangle2D r, Style s) {
@@ -462,6 +464,7 @@ final class Backgrounds {
 
     /** Stops limited to [0, 1], with the colours at the ends interpolated where the stops went past them. */
     private static List<Stop> clampStops(List<Stop> stops) {
+        if (stops.isEmpty()) return stops;
         List<Stop> out = new ArrayList<>();
         if (stops.get(0).pos > 0) out.add(new Stop(stops.get(0).color, 0));
         for (int i = 0; i < stops.size(); i++) {
