@@ -406,25 +406,27 @@ final class InlineLayout {
 
     private List<Atom> split(Atom a, double first, double avail) {
         List<Atom> out = new ArrayList<>();
-        String rest = a.text;
+        String text = a.text;
+        // Pieces are taken from [start] on, not cut off a shrinking copy: a 1 MB word was copied once per piece.
+        int start = 0, n = text.length();
         double room = Math.max(first, 0);
-        while (!rest.isEmpty()) {
+        while (start < n) {
             int k = 1;
-            while (k < rest.length() && L.shaper.width(rest.substring(0, k + 1), a.font) <= room) k++;
-            if (k == 1 && room < avail && out.isEmpty() && L.shaper.width(rest.substring(0, 1), a.font) > room) {
+            while (k < n - start && L.shaper.width(text.substring(start, start + k + 1), a.font) <= room) k++;
+            if (k == 1 && room < avail && out.isEmpty() && L.shaper.width(text.substring(start, start + 1), a.font) > room) {
                 room = avail;
                 continue;
             }
             Atom p = new Atom();
             p.kind = Kind.WORD;
-            p.text = rest.substring(0, k);
+            p.text = text.substring(start, start + k);
             p.box = a.box;
             p.style = a.style;
             p.font = a.font;
             p.w = L.shaper.width(p.text, a.font);
             p.wrap = true;
             out.add(p);
-            rest = rest.substring(k);
+            start += k;
             room = avail;
         }
         return out;
@@ -491,13 +493,17 @@ final class InlineLayout {
         out.y = y;
         out.w = width + extra * spaces - indent;
         double x = block.contentX() + offset;
-        Map<Box, Box.Fragment> open = new HashMap<>();
+        // In the order the boxes opened, which is outermost first: open boxes are nested in one another.
+        Map<Box, Box.Fragment> open = new java.util.LinkedHashMap<>();
         Map<Box, Double> openShift = new HashMap<>();
         List<Box.Fragment> fragments = new ArrayList<>();
         List<Box> fragmentBoxes = new ArrayList<>();
         List<Atom> atomics = new ArrayList<>();
         List<Double> atomicShift = new ArrayList<>();
         Box.Item item = null;
+        // The text of [item] while words are added to it, set once it is complete: adding to a String
+        // copies it, and a long unbreakable line of many words copied itself once per word.
+        StringBuilder itemText = null;
         double shift = 0;
         // Inline boxes still open from the previous line carry on here, without their start edge.
         for (Box c : carried) {
@@ -517,6 +523,8 @@ final class InlineLayout {
                     shift += baselineShift(a.style, ascent);
                     openShift.put(a.box, shift);
                     x += a.w;
+                    if (itemText != null) item.text = itemText.toString();
+                    itemText = null;
                     item = null;
                     // Each inline box's own font and line height count towards the line, even when empty.
                     Fonts.Metrics m = metrics(a.style);
@@ -539,14 +547,19 @@ final class InlineLayout {
                     Double s = openShift.remove(a.box);
                     shift -= baselineShift(a.style, ascent);
                     if (s != null) a.box.baseline = s;
+                    if (itemText != null) item.text = itemText.toString();
+                    itemText = null;
                     item = null;
                 }
                 case WORD, SPACE -> {
                     double w = a.w + (a.kind == Kind.SPACE ? extra * a.text.length() / Math.max(1, a.text.length()) : 0);
                     if (item != null && item.box == a.box && item.style == a.style && extra == 0) {
-                        item.text += a.text;
+                        if (itemText == null) itemText = new StringBuilder(item.text);
+                        itemText.append(a.text);
                         item.w += w;
                     } else {
+                        if (itemText != null) item.text = itemText.toString();
+                        itemText = null;
                         item = new Box.Item();
                         item.box = a.box;
                         item.text = a.text;
@@ -583,6 +596,8 @@ final class InlineLayout {
                     }
                     a.box.x = x + a.box.m[3];
                     x += a.w;
+                    if (itemText != null) item.text = itemText.toString();
+                    itemText = null;
                     item = null;
                 }
                 case ABS -> {
@@ -593,6 +608,7 @@ final class InlineLayout {
                 default -> {}
             }
         }
+        if (itemText != null) item.text = itemText.toString();
         // Boxes still open at the end of the line carry on to the next one, outermost first.
         List<Box> next = new ArrayList<>();
         for (Map.Entry<Box, Box.Fragment> e : open.entrySet()) {
@@ -602,7 +618,6 @@ final class InlineLayout {
             fragmentBoxes.add(e.getKey());
             next.add(e.getKey());
         }
-        next.sort((p1, p2) -> Integer.compare(depth(p1), depth(p2)));
         carried = next;
         // A line with only atomic boxes (images in a row) needs no strut beyond them.
         if (onlyAtomics && !atomics.isEmpty() && strutL == 0) {
@@ -637,12 +652,6 @@ final class InlineLayout {
             fb.baseline = Double.NaN;
         }
         return out;
-    }
-
-    private static int depth(Box b) {
-        int d = 0;
-        for (Box p = b.parent; p != null; p = p.parent) d++;
-        return d;
     }
 
     /** How far (down, in pixels) vertical-align moves an inline box's baseline. */
@@ -680,6 +689,27 @@ final class InlineLayout {
         return new double[]{base, outer - base};
     }
 
+    /**
+     * The longest start of [t] no wider than [room], in characters. Found by doubling and then halving
+     * rather than by dropping one character at a time from the end, which measured a megabyte of
+     * nowrap text a million times over; widths only grow as characters are added, so it is the same length.
+     */
+    private int fitting(String t, Font font, double room) {
+        int lo = 0, hi = 1;
+        while (hi <= t.length() && L.shaper.width(t.substring(0, hi), font) <= room) {
+            lo = hi;
+            hi *= 2;
+        }
+        hi = Math.min(hi, t.length() + 1);
+        // lo fits (or is 0), hi does not (or is past the end).
+        while (hi - lo > 1) {
+            int mid = (lo + hi) >>> 1;
+            if (L.shaper.width(t.substring(0, mid), font) <= room) lo = mid;
+            else hi = mid;
+        }
+        return lo;
+    }
+
     /** Cuts a line's text so it ends in "…" within [avail]. */
     private void ellipsize(Box.Line line, double avail) {
         Box.Item lastText = null;
@@ -695,8 +725,7 @@ final class InlineLayout {
                 continue;
             }
             if (it.text != null && it.x < limit) {
-                String t = it.text;
-                while (!t.isEmpty() && it.x + L.shaper.width(t, it.font) > limit) t = t.substring(0, t.length() - 1);
+                String t = it.text.substring(0, fitting(it.text, it.font, limit - it.x));
                 it.text = t.stripTrailing() + "…";
                 it.w = L.shaper.width(it.text, it.font);
                 keep.add(it);
