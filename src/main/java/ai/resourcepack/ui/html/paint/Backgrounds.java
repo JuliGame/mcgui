@@ -6,6 +6,7 @@ import ai.resourcepack.ui.html.res.Resources;
 import ai.resourcepack.ui.html.style.Len;
 import ai.resourcepack.ui.html.style.Style;
 
+import java.awt.AlphaComposite;
 import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.LinearGradientPaint;
@@ -95,6 +96,10 @@ final class Backgrounds {
         Rectangle2D first = new Rectangle2D.Double(x0, y0, tile[0], tile[1]);
         Paint paint = gradient ? gradientPaint(layer, s, first) : null;
         if (gradient && paint == null) return;
+        // Past its last coloured stop a radial gradient is transparent, which paints nothing over what is there.
+        // Filling only the part that can still show colour skips most of a full-page glow.
+        Rectangle2D fill = gradient && g.getComposite() == AlphaComposite.SrcOver ? first.createIntersection(coloured(paint, first)) : first;
+        if (fill.isEmpty()) return;
         Paint oldPaint = g.getPaint();
         AffineTransform base = g.getTransform();
         if (gradient) g.setPaint(paint);
@@ -106,7 +111,7 @@ final class Backgrounds {
                 if (++tiles > MAX_TILES) break tiling;
                 if (gradient) {
                     g.translate(x - x0, y - y0);
-                    g.fill(first);
+                    g.fill(fill);
                     g.setTransform(base);
                 } else {
                     pic.draw(g, x, y, tile[0], tile[1]);
@@ -119,6 +124,22 @@ final class Backgrounds {
     }
 
     private static final int MAX_TILES = 250_000;
+
+    /** Where [paint] can show any colour within [r]: all of [r], except for a radial gradient that ends transparent. */
+    static Rectangle2D coloured(Paint paint, Rectangle2D r) {
+        if (!(paint instanceof RadialGradientPaint g) || g.getCycleMethod() != MultipleGradientPaint.CycleMethod.NO_CYCLE) return r;
+        Color[] colors = g.getColors();
+        float[] fractions = g.getFractions();
+        int last = colors.length - 1;
+        while (last >= 0 && colors[last].getAlpha() == 0) last--;
+        if (last == colors.length - 1) return r; // the last colour runs on to the edges
+        if (last < 0) return new Rectangle2D.Double(); // transparent throughout
+        // The colour fades to nothing between stop [last] and the next one; beyond that every pixel is transparent.
+        double reach = g.getRadius() * fractions[last + 1] + 1;
+        Point2D c = g.getCenterPoint();
+        Rectangle2D circle = new Rectangle2D.Double(c.getX() - reach, c.getY() - reach, 2 * reach, 2 * reach);
+        return g.getTransform().createTransformedShape(circle).getBounds2D();
+    }
 
     static String url(String layer) {
         int at = layer.toLowerCase(Locale.ROOT).indexOf("url(");
