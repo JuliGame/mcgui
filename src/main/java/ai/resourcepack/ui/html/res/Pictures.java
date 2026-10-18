@@ -33,8 +33,7 @@ public final class Pictures {
         if (data == null || data.length == 0) return null;
         if (looksLikeSvg(data, nameHint)) return svg(new String(data, StandardCharsets.UTF_8));
         try {
-            BufferedImage img = read(data);
-            return img == null ? null : new Raster(img);
+            return bitmap(data);
         } catch (IOException | RuntimeException | OutOfMemoryError e) {
             return null;
         }
@@ -42,9 +41,10 @@ public final class Pictures {
 
     /**
      * ImageIO.read, but looking at the stated size first: a few kilobytes of PNG can state 30000 x 30000
-     * and decode to gigabytes. Large photos come out subsampled to under {@link #MAX_PIXELS}.
+     * and decode to gigabytes. Large photos come out subsampled to under {@link #MAX_PIXELS}, keeping
+     * their stated size as their natural size, so a page lays them out and crops them as a browser would.
      */
-    static BufferedImage read(byte[] data) throws IOException {
+    static Raster bitmap(byte[] data) throws IOException {
         try (ImageInputStream in = ImageIO.createImageInputStream(new ByteArrayInputStream(data))) {
             if (in == null) return null;
             Iterator<ImageReader> readers = ImageIO.getImageReaders(in);
@@ -59,7 +59,8 @@ public final class Pictures {
                     int step = (int) Math.ceil(Math.sqrt((double) (w * h) / MAX_PIXELS));
                     param.setSourceSubsampling(step, step, 0, 0);
                 }
-                return reader.read(0, param);
+                BufferedImage img = reader.read(0, param);
+                return img == null ? null : new Raster(img, w, h);
             } finally {
                 reader.dispose();
             }
@@ -90,9 +91,8 @@ public final class Pictures {
         }
     }
 
-    private record Raster(BufferedImage img) implements Picture {
-        @Override public double width() { return img.getWidth(); }
-        @Override public double height() { return img.getHeight(); }
+    /** A bitmap, [width] x [height] as its file states, which [img] may hold at a lower resolution. */
+    record Raster(BufferedImage img, double width, double height) implements Picture {
 
         @Override
         public void draw(Graphics2D g, double x, double y, double w, double h) {

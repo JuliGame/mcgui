@@ -8,7 +8,6 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class PicturesTest {
@@ -20,11 +19,15 @@ class PicturesTest {
     }
 
     @Test
-    void bigBitmapsAreReadSubsampled() throws IOException {
+    void bigBitmapsAreHeldSubsampledAtTheirStatedSize() throws IOException {
         Picture p = Pictures.decode(png(6000, 4000), "big.png");
-        assertNotNull(p);
-        assertTrue(p.width() * p.height() <= Pictures.MAX_PIXELS, p.width() + " x " + p.height());
-        assertEquals(1.5, p.width() / p.height(), 0.01);
+        // Laid out and cropped at the size the file states...
+        assertEquals(6000, p.width());
+        assertEquals(4000, p.height());
+        // ...but held at fewer pixels.
+        BufferedImage held = ((Pictures.Raster) p).img();
+        assertTrue((long) held.getWidth() * held.getHeight() <= Pictures.MAX_PIXELS, held.getWidth() + " x " + held.getHeight());
+        assertEquals(1.5, (double) held.getWidth() / held.getHeight(), 0.01);
     }
 
     @Test
