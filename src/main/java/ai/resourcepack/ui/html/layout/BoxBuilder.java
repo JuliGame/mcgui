@@ -161,7 +161,7 @@ public final class BoxBuilder {
     }
 
     /** A CSS string literal, with its escapes ("\201C", "\a"). */
-    private static String cssString(String s) {
+    static String cssString(String s) {
         String inner = s.substring(1, s.length() - 1);
         StringBuilder b = new StringBuilder();
         for (int i = 0; i < inner.length(); i++) {
@@ -173,7 +173,9 @@ public final class BoxBuilder {
             int j = i + 1;
             while (j < inner.length() && j < i + 7 && Character.digit(inner.charAt(j), 16) >= 0) j++;
             if (j > i + 1) {
-                b.appendCodePoint(Integer.parseInt(inner.substring(i + 1, j), 16));
+                int cp = Integer.parseInt(inner.substring(i + 1, j), 16);
+                // CSS reads zero, a surrogate or anything past Unicode's last code point as U+FFFD.
+                b.appendCodePoint(cp == 0 || cp > Character.MAX_CODE_POINT || cp >= 0xD800 && cp <= 0xDFFF ? 0xFFFD : cp);
                 if (j < inner.length() && inner.charAt(j) == ' ') j++;
                 i = j - 1;
             } else {
