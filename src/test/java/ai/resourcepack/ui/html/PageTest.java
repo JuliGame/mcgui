@@ -4,12 +4,14 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.time.Duration;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class PageTest {
@@ -54,5 +56,14 @@ class PageTest {
         assertFalse(page(".a + .b { color: red } .a:hover { color: blue }").siblingStates());
         assertFalse(page("li:nth-child(2n+1):hover, [class~=x]:hover { width: calc(1px + 2px) }").siblingStates());
         assertFalse(page("/* .a:hover + .b { } */ .a:hover { color: red }").siblingStates());
+    }
+
+    @Test
+    void unclosedCommentsAndBracketsDoNotTakeQuadraticTime() {
+        // Each of these took tens of seconds per 100 KB with the regexes this scan replaced.
+        assertTimeoutPreemptively(Duration.ofSeconds(10), () -> {
+            assertFalse(page("/* ".repeat(100_000)).siblingStates());
+            assertFalse(page("a:hover" + "[".repeat(300_000) + "{}").siblingStates());
+        });
     }
 }

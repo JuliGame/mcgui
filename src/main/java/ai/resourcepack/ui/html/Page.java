@@ -383,15 +383,14 @@ public final class Page implements Resources {
         return siblingStates;
     }
 
-    private static final Pattern COMMENT = Pattern.compile("/\\*.*?\\*/", Pattern.DOTALL);
-    /** What can hold a '+' or '~' without being a combinator: attribute selectors ([class~=x]) and an+b arguments (2n+1). */
-    private static final Pattern NOT_COMBINATOR = Pattern.compile("\\[[^\\]]*]|\\([-+\\dn\\s]*\\)");
-
+    /**
+     * Notes whether [css] has a :hover or :active selector with a '+' or '~' combinator. Linear scans
+     * only: this runs over remote stylesheets, where a regex with backtracking could be made to take hours.
+     */
     private void noteSelectors(String css) {
         if (siblingStates || css == null) return;
-        String s = COMMENT.matcher(css).replaceAll("");
-        // Every selector is what comes before a '{' since the last ';', '}' or '{'. A scan, not a regex:
-        // a declaration such as a long data: URL would make a pattern backtrack for ages.
+        String s = withoutComments(css);
+        // Every selector is what comes before a '{' since the last ';', '}' or '{'.
         int from = 0;
         for (int i = 0; i < s.length(); i++) {
             char c = s.charAt(i);
@@ -400,14 +399,51 @@ public final class Page implements Resources {
             } else if (c == '{') {
                 String prelude = s.substring(from, i).toLowerCase(Locale.ROOT);
                 from = i + 1;
-                if (!prelude.contains(":hover") && !prelude.contains(":active")) continue;
-                String rest = NOT_COMBINATOR.matcher(prelude).replaceAll("");
-                if (rest.indexOf('+') >= 0 || rest.indexOf('~') >= 0) {
+                if ((prelude.contains(":hover") || prelude.contains(":active")) && siblingCombinator(prelude)) {
                     siblingStates = true;
                     return;
                 }
             }
         }
+    }
+
+    private static String withoutComments(String css) {
+        int open = css.indexOf("/*");
+        if (open < 0) return css;
+        StringBuilder out = new StringBuilder(css.length());
+        int from = 0;
+        while (open >= 0) {
+            out.append(css, from, open);
+            int close = css.indexOf("*/", open + 2);
+            // An unclosed comment runs to the end, as in CSS.
+            if (close < 0) return out.toString();
+            from = close + 2;
+            open = css.indexOf("/*", from);
+        }
+        return out.append(css, from, css.length()).toString();
+    }
+
+    /**
+     * Whether [selector] has a '+' or '~' combinator. Those inside an attribute selector ([class~=x]) or
+     * an an+b argument (2n+1) are not combinators; those inside :is() and the like are.
+     */
+    private static boolean siblingCombinator(String selector) {
+        int n = selector.length();
+        for (int i = 0; i < n; i++) {
+            char c = selector.charAt(i);
+            if (c == '[') {
+                int close = selector.indexOf(']', i + 1);
+                if (close < 0) return false;
+                i = close;
+            } else if (c == '(') {
+                int j = i + 1;
+                while (j < n && "-+0123456789n \t\n\r\f".indexOf(selector.charAt(j)) >= 0) j++;
+                if (j < n && selector.charAt(j) == ')') i = j;
+            } else if (c == '+' || c == '~') {
+                return true;
+            }
+        }
+        return false;
     }
 
     private String sheet(URI target, Loader loader) {
