@@ -358,9 +358,9 @@ public final class Page implements Resources {
         loadImages(loader);
     }
 
-    /** Loads [file] and everything it uses. */
+    /** Loads [file] and everything it uses. Bytes that are not UTF-8 read as U+FFFD, as a browser shows them. */
     public static Page load(Path file, Loader loader) throws IOException {
-        return new Page(file, Files.readString(file, StandardCharsets.UTF_8), loader);
+        return new Page(file, new String(Files.readAllBytes(file), StandardCharsets.UTF_8), loader);
     }
 
     /** A page from a string (tests, built-in pages), resolving relative files against [base]. */
