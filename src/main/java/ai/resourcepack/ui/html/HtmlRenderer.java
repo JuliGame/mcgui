@@ -94,38 +94,76 @@ public final class HtmlRenderer {
     }
 
     /**
-     * Repaints only [clip] (CSS pixels of the viewport) of [base], the image of an earlier frame of the
+     * Repaints only [clip] (CSS pixels of the picture) of [base], the image of an earlier frame of the
      * same page at the same scroll: what a change of hover state needs. Everything is still styled
      * and laid out, so the frame's hit regions are whole; only the pixels outside the clip are skipped.
+     * [base] may be taller than the view (a {@link ScrollCache}'s picture, from [scrollY] down).
      */
     public static Frame render(Page page, org.jsoup.nodes.Document document, int width, int height, double scale, double scrollY,
                                Selector.State state, BufferedImage base, java.awt.geom.Rectangle2D clip) {
+        return draw(page, document, width, height, scale, scrollY, base != null ? base.getHeight() : height, state, base, clip);
+    }
+
+    /**
+     * Renders up to [maxRows] rows (at least the view's [height]) of the page round the view at [scrollY], for a
+     * [width] × [height] view: more of them ahead of the scroll ([down]: below the view) than behind. The frame's
+     * image is that taller picture and its scrollY where the picture starts, a whole number of pixels from the
+     * page's top, so a view at any whole pixel inside it is a copy of its rows ({@link ScrollCache}).
+     */
+    public static Frame renderStrip(Page page, org.jsoup.nodes.Document document, int width, int height, double scale, double scrollY,
+                                    boolean down, int maxRows, Selector.State state) {
         double vw = width / scale, vh = height / scale;
+        Laid laid = lay(page, document, vw, vh, state);
+        int pageRows = Math.max(height, (int) Math.floor(laid.pageHeight * scale + 1e-6));
+        int rows = Math.max(height, Math.min(maxRows, pageRows));
+        int spare = rows - height, behind = down ? spare / 4 : spare - spare / 4;
+        int topRow = Math.max(0, Math.min(pageRows - rows, (int) Math.round(scrollY * scale) - behind));
+        return paint(page, laid, new BufferedImage(width, rows, BufferedImage.TYPE_INT_ARGB_PRE), scale, vw, vh, topRow / scale, true, null, document);
+    }
+
+    /** A document styled and laid out for a view, not painted yet. */
+    private record Laid(Styler styler, Box root, double pageHeight) {}
+
+    private static Laid lay(Page page, org.jsoup.nodes.Document document, double vw, double vh, Selector.State state) {
         Element html = document.selectFirst("html");
         if (html == null) html = document;
         Styler styler = new Styler(Page.UA, page.styles, vw, vh, state, page.uri);
         styler.run(html);
         Box root = new BoxBuilder(styler, page, page.uri).build(html);
-        Layout layout = new Layout(page.shaper, vw, vh);
-        double pageHeight = layout.run(root);
-        double scroll = Math.max(0, Math.min(scrollY, pageHeight - vh));
+        double pageHeight = new Layout(page.shaper, vw, vh).run(root);
+        return new Laid(styler, root, pageHeight);
+    }
+
+    /** A picture [rows] tall (the view's [height], or a {@link ScrollCache}'s more) from [scrollY] down. */
+    private static Frame draw(Page page, org.jsoup.nodes.Document document, int width, int height, double scale, double scrollY, int rows,
+                              Selector.State state, BufferedImage base, java.awt.geom.Rectangle2D clip) {
+        double vw = width / scale, vh = height / scale;
+        Laid laid = lay(page, document, vw, vh, state);
+        double scroll = Math.max(0, Math.min(scrollY, laid.pageHeight - rows / scale));
         // Premultiplied: Java2D blends onto it directly, where a plain ARGB surface costs a conversion of
         // every pixel both ways on every fill. The page is painted on opaque white, so nothing reads alpha.
-        BufferedImage img = base != null ? base : new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB_PRE);
+        BufferedImage img = base != null ? base : new BufferedImage(width, rows, BufferedImage.TYPE_INT_ARGB_PRE);
+        return paint(page, laid, img, scale, vw, vh, scroll, base == null && clip == null, clip, document);
+    }
+
+    /** Paints [laid] into [img] from [scroll] down: [whole], in bands at once; else, within [clip], over what is there. */
+    private static Frame paint(Page page, Laid laid, BufferedImage img, double scale, double vw, double vh, double scroll, boolean whole,
+                               java.awt.geom.Rectangle2D clip, org.jsoup.nodes.Document document) {
         List<Painter.Hit> hits;
-        int bands = base == null && clip == null ? Math.min(MAX_BANDS, height / MIN_BAND_ROWS) : 1;
-        if (bands > 1) {
-            hits = paintBands(page, root, img, bands, Painter.blurReach(styler.styles.values(), scale), scale, vw, vh, scroll);
+        int reach = whole ? Painter.blurReach(laid.styler.styles.values(), scale) : 0;
+        int bands = whole ? Math.max(1, Math.min(MAX_BANDS, img.getHeight() / MIN_BAND_ROWS)) : 1;
+        if (bands > 1 || reach > 0) {
+            hits = paintBands(page, laid.root, img, bands, reach, scale, vw, vh, scroll, laid.pageHeight);
         } else {
             Graphics2D g = img.createGraphics();
             g.scale(scale, scale);
             if (clip != null) g.clip(clip);
             Painter painter = new Painter(page.shaper, page, vw, vh, scroll);
-            painter.paint(g, root, img, scale);
+            painter.paint(g, laid.root, img, scale);
             g.dispose();
             hits = painter.hits;
         }
-        return new Frame(img, scale, vw, vh, pageHeight, scroll, hits, new IdentityHashMap<>(styler.styles), document, page);
+        return new Frame(img, scale, vw, vh, laid.pageHeight, scroll, hits, new IdentityHashMap<>(laid.styler.styles), document, page);
     }
 
     /** Full pictures are painted as up to this many horizontal bands at once, none under this many rows. */
@@ -137,18 +175,22 @@ public final class HtmlRenderer {
      * Paints [root] into [img] as [bands] horizontal bands at once, each with its own painter into its own
      * picture, then copies each band's rows in. Styling and layout are done once and only read here.
      * Each band also paints [reach] rows past its edges, so a backdrop-filter near an edge blurs what a
-     * whole picture would have under it rather than another band's half-painted rows. Returns the hit
-     * regions (every band's painter finds them all; the first band's are kept).
+     * whole picture would have under it rather than another band's half-painted rows. That holds at the
+     * picture's own top and bottom too, where there is more page: so a blur looks the same wherever the
+     * view is, and a view cut from a taller picture ({@link ScrollCache}) matches one drawn on its own.
+     * Returns the hit regions (every band's painter finds them all; the first band's are kept).
      */
     private static List<Painter.Hit> paintBands(Page page, Box root, BufferedImage img, int bands, int reach, double scale,
-                                                double vw, double vh, double scroll) {
+                                                double vw, double vh, double scroll, double pageHeight) {
         int width = img.getWidth(), height = img.getHeight();
         int[] out = ((DataBufferInt) img.getRaster().getDataBuffer()).getData();
+        // Whole rows of page above and below the picture.
+        int above = (int) Math.floor(scroll * scale + 1e-6), below = Math.max(0, (int) Math.floor((pageHeight - scroll) * scale + 1e-6) - height);
         List<ForkJoinTask<List<Painter.Hit>>> tasks = new ArrayList<>(bands);
         for (int b = 0; b < bands; b++) {
             int y0 = height * b / bands, y1 = height * (b + 1) / bands;
             // Twice the reach: a blur in the margin itself reads up to one reach further out.
-            int top = Math.max(0, y0 - 2 * reach), bottom = Math.min(height, y1 + 2 * reach);
+            int top = Math.max(-above, y0 - 2 * reach), bottom = Math.min(height + below, y1 + 2 * reach);
             tasks.add(PAINTERS.submit(() -> {
                 BufferedImage band = new BufferedImage(width, bottom - top, BufferedImage.TYPE_INT_ARGB_PRE);
                 Graphics2D g = band.createGraphics();

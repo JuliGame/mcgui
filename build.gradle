@@ -77,12 +77,16 @@ tasks.register('renderSamples', JavaExec) {
 }
 
 // What each page costs a session: full render, canvas, hover repaint (RenderBench). -Pruns=<n>, -Ponly=<name>.
+// -Pscroll=1: what a notch of the wheel costs, drawn whole and cut from a ScrollCache (-Pnotches=<n>), with long test pages too.
 tasks.register('renderBench', JavaExec) {
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'ai.resourcepack.ui.html.RenderBench'
-    args = [file('samples').absolutePath, file('src/main/resources/pages').absolutePath]
+    def scroll = project.findProperty('scroll') ?: '0'
+    args = [file('samples').absolutePath, file('src/main/resources/pages').absolutePath] + (scroll != '0' ? [file('src/test/resources/scroll').absolutePath] : [])
     systemProperty 'java.awt.headless', 'true'
     systemProperty 'runs', project.findProperty('runs') ?: '20'
     systemProperty 'only', project.findProperty('only') ?: ''
+    systemProperty 'scroll', scroll
+    systemProperty 'notches', project.findProperty('notches') ?: '12'
     maxHeapSize = '2g'
 }

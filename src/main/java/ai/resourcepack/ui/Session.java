@@ -4,6 +4,8 @@ import ai.resourcepack.uiframework.api.Canvas;
 import ai.resourcepack.uiframework.api.Pointer;
 import ai.resourcepack.ui.html.HtmlRenderer;
 import ai.resourcepack.ui.html.Page;
+import ai.resourcepack.ui.html.ScrollCache;
+import ai.resourcepack.ui.html.css.Selector;
 import ai.resourcepack.ui.html.css.Values;
 import ai.resourcepack.ui.html.paint.Painter;
 import ai.resourcepack.ui.html.style.Len;
@@ -64,6 +66,14 @@ public final class Session {
     private int navigation;
 
     private volatile HtmlRenderer.Frame frame;
+    /**
+     * Several views' worth of the page round the view, painted when the view first moves, so the next notches of
+     * the wheel are cut from it rather than painted (ScrollCache): set by the render thread, dropped by the server
+     * thread once nobody has scrolled for a while, since it is several times a picture's memory.
+     */
+    private volatile ScrollCache cache;
+    /** How long a tall picture is kept with nothing cut from it. */
+    private static final long CACHE_IDLE_NANOS = 15_000_000_000L;
     /** The name of the page in [frame]; written before it. */
     private volatile String drawnName;
     /** Counts clicks, so the end of one press does not end a later one. */
@@ -228,8 +238,10 @@ public final class Session {
         render();
     }
 
-    /** Every tick: re-fill placeholders on pages that ask for it. */
+    /** Every tick: re-fill placeholders on pages that ask for it, and let go of a tall picture nobody scrolls. */
     void tick(long now) {
+        ScrollCache c = cache;
+        if (c != null && c.idleNanos() > CACHE_IDLE_NANOS) cache = null;
         if (refreshTicks > 0 && page != null && now >= nextRefresh) {
             nextRefresh = now + refreshTicks;
             Document fresh = Placeholders.fill(page.document, player());
@@ -311,31 +323,51 @@ public final class Session {
                 HtmlRenderer.Frame f = null;
                 Rectangle2D changed = null;
                 boolean partial = false;
-                if (fragment == null && before != null && before.document() == d && before.page() == p && before.scale() == scale
-                        && Math.abs(before.scrollY() - Math.max(0, Math.min(s, before.maxScroll()))) < 0.01) {
+                // This picture's: put back once it is drawn, so a failure part way through cannot leave a half-patched one.
+                ScrollCache c = cache;
+                cache = null;
+                boolean same = fragment == null && before != null && before.document() == d && before.page() == p && before.scale() == scale;
+                double at = same ? Math.max(0, Math.min(s, before.maxScroll())) : s;
+                // A tall picture of another document or size, or one the view has left, is of no more use.
+                if (c != null && !(same && c.of(p, d, canvas.width(), canvas.height(), scale) && c.covers(at))) c = null;
+                boolean still = same && Math.abs(before.scrollY() - at) < 0.01;
+                Set<Element> moved = same ? changedState(hoverKey, pressKey) : Set.of();
+                if (still && moved.isEmpty()) {
+                    drawnHover = hoverKey;
+                    drawnPress = pressKey;
+                    cache = c;
+                    return;
+                }
+                if (c != null && !moved.isEmpty()) {
+                    // The hover or press state moved: repaint what it touches in the whole tall picture, not only
+                    // in view, since the rest of it will be scrolled into view.
+                    HtmlRenderer.Frame strip = c.strip();
+                    Repainted r = repaint(p, d, scale, state, strip, moved);
+                    if (r == null) {
+                        c = null;
+                    } else {
+                        c.patched(r.frame());
+                        Rectangle2D g = r.region();
+                        changed = new Rectangle2D.Double(g.getX(), g.getY() + strip.scrollY() - at, g.getWidth(), g.getHeight());
+                    }
+                }
+                if (c != null) {
+                    f = c.frame(at);
+                    partial = still;
+                } else if (still) {
                     // Only the hover or press state moved: repaint just what it touches.
-                    Set<Element> moved = changedState(hoverKey, pressKey);
-                    if (moved.isEmpty()) {
-                        drawnHover = hoverKey;
-                        drawnPress = pressKey;
-                        return;
+                    Repainted r = repaint(p, d, scale, state, before, moved);
+                    if (r != null) {
+                        f = r.frame();
+                        changed = r.region();
+                        partial = true;
                     }
-                    // A page where hovering one element restyles its siblings ('+', '~') is drawn whole.
-                    changed = p.siblingStates() ? null : dirtyRegion(before, moved);
-                    if (changed != null && small(changed, before)) {
-                        f = HtmlRenderer.render(p, d, canvas.width(), canvas.height(), scale, s, state, before.image(), changed);
-                        // The new state may reach further than the old one did (a shadow only hovering adds): then
-                        // paint both. If it cannot be told, or it is too much, draw it all.
-                        Rectangle2D after = dirtyRegion(f, moved);
-                        if (after == null) {
-                            f = null;
-                        } else if (!changed.contains(after)) {
-                            changed = changed.createUnion(after);
-                            f = small(changed, before) ? HtmlRenderer.render(p, d, canvas.width(), canvas.height(), scale, s, state, before.image(), changed) : null;
-                        }
-                        if (f != null && sameLayout(before, f, changed)) partial = true;
-                        else f = null;
-                    }
+                } else if (same && ScrollCache.possible(before)) {
+                    // Only the view moved (and perhaps the pointer's state with it). Painting is nearly all a picture
+                    // costs, and the next notches will want the rows round this view: paint a few views' worth of
+                    // the page at once, and cut this view and the next ones from that.
+                    c = ScrollCache.paint(p, d, canvas.width(), canvas.height(), scale, at, before.scrollY(), state, ScrollCache.VIEWS);
+                    if (c != null) f = c.frame(at);
                 }
                 if (f == null) {
                     f = HtmlRenderer.render(p, d, canvas.width(), canvas.height(), scale, s, state);
@@ -343,7 +375,7 @@ public final class Session {
                         Element target = d.getElementById(fragment);
                         double top = target == null ? Double.NaN : f.topOf(target);
                         if (!Double.isNaN(top)) {
-                            f = HtmlRenderer.render(p, d, canvas.width(), canvas.height(), scale, top, state);
+                            f = HtmlRenderer.render(p, d, canvas.width(), canvas.height(), scale, ScrollCache.snap(top, scale), state);
                             double scrolled = f.scrollY();
                             // Unless the player has moved on (another page, or scrolled) while this was drawn.
                             serverThread.execute(() -> {
@@ -365,9 +397,11 @@ public final class Session {
                 drawnPress = pressKey;
                 drawnName = name;
                 frame = f;
+                cache = c;
                 if (plugin.debug()) {
-                    plugin.getLogger().info(String.format("Drew %s for %s in %d ms%s", pageName, viewer, (System.nanoTime() - t0) / 1_000_000,
-                            partial ? String.format(" (only %.0f x %.0f)", changed.getWidth(), changed.getHeight()) : ""));
+                    plugin.getLogger().info(String.format("Drew %s for %s in %d ms%s%s", pageName, viewer, (System.nanoTime() - t0) / 1_000_000,
+                            partial ? String.format(" (only %.0f x %.0f)", changed.getWidth(), changed.getHeight()) : "",
+                            c != null ? String.format(" (from a picture %d px tall)", c.strip().image().getHeight()) : ""));
                 }
                 // A new page under a still pointer: what it is over has changed.
                 if (!partial) serverThread.execute(this::repoint);
@@ -380,6 +414,7 @@ public final class Session {
                 if (shown != null && shown.page() != p) serverThread.execute(() -> undrawable(p, nav));
             } finally {
                 synchronized (Session.this) {
+                    if (closed) cache = null;
                     if (dirty && !closed) {
                         dirty = false;
                         // The state moved on while drawing: draw again, reading it on the server thread.
@@ -397,6 +432,30 @@ public final class Session {
         });
     }
 
+    /** A picture with part of it painted again, and that part (CSS pixels of the picture). */
+    private record Repainted(HtmlRenderer.Frame frame, Rectangle2D region) {}
+
+    /**
+     * [base] (the last picture, or a ScrollCache's tall one) with what [moved] touches painted again, into its own
+     * image, in [state]. Null when that is not enough (then [base]'s image may be half repainted): draw it all.
+     */
+    private Repainted repaint(Page p, Document d, double scale, Selector.State state, HtmlRenderer.Frame base, Set<Element> moved) {
+        // A page where hovering one element restyles its siblings ('+', '~') is drawn whole.
+        Rectangle2D changed = p.siblingStates() ? null : dirtyRegion(base, moved);
+        if (changed == null || !small(changed, base)) return null;
+        HtmlRenderer.Frame f = HtmlRenderer.render(p, d, canvas.width(), canvas.height(), scale, base.scrollY(), state, base.image(), changed);
+        // The new state may reach further than the old one did (a shadow only hovering adds): then
+        // paint both. If it cannot be told, or it is too much, draw it all.
+        Rectangle2D after = dirtyRegion(f, moved);
+        if (after == null) return null;
+        if (!changed.contains(after)) {
+            changed = changed.createUnion(after);
+            if (!small(changed, base)) return null;
+            f = HtmlRenderer.render(p, d, canvas.width(), canvas.height(), scale, base.scrollY(), state, base.image(), changed);
+        }
+        return sameLayout(base, f, changed) ? new Repainted(f, changed) : null;
+    }
+
     /** Room round a changed element for what it may draw outside itself on hover beyond its shadows and blur: a lift, a glow. */
     private static final double DIRTY_MARGIN = 48;
 
@@ -411,9 +470,9 @@ public final class Session {
     }
 
     /**
-     * The part of the viewport (CSS pixels) that [changed] and everything inside them cover in [f],
-     * grown by the furthest their styles there paint outside themselves. Null when it cannot be told,
-     * or when a box with a backdrop filter meets it (draw it all).
+     * The part of [f]'s picture (CSS pixels from its top: the view, or a ScrollCache's taller picture) that
+     * [changed] and everything inside them cover, grown by the furthest their styles there paint outside
+     * themselves. Null when it cannot be told, or when a box with a backdrop filter meets it (draw it all).
      */
     private static Rectangle2D dirtyRegion(HtmlRenderer.Frame f, Set<Element> changed) {
         Rectangle2D area = null;
@@ -428,7 +487,7 @@ public final class Session {
             reach = Math.max(reach, paintsOutside(f.style(h.element())));
         }
         if (area == null) return null;
-        Rectangle2D view = new Rectangle2D.Double(0, 0, f.viewportWidth(), f.viewportHeight());
+        Rectangle2D view = new Rectangle2D.Double(0, 0, f.viewportWidth(), f.image().getHeight() / f.scale());
         Rectangle2D padded = new Rectangle2D.Double(area.getX() - reach, area.getY() - f.scrollY() - reach,
                 area.getWidth() + 2 * reach, area.getHeight() + 2 * reach);
         Rectangle2D out = padded.createIntersection(view);
@@ -510,6 +569,7 @@ public final class Session {
     public void dispose() {
         synchronized (this) {
             closed = true;
+            cache = null;
         }
     }
 
@@ -597,7 +657,8 @@ public final class Session {
     public void scroll(int notches) {
         HtmlRenderer.Frame f = frame;
         if (f == null) return;
-        double to = Math.max(0, Math.min(f.maxScroll(), scrollY + notches * plugin.scrollStep()));
+        // Whole pixels of the canvas, so the view can be cut from a tall picture (ScrollCache) and matches one drawn on its own.
+        double to = ScrollCache.snap(Math.max(0, Math.min(f.maxScroll(), scrollY + notches * plugin.scrollStep())), scale());
         if (to == scrollY) return;
         scrollY = to;
         render();
@@ -785,7 +846,7 @@ public final class Session {
         if (target == null) return;
         double top = f.topOf(target);
         if (Double.isNaN(top)) return;
-        scrollY = Math.max(0, Math.min(f.maxScroll(), top));
+        scrollY = ScrollCache.snap(Math.max(0, Math.min(f.maxScroll(), top)), scale());
         render();
     }
 

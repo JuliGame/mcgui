@@ -88,7 +88,9 @@ public final class Painter {
             }
         }
         g.setColor(Color.WHITE);
-        g.fill(new Rectangle2D.Double(0, 0, viewportW, viewportH));
+        // All of the page, not only the view: a picture can be taller than the view (a ScrollCache's), and a band
+        // paints rows past the picture's edges for the blurs there.
+        g.fill(new Rectangle2D.Double(0, -scrollY, viewportW, Math.max(scrollY + viewportH, root.overflowBottom)));
         if (!transparent(canvasSource.style)) {
             Rectangle2D page = new Rectangle2D.Double(0, 0, viewportW, Math.max(viewportH, root.overflowBottom));
             AffineTransform saved = g.getTransform();
