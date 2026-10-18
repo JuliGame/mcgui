@@ -53,6 +53,9 @@ public final class Pipeline {
 
         /** Their client took a teleport the server sent: every rotation after this is from after it. */
         void teleported();
+
+        /** They clicked or scrolled; the rotation that comes next is where they were looking when they did. */
+        default void clicked() {}
     }
 
     private record Pending(UUID player, Runnable then) {}
@@ -221,6 +224,8 @@ public final class Pipeline {
                 try {
                     if (nms.acceptsTeleport(msg)) {
                         mouse.teleported();
+                    } else if (nms.isClick(msg)) {
+                        mouse.clicked();
                     } else {
                         float[] turn = nms.rotation(msg);
                         if (turn != null) mouse.turned(turn[0], turn[1]);

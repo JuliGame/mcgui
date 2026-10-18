@@ -72,6 +72,8 @@ public final class Nms {
     private final Field moveEntityId;
     private final Class<?> positionSyncPacket, teleportPacket;
     private final MethodHandle positionSyncId, teleportId;
+    /** What a click or a wheel step sends, each before that client tick's rotation. */
+    private final List<Class<?>> clickPackets;
 
     public Nms(org.bukkit.Server server) throws ReflectiveOperationException {
         String craft = server.getClass().getPackageName();
@@ -144,6 +146,17 @@ public final class Nms {
         moveEntityId = open(moveEntityPacket, "entityId");
         newPlayerRotation = L.findConstructor(Class.forName(game + "ClientboundPlayerRotationPacket"),
                 MethodType.methodType(void.class, float.class, boolean.class, float.class, boolean.class));
+        // Looked up leniently: a click type a version lacks (or renamed) only loses its exact timing.
+        List<Class<?>> clicks = new java.util.ArrayList<>();
+        for (String name : List.of("ServerboundSwingPacket", "ServerboundAttackPacket", "ServerboundInteractPacket",
+                "ServerboundUseItemOnPacket", "ServerboundUseItemPacket", "ServerboundSetCarriedItemPacket")) {
+            try {
+                clicks.add(Class.forName(game + name));
+            } catch (ClassNotFoundException ignored) {
+                // See above.
+            }
+        }
+        clickPackets = List.copyOf(clicks);
     }
 
     private static Field open(Class<?> owner, String name) throws NoSuchFieldException {
@@ -333,11 +346,25 @@ public final class Nms {
 
     /** Sets a player's pitch and leaves their yaw alone (a relative turn of nothing). */
     public Object pitch(float pitch) {
+        return rotate(0f, true, pitch, false);
+    }
+
+    /** Turns a player to [yaw] and [pitch], each by that much instead where [relativeYaw] / [relativePitch]. */
+    public Object rotate(float yaw, boolean relativeYaw, float pitch, boolean relativePitch) {
         try {
-            return newPlayerRotation.invoke(0f, true, pitch, false);
+            return newPlayerRotation.invoke(yaw, relativeYaw, pitch, relativePitch);
         } catch (Throwable t) {
             throw rethrow(t);
         }
+    }
+
+    /**
+     * Whether [msg] is a click (an attack, a swing, a use, an entity interaction) or a wheel step: the
+     * client sends these while it handles input, before the same tick's rotation.
+     */
+    public boolean isClick(Object msg) {
+        for (Class<?> c : clickPackets) if (c.isInstance(msg)) return true;
+        return false;
     }
 
     /** The client's colour for a packed map colour byte, as the client itself computes it (ARGB). */
