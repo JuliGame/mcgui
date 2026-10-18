@@ -53,8 +53,8 @@ final class Shadows {
         return out;
     }
 
-    /** An outer box shadow for a border box at (x, y), only outside the box itself. */
-    static void outer(Graphics2D g, double x, double y, double w, double h, double[] radii, Shadow sh, double scale) {
+    /** An outer box shadow for a border box at (x, y), only outside the box itself; [surface] as for {@link #blurred}. */
+    static void outer(Graphics2D g, double x, double y, double w, double h, double[] radii, Shadow sh, double scale, java.awt.Rectangle surface) {
         if ((sh.color >>> 24) == 0) return;
         double[] r = Shapes.outset(radii, sh.spread);
         Shape shape = Shapes.rect(x + sh.x - sh.spread, y + sh.y - sh.spread, w + 2 * sh.spread, h + 2 * sh.spread, r);
@@ -63,12 +63,12 @@ final class Shadows {
         Area outside = new Area(new Rectangle2D.Double(-1e5, -1e5, 2e5, 2e5));
         outside.subtract(new Area(Shapes.rect(x, y, w, h, radii)));
         g.clip(outside);
-        blurred(g, shape, sh.color, sh.blur, scale);
+        blurred(g, shape, sh.color, sh.blur, scale, surface);
         g.setClip(old);
     }
 
     /** An inset shadow inside [padding]. */
-    static void inner(Graphics2D g, Shape padding, Shadow sh, double scale) {
+    static void inner(Graphics2D g, Shape padding, Shadow sh, double scale, java.awt.Rectangle surface) {
         if ((sh.color >>> 24) == 0) return;
         Rectangle2D b = padding.getBounds2D();
         Area ring = new Area(new Rectangle2D.Double(b.getX() - sh.blur * 3 - Math.abs(sh.x) - 10, b.getY() - sh.blur * 3 - Math.abs(sh.y) - 10,
@@ -77,7 +77,7 @@ final class Shadows {
         ring.subtract(new Area(hole));
         Shape old = g.getClip();
         g.clip(padding);
-        blurred(g, ring, sh.color, sh.blur, scale);
+        blurred(g, ring, sh.color, sh.blur, scale, surface);
         g.setClip(old);
     }
 
@@ -93,8 +93,11 @@ final class Shadows {
         return t.createTransformedShape(s);
     }
 
-    /** Fills [shape] with [color], blurred by [blur] CSS pixels (a Gaussian of sigma blur/2). */
-    static void blurred(Graphics2D g, Shape shape, int color, double blur, double scale) {
+    /**
+     * Fills [shape] with [color], blurred by [blur] CSS pixels (a Gaussian of sigma blur/2). [surface] is
+     * the device bounds of what [g] draws on: only the part of the blur that can land there is worked out.
+     */
+    static void blurred(Graphics2D g, Shape shape, int color, double blur, double scale, java.awt.Rectangle surface) {
         if (blur <= 0.25) {
             g.setColor(new Color(color, true));
             g.fill(shape);
@@ -105,48 +108,60 @@ final class Shadows {
         double sigma = blur / 2 * scale;
         int pad = (int) Math.ceil(sigma * 3) + 2;
         java.awt.Rectangle r = devShape.getBounds();
-        // Only what can still be seen: the clip, grown by the blur.
-        if (g.getClip() != null) {
-            java.awt.Rectangle clip = dev.createTransformedShape(g.getClip()).getBounds();
-            clip.grow(pad, pad);
-            r = r.intersection(clip);
-            if (r.isEmpty()) return;
-        }
         r.grow(pad, pad);
-        if ((long) r.width * r.height > 25_000_000L) return;
         // A wide blur is worked out small and scaled back up (see Blur.shrink).
         double k = Blur.shrink(sigma);
         int w = Math.max(1, (int) Math.ceil(r.width / k)), h = Math.max(1, (int) Math.ceil(r.height / k));
-        BufferedImage img = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB_PRE);
+        // The small picture is drawn at r, w x h pixels stretched to r's size.
+        double sx = (double) r.width / w, sy = (double) r.height / h;
+        // Only what can be seen: the surface, within the clip. Cut on the small picture's own pixel grid,
+        // so the pixels kept are the ones the whole picture would have (bands painted apart agree), and
+        // with a margin past the visible edge for the blur and the stretch to read from.
+        java.awt.Rectangle vis = surface;
+        if (g.getClip() != null) vis = vis.intersection(dev.createTransformedShape(g.getClip()).getBounds());
+        int margin = pad + 2 * (int) Math.ceil(k);
+        int i0 = Math.max(0, (int) Math.floor((vis.getMinX() - margin - r.x) / sx));
+        int j0 = Math.max(0, (int) Math.floor((vis.getMinY() - margin - r.y) / sy));
+        int i1 = Math.min(w, (int) Math.ceil((vis.getMaxX() + margin - r.x) / sx));
+        int j1 = Math.min(h, (int) Math.ceil((vis.getMaxY() + margin - r.y) / sy));
+        if (vis.isEmpty() || i1 <= i0 || j1 <= j0) return;
+        if ((long) (i1 - i0) * (j1 - j0) > 25_000_000L) return;
+        BufferedImage img = new BufferedImage(i1 - i0, j1 - j0, BufferedImage.TYPE_INT_ARGB_PRE);
         Graphics2D ig = img.createGraphics();
         // Fill with the shadow's colour at zero alpha first, so blurring only ever mixes alpha.
         ig.setComposite(AlphaComposite.Src);
         ig.setColor(new Color(color & 0xFFFFFF, true));
-        ig.fillRect(0, 0, w, h);
+        ig.fillRect(0, 0, img.getWidth(), img.getHeight());
         ig.setComposite(AlphaComposite.SrcOver);
         ig.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         ig.setColor(new Color(color | 0xFF000000));
+        ig.translate(-i0, -j0);
         ig.scale(1 / k, 1 / k);
         ig.translate(-r.x, -r.y);
         ig.fill(devShape);
         ig.dispose();
         Blur.blur(img, sigma / k);
         AffineTransform saved = g.getTransform();
-        g.setTransform(new AffineTransform());
         java.awt.Composite oldComposite = g.getComposite();
         Object oldInterpolation = g.getRenderingHint(RenderingHints.KEY_INTERPOLATION);
         g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
         float alpha = (color >>> 24) / 255f;
         g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, alpha * (oldComposite instanceof AlphaComposite ac ? ac.getAlpha() : 1)));
-        g.drawImage(img, r.x, r.y, r.width, r.height, null);
+        if (i0 == 0 && j0 == 0 && i1 == w && j1 == h) {
+            g.setTransform(new AffineTransform());
+            g.drawImage(img, r.x, r.y, r.width, r.height, null);
+        } else {
+            g.setTransform(new AffineTransform(sx, 0, 0, sy, r.x + i0 * sx, r.y + j0 * sy));
+            g.drawImage(img, 0, 0, null);
+        }
         g.setComposite(oldComposite);
         if (oldInterpolation != null) g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, oldInterpolation);
         g.setTransform(saved);
     }
 
-    static void text(Graphics2D g, TextShaper shaper, String text, Font font, double x, double y, Shadow sh, double scale) {
+    static void text(Graphics2D g, TextShaper shaper, String text, Font font, double x, double y, Shadow sh, double scale, java.awt.Rectangle surface) {
         if ((sh.color >>> 24) == 0) return;
         Shape glyphs = shaper.outline(text, font, x, y);
-        blurred(g, glyphs, sh.color, sh.blur, scale);
+        blurred(g, glyphs, sh.color, sh.blur, scale, surface);
     }
 }

@@ -95,7 +95,7 @@ public final class Painter {
             }
             if (!canvasSource.style.backgroundImages.isEmpty()) {
                 Rectangle2D area = canvasSource == root ? page : new Rectangle2D.Double(0, 0, viewportW, Math.max(viewportH, root.overflowBottom));
-                Backgrounds.paint(g, canvasSource.style, res, area, page);
+                Backgrounds.paint(g, canvasSource.style, res, area, page, surfaceBounds());
             }
             g.setTransform(saved);
         }
@@ -313,7 +313,7 @@ public final class Painter {
             g.setColor(new Color(s.backgroundColor, true));
             g.fill(shape);
         }
-        if (!s.backgroundImages.isEmpty()) Backgrounds.paint(g, s, res, r, shape);
+        if (!s.backgroundImages.isEmpty()) Backgrounds.paint(g, s, res, r, shape, surfaceBounds());
         double left = f.first ? box.b[3] : 0, right = f.last ? box.b[1] : 0;
         drawBorders(g, s, r, radii, new double[]{box.b[0], right, box.b[2], left});
         hit(shape, box.element != null ? box.element : box.owner);
@@ -333,7 +333,7 @@ public final class Painter {
         List<Shadows.Shadow> shadows = Shadows.parse(s.textShadow, s);
         for (int i = shadows.size() - 1; i >= 0; i--) {
             Shadows.Shadow sh = shadows.get(i);
-            Shadows.text(g, shaper, text, font, tx + sh.x(), ty + sh.y(), sh, deviceScale);
+            Shadows.text(g, shaper, text, font, tx + sh.x(), ty + sh.y(), sh, deviceScale, surfaceBounds());
         }
         Integer fill = s.textFillColor;
         boolean clipText = s.backgroundClips.contains("text") && !s.backgroundImages.isEmpty();
@@ -382,7 +382,7 @@ public final class Painter {
             mg.setColor(new Color(s.backgroundColor, true));
             mg.fill(area);
         }
-        Backgrounds.paint(mg, s, res, area, area);
+        Backgrounds.paint(mg, s, res, area, area, new java.awt.Rectangle(r.width, r.height));
         mg.dispose();
         AffineTransform saved = g.getTransform();
         g.setTransform(new AffineTransform());
@@ -493,7 +493,7 @@ public final class Painter {
             List<Shadows.Shadow> shadows = Shadows.parse(s.boxShadow, s);
             for (int i = shadows.size() - 1; i >= 0; i--) {
                 Shadows.Shadow sh = shadows.get(i);
-                if (!sh.inset()) Shadows.outer(g, x, y, b.w, b.h, radii, sh, deviceScale);
+                if (!sh.inset()) Shadows.outer(g, x, y, b.w, b.h, radii, sh, deviceScale, surfaceBounds());
             }
             if (!s.backdropFilter.equals("none") && surface != null) Filters.backdrop(g, surface, border, s, deviceScale);
             Shape clipBox = switch (Backgrounds.pick(s.backgroundClips, 0, "border-box")) {
@@ -509,10 +509,10 @@ public final class Painter {
             }
             if (!textClip && !s.backgroundImages.isEmpty()) {
                 Rectangle2D area = new Rectangle2D.Double(x + b.b[3], y + b.b[0], b.w - b.b[1] - b.b[3], b.h - b.b[0] - b.b[2]);
-                Backgrounds.paint(g, s, res, area, clipBox);
+                Backgrounds.paint(g, s, res, area, clipBox, surfaceBounds());
             }
             if (b.inner == Box.Inner.REPLACED) replaced(g, b, x, y, radii);
-            for (Shadows.Shadow sh : shadows) if (sh.inset()) Shadows.inner(g, padding(b, x, y), sh, deviceScale);
+            for (Shadows.Shadow sh : shadows) if (sh.inset()) Shadows.inner(g, padding(b, x, y), sh, deviceScale, surfaceBounds());
             drawBorders(g, s, new Rectangle2D.Double(x, y, b.w, b.h), radii, b.b);
         }
         if (!s.pointerEvents.equals("none")) hit(border, b.element != null ? b.element : b.owner);
@@ -527,6 +527,27 @@ public final class Painter {
     private void hit(Shape s, Element e) {
         if (e == null) return;
         hits.add(new Hit(pageTx.createTransformedShape(s), pageClip, e));
+    }
+
+    /** The device bounds of the surface being painted on. */
+    private java.awt.Rectangle surfaceBounds() {
+        return new java.awt.Rectangle(surface.getWidth(), surface.getHeight());
+    }
+
+    /**
+     * What [g] can still change of [surface] (the device bounds of what it draws on), in [g]'s user
+     * space: the surface, within the clip if there is one. Null when that is nothing.
+     */
+    static Rectangle2D visible(Graphics2D g, java.awt.Rectangle surface) {
+        Rectangle2D r;
+        try {
+            r = g.getTransform().createInverse().createTransformedShape(surface).getBounds2D();
+        } catch (java.awt.geom.NoninvertibleTransformException e) {
+            return null;
+        }
+        Shape clip = g.getClip();
+        if (clip != null) Rectangle2D.intersect(r, clip.getBounds2D(), r);
+        return r.isEmpty() ? null : r;
     }
 
     /** Borders: a ring per side, or one ring when all four match; dashed and dotted ones stroked. */

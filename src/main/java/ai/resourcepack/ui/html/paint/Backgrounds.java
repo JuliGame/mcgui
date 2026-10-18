@@ -27,8 +27,11 @@ import java.util.Locale;
 final class Backgrounds {
     private Backgrounds() {}
 
-    /** Paints every background layer of [s] into [area] (the positioning box), clipped to [clip]. */
-    static void paint(Graphics2D g, Style s, Resources res, Rectangle2D area, Shape clip) {
+    /**
+     * Paints every background layer of [s] into [area] (the positioning box), clipped to [clip].
+     * [surface] is the device bounds of what [g] draws on: tiles are laid only where they can be seen.
+     */
+    static void paint(Graphics2D g, Style s, Resources res, Rectangle2D area, Shape clip, java.awt.Rectangle surface) {
         List<String> images = s.backgroundImages;
         Shape old = g.getClip();
         g.clip(clip);
@@ -39,7 +42,7 @@ final class Backgrounds {
             String size = pick(s.backgroundSizes, i, "auto");
             String pos = pick(s.backgroundPositions, i, "0% 0%");
             String repeat = pick(s.backgroundRepeats, i, "repeat");
-            layer(g, layer, s, res, area, size, pos, repeat);
+            layer(g, layer, s, res, area, size, pos, repeat, surface);
         }
         g.setClip(old);
     }
@@ -49,7 +52,8 @@ final class Backgrounds {
         return list.get(i % list.size()).trim();
     }
 
-    private static void layer(Graphics2D g, String layer, Style s, Resources res, Rectangle2D area, String size, String pos, String repeat) {
+    private static void layer(Graphics2D g, String layer, Style s, Resources res, Rectangle2D area, String size, String pos, String repeat,
+                              java.awt.Rectangle surface) {
         String lower = layer.toLowerCase(Locale.ROOT);
         Picture pic = null;
         double natW, natH;
@@ -80,21 +84,41 @@ final class Backgrounds {
         if (rl.equals("no-repeat")) rx = ry = false;
         // A gradient the size of its box needs no tiling, whatever the repeat says.
         if (gradient && Math.abs(tile[0] - area.getWidth()) < 0.5 && Math.abs(tile[1] - area.getHeight()) < 0.5) rx = ry = false;
-        Rectangle2D clip = g.getClipBounds() == null ? area : g.getClip().getBounds2D();
+        // Tiles only where they can be seen: the clip [paint] set, within the surface. A full render has
+        // no clip of its own, so without the surface a page-long background would be tiled from top to bottom.
+        Rectangle2D visible = Painter.visible(g, surface);
+        if (visible == null) return;
         double x0 = at[0], y0 = at[1];
-        if (rx) x0 -= Math.ceil((x0 - clip.getMinX()) / tile[0]) * tile[0];
-        if (ry) y0 -= Math.ceil((y0 - clip.getMinY()) / tile[1]) * tile[1];
-        int guard = 0;
-        for (double y = y0; ry ? y < clip.getMaxY() : y == y0; y += tile[1]) {
-            for (double x = x0; rx ? x < clip.getMaxX() : x == x0; x += tile[0]) {
-                if (++guard > 4000) return;
-                if (gradient) gradient(g, layer, s, new Rectangle2D.Double(x, y, tile[0], tile[1]));
-                else pic.draw(g, x, y, tile[0], tile[1]);
+        if (rx) x0 -= Math.ceil((x0 - visible.getMinX()) / tile[0]) * tile[0];
+        if (ry) y0 -= Math.ceil((y0 - visible.getMinY()) / tile[1]) * tile[1];
+        // A gradient's Paint is built once, for the first tile, and moved to each of the others.
+        Rectangle2D first = new Rectangle2D.Double(x0, y0, tile[0], tile[1]);
+        Paint paint = gradient ? gradientPaint(layer, s, first) : null;
+        if (gradient && paint == null) return;
+        Paint oldPaint = g.getPaint();
+        AffineTransform base = g.getTransform();
+        if (gradient) g.setPaint(paint);
+        int tiles = 0;
+        tiling:
+        for (double y = y0; ry ? y < visible.getMaxY() : y == y0; y += tile[1]) {
+            for (double x = x0; rx ? x < visible.getMaxX() : x == x0; x += tile[0]) {
+                // Only against absurdly small tiles: a 2 px pattern over a whole 2x view is about 150 000.
+                if (++tiles > MAX_TILES) break tiling;
+                if (gradient) {
+                    g.translate(x - x0, y - y0);
+                    g.fill(first);
+                    g.setTransform(base);
+                } else {
+                    pic.draw(g, x, y, tile[0], tile[1]);
+                }
                 if (!rx) break;
             }
             if (!ry) break;
         }
+        g.setPaint(oldPaint);
     }
+
+    private static final int MAX_TILES = 250_000;
 
     static String url(String layer) {
         int at = layer.toLowerCase(Locale.ROOT).indexOf("url(");
@@ -186,22 +210,18 @@ final class Backgrounds {
 
     private record Stop(int color, double pos) {}
 
-    static void gradient(Graphics2D g, String layer, Style s, Rectangle2D r) {
+    /** The Paint of the gradient [layer] for a tile at [r], or null if it cannot be read. */
+    private static Paint gradientPaint(String layer, Style s, Rectangle2D r) {
         String lower = layer.toLowerCase(Locale.ROOT).trim();
         boolean repeating = lower.startsWith("repeating-");
         String name = lower.substring(0, lower.indexOf('('));
         String inner = layer.substring(layer.indexOf('(') + 1, layer.lastIndexOf(')'));
         List<String> args = Values.splitCommas(inner);
-        if (args.isEmpty()) return;
-        Paint paint = null;
-        if (name.endsWith("linear-gradient")) paint = linear(args, s, r, repeating);
-        else if (name.endsWith("radial-gradient")) paint = radial(args, s, r, repeating);
-        else if (name.endsWith("conic-gradient")) paint = conic(args, s, r);
-        if (paint == null) return;
-        Paint old = g.getPaint();
-        g.setPaint(paint);
-        g.fill(r);
-        g.setPaint(old);
+        if (args.isEmpty()) return null;
+        if (name.endsWith("linear-gradient")) return linear(args, s, r, repeating);
+        if (name.endsWith("radial-gradient")) return radial(args, s, r, repeating);
+        if (name.endsWith("conic-gradient")) return conic(args, s, r);
+        return null;
     }
 
     private static Paint linear(List<String> args, Style s, Rectangle2D r, boolean repeating) {
