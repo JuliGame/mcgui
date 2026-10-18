@@ -56,6 +56,18 @@ user-facing description; this file is the part that bites.
   in place (`Views.reveal`). The client sends its rotation once per client tick
   (20 a second, whatever the server's tick rate): raising the server's TPS
   would not make it send more often.
+- **Pictures skip the tick too.** `MapSender` runs on its own thread
+  (`UIFramework-send`). It wakes when a canvas publishes a drawing, or every
+  8 ms, and writes each player's patches straight to their channel with one
+  flush (`Nms.writeNow`). `Connection.send` would not do: off the server
+  thread it queues the packet until the next tick. `writeNow` drops the write
+  while the player is being reconfigured (`isAcceptingMessages()` is false),
+  when a game packet would fail to encode, and the tile is sent again later.
+  Who sees which canvas is still worked out once a tick on the server thread.
+  Pointer reports reach `ViewContent.pointer` through
+  `UIFramework.serverThread()`, the server's own task queue, which Paper
+  drains while it waits for the next tick: still the server thread, but not up
+  to 50 ms late.
 - **Depth direction is detected, not assumed.** The in-front trick scales
   `gl_FragCoord.z` towards "near"; the first port assumed reversed depth (26.2). The
   vertex shader passes `ProjMat[2][2] > -0.5` as `mcbReversed`, so the trick
