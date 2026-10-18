@@ -20,6 +20,20 @@ public abstract class Len {
 
     public static final Len ZERO = px(0);
 
+    /**
+     * Lengths are clamped to this many px either way, as browsers' fixed-point layout units saturate
+     * (Chrome's at 2^25 px): nothing that far away can be seen, and an infinite length (1e400px,
+     * calc(1e308px * 10)) would make NaN of every sum it enters, the page height included.
+     */
+    static final double LIMIT = 33_554_432;
+
+    /** calc(), min(), max() and clamp() nested deeper than this are invalid, so parsing never runs out of stack. */
+    private static final int MAX_NESTING = 32;
+
+    static double clamp(double v) {
+        return Double.isNaN(v) ? 0 : Math.max(-LIMIT, Math.min(LIMIT, v));
+    }
+
     public static Len px(double v) {
         return new Fixed(v);
     }
@@ -32,7 +46,7 @@ public abstract class Len {
         final double px;
 
         Fixed(double px) {
-            this.px = px;
+            this.px = clamp(px);
         }
 
         @Override public double of(double basis) { return px; }
@@ -47,7 +61,7 @@ public abstract class Len {
             this.pct = pct;
         }
 
-        @Override public double of(double basis) { return Double.isNaN(basis) ? 0 : basis * pct / 100; }
+        @Override public double of(double basis) { return Double.isNaN(basis) ? 0 : clamp(basis * pct / 100); }
         @Override public boolean relative() { return true; }
         @Override public String toString() { return pct + "%"; }
     }
@@ -65,7 +79,7 @@ public abstract class Len {
 
         @Override
         public double of(double basis) {
-            return switch (op) {
+            return clamp(switch (op) {
                 case '+' -> {
                     double s = 0;
                     for (Len t : terms) s += t.of(basis);
@@ -82,7 +96,7 @@ public abstract class Len {
                     for (Len t : terms) m = Math.max(m, t.of(basis));
                     yield m;
                 }
-            };
+            });
         }
 
         @Override
@@ -100,12 +114,19 @@ public abstract class Len {
      * accepted only if [unitless] (line-height multipliers and the like are handled by their caller).
      */
     public static Len parse(String s, Context c) {
+        return parse(s, c, 0);
+    }
+
+    private static Len parse(String s, Context c, int depth) {
         s = s.trim();
         if (s.isEmpty()) return null;
         String lower = s.toLowerCase(Locale.ROOT);
+        boolean function = lower.startsWith("calc(") || lower.startsWith("-webkit-calc(") || lower.startsWith("min(") || lower.startsWith("max(")
+                || lower.startsWith("clamp(");
+        if (function && depth >= MAX_NESTING) return null;
         if (lower.startsWith("calc(") || lower.startsWith("-webkit-calc(")) {
             String inner = s.substring(s.indexOf('(') + 1, s.length() - 1);
-            Object v = new Calc(inner, c).sum();
+            Object v = new Calc(inner, c, depth + 1).sum();
             return v instanceof Len l ? l : v instanceof Double d && d == 0 ? ZERO : null;
         }
         for (String fn : new String[]{"min", "max", "clamp"}) {
@@ -113,7 +134,7 @@ public abstract class Len {
             if (inner == null) continue;
             List<Len> args = new ArrayList<>();
             for (String part : Values.splitCommas(inner)) {
-                Object v = new Calc(part, c).sum();
+                Object v = new Calc(part, c, depth + 1).sum();
                 if (v instanceof Len l) args.add(l);
                 else if (v instanceof Double d && d == 0) args.add(ZERO);
                 else return null;
@@ -167,31 +188,43 @@ public abstract class Len {
     private static final class Calc {
         private final String s;
         private final Context c;
+        /** How many calc()s and parentheses this one is inside. */
+        private int depth;
         private int pos;
 
-        Calc(String s, Context c) {
+        Calc(String s, Context c, int depth) {
             this.s = s.trim();
             this.c = c;
+            this.depth = depth;
         }
 
+        /** A sum of lengths is one flat list of terms, so a long sum is no deeper than a short one. */
         Object sum() {
             Object left = product();
+            List<Len> terms = null;
             while (true) {
                 skip();
-                if (pos >= s.length()) return left;
+                if (pos >= s.length()) break;
                 char op = s.charAt(pos);
-                if (op != '+' && op != '-') return left;
+                if (op != '+' && op != '-') break;
                 pos++;
                 Object right = product();
                 if (left == null || right == null) return null;
-                if (left instanceof Double a && right instanceof Double b) {
+                if (terms == null && left instanceof Double a && right instanceof Double b) {
                     left = op == '+' ? a + b : a - b;
                     continue;
                 }
-                Len a = asLen(left), b = asLen(right);
-                if (a == null || b == null) return null;
-                left = new Expr('+', List.of(a, op == '+' ? b : new Expr('*', List.of(b), -1)), 1);
+                Len b = asLen(right);
+                if (terms == null) {
+                    Len a = asLen(left);
+                    if (a == null) return null;
+                    terms = new ArrayList<>();
+                    terms.add(a);
+                }
+                if (b == null) return null;
+                terms.add(op == '+' ? b : new Expr('*', List.of(b), -1));
             }
+            return terms == null ? left : new Expr('+', terms, 1);
         }
 
         private Object product() {
@@ -224,8 +257,11 @@ public abstract class Len {
             if (pos >= s.length()) return null;
             char ch = s.charAt(pos);
             if (ch == '(') {
+                if (depth >= MAX_NESTING) return null;
                 pos++;
+                depth++;
                 Object v = sum();
+                depth--;
                 skip();
                 if (pos < s.length() && s.charAt(pos) == ')') pos++;
                 return v;
@@ -234,16 +270,15 @@ public abstract class Len {
             if (Character.isLetter(ch)) {
                 // A nested function: calc(), min(), max(), clamp(), var() already substituted.
                 while (pos < s.length() && s.charAt(pos) != '(') pos++;
-                int depth = 0;
+                int open = 0;
                 for (; pos < s.length(); pos++) {
-                    if (s.charAt(pos) == '(') depth++;
-                    else if (s.charAt(pos) == ')' && --depth == 0) {
+                    if (s.charAt(pos) == '(') open++;
+                    else if (s.charAt(pos) == ')' && --open == 0) {
                         pos++;
                         break;
                     }
                 }
-                Len l = parse(s.substring(start, pos), c);
-                return l;
+                return parse(s.substring(start, pos), c, depth);
             }
             if (ch == '+' || ch == '-') pos++;
             while (pos < s.length() && (Character.isLetterOrDigit(s.charAt(pos)) || s.charAt(pos) == '.' || s.charAt(pos) == '%')) pos++;
