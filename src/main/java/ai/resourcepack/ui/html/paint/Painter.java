@@ -431,8 +431,18 @@ public final class Painter {
         }
         double tx = x + it.x, ty = y + it.baselineY;
         Font font = it.font;
-        // text-shadow, first one on top.
         List<Shadows.Shadow> shadows = Shadows.parse(s.textShadow, s);
+        // A band of a full picture is handed the whole page: text far above or below what it can show
+        // costs a layout and a glyph raster for nothing. Its hit region is still wanted.
+        Rectangle2D vis = visible(g, surfaceBounds());
+        double reach = 2 * Math.max(s.fontSize, font.getSize2D());
+        for (Shadows.Shadow sh : shadows) reach = Math.max(reach, 2 * s.fontSize + Math.abs(sh.y()) + 3 * sh.blur());
+        if (vis == null || ty + reach < vis.getMinY() || ty - reach > vis.getMaxY()) {
+            Fonts.Metrics m = shaper.fonts().metrics(font);
+            hit(new Rectangle2D.Double(tx, ty - m.ascent(), it.w, m.ascent() + m.descent()), s, it.box.owner);
+            return;
+        }
+        // text-shadow, first one on top.
         for (int i = shadows.size() - 1; i >= 0; i--) {
             Shadows.Shadow sh = shadows.get(i);
             Shadows.text(g, shaper, text, font, tx + sh.x(), ty + sh.y(), sh, deviceScale, surfaceBounds());
