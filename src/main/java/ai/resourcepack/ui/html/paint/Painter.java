@@ -138,8 +138,10 @@ public final class Painter {
             pageTx = savedPage;
             return;
         }
-        if (layer) {
+        if (layer && layers < MAX_LAYERS) {
+            layers++;
             layered(g, box, x, y);
+            layers--;
         } else {
             contextBody(g, box, x, y);
         }
@@ -175,6 +177,15 @@ public final class Painter {
             pageClip = oldPage;
         }
     }
+
+    /**
+     * Layers nested deeper than this are not made: such a box is painted straight onto the layer
+     * round it, its opacity and filter left out. Each layer is an image as big as what it covers, all
+     * of them held at once, and 500 nested translucent boxes would otherwise want gigabytes per band.
+     */
+    private static final int MAX_LAYERS = 8;
+    /** Layers being painted into, round the box being painted. */
+    private int layers;
 
     /** Opacity and filters: the subtree painted on a layer of its own, then blended in. */
     private void layered(Graphics2D g, Box box, double x, double y) {
