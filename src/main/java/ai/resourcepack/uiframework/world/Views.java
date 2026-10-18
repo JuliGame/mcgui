@@ -178,6 +178,8 @@ public final class Views implements Listener {
         int settleBy;
         /** A level head has been sent and the client's rotation may still come from before it. */
         boolean pitchReset;
+        /** A client-placed pointer: the player's whole turn from the picture's centre, not wrapped (degrees). */
+        double turnYaw;
         /** A turn back inside the picture has been sent and the client has not yet answered the ping after it. */
         volatile boolean correcting;
         /**
@@ -580,8 +582,16 @@ public final class Views implements Listener {
      */
     private void turnedClient(ViewImpl v, float yaw, float pitch) {
         double w = v.canvas.width(), h = v.canvas.height();
-        double x = w / 2 + v.speed * wrap(yaw - v.refYaw), y = h / 2 + v.speed * pitch;
+        // The shader sees the turn only within ±180°; the turn back past an edge goes by the whole turn
+        // (the same angle, give or take whole turns, nearest to where the last rotation left it), so a
+        // flick right round the back is still undone the way it went.
+        double turn = wrap(yaw - v.refYaw);
+        v.turnYaw = v.primed ? turn + 360 * Math.round((v.turnYaw + wrap(yaw - v.lastYaw) - turn) / 360) : turn;
+        v.lastYaw = yaw;
+        v.primed = true;
+        double x = w / 2 + v.speed * turn, y = h / 2 + v.speed * pitch;
         double cx = Math.max(0, Math.min(w - 1.0, x)), cy = Math.max(0, Math.min(h - 1.0, y));
+        double whole = w / 2 + v.speed * v.turnYaw;
         boolean moved = cx != v.cursorX || cy != v.cursorY;
         v.cursorX = cx;
         v.cursorY = cy;
@@ -601,11 +611,12 @@ public final class Views implements Listener {
             }
         }
         if (moved) queueReport(v);
-        if (!v.correcting && (Math.abs(cx - x) > 0.5 || Math.abs(cy - y) > 0.5)) {
+        double backX = Math.max(0, Math.min(w - 1.0, whole)) - whole, backY = cy - y;
+        if (!v.correcting && (Math.abs(backX) > 0.5 || Math.abs(backY) > 0.5)) {
             Player p = Bukkit.getPlayer(v.player);
             if (p == null) return;
             v.correcting = true;
-            float dyaw = (float) ((cx - x) / v.speed), dpitch = (float) ((cy - y) / v.speed);
+            float dyaw = (float) (backX / v.speed), dpitch = (float) (backY / v.speed);
             plugin.getLogger().info("[pointer] past the edge: turning back " + dyaw + "," + dpitch);
             pipeline.sendNow(v.player, nms.rotate(dyaw, true, dpitch, true));
             pipeline.afterClientCaughtUp(p, () -> v.correcting = false);
