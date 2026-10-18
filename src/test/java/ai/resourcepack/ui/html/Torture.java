@@ -192,8 +192,11 @@ public final class Torture {
                     detail = "in " + run.stage + " @ " + frames(t.getStackTrace()) + painters();
                 } else if (run.error != null) {
                     outcome = run.error instanceof OutOfMemoryError ? "OOM" : "EXCEPTION";
-                    String msg = (run.error.getClass().getSimpleName() + ": " + run.error.getMessage()).replaceAll("\\s+", " ");
-                    detail = msg.substring(0, Math.min(160, msg.length())) + " in " + run.stage + " @ " + frames(run.error.getStackTrace());
+                    // A band painter's exception comes back from join() as a copy, with the original as its cause.
+                    Throwable root = run.error;
+                    while (root.getCause() != null && root.getCause() != root) root = root.getCause();
+                    String msg = (root.getClass().getSimpleName() + ": " + root.getMessage()).replaceAll("\\s+", " ");
+                    detail = msg.substring(0, Math.min(160, msg.length())) + " in " + run.stage + " @ " + frames(root.getStackTrace());
                 } else {
                     outcome = "ok";
                     detail = run.problems;
