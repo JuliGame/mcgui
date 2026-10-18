@@ -2,9 +2,11 @@ package ai.resourcepack.ui.html.css;
 
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
 
@@ -19,19 +21,32 @@ import java.util.function.Function;
 public final class CssParser {
     private final String src;
     private final URI base;
-    private final Function<URI, String> importer;
+    private final Imports imports;
     private int pos;
     private final Stylesheet out;
     private int depth;
-    /** Every sheet this parse has read, itself included: each is imported at most once, so sheets that import each other end. */
-    private final Set<URI> imported;
 
-    private CssParser(String src, URI base, Function<URI, String> importer, Stylesheet out, Set<URI> imported) {
+    /** What every sheet of one parse shares about @import: the sheets being read, how many, and their text. */
+    private static final class Imports {
+        /** Most sheets one parse imports: enough for any page, few enough that a server cannot fan out forever. */
+        static final int MAX = 64;
+        final Function<URI, String> importer;
+        /** The sheets on the current import chain: one importing any of them again is a cycle. */
+        final Set<URI> chain = new HashSet<>();
+        /** Each sheet's text, fetched once however often it is imported (null for one that failed). */
+        final Map<URI, String> fetched = new HashMap<>();
+        int count;
+
+        Imports(Function<URI, String> importer) {
+            this.importer = importer;
+        }
+    }
+
+    private CssParser(String src, URI base, Stylesheet out, Imports imports) {
         this.src = stripComments(src);
         this.base = base;
-        this.importer = importer;
         this.out = out;
-        this.imported = imported;
+        this.imports = imports;
     }
 
     /**
@@ -39,14 +54,14 @@ public final class CssParser {
      * [origin] orders rules across sheets: later sheets win ties.
      */
     public static void parse(String css, URI base, Function<URI, String> importer, Stylesheet into) {
-        Set<URI> imported = new HashSet<>();
-        if (base != null) imported.add(base.normalize());
-        new CssParser(css, base, importer, into, imported).sheet(null);
+        Imports imports = new Imports(importer);
+        if (base != null) imports.chain.add(base.normalize());
+        new CssParser(css, base, into, imports).sheet(null);
     }
 
     /** A {@code style=""} attribute's declarations. */
     public static List<Declaration> declarations(String block, URI base) {
-        CssParser p = new CssParser(block, base, u -> null, new Stylesheet(), new HashSet<>());
+        CssParser p = new CssParser(block, base, new Stylesheet(), new Imports(u -> null));
         return p.declarationList(p.src);
     }
 
@@ -171,15 +186,21 @@ public final class CssParser {
         } catch (IllegalArgumentException e) {
             return;
         }
-        // Each sheet once: a sheet that imports itself (or one that imports it back) would otherwise be
-        // read again at every level, doubling its rules each time.
-        if (depth > 8 || !imported.add(uri.normalize())) return;
-        String css = importer.apply(uri);
+        // A sheet importing one of the sheets that led to it is a cycle, skipped as browsers do. The same
+        // sheet imported again elsewhere is read again, under that import's media and at its place in
+        // the cascade; only the count of imports stops a server fanning out into endless distinct sheets.
+        URI key = uri.normalize();
+        if (depth > 8 || imports.chain.contains(key) || imports.count >= Imports.MAX) return;
+        if (!imports.fetched.containsKey(key)) imports.fetched.put(key, imports.importer.apply(uri));
+        String css = imports.fetched.get(key);
         if (css == null) return;
+        imports.count++;
         Media m = rest.isEmpty() ? media : Media.and(media, Media.parse(rest));
-        CssParser child = new CssParser(css, uri, importer, out, imported);
+        CssParser child = new CssParser(css, uri, out, imports);
         child.depth = depth + 1;
+        imports.chain.add(key);
         child.sheet(m);
+        imports.chain.remove(key);
     }
 
     private void qualifiedRule(Media media) {
