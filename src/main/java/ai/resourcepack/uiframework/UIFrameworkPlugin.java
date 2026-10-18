@@ -117,7 +117,7 @@ public final class UIFrameworkPlugin extends JavaPlugin implements UIFramework, 
                 Canvas canvas;
                 try {
                     canvas = wall.content().canvas(viewer);
-                } catch (RuntimeException e) {
+                } catch (RuntimeException | LinkageError e) {
                     getLogger().log(Level.WARNING, "A screen's content failed", e);
                     continue;
                 }
