@@ -123,7 +123,7 @@ public final class Torture {
             String[] p = row[0].split(":");
             Path dir = BUILD.resolve("fuzz-flagged");
             Files.createDirectories(dir);
-            Files.writeString(dir.resolve(p[1] + "-" + p[2] + ".html"), HtmlFuzz.page(Long.parseLong(p[1]), Integer.parseInt(p[2])));
+            Files.write(dir.resolve(p[1] + "-" + p[2] + ".html"), HtmlFuzz.page(Long.parseLong(p[1]), Integer.parseInt(p[2])).getBytes(StandardCharsets.UTF_8));
         }
     }
 
