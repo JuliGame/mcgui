@@ -191,6 +191,11 @@ public final class Selector {
     private static void pseudo(String name, String arg, Compound c) {
         switch (name) {
             case "not", "is", "where", "matches", "any", "-webkit-any" -> {
+                // Selectors in selectors are read recursively: one nested past MAX_NESTING never matches.
+                if (arg != null && nesting(arg) > MAX_NESTING) {
+                    c.never = true;
+                    return;
+                }
                 List<Selector> args = arg == null ? List.of() : parseList(arg);
                 if (args.isEmpty() && !name.equals("not")) c.never = true;
                 c.pseudos.add(new Pseudo(name.equals("not") || name.equals("where") ? name : "is", arg, args, null));
@@ -214,6 +219,19 @@ public final class Selector {
             }
             default -> c.never = true;
         }
+    }
+
+    private static final int MAX_NESTING = 32;
+
+    /** How deep the parentheses in [s] go. */
+    private static int nesting(String s) {
+        int depth = 0, max = 0;
+        for (int i = 0; i < s.length(); i++) {
+            char ch = s.charAt(i);
+            if (ch == '(') max = Math.max(max, ++depth);
+            else if (ch == ')') depth--;
+        }
+        return max;
     }
 
     /** {a, b} for An+B, odd, even. */
