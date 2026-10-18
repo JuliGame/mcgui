@@ -7,8 +7,15 @@ import java.awt.image.DataBufferInt;
 final class Blur {
     private Blur() {}
 
+    /**
+     * Wider blurs are this wide: one this wide already spreads every pixel over any picture, and the
+     * box sums stay within an int ({@code 255 * box} for a box about four sigmas across).
+     */
+    private static final double MAX_SIGMA = 100_000;
+
     static void blur(BufferedImage img, double sigma) {
-        if (sigma < 0.5) return;
+        if (!(sigma >= 0.5)) return;
+        sigma = Math.min(sigma, MAX_SIGMA);
         int w = img.getWidth(), h = img.getHeight();
         int[] px = ((DataBufferInt) img.getRaster().getDataBuffer()).getData();
         int[] tmp = new int[px.length];
@@ -69,9 +76,13 @@ final class Blur {
         long m = ((1L << 40) + 2L * d - 1) / (2L * d);
         for (int y = 0; y < h; y++) {
             int row = y * w;
-            int a = 0, rr = 0, g = 0, b = 0;
-            for (int i = -r; i <= r; i++) {
-                int p = src[row + Math.min(w - 1, Math.max(0, i))];
+            // The window round x = 0: r copies of the first pixel (the edge repeats), the row up to r,
+            // and copies of the last pixel for whatever of the window lies past the row's end.
+            int first = src[row], last = src[row + w - 1], beyond = Math.max(0, r - (w - 1));
+            int a = r * (first >>> 24) + beyond * (last >>> 24), rr = r * (first >> 16 & 255) + beyond * (last >> 16 & 255);
+            int g = r * (first >> 8 & 255) + beyond * (last >> 8 & 255), b = r * (first & 255) + beyond * (last & 255);
+            for (int i = 0, n = Math.min(r, w - 1); i <= n; i++) {
+                int p = src[row + i];
                 a += p >>> 24;
                 rr += p >> 16 & 255;
                 g += p >> 8 & 255;
