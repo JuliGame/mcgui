@@ -36,6 +36,8 @@ public final class Canvas {
     private final AtomicReferenceArray<byte[]> hi;
     /** HI_OWN tiles with the HI array each was made from, so a stale one is never handed out. */
     private final AtomicReferenceArray<Own> hiOwn;
+    /** HI_TILED tiles, likewise. */
+    private final AtomicReferenceArray<Own> hiTiled;
     /** PLAIN tiles with the HI array each was made with: made only when somebody without the pack looks. */
     private final AtomicReferenceArray<Own> plain;
     private volatile long version;
@@ -59,6 +61,7 @@ public final class Canvas {
         int tiles = cols * rows;
         hi = new AtomicReferenceArray<>(tiles);
         hiOwn = new AtomicReferenceArray<>(tiles);
+        hiTiled = new AtomicReferenceArray<>(tiles);
         plain = new AtomicReferenceArray<>(tiles);
         for (int i = 0; i < ycc.length; i += 3) {
             ycc[i] = 0;
@@ -201,6 +204,15 @@ public final class Canvas {
                 }
                 yield own.tile;
             }
+            case HI_TILED -> {
+                byte[] base = hi.get(index);
+                Own own = hiTiled.get(index);
+                if (own == null || own.base != base) {
+                    own = new Own(base, palette.markTiled(base, cols, rows, index % cols, index / cols));
+                    hiTiled.set(index, own);
+                }
+                yield own.tile;
+            }
         };
     }
 
@@ -236,6 +248,8 @@ public final class Canvas {
         HI,
         /** HI, marked as the viewer's own fullscreen view: their client draws it in front of the world. */
         HI_OWN,
+        /** HI_OWN, carrying each tile's place too, for a view whose pointer the viewer's client draws. */
+        HI_TILED,
         /** Plain map colours, for players without the pack. */
         PLAIN
     }

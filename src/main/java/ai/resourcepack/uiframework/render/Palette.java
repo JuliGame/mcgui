@@ -133,6 +133,23 @@ public final class Palette {
         return own;
     }
 
+    /**
+     * A copy of a HI tile marked as tile ([col], [row]) of somebody's own fullscreen view of [cols] × [rows]
+     * maps whose pointer their client draws: both bottom marker colours the fourth, the view's columns
+     * and rows right of the marker as in {@link #markOwn}, and the tile's own column and row below those.
+     * The shader places the tile in the window from these alone, wherever its frame is.
+     */
+    public byte[] markTiled(byte[] hi, int cols, int rows, int col, int row) {
+        byte[] own = hi.clone();
+        own[128] = markerId[3];
+        own[129] = markerId[3];
+        own[2] = symbolId[Math.min(SYMBOLS - 1, cols)];
+        own[3] = symbolId[Math.min(SYMBOLS - 1, rows)];
+        own[130] = symbolId[Math.min(SYMBOLS - 1, col)];
+        own[131] = symbolId[Math.min(SYMBOLS - 1, row)];
+        return own;
+    }
+
     public void encodePlain(byte[] ycc, int stride, int ox, int oy, byte[] out) {
         for (int y = 0; y < 128; y++) {
             int i = ((oy + y) * stride + ox) * 3;
