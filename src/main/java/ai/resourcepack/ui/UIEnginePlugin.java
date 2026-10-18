@@ -58,8 +58,12 @@ public final class UIEnginePlugin extends JavaPlugin {
         pages = newPageStore();
         screens = new Screens(this, renderers);
         getServer().getPluginManager().registerEvents(screens, this);
-        // Warm the renderer (fonts, the default stylesheet) so the first page a player opens is quick.
-        renderers.execute(() -> ai.resourcepack.ui.html.text.Fonts.bundled());
+        // Warm the renderer so the first page a player opens is quick: fonts, then a few pages loaded and drawn
+        // once, full screen, off screen. A cold JVM takes several times longer over its first pictures.
+        renderers.execute(() -> {
+            ai.resourcepack.ui.html.text.Fonts.bundled();
+            warmUp();
+        });
         screens.load();
         UiCommand command = new UiCommand(this);
         getCommand("ui").setExecutor(command);
@@ -187,6 +191,38 @@ public final class UIEnginePlugin extends JavaPlugin {
     }
 
     /** A view's size in maps: the page's {@code <meta name="ui:size" content="12x7">}, else the config's. */
+    /** Pages {@link #warmUp} loads and draws when the plugin starts. */
+    private static final int WARM_PAGES = 3, WARM_ROUNDS = 3;
+
+    /**
+     * Loads the first few pages and draws each a few times at the default view size, so the JIT has
+     * compiled the layout, paint and conversion code before a player waits on it. Runs on a render thread.
+     */
+    private void warmUp() {
+        try {
+            long t0 = System.nanoTime();
+            int done = 0;
+            for (String name : pages.names()) {
+                if (done == WARM_PAGES || !isEnabled()) break;
+                Page page = pages.load(name).get(30, java.util.concurrent.TimeUnit.SECONDS);
+                if (page == null) continue;
+                int[] size = viewSize(page);
+                var canvas = UIFramework.get().canvas(size[0], size[1]);
+                double scale = canvas.height() / Screens.designHeight(page, viewHeight());
+                for (int i = 0; i < WARM_ROUNDS; i++) {
+                    var frame = ai.resourcepack.ui.html.HtmlRenderer.render(page, canvas.width(), canvas.height(), scale, i * 40.0,
+                            ai.resourcepack.ui.html.css.Selector.State.NONE);
+                    canvas.draw(frame.image(), 0, 0);
+                }
+                done++;
+            }
+            if (debug()) getLogger().info("Warmed up on " + done + " pages in " + (System.nanoTime() - t0) / 1_000_000 + " ms");
+        } catch (Exception | LinkageError e) {
+            // Only ever a head start: a page that will not load or draw here fails for the player too, with a message.
+            if (debug()) getLogger().info("Warm-up stopped: " + e);
+        }
+    }
+
     int[] viewSize(Page p) {
         String v = p.meta("ui:size");
         if (v == null) v = cfg.getString("views.size", "16x9");
