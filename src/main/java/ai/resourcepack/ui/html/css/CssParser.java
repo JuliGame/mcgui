@@ -2,8 +2,10 @@ package ai.resourcepack.ui.html.css;
 
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.function.Function;
 
 /**
@@ -21,12 +23,15 @@ public final class CssParser {
     private int pos;
     private final Stylesheet out;
     private int depth;
+    /** Every sheet this parse has read, itself included: each is imported at most once, so sheets that import each other end. */
+    private final Set<URI> imported;
 
-    private CssParser(String src, URI base, Function<URI, String> importer, Stylesheet out) {
+    private CssParser(String src, URI base, Function<URI, String> importer, Stylesheet out, Set<URI> imported) {
         this.src = stripComments(src);
         this.base = base;
         this.importer = importer;
         this.out = out;
+        this.imported = imported;
     }
 
     /**
@@ -34,12 +39,14 @@ public final class CssParser {
      * [origin] orders rules across sheets: later sheets win ties.
      */
     public static void parse(String css, URI base, Function<URI, String> importer, Stylesheet into) {
-        new CssParser(css, base, importer, into).sheet(null);
+        Set<URI> imported = new HashSet<>();
+        if (base != null) imported.add(base.normalize());
+        new CssParser(css, base, importer, into, imported).sheet(null);
     }
 
     /** A {@code style=""} attribute's declarations. */
     public static List<Declaration> declarations(String block, URI base) {
-        CssParser p = new CssParser(block, base, u -> null, new Stylesheet());
+        CssParser p = new CssParser(block, base, u -> null, new Stylesheet(), new HashSet<>());
         return p.declarationList(p.src);
     }
 
@@ -164,11 +171,13 @@ public final class CssParser {
         } catch (IllegalArgumentException e) {
             return;
         }
-        if (depth > 8) return;
+        // Each sheet once: a sheet that imports itself (or one that imports it back) would otherwise be
+        // read again at every level, doubling its rules each time.
+        if (depth > 8 || !imported.add(uri.normalize())) return;
         String css = importer.apply(uri);
         if (css == null) return;
         Media m = rest.isEmpty() ? media : Media.and(media, Media.parse(rest));
-        CssParser child = new CssParser(css, uri, importer, out);
+        CssParser child = new CssParser(css, uri, importer, out, imported);
         child.depth = depth + 1;
         child.sheet(m);
     }
