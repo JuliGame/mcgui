@@ -74,6 +74,8 @@ public final class Session {
     private volatile ScrollCache cache;
     /** How long a tall picture is kept with nothing cut from it. */
     private static final long CACHE_IDLE_NANOS = 15_000_000_000L;
+    /** No tall picture is painted of a document a refresh replaces within this many ticks. */
+    private static final int CACHE_MIN_TICKS = 100;
     /** The name of the page in [frame]; written before it. */
     private volatile String drawnName;
     /** Counts clicks, so the end of one press does not end a later one. */
@@ -316,6 +318,8 @@ public final class Session {
         String fragment = pendingFragment;
         pendingFragment = null;
         double scale = scale();
+        // A tall picture is worth painting only if its document lasts: not if a refresh replaces it within seconds.
+        boolean lasting = refreshTicks == 0 || nextRefresh - Bukkit.getCurrentTick() > CACHE_MIN_TICKS;
         renderers.execute(() -> {
             try {
                 long t0 = System.nanoTime();
@@ -338,13 +342,16 @@ public final class Session {
                     cache = c;
                     return;
                 }
+                boolean redraw = false;
                 if (c != null && !moved.isEmpty()) {
                     // The hover or press state moved: repaint what it touches in the whole tall picture, not only
                     // in view, since the rest of it will be scrolled into view.
                     HtmlRenderer.Frame strip = c.strip();
                     Repainted r = repaint(p, d, scale, state, strip, moved);
                     if (r == null) {
+                        // Not enough, and it may be half done: neither it nor the view in it will do.
                         c = null;
+                        redraw = true;
                     } else {
                         c.patched(r.frame());
                         Rectangle2D g = r.region();
@@ -354,7 +361,7 @@ public final class Session {
                 if (c != null) {
                     f = c.frame(at);
                     partial = still;
-                } else if (still) {
+                } else if (still && !redraw) {
                     // Only the hover or press state moved: repaint just what it touches.
                     Repainted r = repaint(p, d, scale, state, before, moved);
                     if (r != null) {
@@ -362,7 +369,7 @@ public final class Session {
                         changed = r.region();
                         partial = true;
                     }
-                } else if (same && ScrollCache.possible(before)) {
+                } else if (same && !still && lasting && ScrollCache.possible(before)) {
                     // Only the view moved (and perhaps the pointer's state with it). Painting is nearly all a picture
                     // costs, and the next notches will want the rows round this view: paint a few views' worth of
                     // the page at once, and cut this view and the next ones from that.
@@ -472,7 +479,8 @@ public final class Session {
     /**
      * The part of [f]'s picture (CSS pixels from its top: the view, or a ScrollCache's taller picture) that
      * [changed] and everything inside them cover, grown by the furthest their styles there paint outside
-     * themselves. Null when it cannot be told, or when a box with a backdrop filter meets it (draw it all).
+     * themselves, and over every blur it meets. Null when it cannot be told, or when a blur it meets is cut by
+     * the picture's edge (draw it all).
      */
     private static Rectangle2D dirtyRegion(HtmlRenderer.Frame f, Set<Element> changed) {
         Rectangle2D area = null;
@@ -492,19 +500,54 @@ public final class Session {
                 area.getWidth() + 2 * reach, area.getHeight() + 2 * reach);
         Rectangle2D out = padded.createIntersection(view);
         if (out.isEmpty()) return null;
-        // A backdrop filter blurs what is behind it, from a little past the region: in a partial repaint that
-        // is the last picture, already blurred and with text on it, which would show as a seam.
-        for (Painter.Hit h : f.hits()) {
-            Style s = f.style(h.element());
-            if (s == null || s.backdropFilter.equals("none")) continue;
-            Rectangle2D b = h.shape().getBounds2D();
-            if (out.intersects(b.getX(), b.getY() - f.scrollY(), b.getWidth(), b.getHeight())) return null;
+        // Blurs read round themselves. A filter blur blurs a layer of its own, which a partial repaint paints only
+        // inside the region, so a layer the region cuts would blur with a cut edge; a backdrop filter blurs what is
+        // painted under and round its box, which outside the region is the last picture, already blurred and with
+        // text on it. So the region takes in all of each it meets, as far as its blur reads. One the picture's edge
+        // cuts is drawn whole by a full picture, with the page past the edge under it (HtmlRenderer.paintBands),
+        // and cannot be repainted in part at all.
+        for (boolean grew = true; grew; ) {
+            grew = false;
+            for (Painter.Hit h : f.hits()) {
+                Style s = f.style(h.element());
+                if (s == null) continue;
+                double blur = blurReach(s.filter, s);
+                boolean backdrop = !s.backdropFilter.equals("none");
+                if (blur <= 0 && !backdrop) continue;
+                Rectangle2D b = blur > 0 ? extent(f, h.element()) : h.shape().getBounds2D();
+                if (backdrop) blur = Math.max(blur, blurReach(s.backdropFilter, s));
+                Rectangle2D layer = new Rectangle2D.Double(b.getX() - blur, b.getY() - f.scrollY() - blur, b.getWidth() + 2 * blur, b.getHeight() + 2 * blur);
+                if (!out.intersects(layer) || out.contains(layer)) continue;
+                if (!view.contains(layer)) return null;
+                out = out.createUnion(layer);
+                grew = true;
+            }
         }
-        return out;
+        // Out to whole pixels of the picture: a clip edge part way through a pixel leaves that pixel half repainted.
+        double sc = f.scale(), x0 = Math.floor(out.getX() * sc) / sc, y0 = Math.floor(out.getY() * sc) / sc;
+        return new Rectangle2D.Double(x0, y0, Math.ceil(out.getMaxX() * sc) / sc - x0, Math.ceil(out.getMaxY() * sc) / sc - y0).createIntersection(view);
     }
 
+    /** Where [e] and everything inside it are drawn in [f], in page CSS pixels. */
+    private static Rectangle2D extent(HtmlRenderer.Frame f, Element e) {
+        Rectangle2D area = null;
+        for (Painter.Hit h : f.hits()) {
+            boolean inside = false;
+            for (Element p = h.element(); p != null && !inside; p = p.parent()) inside = p == e;
+            if (!inside) continue;
+            Rectangle2D b = h.shape().getBounds2D();
+            if (area == null) area = new Rectangle2D.Double(b.getX(), b.getY(), b.getWidth(), b.getHeight());
+            else area.add(b);
+        }
+        return area;
+    }
+
+    /**
+     * Whether repainting [region] of [f]'s picture is worth it over painting all of it again: the view, or a
+     * ScrollCache's taller picture, whose whole repaint would cost several views.
+     */
     private static boolean small(Rectangle2D region, HtmlRenderer.Frame f) {
-        return region.getWidth() * region.getHeight() < 0.6 * f.viewportWidth() * f.viewportHeight();
+        return region.getWidth() * region.getHeight() < 0.6 * f.viewportWidth() * f.image().getHeight() / f.scale();
     }
 
     /** How far past its box (CSS pixels) an element styled [s] can paint: its outer shadows, its text's shadows, its blur. */
