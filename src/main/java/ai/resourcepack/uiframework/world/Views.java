@@ -294,11 +294,15 @@ public final class Views implements Listener {
         Location cam = wall.cameraLocation(fov);
         if (clientPointer) {
             // Where the picture really is no longer matters, only that the camera is flagged: so the middle
-            // of a block across and up, away from every block face (a click must hit the target round
-            // the eye before any block) and with the frames' block plainly the camera's own.
-            cam.setY(Math.floor(cam.getY()) + 0.5);
-            if (wall.facing.getModX() != 0) cam.setZ(Math.floor(cam.getZ()) + 0.5);
-            else cam.setX(Math.floor(cam.getX()) + 0.5);
+            // of the block the player's own eye is in (air, as they stand there), 3/128 off it along the
+            // flagged axis. Every block face is then at least 0.27 away: more than the half-width of
+            // the eye box the client tests for its in-wall overlay, and far more than the target round
+            // the eye, which a click must hit before any block. The frames' block is plainly the camera's.
+            Location eye = player.getEyeLocation();
+            double x = Math.floor(eye.getX()) + 0.5, y = Math.floor(eye.getY()) + 0.5, z = Math.floor(eye.getZ()) + 0.5;
+            if (wall.facing.getModX() != 0) x += Shaders.FLAG_PHASE;
+            else z += Shaders.FLAG_PHASE;
+            cam = new Location(world, x, y, z, cam.getYaw(), 0);
         }
         // Spawned unseen: the maps go out first, and the frames only appear once they can show them.
         wall.spawn(plugin, player, false, clientPointer ? stackBlock(cam) : null);
