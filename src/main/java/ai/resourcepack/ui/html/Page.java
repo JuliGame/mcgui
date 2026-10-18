@@ -17,6 +17,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.UnknownHostException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -97,7 +98,9 @@ public final class Page implements Resources {
                 String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
                 switch (scheme) {
                     case "file" -> {
-                        Path p = Path.of(uri).toAbsolutePath().normalize();
+                        Path p = file(uri);
+                        if (p == null) return null;
+                        p = p.toAbsolutePath().normalize();
                         // A stylesheet from the web can name file: URLs as well; pages may only read their own folder.
                         if (root != null && !p.startsWith(root)) return null;
                         return Files.isRegularFile(p) && Files.size(p) < 32 * 1024 * 1024 ? Files.readAllBytes(p) : null;
@@ -447,7 +450,7 @@ public final class Page implements Resources {
     }
 
     private String sheet(URI target, Loader loader) {
-        if ("file".equalsIgnoreCase(target.getScheme())) dependencies.add(Path.of(target));
+        depend(target);
         // Google Fonts sends TrueType to a browser it does not recognise; that is what Java can read.
         byte[] data = loader.fetch(target, isGoogleFonts(target) ? "Mozilla/5.0" : null);
         return data == null ? null : new String(data, StandardCharsets.UTF_8);
@@ -466,7 +469,7 @@ public final class Page implements Resources {
                 if (lower.contains(".woff")) continue;
                 URI u = resolve(uri, src);
                 if (u == null) continue;
-                if ("file".equalsIgnoreCase(u.getScheme())) dependencies.add(Path.of(u));
+                depend(u);
                 byte[] data = loader.fetch(u, null);
                 if (data != null) {
                     out.add(new Fonts.PageFont(face.family(), face.weight(), face.italic(), data));
@@ -496,10 +499,31 @@ public final class Page implements Resources {
             if (images.containsKey(u)) continue;
             URI target = resolve(null, u);
             if (target == null) continue;
-            if ("file".equalsIgnoreCase(target.getScheme())) dependencies.add(Path.of(target));
+            // url(#id) names something in the page itself (an SVG filter, clip or gradient), not an image file.
+            if (target.getFragment() != null && file(target) != null && file(target).equals(file(uri))) continue;
+            depend(target);
             Picture p = Pictures.decode(loader.fetch(target, null), u);
             if (p != null) images.put(u, p);
             else if (!u.startsWith("data:")) problems.add("Could not load image " + u);
+        }
+    }
+
+    /** Notes a file: [uri] as one this page read, so that changing it loads the page again. */
+    private void depend(URI uri) {
+        if (!"file".equalsIgnoreCase(uri.getScheme())) return;
+        Path p = file(uri);
+        if (p != null) dependencies.add(p);
+    }
+
+    /**
+     * The file a file: URI names, without its #fragment or ?query (Path.of refuses a URI with either,
+     * and {@code url(icons.svg#home)} names the file icons.svg), or null if it names no local file.
+     */
+    static Path file(URI uri) {
+        try {
+            return uri.getPath() == null || uri.getAuthority() != null ? null : Path.of(new URI("file", null, uri.getPath(), null));
+        } catch (URISyntaxException | RuntimeException e) {
+            return null;
         }
     }
 
