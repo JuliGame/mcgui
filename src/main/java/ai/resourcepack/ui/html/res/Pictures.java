@@ -6,6 +6,9 @@ import com.github.weisj.jsvg.parser.SVGLoader;
 import com.github.weisj.jsvg.view.ViewBox;
 
 import javax.imageio.ImageIO;
+import javax.imageio.ImageReadParam;
+import javax.imageio.ImageReader;
+import javax.imageio.stream.ImageInputStream;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.geom.AffineTransform;
@@ -14,20 +17,52 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.util.Iterator;
 
 /** Decoding images: bitmaps through ImageIO, SVG through JSVG. */
 public final class Pictures {
     private Pictures() {}
+
+    /** Bitmaps bigger than this many pixels are read at every second (third, ...) pixel: 16 MP is 64 MB decoded. */
+    static final long MAX_PIXELS = 16_000_000;
+    /** Past this, a bitmap is refused: even read sparsely, one row of it would be a large allocation. */
+    private static final int MAX_SIDE = 65_536;
 
     /** A picture from file bytes, or null if they are neither a bitmap Java reads nor an SVG. */
     public static Picture decode(byte[] data, String nameHint) {
         if (data == null || data.length == 0) return null;
         if (looksLikeSvg(data, nameHint)) return svg(new String(data, StandardCharsets.UTF_8));
         try {
-            BufferedImage img = ImageIO.read(new ByteArrayInputStream(data));
+            BufferedImage img = read(data);
             return img == null ? null : new Raster(img);
-        } catch (IOException | RuntimeException e) {
+        } catch (IOException | RuntimeException | OutOfMemoryError e) {
             return null;
+        }
+    }
+
+    /**
+     * ImageIO.read, but looking at the stated size first: a few kilobytes of PNG can state 30000 x 30000
+     * and decode to gigabytes. Large photos come out subsampled to under {@link #MAX_PIXELS}.
+     */
+    static BufferedImage read(byte[] data) throws IOException {
+        try (ImageInputStream in = ImageIO.createImageInputStream(new ByteArrayInputStream(data))) {
+            if (in == null) return null;
+            Iterator<ImageReader> readers = ImageIO.getImageReaders(in);
+            if (!readers.hasNext()) return null;
+            ImageReader reader = readers.next();
+            try {
+                reader.setInput(in, true, true);
+                long w = reader.getWidth(0), h = reader.getHeight(0);
+                if (w <= 0 || h <= 0 || w > MAX_SIDE || h > MAX_SIDE) return null;
+                ImageReadParam param = reader.getDefaultReadParam();
+                if (w * h > MAX_PIXELS) {
+                    int step = (int) Math.ceil(Math.sqrt((double) (w * h) / MAX_PIXELS));
+                    param.setSourceSubsampling(step, step, 0, 0);
+                }
+                return reader.read(0, param);
+            } finally {
+                reader.dispose();
+            }
         }
     }
 
