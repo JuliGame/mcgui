@@ -51,6 +51,16 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
   picture, a hover worked out again, a fragment scroll) goes through UI
   Framework's `serverThread()`, which runs between ticks, rather than
   `runTask`, which would wait for the next one.
+- **So does loading pages.** `PageStore.load` hands back a future (one per
+  page, however many ask) completed on a loader thread; sessions and views
+  show the page when it completes, back on the server thread, and a session
+  that has moved on meanwhile (`Session.navigation`) ignores it. Nothing on the
+  server thread may wait for one: a page's web fetches can take 15 s each.
+- **A session's `hover` and `pressed` are elements of its own `doc`**, which
+  can be ahead of the last picture's document. Elements found in a picture are
+  mapped into `doc` by their place in document order (`Session.counterpart`),
+  which works because every copy of one `Page`'s document has the same shape;
+  after a live reload the shape can differ, so nothing carries over then.
 - **Surfaces are premultiplied** (`TYPE_INT_ARGB_PRE`), which Java2D blends
   fastest and UI Framework's `Canvas` reads in place. A layer with a `filter`
   stays straight `TYPE_INT_ARGB`, because `Filters` edits its pixels as
@@ -72,11 +82,15 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
 - **Google Fonts send TrueType to a user agent they do not recognise**, which is
   why `Page` asks for their CSS as plain "Mozilla/5.0": Java cannot read WOFF.
   Web fetches are cached in `plugins/UIEngine/cache/` and switched off with
-  `allow-web: false`.
-- **`data-console` runs as the console** with placeholders already filled in.
-  Built-in placeholders are safe (Minecraft names are `[A-Za-z0-9_]`); a
-  PlaceholderAPI placeholder that can contain spaces or semicolons is the
-  server owner's to keep out of console commands.
+  `allow-web: false`. `Page.Loader` follows redirects itself so it can refuse
+  loopback and private addresses at every hop (`allow-private-hosts`), and
+  reads `file:` URLs only inside the pages folder.
+- **`data-console` runs as the console** with placeholders filled in at the
+  click, for whoever clicked, from the attribute as the page file has it.
+  `Placeholders.command` refuses the command (and logs why) when a filled
+  value has whitespace or `;` in it: `{player}` and `{uuid}` never do, but
+  `{display_name}` (nickname plugins), `{world}` (a folder name) and
+  PlaceholderAPI values can, and would add arguments to a console command.
 - **Permissions are one node per subcommand** (`uiengine.<sub>`, plus
   `.others` when the command names another player), checked in `UiCommand`
   through `permissionFor`. `uiengine.admin` is a parent in `plugin.yml` that

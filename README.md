@@ -23,7 +23,7 @@ renderer by eye.
 | `/ui close [player]` | Closes it |
 | `/ui place <page> [cols] [rows] [name] [shared]` | Puts a page on the wall you look at (the block becomes the top-left corner) |
 | `/ui remove [name]` | Takes a wall screen down (or the one you look at) |
-| `/ui list` · `/ui reload` | Pages and screens · read everything again |
+| `/ui list` · `/ui reload` | Pages and screens · read the config and every page again (`render-threads` needs a restart) |
 
 ### Permissions
 
@@ -46,8 +46,12 @@ Closing your own page needs no permission, just as sneaking out of it needs
 none. `uiengine.admin` is only a parent: the plugin checks the nodes it grants,
 never `uiengine.admin` itself. Tab completion offers only what you may run.
 
-Wall screens are kept in `screens.yml`. Each player browses their own copy of a
-wall's page unless it was placed `shared`. Left-click a wall screen to click the
+Wall screens are kept in `screens.yml`; a screen's name cannot contain a `.`.
+A screen in a world that is not loaded when the server starts (one a
+multiworld plugin loads later) goes up when that world loads. Each player
+browses their own copy of a wall's page unless it was placed `shared`; on a
+shared screen, commands, messages and links act for whoever clicked, with
+placeholders filled in for them. Left-click a wall screen to click the
 page; right-click it to sit down at that page fullscreen
 (`walls.right-click-fullscreen`). Fullscreen pages fill the whole window,
 whatever its shape and the player's FOV.
@@ -58,7 +62,7 @@ whatever its shape and the player's FOV.
 |---|---|
 | `<a href="shop.html">` | goes to another page in the folder; `#id` scrolls to it |
 | `data-command="spawn"` | runs a command as the player |
-| `data-console="give {player} bread"` | runs a command as the console |
+| `data-console="give {player} bread"` | runs a command as the console; not if a filled-in value has a space or `;` in it (a nickname, say), which is logged |
 | `data-message="<gold>Hi {player}"` | sends the player a chat message (MiniMessage) |
 | `data-action="close"` | closes the page; also `back`, `reload`, `top`, `page:shop` |
 | `data-close` | (with a command) closes the page after running it |
@@ -72,11 +76,17 @@ Page settings, all optional:
 ```html
 <meta name="ui:size" content="12x7">    <!-- fullscreen size in maps (config: views.size) -->
 <meta name="ui:height" content="576">   <!-- the page is laid out this many CSS px tall -->
-<meta name="ui:refresh" content="5">    <!-- refill placeholders every 5 seconds -->
+<meta name="ui:refresh" content="5">    <!-- refill placeholders every 5 seconds (0.5 at the most often; 0: never) -->
 ```
 
 Controls while a page is open: mouse moves the pointer, either button clicks,
 the wheel (or W/S) scrolls, F goes back, sneak closes.
+
+Pages load in the background, so a page that fetches from the web never holds
+up the server; it shows when it has loaded. With `allow-web`, a page can load
+stylesheets, fonts and images from the web, but not from the server's own
+machine or private network unless `allow-private-hosts` is on. Files are read
+from the pages folder only.
 
 ## What the renderer supports
 
