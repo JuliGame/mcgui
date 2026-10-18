@@ -64,6 +64,10 @@ public final class Session {
     private int navigation;
 
     private volatile HtmlRenderer.Frame frame;
+    /** The name of the page in [frame]; written before it. */
+    private volatile String drawnName;
+    /** Counts clicks, so the end of one press does not end a later one. */
+    private int presses;
     private boolean rendering, dirty;
     private boolean closed;
     /** Told the pointer shape for what is under the pointer (views only). */
@@ -196,6 +200,34 @@ public final class Session {
         }, serverThread);
     }
 
+    /**
+     * Page [p], shown for navigation [nav], could not be drawn, and the screen still has the last picture
+     * of another page: unless the player has moved on, that page comes back, as it was drawn.
+     */
+    private void undrawable(Page p, int nav) {
+        HtmlRenderer.Frame f = frame;
+        String name = drawnName;
+        if (closed || navigation != nav || page != p || f == null || f.page() == p || name == null) return;
+        navigation++;
+        String failed = pageName;
+        // Reached from the page in the picture: that page is on top of the back stack, and going back to it would go nowhere.
+        Entry top = back.peek();
+        if (top != null && top.page().equals(name) && top.scroll() == f.scrollY()) back.pop();
+        pageName = name;
+        page = f.page();
+        // The picture's document was this session's, so it was never changed after being drawn.
+        doc = f.document();
+        scrollY = f.scrollY();
+        hover = null;
+        pressed = null;
+        pendingFragment = null;
+        refreshTicks = refreshSetting(page);
+        nextRefresh = Bukkit.getCurrentTick() + refreshTicks;
+        Player pl = player();
+        if (pl != null) pl.sendActionBar(Component.text("Could not show " + failed + ": see the console", NamedTextColor.RED));
+        render();
+    }
+
     /** Every tick: re-fill placeholders on pages that ask for it. */
     void tick(long now) {
         if (refreshTicks > 0 && page != null && now >= nextRefresh) {
@@ -268,6 +300,7 @@ public final class Session {
         int nav = navigation;
         var state = HtmlRenderer.state(hover, pressed);
         List<Element> hoverKey = key(hover, false), pressKey = key(pressed, true);
+        String name = pageName;
         String fragment = pendingFragment;
         pendingFragment = null;
         double scale = scale();
@@ -330,6 +363,7 @@ public final class Session {
                 }
                 drawnHover = hoverKey;
                 drawnPress = pressKey;
+                drawnName = name;
                 frame = f;
                 if (plugin.debug()) {
                     plugin.getLogger().info(String.format("Drew %s for %s in %d ms%s", pageName, viewer, (System.nanoTime() - t0) / 1_000_000,
@@ -338,8 +372,12 @@ public final class Session {
                 // A new page under a still pointer: what it is over has changed.
                 if (!partial) serverThread.execute(this::repoint);
             } catch (RuntimeException | Error e) {
-                plugin.getLogger().warning("Could not draw page " + pageName + ": " + e);
+                plugin.getLogger().warning("Could not draw page " + name + ": " + e);
                 if (plugin.debug()) e.printStackTrace();
+                // A page that cannot be drawn at all leaves the last picture, of another page, on the screen,
+                // where clicks would find nothing: go back to that page, so the screen still works.
+                HtmlRenderer.Frame shown = frame;
+                if (shown != null && shown.page() != p) serverThread.execute(() -> undrawable(p, nav));
             } finally {
                 synchronized (Session.this) {
                     if (dirty && !closed) {
@@ -586,10 +624,12 @@ public final class Session {
             // :active for a moment, so a press shows. A toggle has given the session a new copy by now.
             Element target = counterpart(e, doc);
             if (target == null) return;
+            int press = ++presses;
             pressed = target;
             render();
             Bukkit.getScheduler().runTaskLater(plugin, () -> {
-                if (pressed == target) {
+                // By identity it could miss: a refresh in between moves pressed to a new copy of the document.
+                if (presses == press && pressed != null) {
                     pressed = null;
                     render();
                 }
