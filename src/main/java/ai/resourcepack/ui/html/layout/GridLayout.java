@@ -468,6 +468,12 @@ final class GridLayout {
         return out;
     }
 
+    /**
+     * Line numbers and spans are clamped to this, as the spec lets browsers do: {@code grid-row: span
+     * 1000000000} would otherwise mark a billion rows as taken (Firefox clamps at 10000; a screen needs far fewer).
+     */
+    private static final int MAX_LINES = 1000;
+
     /** A placement property as a 0-based line, a span ({-n}), or auto (Integer.MIN_VALUE). */
     private static int line(String v, int count, Map<String, int[]> areas, Map<String, Integer> names, boolean start, boolean column) {
         v = v.trim().toLowerCase(Locale.ROOT);
@@ -475,14 +481,14 @@ final class GridLayout {
         if (v.startsWith("span")) {
             String n = v.substring(4).trim();
             try {
-                return -Math.max(1, Integer.parseInt(n));
+                return -Math.max(1, Math.min(MAX_LINES, Integer.parseInt(n)));
             } catch (NumberFormatException e) {
                 return -1;
             }
         }
         try {
             int n = Integer.parseInt(v);
-            if (n > 0) return n - 1;
+            if (n > 0) return Math.min(n, MAX_LINES) - 1;
             if (n < 0) return Math.max(0, count + 1 + n);
             return Integer.MIN_VALUE;
         } catch (NumberFormatException e) {
