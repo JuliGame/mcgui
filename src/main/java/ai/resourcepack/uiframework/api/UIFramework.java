@@ -51,6 +51,14 @@ public interface UIFramework {
     /** Bytes of map data sent since the engine started. */
     long bytesSent();
 
+    /**
+     * Runs tasks on the server thread as soon as it is free, the way the server handles players'
+     * packets: between ticks that is at once, where the Bukkit scheduler would wait for the next tick
+     * (up to 50 ms). For work that must be on the server thread but should not wait, such as asking
+     * for the next picture once one is drawn.
+     */
+    java.util.concurrent.Executor serverThread();
+
     /** Set by the plugin itself; not for other plugins. */
     final class Holder {
         private Holder() {}

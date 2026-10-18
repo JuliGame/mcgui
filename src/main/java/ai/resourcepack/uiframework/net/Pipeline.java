@@ -85,7 +85,8 @@ public final class Pipeline {
             if (p.get(PONGS) == null && p.get(nms.packetHandlerName) != null) p.addBefore(nms.packetHandlerName, PONGS, new Pongs());
             if (p.get(PONGS) == null) waiting.remove(id);
         });
-        nms.send(player, nms.ping(id));
+        // Written now rather than with the next tick: the patches it follows went out the same way.
+        if (!nms.writeNow(player, List.of(nms.ping(id)), ok -> { if (!ok) waiting.remove(id); })) waiting.remove(id);
     }
 
     /** Catches the answers to the engine's pings; the server ignores pongs, so they pass on as well. */

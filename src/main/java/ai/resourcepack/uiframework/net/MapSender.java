@@ -4,10 +4,10 @@ import ai.resourcepack.uiframework.api.Canvas;
 import ai.resourcepack.uiframework.api.Pointer;
 import ai.resourcepack.uiframework.render.Palette;
 import ai.resourcepack.uiframework.world.MapWall;
-import io.netty.channel.ChannelFutureListener;
 import org.bukkit.entity.Player;
 
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -15,11 +15,11 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.LockSupport;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * Sends each player only the rectangle of each map that changed since what their client last
@@ -27,10 +27,11 @@ import java.util.concurrent.atomic.AtomicReference;
  * gets fewer pictures, never a growing backlog, so what they see stays current.
  *
  * <p>Pictures go out whole: the changed tiles of one moment are snapshotted and all sent before
- * anything newer is looked at, so a change never arrives as mismatched squares. Runs on its own thread
- * every few milliseconds rather than on the server tick, so a new picture goes out as soon as it is
- * drawn: map packets are safe to send from any thread, and the tile arrays it compares are immutable
- * once a {@link Canvas} publishes them.
+ * anything newer is looked at, so a change never arrives as mismatched squares. Runs on its own thread,
+ * woken the moment a canvas publishes new tiles (and every few milliseconds regardless, for budgets),
+ * and writes straight to each player's connection with one flush per pass, so a new picture goes out as
+ * soon as it is drawn rather than with the next tick. The tile arrays it compares are immutable once a
+ * {@link Canvas} publishes them.
  */
 public final class MapSender implements AutoCloseable {
     /**
@@ -49,6 +50,11 @@ public final class MapSender implements AutoCloseable {
         final AtomicLong inFlight = new AtomicLong();
         /** Plain tiles with the pointer drawn in, by map id, with what each was made from. */
         final Map<Integer, Pointed> pointed = new ConcurrentHashMap<>(); // also read by delivered(), on the main thread
+        /** This pass's patches, written together with one flush. */
+        final List<Object> packets = new ArrayList<>();
+        final List<Integer> ids = new ArrayList<>();
+        final List<byte[]> tiles = new ArrayList<>();
+        long batchCost;
     }
 
     private record Pointed(byte[] base, PointerSpot spot, byte[] tile) {}
@@ -73,22 +79,29 @@ public final class MapSender implements AutoCloseable {
     private final Map<UUID, Viewer> viewers = new ConcurrentHashMap<>();
     private final AtomicReference<List<Assignment>> latest = new AtomicReference<>(List.of());
     private final AtomicLong bytesSent = new AtomicLong();
-    private final ScheduledExecutorService loop = Executors.newSingleThreadScheduledExecutor(r -> {
-        Thread t = new Thread(r, "UIFramework-send");
-        t.setDaemon(true);
-        return t;
-    });
+    private final Logger log;
+    private final Thread loop = new Thread(this::run, "UIFramework-send");
+    private volatile boolean closed;
     private long lastRun = System.nanoTime();
+    private long lastWarning;
 
-    public MapSender(Nms nms, Palette palette, int bytesPerSecond) {
+    public MapSender(Nms nms, Palette palette, int bytesPerSecond, Logger log) {
         this.nms = nms;
         this.palette = palette;
         this.bytesPerSecond = bytesPerSecond;
         this.maxInFlight = Math.max(512 * 1024L, bytesPerSecond / 20L);
+        this.log = log;
+        loop.setDaemon(true);
     }
 
     public void update(List<Assignment> assignments) {
         latest.set(assignments);
+        wake();
+    }
+
+    /** Something may have changed (a canvas published tiles): look now rather than at the next poll. */
+    public void wake() {
+        LockSupport.unpark(loop);
     }
 
     public long bytesSent() {
@@ -118,18 +131,30 @@ public final class MapSender implements AutoCloseable {
     }
 
     public void start() {
-        loop.scheduleAtFixedRate(() -> {
+        loop.start();
+    }
+
+    private void run() {
+        while (!closed) {
             try {
                 tick();
             } catch (RuntimeException e) {
-                // A player left mid-send; the next run sees the new list.
+                // Usually a player leaving mid-send, which the next run gets past; say so if it keeps happening.
+                long now = System.nanoTime();
+                if (now - lastWarning > 60_000_000_000L) {
+                    lastWarning = now;
+                    log.log(Level.WARNING, "Sending map pictures failed (shown at most once a minute)", e);
+                }
             }
-        }, 0, 8, TimeUnit.MILLISECONDS);
+            // Woken early by wake(); otherwise every 8 ms, so budgets refill and a full connection is retried.
+            LockSupport.parkNanos(8_000_000L);
+        }
     }
 
     @Override
     public void close() {
-        loop.shutdownNow();
+        closed = true;
+        wake();
     }
 
     private void tick() {
@@ -144,6 +169,7 @@ public final class MapSender implements AutoCloseable {
             if (seen.add(a.player.getUniqueId())) v.budget = Math.min(v.budget + refill, bytesPerSecond / 4L);
             send(a, v);
         }
+        for (Assignment a : assignments) flush(a.player, viewers.get(a.player.getUniqueId()));
         // Players who left every screen: drop their state so walking back resends everything.
         viewers.keySet().retainAll(seen);
         for (Viewer v : viewers.values()) {
@@ -211,19 +237,44 @@ public final class MapSender implements AutoCloseable {
             if (v.budget <= 0 || v.inFlight.get() >= maxInFlight) return; // carry on from here next run
             byte[] data = new byte[cost];
             for (int y = 0; y < rect[3]; y++) System.arraycopy(current, (rect[1] + y) * 128 + rect[0], data, y * rect[2], rect[2]);
+            // Counted in flight from now, so delivered() never sees the tile as sent before it is written.
             v.inFlight.addAndGet(cost);
-            // Completes once netty has compressed the packet and the socket took it, whether or not it succeeded.
-            boolean sent = nms.send(a.player, nms.mapPatch(id, rect[0], rect[1], rect[2], rect[3], data),
-                    (ChannelFutureListener) f -> v.inFlight.addAndGet(-cost));
-            if (!sent) {
-                v.inFlight.addAndGet(-cost);
-                return;
-            }
+            v.packets.add(nms.mapPatch(id, rect[0], rect[1], rect[2], rect[3], data));
+            v.ids.add(id);
+            v.tiles.add(current);
+            v.batchCost += cost;
             v.budget -= cost;
-            bytesSent.addAndGet(cost);
             v.sent.put(id, current);
             frame.queue.pollFirst();
         }
+    }
+
+    /** Writes [v]'s patches from this pass to [player] together, with one flush. */
+    private void flush(Player player, Viewer v) {
+        if (v == null || v.packets.isEmpty()) return;
+        List<Object> packets = List.copyOf(v.packets);
+        List<Integer> ids = List.copyOf(v.ids);
+        List<byte[]> tiles = List.copyOf(v.tiles);
+        long cost = v.batchCost;
+        v.packets.clear();
+        v.ids.clear();
+        v.tiles.clear();
+        v.batchCost = 0;
+        // Completes once netty has compressed the last packet and the socket took it.
+        boolean queued = nms.writeNow(player, packets, ok -> {
+            v.inFlight.addAndGet(-cost);
+            if (ok) bytesSent.addAndGet(cost);
+            else forget(v, ids, tiles);
+        });
+        if (!queued) {
+            v.inFlight.addAndGet(-cost);
+            forget(v, ids, tiles);
+        }
+    }
+
+    /** Patches that never reached the client: forget that it has them, so they are sent again. */
+    private static void forget(Viewer v, List<Integer> ids, List<byte[]> tiles) {
+        for (int i = 0; i < ids.size(); i++) v.sent.remove(ids.get(i), tiles.get(i));
     }
 
     /** The smallest rectangle {x, y, w, h} covering every byte that differs, or null if none does. */

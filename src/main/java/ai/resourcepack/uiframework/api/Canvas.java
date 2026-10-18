@@ -36,8 +36,16 @@ public final class Canvas {
     private final AtomicReferenceArray<Own> hiOwn;
     private final AtomicReferenceArray<byte[]> plain;
     private volatile long version;
+    /** Told whenever new tiles are published, so they go out at once (the engine's sender). */
+    private final Runnable published;
 
     public Canvas(Palette palette, int cols, int rows) {
+        this(palette, cols, rows, () -> {});
+    }
+
+    /** As {@link #Canvas(Palette, int, int)}, running [published] after every drawing that changed a tile. */
+    public Canvas(Palette palette, int cols, int rows, Runnable published) {
+        this.published = published;
         if (cols < 1 || rows < 1 || cols * rows > 1024) throw new IllegalArgumentException("A canvas is 1 to 1024 maps");
         this.palette = palette;
         this.cols = cols;
@@ -118,6 +126,7 @@ public final class Canvas {
         for (int t = 0; t < dirty.length; t++) if (dirty[t]) changed.add(t);
         encode(changed);
         version++;
+        published.run();
     }
 
     /** The picture shrunk to [w] × [h] RGB pixels, each the average of the area it covers. */

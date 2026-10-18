@@ -159,6 +159,8 @@ public final class Views implements Listener {
         Pointer shape = Pointer.ARROW;
         Pointer shownShape = null;
         int lastPointerX = -1, lastPointerY = -1;
+        /** A pointer report is waiting for the server thread (see turned). */
+        final java.util.concurrent.atomic.AtomicBoolean reportQueued = new java.util.concurrent.atomic.AtomicBoolean();
         boolean pinged;
         volatile boolean revealed, closed;
         volatile boolean caughtUp;
@@ -428,6 +430,13 @@ public final class Views implements Listener {
                 v.cursorX = Math.max(0, Math.min(v.canvas.width() - 1.0, v.cursorX + dyaw * speed));
                 v.cursorY = Math.max(0, Math.min(v.canvas.height() - 1.0, v.cursorY + dpitch * speed));
                 sendPointer(v);
+                // Tell the content now, on the server thread as soon as it is free, rather than at the next tick.
+                if (v.reportQueued.compareAndSet(false, true)) {
+                    nms.serverThread().execute(() -> {
+                        v.reportQueued.set(false);
+                        if (!v.closed && views.get(v.player) == v) report(v);
+                    });
+                }
             }
             if (!v.pitchReset && Math.abs(pitch) > PITCH_LIMIT) {
                 v.pitchReset = true;
@@ -448,7 +457,10 @@ public final class Views implements Listener {
         return v.wall.pointAt(v.cursorX, v.cursorY);
     }
 
-    /** Tell the content where the pointer is, on the server thread, whenever it is over a new pixel. */
+    /**
+     * Tell the content where the pointer is, on the server thread, whenever it is over a new pixel. Runs
+     * as soon as a turn moves the cursor (see turned) and again each tick, which then finds nothing new.
+     */
     private void report(ViewImpl v) {
         int x = (int) v.cursorX, y = (int) v.cursorY;
         if (x != v.lastPointerX || y != v.lastPointerY) {

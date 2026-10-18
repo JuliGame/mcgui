@@ -64,7 +64,7 @@ public final class UIFrameworkPlugin extends JavaPlugin implements UIFramework, 
         } catch (Exception e) {
             getLogger().log(Level.SEVERE, "Could not build or serve the resource pack", e);
         }
-        sender = new MapSender(nms, palette, settings.bytesPerSecond);
+        sender = new MapSender(nms, palette, settings.bytesPerSecond, getLogger());
         pipeline = new Pipeline(nms, getLogger());
         views = new Views(this, settings, nms, pipeline, id -> pack != null && pack.has(id), sender, settings.mapIdBase);
         walls = new Walls(this, settings.mapIdBase + VIEW_ID_SPAN, settings.viewDistance, settings.reach, views::seated);
@@ -119,7 +119,7 @@ public final class UIFrameworkPlugin extends JavaPlugin implements UIFramework, 
 
     @Override
     public Canvas canvas(int cols, int rows) {
-        return new Canvas(palette, cols, rows);
+        return new Canvas(palette, cols, rows, sender::wake);
     }
 
     @Override
@@ -145,6 +145,11 @@ public final class UIFrameworkPlugin extends JavaPlugin implements UIFramework, 
     @Override
     public long bytesSent() {
         return sender.bytesSent();
+    }
+
+    @Override
+    public java.util.concurrent.Executor serverThread() {
+        return nms.serverThread();
     }
 
     Views views() {

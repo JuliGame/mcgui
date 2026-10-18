@@ -1,6 +1,7 @@
 package ai.resourcepack.uiframework.net;
 
 import io.netty.channel.Channel;
+import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
@@ -11,6 +12,9 @@ import java.lang.invoke.MethodType;
 import java.lang.reflect.Field;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.function.Consumer;
 
 /**
  * Everything UI Framework needs that the Paper API cannot do, reached by reflection on the
@@ -30,6 +34,8 @@ public final class Nms {
     private final Field channelField;              // Connection#channel
     private final MethodHandle send;               // ServerCommonPacketListenerImpl#send(Packet)
     private final MethodHandle sendListening;      // ...#send(Packet, ChannelFutureListener)
+    private final MethodHandle accepting;          // ServerGamePacketListenerImpl#isAcceptingMessages()
+    private final Executor serverThread;           // the MinecraftServer, which runs tasks between ticks
     private final MethodHandle newMapId;           // new MapId(int)
     private final MethodHandle newMapPatch;        // new MapItemSavedData.MapPatch(x, y, w, h, bytes)
     private final MethodHandle newMapPacket;       // new ClientboundMapItemDataPacket(id, scale, locked, Optional, Optional)
@@ -77,6 +83,8 @@ public final class Nms {
         Class<?> packet = Class.forName("net.minecraft.network.protocol.Packet");
         send = L.unreflect(common.getMethod("send", packet));
         sendListening = L.unreflect(common.getMethod("send", packet, ChannelFutureListener.class));
+        accepting = L.unreflect(Class.forName("net.minecraft.server.network.ServerGamePacketListenerImpl").getMethod("isAcceptingMessages"));
+        serverThread = (Executor) server.getClass().getMethod("getServer").invoke(server);
 
         Class<?> mapId = Class.forName("net.minecraft.world.level.saveddata.maps.MapId");
         Class<?> patch = Class.forName("net.minecraft.world.level.saveddata.maps.MapItemSavedData$MapPatch");
@@ -187,6 +195,61 @@ public final class Nms {
         } catch (Throwable t) {
             throw rethrow(t);
         }
+    }
+
+    /**
+     * Writes [packets] to [player] in order with one flush, from any thread, without waiting for the
+     * server thread: {@link #send} off the server thread only queues a packet until that thread next
+     * drains the queue, up to a tick later. The write happens on the connection's own thread, and is
+     * dropped once the connection has started switching away from play (reconfiguration), where a game
+     * packet would fail to encode and take the player down. [done] hears whether the last packet was
+     * written (false if dropped or failed). False, and [done] never called, if the player has no
+     * connection.
+     */
+    public boolean writeNow(Player player, List<?> packets, Consumer<Boolean> done) {
+        if (packets.isEmpty()) return true;
+        Object listener;
+        Channel channel;
+        try {
+            listener = listener(player);
+            if (listener == null) return false;
+            channel = (Channel) channelField.get(networkField.get(listener));
+        } catch (IllegalAccessException e) {
+            throw new IllegalStateException(e);
+        }
+        if (channel == null || !channel.isActive()) return false;
+        try {
+            channel.eventLoop().execute(() -> {
+                if (!channel.isActive() || !accepting(listener)) {
+                    done.accept(false);
+                    return;
+                }
+                ChannelFuture last = null;
+                for (Object p : packets) last = channel.write(p);
+                channel.flush();
+                last.addListener(f -> done.accept(f.isSuccess()));
+            });
+        } catch (RejectedExecutionException e) {
+            return false; // the event loop is shutting down with the server
+        }
+        return true;
+    }
+
+    private boolean accepting(Object listener) {
+        try {
+            return (boolean) accepting.invoke(listener);
+        } catch (Throwable t) {
+            throw rethrow(t);
+        }
+    }
+
+    /**
+     * The server thread, as packets reach it: a task runs as soon as the thread is free, which between
+     * ticks is at once (the thread is woken for it), rather than at the start of the next tick as the
+     * Bukkit scheduler would run it.
+     */
+    public Executor serverThread() {
+        return serverThread;
     }
 
     /** A map data packet carrying one rectangle of colour bytes and no decorations. */
