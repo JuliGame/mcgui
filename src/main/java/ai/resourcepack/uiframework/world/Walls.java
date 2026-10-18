@@ -20,6 +20,7 @@ import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerItemHeldEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.event.world.WorldUnloadEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.util.RayTraceResult;
@@ -34,6 +35,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Predicate;
+import java.util.logging.Level;
 
 /**
  * Placed walls, and what players do to them: the pixel each player's crosshair is on (so a page can
@@ -93,7 +95,7 @@ public final class Walls implements Listener {
             Set<UUID> watchers = inRange.remove(this);
             if (watchers != null) for (UUID id : watchers) {
                 Player p = Bukkit.getPlayer(id);
-                if (p != null) content.left(p);
+                if (p != null) left(this, p);
             }
             looks.values().removeIf(l -> l.wall == this);
         }
@@ -138,17 +140,40 @@ public final class Walls implements Listener {
             if (before != null) for (UUID id : before) {
                 if (now.contains(id)) continue;
                 Player p = Bukkit.getPlayer(id);
-                if (p != null) wall.content.left(p);
+                if (p != null) left(wall, p);
             }
         }
         for (Player p : Bukkit.getOnlinePlayers()) {
             Look now = seated.test(p) ? null : aim(p);
             Look before = now == null ? looks.remove(p.getUniqueId()) : looks.put(p.getUniqueId(), now);
-            if (before != null && (now == null || before.wall != now.wall)) before.wall.content.lookAway(p);
-            if (now != null && (before == null || before.wall != now.wall || before.x != now.x || before.y != now.y)) {
-                now.wall.content.look(p, now.x, now.y);
+            // Each guarded: a content that throws must not cost every later wall and player their turn.
+            try {
+                if (before != null && (now == null || before.wall != now.wall)) before.wall.content.lookAway(p);
+            } catch (RuntimeException | LinkageError e) {
+                failed("on a look away", e);
+            }
+            try {
+                if (now != null && (before == null || before.wall != now.wall || before.x != now.x || before.y != now.y)) {
+                    now.wall.content.look(p, now.x, now.y);
+                }
+            } catch (RuntimeException | LinkageError e) {
+                failed("on a look", e);
             }
         }
+    }
+
+    /** Tells [wall]'s content that [player] went out of range. Guarded: it is never asked again for them. */
+    private void left(Wall wall, Player player) {
+        try {
+            wall.content.left(player);
+        } catch (RuntimeException | LinkageError e) {
+            failed("when a player left", e);
+        }
+    }
+
+    /** A content callback threw: say so, and carry on with everything else (LinkageError: see Views.failed). */
+    private void failed(String when, Throwable e) {
+        plugin.getLogger().log(Level.WARNING, "A screen's content failed " + when, e);
     }
 
     /** The wall pixel [player]'s crosshair is on, if any wall is in reach and nothing solid is in the way. */
@@ -246,9 +271,16 @@ public final class Walls implements Listener {
         looks.remove(id);
         lastSwing.remove(id);
         lastUse.remove(id);
-        for (Map.Entry<Wall, Set<UUID>> entry : inRange.entrySet()) {
-            if (entry.getValue().remove(id)) entry.getKey().content.left(e.getPlayer());
+        // A copy: a content may remove its own wall from left(), which takes it out of inRange.
+        for (Map.Entry<Wall, Set<UUID>> entry : new ArrayList<>(inRange.entrySet())) {
+            if (entry.getValue().remove(id)) left(entry.getKey(), e.getPlayer());
         }
+    }
+
+    /** A wall in a world that goes away goes with it: it would keep the dead world loaded and never come back. */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onWorldUnload(WorldUnloadEvent e) {
+        for (Wall w : walls) if (w.map.world == e.getWorld()) w.remove();
     }
 
     public void removeAll() {
