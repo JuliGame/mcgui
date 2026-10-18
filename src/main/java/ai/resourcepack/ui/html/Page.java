@@ -361,17 +361,20 @@ public final class Page implements Resources {
         loadImages(loader);
     }
 
-    /** Loads [file] and everything it uses. Bytes that are not UTF-8 read as U+FFFD, as a browser shows them. */
+    /**
+     * Loads [file] and everything it uses. Bytes that are not UTF-8 fail the load (a MalformedInputException)
+     * rather than reading as U+FFFD: PageStore takes that as a file caught mid-write and reads it again.
+     */
     public static Page load(Path file, Loader loader) throws IOException {
         return new Page(file, decode(Files.readAllBytes(file)), loader);
     }
 
     /** A page's text: UTF-8 unless a byte order mark says UTF-16, as browsers sniff it. */
-    static String decode(byte[] b) {
+    static String decode(byte[] b) throws IOException {
         if (b.length >= 2 && (b[0] & 0xFF) == 0xFF && (b[1] & 0xFF) == 0xFE) return new String(b, 2, b.length - 2, StandardCharsets.UTF_16LE);
         if (b.length >= 2 && (b[0] & 0xFF) == 0xFE && (b[1] & 0xFF) == 0xFF) return new String(b, 2, b.length - 2, StandardCharsets.UTF_16BE);
         int skip = b.length >= 3 && (b[0] & 0xFF) == 0xEF && (b[1] & 0xFF) == 0xBB && (b[2] & 0xFF) == 0xBF ? 3 : 0;
-        return new String(b, skip, b.length - skip, StandardCharsets.UTF_8);
+        return StandardCharsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(b, skip, b.length - skip)).toString();
     }
 
     /** A page from a string (tests, built-in pages), resolving relative files against [base]. */
