@@ -191,7 +191,9 @@ public final class Painter {
         // A backdrop-filter inside reads what is painted round it, which a smaller layer would cut off.
         if (!reach.backdrop) {
             java.awt.Rectangle painted = dev.createTransformedShape(reach.area).getBounds();
-            painted.grow(2, 2);
+            // Blurs spread in device pixels whatever the transforms, so their room is added after mapping.
+            int pad = (int) Math.ceil(reach.blur) + 2;
+            painted.grow(pad, pad);
             r = r.intersection(painted);
         }
         if (r.width <= 0 || r.height <= 0) return;
@@ -217,9 +219,13 @@ public final class Painter {
         g.setTransform(saved);
     }
 
-    /** Where a subtree can paint, in the user space it is painted in; and whether it has a backdrop-filter. */
+    /**
+     * Where a subtree can paint, in the user space it is painted in; how far (device px) its blurs spread
+     * past that; and whether it has a backdrop-filter.
+     */
     private static final class Reach {
         Rectangle2D area;
+        double blur;
         boolean backdrop;
 
         void add(Rectangle2D r, double grow) {
@@ -234,9 +240,10 @@ public final class Painter {
 
     /**
      * Adds to [reach] where [box] (its border box at (x, y)) and everything it paints can draw, generously:
-     * every box, its outer shadows, its text with an em to spare, its list marker, and the spread of any
-     * filter blur, with nested transforms applied. Walks the tree the way painting does: anything new
-     * that paints outside its own box must be added here too, or a translucent ancestor cuts it off.
+     * every box, its outer shadows, its text with an em to spare, its list marker, with nested transforms
+     * applied; and how far blurred shadows and filter blurs spread from that. Walks the tree the way
+     * painting does: anything new that paints outside its own box must be added here too, or a
+     * translucent ancestor cuts it off.
      */
     private void reach(Box box, double x, double y, Reach reach) {
         Style s = box.style;
@@ -244,7 +251,9 @@ public final class Painter {
         own.add(new Rectangle2D.Double(x, y, box.w, box.h), SLACK);
         if (!s.backdropFilter.equals("none")) reach.backdrop = true;
         for (Shadows.Shadow sh : Shadows.parse(s.boxShadow, s)) {
-            if (!sh.inset()) own.add(new Rectangle2D.Double(x + sh.x(), y + sh.y(), box.w, box.h), Math.max(0, sh.spread()) + 2 * sh.blur() + SLACK);
+            if (sh.inset()) continue;
+            own.add(new Rectangle2D.Double(x + sh.x(), y + sh.y(), box.w, box.h), Math.max(0, sh.spread()) + SLACK);
+            own.blur = Math.max(own.blur, shadowSpread(sh));
         }
         if (box.marker != null) {
             double fs = (box.markerStyle != null ? box.markerStyle : s).fontSize;
@@ -258,15 +267,24 @@ public final class Painter {
                     Rectangle2D t = new Rectangle2D.Double(x + it.x - fs, y + it.baselineY - 2 * fs, it.w + 2 * fs, 3 * fs);
                     own.add(t, SLACK);
                     for (Shadows.Shadow sh : Shadows.parse(it.style.textShadow, it.style)) {
-                        own.add(new Rectangle2D.Double(t.getX() + sh.x(), t.getY() + sh.y(), t.getWidth(), t.getHeight()), 2 * sh.blur() + SLACK);
+                        own.add(new Rectangle2D.Double(t.getX() + sh.x(), t.getY() + sh.y(), t.getWidth(), t.getHeight()), SLACK);
+                        own.blur = Math.max(own.blur, shadowSpread(sh));
                     }
                 }
             }
         }
         reachChildren(box, x, y, own);
         reach.backdrop |= own.backdrop;
-        // A blur spreads the picture about three times its radius.
-        reach.add(own.area, 3 * Filters.blurRadius(s.filter, s) + 1);
+        reach.add(own.area, 0);
+        // A filter blur (sigma, device px) spreads everything inside, blurs included, about three sigma further;
+        // Blur's three boxes reach a pixel or so more each.
+        double filter = Filters.blurRadius(s.filter, s) * deviceScale;
+        reach.blur = Math.max(reach.blur, own.blur + (filter > 0 ? 3 * filter + 4 : 0));
+    }
+
+    /** How far (device px) a blurred shadow spreads past its shape, as {@link Shadows#blurred} pads it. */
+    private double shadowSpread(Shadows.Shadow sh) {
+        return sh.blur() <= 0.25 ? 0 : Math.ceil(sh.blur() / 2 * deviceScale * 3) + 2;
     }
 
     private void reachChildren(Box parent, double x, double y, Reach reach) {
@@ -284,6 +302,7 @@ public final class Painter {
             AffineTransform t = transform(c, cx, cy);
             reach.add(t == null ? inner.area : t.createTransformedShape(inner.area).getBounds2D(), 0);
             reach.backdrop |= inner.backdrop;
+            reach.blur = Math.max(reach.blur, inner.blur);
         }
     }
 
