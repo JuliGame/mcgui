@@ -138,7 +138,7 @@ public final class HtmlRenderer {
      * picture, then copies each band's rows in. Styling and layout are done once and only read here.
      * Each band also paints [reach] rows past its edges, so a backdrop-filter near an edge blurs what a
      * whole picture would have under it rather than another band's half-painted rows. Returns the hit
-     * regions (every band's painter finds them all; the first band's are kept).
+     * regions (the first band's painter finds them all; the others make none).
      */
     private static List<Painter.Hit> paintBands(Page page, Box root, BufferedImage img, int bands, int reach, double scale,
                                                 double vw, double vh, double scroll) {
@@ -149,6 +149,7 @@ public final class HtmlRenderer {
             int y0 = height * b / bands, y1 = height * (b + 1) / bands;
             // Twice the reach: a blur in the margin itself reads up to one reach further out.
             int top = Math.max(0, y0 - 2 * reach), bottom = Math.min(height, y1 + 2 * reach);
+            boolean first = b == 0;
             tasks.add(PAINTERS.submit(() -> {
                 BufferedImage band = new BufferedImage(width, bottom - top, BufferedImage.TYPE_INT_ARGB_PRE);
                 Graphics2D g = band.createGraphics();
@@ -157,6 +158,7 @@ public final class HtmlRenderer {
                 // No clip: the band's own edges stop the drawing, so the painter sees exactly what a whole
                 // picture's would (a clip changes how Java2D intersects overflow clips, by a pixel).
                 Painter painter = new Painter(page.shaper, page, vw, vh, scroll);
+                if (!first) painter.withoutHits();
                 painter.paint(g, root, band, scale);
                 g.dispose();
                 System.arraycopy(((DataBufferInt) band.getRaster().getDataBuffer()).getData(), (y0 - top) * width, out, y0 * width, (y1 - y0) * width);

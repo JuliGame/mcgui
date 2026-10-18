@@ -70,7 +70,7 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
   with a margin above and below as deep as the furthest blur can reach.
   The bands are deliberately not clipped: an extra clip changes how Java2D
   rounds overflow clips, by a pixel at their edges. Hit regions come from the
-  first band, which lays out the whole page. Partial (hover) repaints are still
+  first band, which paints every box of the page; the other bands make none. Partial (hover) repaints are still
   one painter. `sh gradlew renderBench` times a page's full render, its
   `Canvas.draw` and a hover repaint.
 - **Gradient text is a mask**, not a clip: Java2D clips are not antialiased,

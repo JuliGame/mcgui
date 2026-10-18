@@ -54,6 +54,8 @@ public final class Painter {
     public record Hit(Shape shape, Shape clip, Element element, boolean pointer) {}
 
     public final List<Hit> hits = new ArrayList<>();
+    /** False for a painter whose hit regions nobody reads: then it makes none. */
+    private boolean recordHits = true;
     /** Page-space clip in force (for hit regions); null for none. */
     private Shape pageClip;
     /** Page-space transform in force (for hit regions). */
@@ -65,6 +67,16 @@ public final class Painter {
         this.viewportW = viewportW;
         this.viewportH = viewportH;
         this.scrollY = scrollY;
+    }
+
+    /**
+     * This painter, making no hit regions: for the bands of a picture after the first, which paint the
+     * same boxes. A hit region is a transformed copy of a box's shape, and a page with millions of
+     * inline fragments ran out of memory making them in every band.
+     */
+    public Painter withoutHits() {
+        recordHits = false;
+        return this;
     }
 
     /** Paints the page into [g] (already scaled to CSS pixels) over [surface], the image [g] draws on. */
@@ -648,7 +660,7 @@ public final class Painter {
     }
 
     private void hit(Shape s, Style style, Element e) {
-        if (e == null) return;
+        if (e == null || !recordHits) return;
         hits.add(new Hit(pageTx.createTransformedShape(s), pageClip, e, !style.hidden() && !style.pointerEvents.equals("none")));
     }
 
