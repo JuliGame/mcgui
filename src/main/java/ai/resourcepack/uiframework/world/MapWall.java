@@ -105,16 +105,28 @@ public final class MapWall {
 
     /** [viewer]: frames only they will see, shown to them now or, without [show], later with {@link #showTo}. */
     public void spawn(Plugin plugin, Player viewer, boolean show) {
+        spawn(plugin, viewer, show, null);
+    }
+
+    /**
+     * As {@link #spawn(Plugin, Player, boolean)}, but with [stack] (a block) every frame in that one block,
+     * lying on its floor, rather than laid out as the wall: for a view whose maps the viewer's client
+     * places in the window by what each map carries (see Canvas.Encoding.HI_TILED). A frame lying at the
+     * camera's own block is inside the client's view frustum whichever way the camera looks, so it is
+     * never culled.
+     */
+    public void spawn(Plugin plugin, Player viewer, boolean show, int[] stack) {
         despawn();
+        BlockFace face = stack == null ? facing : BlockFace.UP;
         for (int r = 0; r < rows; r++) {
             for (int c = 0; c < cols; c++) {
-                int[] b = tileBlock(c, r);
+                int[] b = stack == null ? tileBlock(c, r) : stack;
                 ItemStack item = new ItemStack(Material.FILLED_MAP);
                 MapMeta meta = (MapMeta) item.getItemMeta();
                 meta.setMapId(mapId(r * cols + c));
                 item.setItemMeta(meta);
                 GlowItemFrame frame = world.spawn(new Location(world, b[0], b[1], b[2]), GlowItemFrame.class, f -> {
-                    f.setFacingDirection(facing, true);
+                    f.setFacingDirection(face, true);
                     f.setItem(item, false);
                     f.setFixed(true);
                     f.setVisible(false);

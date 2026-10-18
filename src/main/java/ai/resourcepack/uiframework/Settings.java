@@ -19,6 +19,8 @@ public final class Settings {
     public final double reach;
     public final int defaultFov;
     public final double cursorSpeed;
+    /** With the pack: the client draws the pointer itself every frame from where the player looks. */
+    public final boolean clientPointer;
     public final int mapIdBase;
 
     private Settings(FileConfiguration c) {
@@ -33,6 +35,7 @@ public final class Settings {
         reach = c.getDouble("screens.reach", 8);
         defaultFov = c.getInt("views.default-fov", 70);
         cursorSpeed = c.getDouble("views.cursor-speed", 8.0);
+        clientPointer = c.getBoolean("views.client-pointer", true);
         mapIdBase = c.getInt("map-id-base", 2_000_000_000);
     }
 
