@@ -63,6 +63,7 @@ public final class Nms {
     // A seated player's mouse, read off the wire, and the pointer moves sent straight back.
     private final Class<?> movePacket;             // ServerboundMovePlayerPacket
     private final Field moveYRot, moveXRot, moveHasRot;
+    private final Class<?> acceptTeleportPacket;   // ServerboundAcceptTeleportationPacket
     private final MethodHandle newTeleport;        // new ClientboundTeleportEntityPacket(id, PositionMoveRotation, Set<Relative>, onGround)
     private final MethodHandle newPositionMoveRotation;
     private final MethodHandle newVec3;
@@ -129,6 +130,7 @@ public final class Nms {
         moveYRot = open(movePacket, "yRot");
         moveXRot = open(movePacket, "xRot");
         moveHasRot = open(movePacket, "hasRot");
+        acceptTeleportPacket = Class.forName(game + "ServerboundAcceptTeleportationPacket");
         Class<?> vec3 = Class.forName("net.minecraft.world.phys.Vec3");
         Class<?> pmr = Class.forName("net.minecraft.world.entity.PositionMoveRotation");
         newVec3 = L.findConstructor(vec3, MethodType.methodType(void.class, double.class, double.class, double.class));
@@ -293,6 +295,11 @@ public final class Nms {
     public float[] rotation(Object msg) {
         if (!movePacket.isInstance(msg) || !(boolean) get(moveHasRot, msg)) return null;
         return new float[]{(float) get(moveYRot, msg), (float) get(moveXRot, msg)};
+    }
+
+    /** Whether [msg] is the client saying it has applied a teleport (a player position packet) the server sent. */
+    public boolean acceptsTeleport(Object msg) {
+        return acceptTeleportPacket.isInstance(msg);
     }
 
     /** The entity a position packet moves, or -1 if [msg] is not one. */

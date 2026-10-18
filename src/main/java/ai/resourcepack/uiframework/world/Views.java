@@ -73,6 +73,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Predicate;
+import java.util.logging.Level;
 
 /**
  * Fullscreen views. A seated player rides an invisible armour stand with their camera locked onto an
@@ -103,6 +104,8 @@ public final class Views implements Listener {
     private static final double STRETCHED_FIT = 0.6;
     /** Pitch beyond which the player's head is put back level, so the client's clamp at ±90° never stops the pointer. */
     private static final float PITCH_LIMIT = 60;
+    /** Ticks to wait for the client to take the teleport to the seat before reading the mouse regardless. */
+    private static final int SETTLE_TIMEOUT = 20;
 
     private final Plugin plugin;
     private final Settings settings;
@@ -143,14 +146,19 @@ public final class Views implements Listener {
         final TextDisplay pointer;
         final GameMode previousMode;
         final WeatherType previousWeather;
+        /** The player's own invisibility (a potion), which the view's effect replaces until they stand. */
+        final PotionEffect previousInvisibility;
         final Location returnTo;
         final PrivateView privateView;
-        final int deadline;
+        final int openedAt, deadline;
         final int pointerId;
         /** Written under the view's lock on the netty thread as the mouse moves, read by the server thread. */
         volatile double cursorX, cursorY;
         float lastYaw, lastPitch;
         boolean primed;
+        /** Revealed, and the client has not yet taken the teleport to the seat (until [settleBy] at most). */
+        volatile boolean awaitingTeleport;
+        int settleBy;
         /** A level head has been sent and the client's rotation may still come from before it. */
         boolean pitchReset;
         Input lastInput;
@@ -179,9 +187,11 @@ public final class Views implements Listener {
             this.pointer = pointer;
             this.previousMode = p.getGameMode();
             this.previousWeather = p.getPlayerWeather();
+            this.previousInvisibility = p.getPotionEffect(PotionEffectType.INVISIBILITY);
             this.returnTo = returnTo;
             this.privateView = new PrivateView(wall, cameraAt, !withPack);
-            this.deadline = Bukkit.getCurrentTick() + REVEAL_TIMEOUT;
+            this.openedAt = Bukkit.getCurrentTick();
+            this.deadline = openedAt + REVEAL_TIMEOUT;
             this.pointerId = pointer == null ? -1 : pointer.getEntityId();
             this.cursorX = canvas.width() / 2.0;
             this.cursorY = canvas.height() / 2.0;
@@ -286,7 +296,10 @@ public final class Views implements Listener {
         player.setGameMode(GameMode.ADVENTURE);
         // An empty hotbar until they get up, or scrolling would pop up the held item's name.
         pipeline.conceal(player, true);
-        pipeline.watch(player, (yaw, pitch) -> turned(view, yaw, pitch), view.pointerId);
+        pipeline.watch(player, new Pipeline.Mouse() {
+            @Override public void turned(float yaw, float pitch) { Views.this.turned(view, yaw, pitch); }
+            @Override public void teleported() { view.awaitingTeleport = false; }
+        }, view.pointerId);
         // Hides the first-person arm; nobody else sees the seated player at all.
         player.addPotionEffect(new PotionEffect(PotionEffectType.INVISIBILITY, PotionEffect.INFINITE_DURATION, 0, false, false, false));
         // Rain and snow are drawn between the camera and the picture: clear skies for this player only.
@@ -374,6 +387,8 @@ public final class Views implements Listener {
                 }
                 reveal(p, v);
             }
+            // A client that never takes the teleport (another plugin cancelled it) must not leave the mouse dead.
+            if (v.awaitingTeleport && now >= v.settleBy) v.awaitingTeleport = false;
             report(v);
             movePointer(v);
             if (now % 40 == 0) v.privateView.refresh(p);
@@ -381,6 +396,9 @@ public final class Views implements Listener {
     }
 
     private void reveal(Player p, ViewImpl v) {
+        // Before revealed, so turned() never reads a rotation from before the teleport below as the start.
+        v.settleBy = Bukkit.getCurrentTick() + SETTLE_TIMEOUT;
+        v.awaitingTeleport = true;
         v.revealed = true;
         // All in one tick, so the client applies them together with the camera switch.
         v.wall.showTo(plugin, p);
@@ -408,6 +426,9 @@ public final class Views implements Listener {
     private void turned(ViewImpl v, float yaw, float pitch) {
         synchronized (v) {
             if (!v.revealed || v.closed) return;
+            // Until the client has taken the teleport to the seat, its rotation is from before it, and
+            // starting from that would throw the pointer by the difference the moment the view appears.
+            if (v.awaitingTeleport) return;
             if (!v.primed) {
                 v.lastYaw = yaw;
                 v.lastPitch = pitch;
@@ -466,7 +487,11 @@ public final class Views implements Listener {
         if (x != v.lastPointerX || y != v.lastPointerY) {
             v.lastPointerX = x;
             v.lastPointerY = y;
-            v.content.pointer(v, x, y);
+            try {
+                v.content.pointer(v, x, y);
+            } catch (RuntimeException | LinkageError e) {
+                failed("on a pointer move", e);
+            }
         }
     }
 
@@ -501,7 +526,14 @@ public final class Views implements Listener {
         for (ViewImpl v : views.values()) {
             Player p = Bukkit.getPlayer(v.player);
             if (p == null) continue;
-            Canvas canvas = v.content.canvas();
+            Canvas canvas;
+            try {
+                canvas = v.content.canvas();
+            } catch (RuntimeException | LinkageError e) {
+                // One broken view must not stop the list, and with it every screen, from being sent.
+                failed("giving its canvas", e);
+                canvas = null;
+            }
             if (canvas == null || canvas.cols() != v.wall.cols || canvas.rows() != v.wall.rows) canvas = v.canvas;
             if (v.withPack) out.add(new MapSender.Assignment(p, v.wall, canvas, Canvas.Encoding.HI_OWN, null));
             else out.add(new MapSender.Assignment(p, v.wall, canvas, Canvas.Encoding.PLAIN,
@@ -514,36 +546,70 @@ public final class Views implements Listener {
         if (v == null) return;
         v.closed = true;
         pipeline.unwatch(player.getUniqueId());
-        for (Map.Entry<Key, Boolean> held : v.held.entrySet()) if (held.getValue()) v.content.key(v, held.getKey(), false);
+        // The player first, and the content after: a content that throws must never leave them seated,
+        // invisible and hidden, with the view already gone so that nothing could close it again.
         if (player.isOnline()) {
             nms.setCamera(player, player);
             v.vehicle.removePassenger(player);
         }
         for (Entity e : v.entities()) e.remove();
-        restore(player, v.previousMode);
+        PotionEffect own = v.previousInvisibility;
+        if (own != null && !own.isInfinite()) {
+            // Sitting does not stop its clock.
+            int left = own.getDuration() - (Bukkit.getCurrentTick() - v.openedAt);
+            own = left > 0 ? own.withDuration(left) : null;
+        }
+        restore(player, v.previousMode, own);
         if (v.previousWeather != null) player.setPlayerWeather(v.previousWeather);
         else player.resetPlayerWeather();
-        v.privateView.close(plugin, player);
+        // Players still seated stay hidden from everyone (see open), whatever this view hid of them.
+        v.privateView.close(plugin, player, e -> e instanceof Player other && views.containsKey(other.getUniqueId()));
         v.wall.despawn();
-        if (player.isOnline()) player.teleport(v.returnTo);
+        // Not when they have already gone to another world (the move closed the view): that is where they were sent.
+        if (player.isOnline() && player.getWorld() == v.wall.world) player.teleport(v.returnTo);
         player.getPersistentDataContainer().remove(returnKey);
+        for (Map.Entry<Key, Boolean> held : v.held.entrySet()) {
+            if (!held.getValue()) continue;
+            try {
+                v.content.key(v, held.getKey(), false);
+            } catch (RuntimeException | LinkageError e) {
+                failed("on a key release", e);
+            }
+        }
         try {
             v.content.closed(v, reason);
-        } catch (RuntimeException e) {
-            plugin.getLogger().warning("A view's content failed on close: " + e);
+        } catch (RuntimeException | LinkageError e) {
+            failed("on close", e);
         }
     }
 
-    private void restore(Player player, GameMode mode) {
+    /**
+     * A content callback threw: say so, and carry on with everything else. Callers catch LinkageError
+     * too: a content whose plugin was disabled before this one can no longer load its classes.
+     */
+    private void failed(String when, Throwable e) {
+        plugin.getLogger().log(Level.WARNING, "A view's content failed " + when, e);
+    }
+
+    /** [invisibility] is the player's own, put back after the view's; null for none. */
+    private void restore(Player player, GameMode mode, PotionEffect invisibility) {
         player.setGameMode(mode);
         player.removePotionEffect(PotionEffectType.INVISIBILITY);
+        if (invisibility != null) player.addPotionEffect(invisibility);
         player.getPersistentDataContainer().remove(seatKey);
         for (Player other : Bukkit.getOnlinePlayers()) other.showPlayer(plugin, player);
         pipeline.conceal(player, false);
     }
 
     public void closeAll(CloseReason reason) {
-        for (Player p : Bukkit.getOnlinePlayers()) close(p, reason);
+        for (Player p : Bukkit.getOnlinePlayers()) {
+            // Each on its own: one that fails must not leave everyone after them seated.
+            try {
+                close(p, reason);
+            } catch (RuntimeException | LinkageError e) {
+                plugin.getLogger().log(Level.SEVERE, "Could not close " + p.getName() + "'s view", e);
+            }
+        }
     }
 
     private static String encode(Location l) {
@@ -588,7 +654,8 @@ public final class Views implements Listener {
             } catch (IllegalArgumentException ex) {
                 gm = GameMode.SURVIVAL;
             }
-            restore(player, gm);
+            // Their own invisibility is not known here: it was only kept in memory, which the crash lost.
+            restore(player, gm, null);
         }
         String back = player.getPersistentDataContainer().get(returnKey, PersistentDataType.STRING);
         if (back != null) {
@@ -721,8 +788,12 @@ public final class Views implements Listener {
     @EventHandler(ignoreCancelled = true)
     public void onTeleport(PlayerTeleportEvent e) {
         ViewImpl v = views.get(e.getPlayer().getUniqueId());
-        if (v == null || !v.revealed) return;
-        if (e.getTo().getWorld() != v.wall.world || e.getTo().distanceSquared(v.vehicle.getLocation()) > 4) close(e.getPlayer(), CloseReason.INTERRUPTED);
+        if (v == null) return;
+        // Before the reveal they still stand on their own feet, and reveal() would undo a teleport by
+        // seating them: so a real move closes a view still loading too. A nudge (a move correction) does
+        // not matter either way, as getting up puts them back where they opened it.
+        Location to = e.getTo(), at = v.revealed ? v.vehicle.getLocation() : e.getFrom();
+        if (to.getWorld() != at.getWorld() || to.distanceSquared(at) > 4) close(e.getPlayer(), CloseReason.INTERRUPTED);
     }
 
     @EventHandler
@@ -737,8 +808,11 @@ public final class Views implements Listener {
 
     @EventHandler
     public void onQuit(PlayerQuitEvent e) {
-        close(e.getPlayer(), CloseReason.INTERRUPTED);
-        pipeline.forget(e.getPlayer().getUniqueId());
+        try {
+            close(e.getPlayer(), CloseReason.INTERRUPTED);
+        } finally {
+            pipeline.forget(e.getPlayer().getUniqueId());
+        }
     }
 
     /** For /uif debug: put a view's pointer at (x, y) as if the mouse had moved there. */

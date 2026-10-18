@@ -2,6 +2,7 @@ package ai.resourcepack.uiframework.net;
 
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelDuplexHandler;
+import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelPromise;
@@ -9,11 +10,13 @@ import io.netty.channel.ChannelPipeline;
 import org.bukkit.entity.Player;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -29,7 +32,8 @@ public final class Pipeline {
     private static final int PLAYER_SLOTS = 36;
 
     private final Nms nms;
-    private final Map<Integer, Runnable> waiting = new ConcurrentHashMap<>();
+    /** Pings sent and not yet answered, with whose they are, so a player who leaves first takes theirs along. */
+    private final Map<Integer, Pending> waiting = new ConcurrentHashMap<>();
     private final AtomicInteger pingIds = new AtomicInteger(0x5345_0000);
     private final Set<UUID> concealed = ConcurrentHashMap.newKeySet();
     private final Map<UUID, Mouse> mice = new ConcurrentHashMap<>();
@@ -42,10 +46,16 @@ public final class Pipeline {
         this.log = log;
     }
 
-    /** A seated player turned their head to (yaw, pitch). Runs on the netty thread, as the packet arrives. */
+    /** A seated player's mouse. Both run on the netty thread, as the packet arrives. */
     public interface Mouse {
+        /** They turned their head to (yaw, pitch). */
         void turned(float yaw, float pitch);
+
+        /** Their client took a teleport the server sent: every rotation after this is from after it. */
+        void teleported();
     }
+
+    private record Pending(UUID player, Runnable then) {}
 
     /**
      * Hand [player]'s turning to [mouse] as each packet arrives rather than a tick later, and stop the
@@ -79,11 +89,11 @@ public final class Pipeline {
         Channel channel = nms.channel(player);
         if (channel == null) return;
         int id = pingIds.incrementAndGet();
-        waiting.put(id, then);
+        waiting.put(id, new Pending(player.getUniqueId(), then));
         channel.eventLoop().execute(() -> {
             ChannelPipeline p = channel.pipeline();
-            if (p.get(PONGS) == null && p.get(nms.packetHandlerName) != null) p.addBefore(nms.packetHandlerName, PONGS, new Pongs());
-            if (p.get(PONGS) == null) waiting.remove(id);
+            if (!ours(p.get(PONGS))) install(p, PONGS, new Pongs());
+            if (!ours(p.get(PONGS))) waiting.remove(id);
         });
         // Written now rather than with the next tick: the patches it follows went out the same way.
         if (!nms.writeNow(player, List.of(nms.ping(id)), ok -> { if (!ok) waiting.remove(id); })) waiting.remove(id);
@@ -95,10 +105,14 @@ public final class Pipeline {
         public void channelRead(ChannelHandlerContext ctx, Object msg) {
             Integer id = nms.pongId(msg);
             if (id != null) {
-                Runnable r = waiting.remove(id);
-                if (r != null) r.run();
+                Pending w = waiting.remove(id);
+                if (w != null) w.then.run();
             }
             ctx.fireChannelRead(msg);
+        }
+
+        Pipeline owner() {
+            return Pipeline.this;
         }
     }
 
@@ -117,12 +131,9 @@ public final class Pipeline {
             // On the event loop, so it is in place before the resend below is written (the loop runs tasks in order).
             channel.eventLoop().execute(() -> {
                 ChannelPipeline p = channel.pipeline();
-                // The anchor is only missing once netty has torn the channel down; then there is nothing to filter.
-                if (p.get(FILTER) == null && p.get(nms.packetHandlerName) != null) {
-                    Filter f = new Filter(player.getUniqueId(), handle);
-                    p.addBefore(nms.packetHandlerName, FILTER, f);
-                    filters.put(player.getUniqueId(), f);
-                }
+                if (ours(p.get(FILTER))) return;
+                Filter f = new Filter(player.getUniqueId(), handle);
+                if (install(p, FILTER, f)) filters.put(player.getUniqueId(), f);
             });
         } else if (!concealed.remove(player.getUniqueId())) {
             return;
@@ -134,6 +145,53 @@ public final class Pipeline {
         concealed.remove(player);
         unwatch(player);
         filters.remove(player);
+        // A ping the player never answered would otherwise keep its view, canvas and all, for good.
+        waiting.values().removeIf(w -> w.player.equals(player));
+    }
+
+    /**
+     * Whether [handler] is this Pipeline's own. A handler of the same name can be left in a channel by an
+     * earlier load of the plugin (a reload, or a disable and enable): it reads that load's maps, so it
+     * would swallow this one's pongs and never see its seated players.
+     */
+    private boolean ours(ChannelHandler handler) {
+        return handler instanceof Filter f ? f.owner() == this : handler instanceof Pongs g && g.owner() == this;
+    }
+
+    /**
+     * Puts [handler] in as [name], in place of any other handler of that name. False if the anchor is
+     * missing, which happens only once netty has torn the channel down; then there is nothing to handle.
+     */
+    private boolean install(ChannelPipeline p, String name, ChannelHandler handler) {
+        if (p.get(nms.packetHandlerName) == null) return false;
+        if (p.get(name) != null) p.replace(name, name, handler);
+        else p.addBefore(nms.packetHandlerName, name, handler);
+        return true;
+    }
+
+    /**
+     * Takes this Pipeline's handlers out of [players]' connections, so a disabled plugin leaves nothing
+     * behind that reads its maps (and keeps its classes loaded). On each channel's own thread, like
+     * every other change to a pipeline here.
+     */
+    public void close(Collection<? extends Player> players) {
+        for (Player player : players) {
+            Channel channel = nms.channel(player);
+            if (channel == null) continue;
+            try {
+                channel.eventLoop().execute(() -> {
+                    ChannelPipeline p = channel.pipeline();
+                    for (String name : List.of(FILTER, PONGS)) if (ours(p.get(name))) p.remove(name);
+                });
+            } catch (RejectedExecutionException e) {
+                // The event loop is shutting down with the server, and the channel with it.
+            }
+        }
+        waiting.clear();
+        filters.clear();
+        mice.clear();
+        pinned.clear();
+        concealed.clear();
     }
 
     /** Stays in the pipeline once added; it passes everything through untouched while its player is not seated. */
@@ -152,18 +210,24 @@ public final class Pipeline {
             this.ctx = ctx;
         }
 
+        Pipeline owner() {
+            return Pipeline.this;
+        }
+
         @Override
         public void channelRead(ChannelHandlerContext ctx, Object msg) {
             Mouse mouse = mice.get(id);
             if (mouse != null) {
-                float[] turn = nms.rotation(msg);
-                if (turn != null) {
-                    try {
-                        mouse.turned(turn[0], turn[1]);
-                    } catch (RuntimeException e) {
-                        // Never take the connection down with it.
-                        log.log(Level.WARNING, "A view's mouse handler failed", e);
+                try {
+                    if (nms.acceptsTeleport(msg)) {
+                        mouse.teleported();
+                    } else {
+                        float[] turn = nms.rotation(msg);
+                        if (turn != null) mouse.turned(turn[0], turn[1]);
                     }
+                } catch (RuntimeException e) {
+                    // Never take the connection down with it.
+                    log.log(Level.WARNING, "A view's mouse handler failed", e);
                 }
             }
             ctx.fireChannelRead(msg);

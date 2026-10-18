@@ -14,6 +14,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Predicate;
 
 /**
  * A view's wall exists for one player only and does not move anything: its frames are shown to them
@@ -64,17 +65,22 @@ final class PrivateView {
         Pyramid p = pyramid();
         if (p == null) return;
         for (Entity e : wall.world.getNearbyEntities(p.bounds)) {
-            if (e == player || !e.isVisibleByDefault() || unseen.contains(e)) continue;
+            // Not what the player already cannot see: hidden for another reason (a seated player, see
+            // Views.open), it must stay hidden when this view lets go. What this view hid and something
+            // has shown again since (that player standing up) is hidden again.
+            if (e == player || !e.isVisibleByDefault() || !player.canSee(e)) continue;
             BoundingBox b = e.getBoundingBox();
             // Level with the picture counts too: another screen's frames on the same wall would fight with it.
-            if (p.reaches(b.getMinX(), b.getMinY(), b.getMinZ(), b.getMaxX(), b.getMaxY(), b.getMaxZ(), 0.5) && unseen.add(e)) {
+            if (p.reaches(b.getMinX(), b.getMinY(), b.getMinZ(), b.getMaxX(), b.getMaxY(), b.getMaxZ(), 0.5)) {
+                unseen.add(e);
                 player.hideEntity(plugin, e);
             }
         }
     }
 
-    void close(Plugin plugin, Player player) {
-        for (Entity e : unseen) if (e.isValid()) player.showEntity(plugin, e);
+    /** Puts back everything this view hid, except what [stillHidden] says must stay hidden for another reason. */
+    void close(Plugin plugin, Player player, Predicate<Entity> stillHidden) {
+        for (Entity e : unseen) if (e.isValid() && !stillHidden.test(e)) player.showEntity(plugin, e);
         unseen.clear();
         if (!player.isOnline() || player.getWorld() != wall.world || cleared.isEmpty()) return;
         World world = wall.world;

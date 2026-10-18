@@ -87,17 +87,31 @@ public final class UIFrameworkPlugin extends JavaPlugin implements UIFramework, 
         UIFramework.Holder.set(null);
         tasks.forEach(BukkitTask::cancel);
         tasks.clear();
-        if (views != null) views.closeAll(CloseReason.SHUTDOWN);
-        if (walls != null) walls.removeAll();
-        if (sender != null) sender.close();
-        if (pack != null) pack.close();
+        if (views != null) step("close the open views", () -> views.closeAll(CloseReason.SHUTDOWN));
+        if (walls != null) step("remove the walls", walls::removeAll);
+        // After the views, whose closing still writes through them.
+        if (pipeline != null) step("take the handlers out of players' connections", () -> pipeline.close(Bukkit.getOnlinePlayers()));
+        if (sender != null) step("stop sending map pictures", sender::close);
+        if (pack != null) step("stop serving the resource pack", pack::close);
         HandlerList.unregisterAll((org.bukkit.plugin.Plugin) this);
+    }
+
+    /** One step of shutting down, on its own: one that fails must not skip the ones after it. */
+    private void step(String what, Runnable step) {
+        try {
+            step.run();
+        } catch (RuntimeException | LinkageError e) {
+            getLogger().log(Level.SEVERE, "Could not " + what, e);
+        }
     }
 
     private void tick() {
         views.tick();
         walls.tick();
+        // Views first: the sender spends each player's budget in this order, and a seated player sees
+        // nothing but their view, so it must not wait behind walls.
         List<MapSender.Assignment> out = new ArrayList<>();
+        views.assignments(out);
         for (Walls.Wall wall : walls.all()) {
             for (Player viewer : walls.viewers(wall)) {
                 Canvas canvas;
@@ -111,7 +125,6 @@ public final class UIFrameworkPlugin extends JavaPlugin implements UIFramework, 
                 out.add(new MapSender.Assignment(viewer, wall.map(), canvas, hasPack(viewer) ? Canvas.Encoding.HI : Canvas.Encoding.PLAIN, null));
             }
         }
-        views.assignments(out);
         sender.update(out);
     }
 
