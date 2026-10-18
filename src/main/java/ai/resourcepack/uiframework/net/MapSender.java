@@ -47,15 +47,22 @@ public final class MapSender implements AutoCloseable {
         final Map<Integer, byte[]> sent = new ConcurrentHashMap<>(); // map id -> exact array the client last got
         long budget;
         final Map<MapWall, Frame> frames = new HashMap<>();
+        /** The walls this pass assigned them; frames for any other are dropped. */
+        final Set<MapWall> walls = new HashSet<>();
+        /** Bytes queued and not yet written, all walls together: what back-pressure goes by. */
         final AtomicLong inFlight = new AtomicLong();
+        /** The same for each wall, so delivered() for one wall never waits on another that keeps changing. */
+        final Map<MapWall, AtomicLong> wallInFlight = new ConcurrentHashMap<>();
         /** Plain tiles with the pointer drawn in, by map id, with what each was made from. */
         final Map<Integer, Pointed> pointed = new ConcurrentHashMap<>(); // also read by delivered(), on the main thread
         /** This pass's patches, written together with one flush. */
         final List<Object> packets = new ArrayList<>();
-        final List<Integer> ids = new ArrayList<>();
-        final List<byte[]> tiles = new ArrayList<>();
+        final List<Patch> patches = new ArrayList<>();
         long batchCost;
     }
+
+    /** One patch on its way: the tile it brings map [id] up to, and the wall's in-flight count it is in. */
+    private record Patch(int id, byte[] tile, int cost, AtomicLong wallInFlight) {}
 
     private record Pointed(byte[] base, PointerSpot spot, byte[] tile) {}
 
@@ -118,7 +125,9 @@ public final class MapSender implements AutoCloseable {
             }
         }
         Viewer v = viewers.get(player);
-        if (a == null || v == null || v.inFlight.get() > 0) return false;
+        if (a == null || v == null) return false;
+        AtomicLong flying = v.wallInFlight.get(wall);
+        if (flying != null && flying.get() > 0) return false;
         for (int t = 0; t < wall.tiles(); t++) {
             if (v.sent.get(wall.mapId(t)) != tileFor(a, v, t)) return false;
         }
@@ -138,13 +147,10 @@ public final class MapSender implements AutoCloseable {
         while (!closed) {
             try {
                 tick();
-            } catch (RuntimeException e) {
-                // Usually a player leaving mid-send, which the next run gets past; say so if it keeps happening.
-                long now = System.nanoTime();
-                if (now - lastWarning > 60_000_000_000L) {
-                    lastWarning = now;
-                    log.log(Level.WARNING, "Sending map pictures failed (shown at most once a minute)", e);
-                }
+            } catch (Throwable e) {
+                // Errors too (out of memory, a broken reflective call): this thread is all that sends pictures,
+                // so it must never die, and an exception that ended it would be lost without a word.
+                warn(e);
             }
             // Woken early by wake(); otherwise every 8 ms, so budgets refill and a full connection is retried.
             LockSupport.parkNanos(8_000_000L);
@@ -157,6 +163,15 @@ public final class MapSender implements AutoCloseable {
         wake();
     }
 
+    /** Usually a player leaving mid-send, which the next run gets past; said at most once a minute if it keeps happening. */
+    private void warn(Throwable e) {
+        long now = System.nanoTime();
+        if (now - lastWarning > 60_000_000_000L) {
+            lastWarning = now;
+            log.log(Level.WARNING, "Sending map pictures failed (shown at most once a minute)", e);
+        }
+    }
+
     private void tick() {
         List<Assignment> assignments = latest.get();
         long now = System.nanoTime();
@@ -167,13 +182,28 @@ public final class MapSender implements AutoCloseable {
             Viewer v = viewers.computeIfAbsent(a.player.getUniqueId(), k -> new Viewer());
             // A quarter of a second of budget can build up, so a burst after a quiet moment goes out at once.
             if (seen.add(a.player.getUniqueId())) v.budget = Math.min(v.budget + refill, bytesPerSecond / 4L);
-            send(a, v);
+            v.walls.add(a.wall);
+            // Each on its own: one that fails must not hold up every assignment after it.
+            try {
+                send(a, v);
+            } catch (RuntimeException e) {
+                warn(e);
+            }
         }
-        for (Assignment a : assignments) flush(a.player, viewers.get(a.player.getUniqueId()));
+        for (Assignment a : assignments) {
+            try {
+                flush(a.player, viewers.get(a.player.getUniqueId()));
+            } catch (RuntimeException e) {
+                warn(e);
+            }
+        }
         // Players who left every screen: drop their state so walking back resends everything.
         viewers.keySet().retainAll(seen);
+        // And each player's frames for walls they are no longer near, even where others still are.
         for (Viewer v : viewers.values()) {
-            v.frames.keySet().removeIf(w -> assignments.stream().noneMatch(a -> a.wall == w));
+            v.frames.keySet().retainAll(v.walls);
+            v.wallInFlight.entrySet().removeIf(e -> !v.walls.contains(e.getKey()) && e.getValue().get() == 0);
+            v.walls.clear();
         }
     }
 
@@ -237,11 +267,13 @@ public final class MapSender implements AutoCloseable {
             if (v.budget <= 0 || v.inFlight.get() >= maxInFlight) return; // carry on from here next run
             byte[] data = new byte[cost];
             for (int y = 0; y < rect[3]; y++) System.arraycopy(current, (rect[1] + y) * 128 + rect[0], data, y * rect[2], rect[2]);
+            Object packet = nms.mapPatch(id, rect[0], rect[1], rect[2], rect[3], data);
+            AtomicLong wallInFlight = v.wallInFlight.computeIfAbsent(a.wall, w -> new AtomicLong());
             // Counted in flight from now, so delivered() never sees the tile as sent before it is written.
             v.inFlight.addAndGet(cost);
-            v.packets.add(nms.mapPatch(id, rect[0], rect[1], rect[2], rect[3], data));
-            v.ids.add(id);
-            v.tiles.add(current);
+            wallInFlight.addAndGet(cost);
+            v.packets.add(packet);
+            v.patches.add(new Patch(id, current, cost, wallInFlight));
             v.batchCost += cost;
             v.budget -= cost;
             v.sent.put(id, current);
@@ -253,28 +285,40 @@ public final class MapSender implements AutoCloseable {
     private void flush(Player player, Viewer v) {
         if (v == null || v.packets.isEmpty()) return;
         List<Object> packets = List.copyOf(v.packets);
-        List<Integer> ids = List.copyOf(v.ids);
-        List<byte[]> tiles = List.copyOf(v.tiles);
+        List<Patch> patches = List.copyOf(v.patches);
         long cost = v.batchCost;
         v.packets.clear();
-        v.ids.clear();
-        v.tiles.clear();
+        v.patches.clear();
         v.batchCost = 0;
-        // Completes once netty has compressed the last packet and the socket took it.
-        boolean queued = nms.writeNow(player, packets, ok -> {
-            v.inFlight.addAndGet(-cost);
-            if (ok) bytesSent.addAndGet(cost);
-            else forget(v, ids, tiles);
-        });
-        if (!queued) {
-            v.inFlight.addAndGet(-cost);
-            forget(v, ids, tiles);
+        boolean queued = false;
+        try {
+            // Completes once netty has compressed the last packet and the socket took it.
+            queued = nms.writeNow(player, packets, ok -> {
+                if (ok) bytesSent.addAndGet(cost);
+                else forget(v, patches);
+                landed(v, patches, cost);
+            });
+        } finally {
+            // Never queued (no connection, or the write threw): nothing else will ever settle them.
+            if (!queued) {
+                forget(v, patches);
+                landed(v, patches, cost);
+            }
         }
     }
 
-    /** Patches that never reached the client: forget that it has them, so they are sent again. */
-    private static void forget(Viewer v, List<Integer> ids, List<byte[]> tiles) {
-        for (int i = 0; i < ids.size(); i++) v.sent.remove(ids.get(i), tiles.get(i));
+    /**
+     * Patches that never reached the client: forget that it has them, so they are sent again. Before
+     * they stop counting as in flight, so delivered() never sees them as both written and sent.
+     */
+    private static void forget(Viewer v, List<Patch> patches) {
+        for (Patch p : patches) v.sent.remove(p.id, p.tile);
+    }
+
+    /** Patches written (or given up on): no longer in flight. */
+    private static void landed(Viewer v, List<Patch> patches, long cost) {
+        v.inFlight.addAndGet(-cost);
+        for (Patch p : patches) p.wallInFlight.addAndGet(-p.cost);
     }
 
     /** The smallest rectangle {x, y, w, h} covering every byte that differs, or null if none does. */
