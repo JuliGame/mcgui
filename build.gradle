@@ -32,6 +32,8 @@ dependencies {
     implementation 'com.github.weisj:jsvg:2.2.0'
 
     testImplementation 'org.junit.jupiter:junit-jupiter:5.11.0'
+    // The benchmark measures the canvas step too.
+    testImplementation 'ai.resourcepack:ui-framework:0.1.0'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
@@ -72,4 +74,15 @@ tasks.register('renderSamples', JavaExec) {
     def dir = project.findProperty('dir') ?: 'samples'
     args = [file(dir).absolutePath, layout.buildDirectory.dir('samples').get().asFile.absolutePath] + (project.findProperty('only') ? [project.findProperty('only')] : [])
     systemProperty 'java.awt.headless', 'true'
+}
+
+// What each page costs a session: full render, canvas, hover repaint (RenderBench). -Pruns=<n>, -Ponly=<name>.
+tasks.register('renderBench', JavaExec) {
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'ai.resourcepack.ui.html.RenderBench'
+    args = [file('samples').absolutePath, file('src/main/resources/pages').absolutePath]
+    systemProperty 'java.awt.headless', 'true'
+    systemProperty 'runs', project.findProperty('runs') ?: '20'
+    systemProperty 'only', project.findProperty('only') ?: ''
+    maxHeapSize = '2g'
 }
