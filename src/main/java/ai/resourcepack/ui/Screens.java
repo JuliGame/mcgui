@@ -287,7 +287,8 @@ public final class Screens {
         @Override
         public void closed(View v, CloseReason reason) {
             session.dispose();
-            views.remove(session.viewer);
+            // Only if it is still this view's: one opening in its place closes this one after taking the slot.
+            views.remove(session.viewer, this);
         }
     }
 
