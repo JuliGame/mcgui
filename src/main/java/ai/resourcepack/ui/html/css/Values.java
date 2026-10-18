@@ -116,17 +116,19 @@ public final class Values {
                 parts.add(p);
             }
         }
-        double alpha = 1;
-        int slash = parts.indexOf("/");
-        if (slash >= 0) {
-            if (slash + 1 < parts.size()) alpha = fraction(parts.get(slash + 1));
-            parts = parts.subList(0, slash);
-        } else if (parts.size() == 4) {
-            alpha = fraction(parts.get(3));
-            parts = parts.subList(0, 3);
-        }
-        if (parts.size() < 3) return null;
+        // The alpha is read inside the try too: color-mix(in srgb, red, blue) has four parts, and "blue"
+        // as an alpha threw out of here and left the whole page undrawn.
         try {
+            double alpha = 1;
+            int slash = parts.indexOf("/");
+            if (slash >= 0) {
+                if (slash + 1 < parts.size()) alpha = fraction(parts.get(slash + 1));
+                parts = parts.subList(0, slash);
+            } else if (parts.size() == 4) {
+                alpha = fraction(parts.get(3));
+                parts = parts.subList(0, 3);
+            }
+            if (parts.size() < 3) return null;
             int[] rgb = switch (name) {
                 case "rgb", "rgba" -> new int[]{channel(parts.get(0)), channel(parts.get(1)), channel(parts.get(2))};
                 case "hsl", "hsla" -> hsl(hue(parts.get(0)), percent(parts.get(1)), percent(parts.get(2)));
