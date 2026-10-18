@@ -26,7 +26,10 @@ import java.util.HexFormat;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executors;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.logging.Logger;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
@@ -50,6 +53,8 @@ public final class ResourcePack implements AutoCloseable {
     public final String sha1;
     private final Set<UUID> loaded = ConcurrentHashMap.newKeySet();
     private HttpServer http;
+    /** The server's threads: HttpServer.stop() leaves an executor it was given running. */
+    private ExecutorService executor;
 
     public ResourcePack(Settings settings, Palette palette, Path dataFolder, Logger logger) throws IOException {
         this.settings = settings;
@@ -79,11 +84,17 @@ public final class ResourcePack implements AutoCloseable {
                 }
             }
         });
-        server.setExecutor(Executors.newFixedThreadPool(2, r -> {
+        // The server reads each request on one of these threads, so a few connections that stall
+        // part-way must not take every one: up to 8 at once, each ending after 30 s idle. A pool only
+        // grows past its core size once its queue is full, so the core size is the cap.
+        ThreadPoolExecutor pool = new ThreadPoolExecutor(8, 8, 30, TimeUnit.SECONDS, new LinkedBlockingQueue<>(), r -> {
             Thread t = new Thread(r, "UIFramework-pack");
             t.setDaemon(true);
             return t;
-        }));
+        });
+        pool.allowCoreThreadTimeOut(true);
+        executor = pool;
+        server.setExecutor(pool);
         server.start();
         http = server;
         logger.info("Serving the resource pack on " + settings.packBind + ":" + settings.packPort);
@@ -125,6 +136,8 @@ public final class ResourcePack implements AutoCloseable {
     public void close() {
         if (http != null) http.stop(0);
         http = null;
+        if (executor != null) executor.shutdownNow();
+        executor = null;
     }
 
     private static byte[] build(Palette palette) throws IOException {
