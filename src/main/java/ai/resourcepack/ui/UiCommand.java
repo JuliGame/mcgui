@@ -82,8 +82,8 @@ final class UiCommand implements TabExecutor {
             }
             case "reload" -> {
                 if (!permitted(sender, permissionFor("reload"))) return true;
-                plugin.reload();
-                say(sender, "Reloaded the config and every page.", NamedTextColor.GREEN);
+                String restart = plugin.reload();
+                say(sender, "Reloaded the config and every page." + (restart == null ? "" : " " + restart), NamedTextColor.GREEN);
             }
             default -> say(sender, "/ui open <page> [player] · close [player] · place <page> [cols] [rows] [name] [shared] · remove [name] · list · reload",
                     NamedTextColor.GRAY);
@@ -109,7 +109,10 @@ final class UiCommand implements TabExecutor {
             return;
         }
         try {
-            if (!plugin.screens().open(target, page)) say(sender, "Could not open '" + page + "': see the console.", NamedTextColor.RED);
+            // A page not loaded yet opens when it has; what goes wrong then is told here too.
+            if (!plugin.screens().open(target, page, problem -> say(sender, problem, NamedTextColor.RED))) {
+                say(sender, "Could not open '" + page + "': see the console.", NamedTextColor.RED);
+            }
         } catch (IllegalStateException e) {
             say(sender, e.getMessage(), NamedTextColor.RED);
         }

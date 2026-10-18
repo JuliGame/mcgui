@@ -34,6 +34,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
+import java.util.function.Consumer;
 
 /**
  * Pages on screens: placed wall screens (saved in screens.yml, each viewer browsing their own copy
@@ -50,6 +51,8 @@ public final class Screens implements Listener {
      */
     private final Map<String, ConfigurationSection> waiting = new ConcurrentHashMap<>();
     private final Map<UUID, Seated> views = new ConcurrentHashMap<>();
+    /** Each player's latest fullscreen open still waiting for its page to load: an older one that loads later is dropped. */
+    private final Map<UUID, Object> opening = new ConcurrentHashMap<>();
 
     Screens(UIEnginePlugin plugin, ExecutorService renderers) {
         this.plugin = plugin;
@@ -94,10 +97,9 @@ public final class Screens implements Listener {
         }
 
         private Session newSession(UUID id) {
-            Page p = plugin.pages().get(page);
-            double designHeight = designHeight(p, height > 0 ? height : plugin.wallHeight(rows));
+            // Called inside UI Framework's tick: the page loads elsewhere and shows when it has.
             Canvas canvas = UIFramework.get().canvas(cols, rows);
-            Session s = new Session(plugin, renderers, canvas, id, designHeight);
+            Session s = new Session(plugin, renderers, canvas, id, height > 0 ? height : plugin.wallHeight(rows));
             s.close = () -> {
                 if (s.pageName() != null && !s.pageName().equals(plugin.pages().normalise(page))) s.open(page, null, false);
             };
@@ -133,14 +135,16 @@ public final class Screens implements Listener {
             if (click == Click.RIGHT && plugin.wallFullscreen()) {
                 // Sit down at it: the page this screen is on for them, fullscreen.
                 String at = s.pageName() != null ? s.pageName() : page;
+                Consumer<String> tell = problem -> viewer.sendActionBar(Component.text(problem, NamedTextColor.RED));
                 try {
-                    open(viewer, at);
+                    open(viewer, at, tell);
                 } catch (IllegalStateException e) {
-                    viewer.sendActionBar(Component.text(e.getMessage(), NamedTextColor.RED));
+                    tell.accept(e.getMessage());
                 }
                 return;
             }
-            s.click(x, y);
+            // On a shared screen the session has no player of its own: commands run as (and for) whoever clicked.
+            s.click(x, y, viewer);
         }
 
         @Override
@@ -327,13 +331,40 @@ public final class Screens implements Listener {
         }
     }
 
-    /** Opens [page] fullscreen for [player]; false (with the reason told to them) if it cannot be. */
-    public boolean open(Player player, String page) {
-        Page p = plugin.pages().get(page);
-        if (p == null) return false;
+    /**
+     * Opens [page] fullscreen for [player]: at once if the page is loaded, else once it has loaded.
+     * False if there is no such page. Seating them can fail (no room where they are): at once, that
+     * throws IllegalStateException; later, [problem] hears it, as it hears a page that fails to load.
+     */
+    public boolean open(Player player, String page, Consumer<String> problem) {
+        String n = plugin.pages().normalise(page);
+        if (n == null || !plugin.pages().exists(n)) return false;
+        UUID id = player.getUniqueId();
+        Page p = plugin.pages().loaded(n);
+        if (p != null) {
+            opening.remove(id);
+            return seat(player, n, p);
+        }
+        Object ticket = new Object();
+        opening.put(id, ticket);
+        plugin.pages().load(n).thenAcceptAsync(loaded -> {
+            if (!opening.remove(id, ticket)) return;
+            Player now = Bukkit.getPlayer(id);
+            if (now == null) return;
+            try {
+                if (loaded == null || !seat(now, n, loaded)) problem.accept("Could not open '" + page + "': see the console.");
+            } catch (IllegalStateException e) {
+                problem.accept(e.getMessage());
+            }
+        }, plugin.serverThread());
+        return true;
+    }
+
+    /** Seats [player] at page [p], named [n], fullscreen. */
+    private boolean seat(Player player, String n, Page p) {
         int[] size = plugin.viewSize(p);
         Canvas canvas = UIFramework.get().canvas(size[0], size[1]);
-        Session session = new Session(plugin, renderers, canvas, player.getUniqueId(), designHeight(p, plugin.viewHeight()));
+        Session session = new Session(plugin, renderers, canvas, player.getUniqueId(), plugin.viewHeight());
         Seated seated = new Seated(session);
         session.pointerShape = shape -> {
             View v = seated.view;
@@ -343,13 +374,13 @@ public final class Screens implements Listener {
             View v = seated.view;
             if (v != null) v.close();
         };
-        if (!session.open(page, null, false)) return false;
+        if (!session.open(n, null, false)) return false;
         Seated old = views.put(player.getUniqueId(), seated);
         if (old != null && old.view != null) old.view.close();
         try {
             seated.view = UIFramework.get().openView(player, seated, ViewOptions.DEFAULT);
         } catch (IllegalStateException e) {
-            views.remove(player.getUniqueId());
+            views.remove(player.getUniqueId(), seated);
             session.dispose();
             throw e;
         }
@@ -357,9 +388,11 @@ public final class Screens implements Listener {
         return true;
     }
 
+    /** Closes [player]'s page, or the one still loading for them. */
     public boolean close(Player player) {
+        boolean wasOpening = opening.remove(player.getUniqueId()) != null;
         Seated s = views.get(player.getUniqueId());
-        if (s == null || s.view == null) return false;
+        if (s == null || s.view == null) return wasOpening;
         s.view.close();
         return true;
     }
@@ -376,6 +409,7 @@ public final class Screens implements Listener {
     }
 
     void shutdown() {
+        opening.clear();
         for (Seated s : new ArrayList<>(views.values())) if (s.view != null) s.view.close();
         views.clear();
         for (Wall w : walls.values()) w.remove();

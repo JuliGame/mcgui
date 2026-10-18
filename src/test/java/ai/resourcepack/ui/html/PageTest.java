@@ -7,8 +7,10 @@ import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class PageTest {
     private static final Page.Loader OFFLINE = new Page.Loader(false, null);
@@ -42,5 +44,15 @@ class PageTest {
         assertNotNull(p.image(uri));
         assertNull(p.image("data:image/png;base64,a"));
         assertNull(p.image("data:image/png;base64,a"));
+    }
+
+    @Test
+    void siblingStatesSeesSiblingCombinatorsOnlyInStateRules() {
+        assertTrue(page(".tab:hover + .panel { color: red }").siblingStates());
+        assertTrue(page("@media (min-width: 1px) { .a:active ~ .b { color: red } }").siblingStates());
+        assertTrue(page(":is(.a:hover ~ .b) { color: red }").siblingStates());
+        assertFalse(page(".a + .b { color: red } .a:hover { color: blue }").siblingStates());
+        assertFalse(page("li:nth-child(2n+1):hover, [class~=x]:hover { width: calc(1px + 2px) }").siblingStates());
+        assertFalse(page("/* .a:hover + .b { } */ .a:hover { color: red }").siblingStates());
     }
 }

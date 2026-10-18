@@ -10,6 +10,9 @@ import org.jsoup.nodes.Node;
 import org.jsoup.nodes.TextNode;
 
 import java.lang.reflect.Method;
+import java.util.logging.Logger;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Fills a page in for one player: {player}, {uuid}, {world}, {x} {y} {z}, {online}, {max}, {health},
@@ -98,6 +101,31 @@ public final class Placeholders {
             }
         }
         return out;
+    }
+
+    /** One placeholder: a built-in {name} or a PlaceholderAPI %name%. */
+    private static final Pattern PLACEHOLDER = Pattern.compile("\\{[a-z_]+}|%[^%\\s]+%");
+
+    /**
+     * [command], for the console to run, with its placeholders filled for [player]; or null, with the
+     * reason logged to [log], when a value put in has whitespace or a ';' in it. A display name, a
+     * world's name or a PlaceholderAPI value can, and would then add arguments, or with some command
+     * plugins a second command, to what runs with the console's rights.
+     */
+    public static String command(String command, Player player, Logger log) {
+        Matcher m = PLACEHOLDER.matcher(command);
+        StringBuilder out = new StringBuilder();
+        while (m.find()) {
+            String token = m.group();
+            String value = apply(token, player);
+            if (!value.equals(token) && value.chars().anyMatch(c -> Character.isWhitespace(c) || Character.isSpaceChar(c) || c == ';')) {
+                log.warning("Not running console command '" + command + "': " + token + " is '" + value + "', which has a space or ';' in it");
+                return null;
+            }
+            m.appendReplacement(out, Matcher.quoteReplacement(value));
+        }
+        m.appendTail(out);
+        return out.toString();
     }
 
     private static String plain(Player p) {

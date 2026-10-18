@@ -1,5 +1,6 @@
 package ai.resourcepack.ui;
 
+import ai.resourcepack.uiframework.api.UIFramework;
 import ai.resourcepack.ui.html.Page;
 import org.bukkit.Bukkit;
 import org.bukkit.configuration.file.FileConfiguration;
@@ -13,6 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -28,38 +30,34 @@ public final class UIEnginePlugin extends JavaPlugin {
     /** The example pages copied into a new pages folder. */
     private static final String[] EXAMPLES = {"menu.html", "rules.html", "shop.html", "style.css"};
 
-    private PageStore pages;
+    private volatile PageStore pages;
     private Screens screens;
     private ExecutorService renderers;
+    private int renderThreads;
+    private Executor serverThread;
     private final List<BukkitTask> tasks = new ArrayList<>();
+    private BukkitTask watcher;
     private FileConfiguration cfg;
 
     @Override
     public void onEnable() {
         saveDefaultConfig();
         cfg = getConfig();
-        Path folder = getDataFolder().toPath().resolve(cfg.getString("pages-folder", "pages")).normalize();
-        try {
-            if (!Files.isDirectory(folder)) {
-                Files.createDirectories(folder);
-                for (String name : EXAMPLES) copyExample(name, folder);
-            }
-        } catch (IOException e) {
-            getLogger().warning("Could not create the pages folder: " + e.getMessage());
-        }
-        int threads = Math.max(1, cfg.getInt("render-threads", Math.max(1, Runtime.getRuntime().availableProcessors() / 2)));
+        Executor main = UIFramework.get().serverThread();
+        serverThread = task -> main.execute(() -> {
+            if (isEnabled()) task.run();
+        });
+        renderThreads = renderThreadsSetting();
         AtomicInteger n = new AtomicInteger();
-        renderers = Executors.newFixedThreadPool(threads, r -> {
+        renderers = Executors.newFixedThreadPool(renderThreads, r -> {
             Thread t = new Thread(r, "UIEngine-render-" + n.incrementAndGet());
             t.setDaemon(true);
             t.setPriority(Thread.NORM_PRIORITY - 1);
             return t;
         });
-        Page.Loader loader = new Page.Loader(cfg.getBoolean("allow-web", true), getDataFolder().toPath().resolve("cache"));
-        pages = new PageStore(folder, loader, getLogger());
+        pages = newPageStore();
         screens = new Screens(this, renderers);
         getServer().getPluginManager().registerEvents(screens, this);
-        pages.onReload = name -> Bukkit.getScheduler().runTask(this, () -> screens.reloaded(name));
         // Warm the renderer (fonts, the default stylesheet) so the first page a player opens is quick.
         renderers.execute(() -> ai.resourcepack.ui.html.text.Fonts.bundled());
         screens.load();
@@ -67,9 +65,7 @@ public final class UIEnginePlugin extends JavaPlugin {
         getCommand("ui").setExecutor(command);
         getCommand("ui").setTabCompleter(command);
         tasks.add(Bukkit.getScheduler().runTaskTimer(this, () -> screens.tick(Bukkit.getCurrentTick()), 1, 1));
-        if (cfg.getBoolean("live-reload", true)) {
-            tasks.add(Bukkit.getScheduler().runTaskTimerAsynchronously(this, pages::checkForChanges, 20, 20));
-        }
+        watch();
         UIEngine.instance = this;
     }
 
@@ -78,7 +74,9 @@ public final class UIEnginePlugin extends JavaPlugin {
         UIEngine.instance = null;
         tasks.forEach(BukkitTask::cancel);
         tasks.clear();
+        if (watcher != null) watcher.cancel();
         if (screens != null) screens.shutdown();
+        if (pages != null) pages.close();
         if (renderers != null) {
             renderers.shutdownNow();
             try {
@@ -90,13 +88,50 @@ public final class UIEnginePlugin extends JavaPlugin {
         HandlerList.unregisterAll(this);
     }
 
-    /** Reads config.yml and the pages again, keeping placed screens. */
-    void reload() {
+    private int renderThreadsSetting() {
+        return Math.max(1, cfg.getInt("render-threads", Math.max(1, Runtime.getRuntime().availableProcessors() / 2)));
+    }
+
+    /** The pages folder the config names (made, with the examples, if it is not there), with a loader as the config says. */
+    private PageStore newPageStore() {
+        Path folder = getDataFolder().toPath().resolve(cfg.getString("pages-folder", "pages")).normalize();
+        try {
+            if (!Files.isDirectory(folder)) {
+                Files.createDirectories(folder);
+                for (String name : EXAMPLES) copyExample(name, folder);
+            }
+        } catch (IOException e) {
+            getLogger().warning("Could not create the pages folder: " + e.getMessage());
+        }
+        Page.Loader loader = new Page.Loader(cfg.getBoolean("allow-web", true), getDataFolder().toPath().resolve("cache"),
+                cfg.getBoolean("allow-private-hosts", false), folder);
+        PageStore store = new PageStore(folder, loader, getLogger());
+        store.onReload = name -> serverThread.execute(() -> screens.reloaded(name));
+        return store;
+    }
+
+    /** Starts (or restarts, or stops) the live-reload check, as the config says. */
+    private void watch() {
+        if (watcher != null) watcher.cancel();
+        watcher = cfg.getBoolean("live-reload", true)
+                ? Bukkit.getScheduler().runTaskTimerAsynchronously(this, () -> pages.checkForChanges(), 20, 20) : null;
+    }
+
+    /**
+     * Reads config.yml and the pages again, keeping placed screens. The page store and its loader are
+     * made anew, so pages-folder, allow-web and allow-private-hosts apply, and URLs that failed are
+     * tried again. Returns what only a restart applies, or null.
+     */
+    String reload() {
         reloadConfig();
         cfg = getConfig();
-        pages.clear();
+        PageStore old = pages;
+        pages = newPageStore();
+        old.close();
         Placeholders.reset();
+        watch();
         for (String name : pages.names()) screens.reloaded(name);
+        return renderThreadsSetting() != renderThreads ? "render-threads changes on the next restart." : null;
     }
 
     private void copyExample(String name, Path folder) throws IOException {
@@ -107,6 +142,14 @@ public final class UIEnginePlugin extends JavaPlugin {
 
     PageStore pages() {
         return pages;
+    }
+
+    /**
+     * Runs a task on the server thread as soon as it is free, which between ticks is at once (the Bukkit
+     * scheduler would hold it for the next tick), and not at all once the plugin is disabled.
+     */
+    Executor serverThread() {
+        return serverThread;
     }
 
     Screens screens() {

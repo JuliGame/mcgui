@@ -2,10 +2,11 @@ package ai.resourcepack.ui;
 
 import ai.resourcepack.uiframework.api.Canvas;
 import ai.resourcepack.uiframework.api.Pointer;
-import ai.resourcepack.uiframework.api.UIFramework;
 import ai.resourcepack.ui.html.HtmlRenderer;
 import ai.resourcepack.ui.html.Page;
+import ai.resourcepack.ui.html.css.Values;
 import ai.resourcepack.ui.html.paint.Painter;
+import ai.resourcepack.ui.html.style.Len;
 import ai.resourcepack.ui.html.style.Style;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.event.ClickEvent;
@@ -15,6 +16,7 @@ import org.bukkit.Sound;
 import org.bukkit.entity.Player;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
+import org.jsoup.select.Elements;
 
 import java.awt.geom.Rectangle2D;
 import java.util.ArrayDeque;
@@ -33,7 +35,7 @@ import java.util.function.Consumer;
  * One player's page on one screen: which page, how far it is scrolled, what the pointer is over, and
  * the history the back button walks. Drawing happens off the server thread, at most one picture at a
  * time per session, and a change while one is being drawn just asks for another when it is done.
- * Everything else runs on the server thread.
+ * Pages load off the server thread too, and show once loaded. Everything else runs on the server thread.
  */
 public final class Session {
     private final UIEnginePlugin plugin;
@@ -46,15 +48,20 @@ public final class Session {
     public final Canvas canvas;
     /** The player this session belongs to, or null for a screen everyone shares. */
     public final UUID viewer;
-    private final double designHeight;
+    /** CSS pixels the canvas is tall: the screen's own until the first page shown says otherwise. */
+    private double designHeight;
+    private boolean sized;
 
     private String pageName;
     private Page page;
+    /** This session's copy of the page's document; [hover] and [pressed] are always elements of it. */
     private Document doc;
     private double scrollY;
     private Element hover, pressed;
     private final Deque<Entry> back = new ArrayDeque<>();
     private record Entry(String page, double scroll) {}
+    /** Counts the pages asked for, so a page that finishes loading after another was asked for is not shown. */
+    private int navigation;
 
     private volatile HtmlRenderer.Frame frame;
     private boolean rendering, dirty;
@@ -67,13 +74,11 @@ public final class Session {
     private int refreshTicks;
     private long nextRefresh;
 
+    /** [designHeight]: how many CSS pixels tall the canvas is, unless the first page shown sets its own ui:height. */
     Session(UIEnginePlugin plugin, ExecutorService renderers, Canvas canvas, UUID viewer, double designHeight) {
         this.plugin = plugin;
         this.renderers = renderers;
-        Executor main = UIFramework.get().serverThread();
-        this.serverThread = task -> main.execute(() -> {
-            if (plugin.isEnabled()) task.run();
-        });
+        this.serverThread = plugin.serverThread();
         this.canvas = canvas;
         this.viewer = viewer;
         this.designHeight = designHeight;
@@ -93,23 +98,60 @@ public final class Session {
 
     // ---------------------------------------------------------------- pages
 
-    /** Shows [name] (a page in the folder), scrolled to its top or to [fragment]. False if there is no such page. */
+    /**
+     * Shows [name] (a page in the folder), scrolled to its top or to [fragment]: now if it is loaded,
+     * else once it has loaded. False if there is no such page.
+     */
     public boolean open(String name, String fragment, boolean remember) {
-        Page p = plugin.pages().get(name);
-        if (p == null) return false;
-        if (remember && pageName != null) back.push(new Entry(pageName, scrollY));
-        if (back.size() > 50) back.removeLast();
-        pageName = plugin.pages().normalise(name);
+        return open(name, fragment, remember, null);
+    }
+
+    /** As {@link #open(String, String, boolean)}; [tell] hears if the page then fails to load. */
+    private boolean open(String name, String fragment, boolean remember, Player tell) {
+        String n = plugin.pages().normalise(name);
+        if (n == null || !plugin.pages().exists(n)) return false;
+        whenLoaded(n, tell, p -> {
+            if (remember && pageName != null) back.push(new Entry(pageName, scrollY));
+            if (back.size() > 50) back.removeLast();
+            show(n, p, 0, fragment);
+        });
+        return true;
+    }
+
+    /**
+     * Runs [then] with page [n] on the server thread: at once if it is loaded, else when it is, unless
+     * another page was asked for meanwhile. [tell] hears if it cannot be loaded.
+     */
+    private void whenLoaded(String n, Player tell, Consumer<Page> then) {
+        int nav = ++navigation;
+        Page now = plugin.pages().loaded(n);
+        if (now != null) {
+            then.accept(now);
+            return;
+        }
+        plugin.pages().load(n).thenAcceptAsync(p -> {
+            if (closed || navigation != nav) return;
+            if (p != null) then.accept(p);
+            else if (tell != null && tell.isOnline()) tell.sendActionBar(Component.text("There is no page called " + n, NamedTextColor.RED));
+        }, serverThread);
+    }
+
+    /** Puts up page [p], named [n], scrolled to [scroll] or, once drawn, to [fragment]. */
+    private void show(String n, Page p, double scroll, String fragment) {
+        if (!sized) {
+            designHeight = Screens.designHeight(p, designHeight);
+            sized = true;
+        }
+        pageName = n;
         page = p;
         doc = Placeholders.fill(p.document, player());
-        scrollY = 0;
+        scrollY = scroll;
         hover = null;
         pressed = null;
         refreshTicks = refreshSetting(p);
         nextRefresh = Bukkit.getCurrentTick() + refreshTicks;
         pendingFragment = fragment;
         render();
-        return true;
     }
 
     private String pendingFragment;
@@ -118,45 +160,85 @@ public final class Session {
         String v = p.meta("ui:refresh");
         if (v == null) return 0;
         try {
-            return Math.max(1, (int) Math.round(Double.parseDouble(v.trim()) * 20));
+            double seconds = Double.parseDouble(v.trim());
+            // 0 or less is no refresh. Each refresh draws the whole page again, so not more than twice a second.
+            return seconds > 0 ? (int) Math.max(10, Math.min(Integer.MAX_VALUE, Math.round(seconds * 20))) : 0;
         } catch (NumberFormatException e) {
             return 0;
         }
     }
 
+    /** Back to the page before; false if there is none. */
     public boolean goBack() {
+        return goBack(player());
+    }
+
+    private boolean goBack(Player tell) {
         Entry e = back.poll();
         if (e == null) return false;
-        Page p = plugin.pages().get(e.page);
-        if (p == null) return false;
-        pageName = e.page;
-        page = p;
-        doc = Placeholders.fill(p.document, player());
-        scrollY = e.scroll;
-        hover = null;
-        refreshTicks = refreshSetting(p);
-        render();
+        whenLoaded(e.page, tell, p -> show(e.page, p, e.scroll, null));
         return true;
     }
 
     /** The page file changed: show the new one where the player was. */
     void reloaded(String name) {
         if (!name.equals(pageName) || closed) return;
-        Page p = plugin.pages().get(name);
-        if (p == null) return;
-        page = p;
-        doc = Placeholders.fill(p.document, player());
-        hover = null;
-        render();
+        int nav = navigation;
+        plugin.pages().load(name).thenAcceptAsync(p -> {
+            if (closed || navigation != nav || p == null || p == page || !name.equals(pageName)) return;
+            page = p;
+            doc = Placeholders.fill(p.document, player());
+            // The new file can be shaped differently: nothing carries over by position.
+            hover = null;
+            pressed = null;
+            refreshTicks = refreshSetting(p);
+            render();
+        }, serverThread);
     }
 
     /** Every tick: re-fill placeholders on pages that ask for it. */
     void tick(long now) {
         if (refreshTicks > 0 && page != null && now >= nextRefresh) {
             nextRefresh = now + refreshTicks;
-            doc = Placeholders.fill(page.document, player());
+            Document fresh = Placeholders.fill(page.document, player());
+            // What clicks changed (an open <details>, a ticked box) and what the pointer is on carry over.
+            keepFormState(doc, fresh);
+            hover = counterpart(hover, fresh);
+            pressed = counterpart(pressed, fresh);
+            doc = fresh;
             render();
         }
+    }
+
+    /** Copies what a click can change, ticks and open details, from [from] to [to], copies of the same page. */
+    private static void keepFormState(Document from, Document to) {
+        Elements a = from.getAllElements(), b = to.getAllElements();
+        if (a.size() != b.size()) return;
+        for (int i = 0; i < a.size(); i++) {
+            String attr = switch (a.get(i).normalName()) {
+                case "input" -> "checked";
+                case "details" -> "open";
+                default -> null;
+            };
+            if (attr == null) continue;
+            if (a.get(i).hasAttr(attr)) b.get(i).attr(attr, "");
+            else b.get(i).removeAttr(attr);
+        }
+    }
+
+    /**
+     * [e]'s counterpart in [to]. Both documents must be copies of the same page's: filling in
+     * placeholders and clicking change attributes and text, never the shape, so an element's place in
+     * document order finds it.
+     */
+    private static Element counterpart(Element e, Document to) {
+        if (e == null) return null;
+        Document from = e.ownerDocument();
+        if (from == to) return e;
+        if (from == null) return null;
+        int i = from.getAllElements().indexOf(e);
+        Elements all = to.getAllElements();
+        return i >= 0 && i < all.size() ? all.get(i) : null;
     }
 
     // ---------------------------------------------------------------- drawing
@@ -183,6 +265,7 @@ public final class Session {
         Page p = page;
         Document d = doc;
         double s = scrollY;
+        int nav = navigation;
         var state = HtmlRenderer.state(hover, pressed);
         List<Element> hoverKey = key(hover, false), pressKey = key(pressed, true);
         String fragment = pendingFragment;
@@ -198,15 +281,26 @@ public final class Session {
                 if (fragment == null && before != null && before.document() == d && before.page() == p && before.scale() == scale
                         && Math.abs(before.scrollY() - Math.max(0, Math.min(s, before.maxScroll()))) < 0.01) {
                     // Only the hover or press state moved: repaint just what it touches.
-                    changed = dirtyRegion(before, hoverKey, pressKey);
-                    if (changed != null && changed.isEmpty()) {
+                    Set<Element> moved = changedState(hoverKey, pressKey);
+                    if (moved.isEmpty()) {
                         drawnHover = hoverKey;
                         drawnPress = pressKey;
                         return;
                     }
-                    if (changed != null && changed.getWidth() * changed.getHeight() < 0.6 * before.viewportWidth() * before.viewportHeight()) {
+                    // A page where hovering one element restyles its siblings ('+', '~') is drawn whole.
+                    changed = p.siblingStates() ? null : dirtyRegion(before, moved);
+                    if (changed != null && small(changed, before)) {
                         f = HtmlRenderer.render(p, d, canvas.width(), canvas.height(), scale, s, state, before.image(), changed);
-                        if (sameLayout(before, f, changed)) partial = true;
+                        // The new state may reach further than the old one did (a shadow only hovering adds): then
+                        // paint both. If it cannot be told, or it is too much, draw it all.
+                        Rectangle2D after = dirtyRegion(f, moved);
+                        if (after == null) {
+                            f = null;
+                        } else if (!changed.contains(after)) {
+                            changed = changed.createUnion(after);
+                            f = small(changed, before) ? HtmlRenderer.render(p, d, canvas.width(), canvas.height(), scale, s, state, before.image(), changed) : null;
+                        }
+                        if (f != null && sameLayout(before, f, changed)) partial = true;
                         else f = null;
                     }
                 }
@@ -218,7 +312,10 @@ public final class Session {
                         if (!Double.isNaN(top)) {
                             f = HtmlRenderer.render(p, d, canvas.width(), canvas.height(), scale, top, state);
                             double scrolled = f.scrollY();
-                            serverThread.execute(() -> scrollY = scrolled);
+                            // Unless the player has moved on (another page, or scrolled) while this was drawn.
+                            serverThread.execute(() -> {
+                                if (navigation == nav && scrollY == s) scrollY = scrolled;
+                            });
                         }
                     }
                 }
@@ -262,36 +359,96 @@ public final class Session {
         });
     }
 
-    /** Room round a changed element for what it may draw outside itself on hover: a shadow, a glow, a lift. */
+    /** Room round a changed element for what it may draw outside itself on hover beyond its shadows and blur: a lift, a glow. */
     private static final double DIRTY_MARGIN = 48;
 
-    /**
-     * The part of the viewport (CSS pixels) a change from the drawn hover and press state to [hoverKey]
-     * and [pressKey] can touch: the elements that changed state and everything inside them. Empty
-     * when nothing changed; null when it cannot be told (draw it all).
-     */
-    private Rectangle2D dirtyRegion(HtmlRenderer.Frame before, List<Element> hoverKey, List<Element> pressKey) {
+    /** The elements whose hover or press state differs between the picture drawn and [hoverKey] and [pressKey]. */
+    private Set<Element> changedState(List<Element> hoverKey, List<Element> pressKey) {
         Set<Element> changed = Collections.newSetFromMap(new IdentityHashMap<>());
         for (Element e : drawnHover) if (!hoverKey.contains(e)) changed.add(e);
         for (Element e : hoverKey) if (!drawnHover.contains(e)) changed.add(e);
         for (Element e : drawnPress) if (!pressKey.contains(e)) changed.add(e);
         for (Element e : pressKey) if (!drawnPress.contains(e)) changed.add(e);
-        if (changed.isEmpty()) return new Rectangle2D.Double();
+        return changed;
+    }
+
+    /**
+     * The part of the viewport (CSS pixels) that [changed] and everything inside them cover in [f],
+     * grown by the furthest their styles there paint outside themselves. Null when it cannot be told,
+     * or when a box with a backdrop filter meets it (draw it all).
+     */
+    private static Rectangle2D dirtyRegion(HtmlRenderer.Frame f, Set<Element> changed) {
         Rectangle2D area = null;
-        for (Painter.Hit h : before.hits()) {
+        double reach = DIRTY_MARGIN;
+        for (Painter.Hit h : f.hits()) {
             boolean inside = false;
             for (Element e = h.element(); e != null && !inside; e = e.parent()) inside = changed.contains(e);
             if (!inside) continue;
             Rectangle2D b = h.shape().getBounds2D();
             if (area == null) area = new Rectangle2D.Double(b.getX(), b.getY(), b.getWidth(), b.getHeight());
             else area.add(b);
+            reach = Math.max(reach, paintsOutside(f.style(h.element())));
         }
         if (area == null) return null;
-        Rectangle2D view = new Rectangle2D.Double(0, 0, before.viewportWidth(), before.viewportHeight());
-        Rectangle2D padded = new Rectangle2D.Double(area.getX() - DIRTY_MARGIN, area.getY() - before.scrollY() - DIRTY_MARGIN,
-                area.getWidth() + 2 * DIRTY_MARGIN, area.getHeight() + 2 * DIRTY_MARGIN);
+        Rectangle2D view = new Rectangle2D.Double(0, 0, f.viewportWidth(), f.viewportHeight());
+        Rectangle2D padded = new Rectangle2D.Double(area.getX() - reach, area.getY() - f.scrollY() - reach,
+                area.getWidth() + 2 * reach, area.getHeight() + 2 * reach);
         Rectangle2D out = padded.createIntersection(view);
-        return out.isEmpty() ? null : out;
+        if (out.isEmpty()) return null;
+        // A backdrop filter blurs what is behind it, from a little past the region: in a partial repaint that
+        // is the last picture, already blurred and with text on it, which would show as a seam.
+        for (Painter.Hit h : f.hits()) {
+            Style s = f.style(h.element());
+            if (s == null || s.backdropFilter.equals("none")) continue;
+            Rectangle2D b = h.shape().getBounds2D();
+            if (out.intersects(b.getX(), b.getY() - f.scrollY(), b.getWidth(), b.getHeight())) return null;
+        }
+        return out;
+    }
+
+    private static boolean small(Rectangle2D region, HtmlRenderer.Frame f) {
+        return region.getWidth() * region.getHeight() < 0.6 * f.viewportWidth() * f.viewportHeight();
+    }
+
+    /** How far past its box (CSS pixels) an element styled [s] can paint: its outer shadows, its text's shadows, its blur. */
+    private static double paintsOutside(Style s) {
+        if (s == null) return 0;
+        return Math.max(Math.max(shadowReach(s.boxShadow, s), shadowReach(s.textShadow, s)), blurReach(s.filter, s));
+    }
+
+    private static double shadowReach(String value, Style s) {
+        if (value == null || value.isBlank() || value.trim().equalsIgnoreCase("none")) return 0;
+        double reach = 0;
+        for (String shadow : Values.splitCommas(value)) {
+            double[] lens = new double[4];
+            int n = 0;
+            boolean inset = false;
+            for (String tok : Values.splitSpaces(shadow)) {
+                if (tok.equalsIgnoreCase("inset")) {
+                    inset = true;
+                    continue;
+                }
+                Len l = Len.parse(tok, s.context);
+                if (l != null && n < 4) lens[n++] = Math.abs(l.of(0));
+            }
+            if (inset || n < 2) continue;
+            // Offset and spread, and the blur: a Gaussian of sigma blur/2, drawn out to three sigma.
+            reach = Math.max(reach, Math.max(lens[0], lens[1]) + lens[3] + 1.5 * lens[2] + 2);
+        }
+        return reach;
+    }
+
+    private static double blurReach(String filter, Style s) {
+        if (filter == null || filter.equals("none")) return 0;
+        double reach = 0;
+        for (String fn : Values.splitSpaces(filter)) {
+            if (!fn.toLowerCase(Locale.ROOT).startsWith("blur(") || !fn.endsWith(")")) continue;
+            String arg = fn.substring(5, fn.length() - 1).trim();
+            Len l = Len.parse(arg.isEmpty() ? "0" : arg, s.context);
+            // blur(r) is a Gaussian of sigma r, drawn out to three sigma.
+            if (l != null) reach = Math.max(reach, 3 * Math.abs(l.of(0)) + 2);
+        }
+        return reach;
     }
 
     /** Whether nothing outside [region] moved between two frames: if something did, a partial repaint is not enough. */
@@ -325,9 +482,13 @@ public final class Session {
         return new double[]{x / s, y / s};
     }
 
+    /**
+     * What is at (x, y) in the last picture, an element of that picture's document; null if the picture
+     * is of another page than the one shown now (the new page's first picture has not landed yet).
+     */
     private Element at(int x, int y) {
         HtmlRenderer.Frame f = frame;
-        if (f == null) return null;
+        if (f == null || f.page() != page) return null;
         double[] c = css(x, y);
         return f.elementAt(c[0], c[1]);
     }
@@ -339,8 +500,9 @@ public final class Session {
     public void pointer(int x, int y) {
         pointerX = x;
         pointerY = y;
-        Element e = at(x, y);
-        pointerShape.accept(cursorFor(e));
+        Element seen = at(x, y);
+        pointerShape.accept(cursorFor(seen));
+        Element e = counterpart(seen, doc);
         if (e == hover) return;
         // Only a move that changes what :hover matches is worth a picture.
         boolean differs = !key(hover, false).equals(key(e, false));
@@ -357,6 +519,7 @@ public final class Session {
         }
     }
 
+    /** The pointer for [e], an element of the last picture's document (whose styles it reads). */
     private Pointer cursorFor(Element e) {
         HtmlRenderer.Frame f = frame;
         for (Element p = e; p != null; p = p.parent()) {
@@ -385,8 +548,9 @@ public final class Session {
 
     private void repoint() {
         if (closed || pointerX < 0) return;
-        Element e = at(pointerX, pointerY);
-        pointerShape.accept(cursorFor(e));
+        Element seen = at(pointerX, pointerY);
+        pointerShape.accept(cursorFor(seen));
+        Element e = counterpart(seen, doc);
         boolean differs = !key(e, false).equals(drawnHover);
         hover = e;
         if (differs) render();
@@ -401,16 +565,27 @@ public final class Session {
         render();
     }
 
-    /** A click at (x, y): follows the link or runs the command under it. */
+    /** A click at (x, y) by the player this session belongs to. */
     public void click(int x, int y) {
-        Element e = at(x, y);
+        click(x, y, null);
+    }
+
+    /**
+     * A click at (x, y): follows the link or runs the command under it. [clicker] is who clicked: on a
+     * shared screen, the one whose commands run and whose placeholders fill them; null for the viewer.
+     */
+    public void click(int x, int y, Player clicker) {
+        // The picture can be behind the session: the element clicked is found in the session's own copy.
+        Element e = counterpart(at(x, y), doc);
         if (e == null) return;
-        Player p = player();
+        Player p = clicker != null ? clicker : player();
+        Page on = page;
         boolean acted = activate(e, p);
         if (acted && p != null && plugin.clickSound()) p.playSound(p.getLocation(), Sound.UI_BUTTON_CLICK, 0.4f, 1.2f);
-        if (page != null && page.styles.dynamic) {
-            // :active for a moment, so a press shows.
-            Element target = e;
+        if (page == on && page.styles.dynamic) {
+            // :active for a moment, so a press shows. A toggle has given the session a new copy by now.
+            Element target = counterpart(e, doc);
+            if (target == null) return;
             pressed = target;
             render();
             Bukkit.getScheduler().runTaskLater(plugin, () -> {
@@ -422,26 +597,30 @@ public final class Session {
         }
     }
 
+    /** [target] (an element of [doc]) or the nearest ancestor that does something, clicked by [p]. */
     private boolean activate(Element target, Player p) {
         for (Element e = target; e != null; e = e.parent()) {
             if (e.hasAttr("data-command") || e.hasAttr("data-console") || e.hasAttr("data-message")) {
-                if (e.hasAttr("data-message") && p != null) p.sendMessage(net.kyori.adventure.text.minimessage.MiniMessage.miniMessage().deserialize(e.attr("data-message")));
-                if (e.hasAttr("data-command") && p != null) runAs(p, e.attr("data-command"));
-                if (e.hasAttr("data-console")) Bukkit.dispatchCommand(Bukkit.getConsoleSender(), strip(e.attr("data-console")));
+                if (e.hasAttr("data-message") && p != null) {
+                    p.sendMessage(net.kyori.adventure.text.minimessage.MiniMessage.miniMessage().deserialize(Placeholders.apply(original(e, "data-message"), p)));
+                }
+                if (e.hasAttr("data-command") && p != null) runAs(p, Placeholders.apply(original(e, "data-command"), p));
+                if (e.hasAttr("data-console")) console(original(e, "data-console"), p);
                 if (e.hasAttr("data-close")) close.run();
                 return true;
             }
             if (e.hasAttr("data-action")) {
-                action(e.attr("data-action"));
+                action(e.attr("data-action"), p);
                 return true;
             }
             String tag = e.normalName();
             if (tag.equals("a") && e.hasAttr("href")) {
-                link(e.attr("href"), p);
+                link(original(e, "href"), p);
                 return true;
             }
             if (tag.equals("summary") && e.parent() != null && e.parent().normalName().equals("details")) {
                 Element details = editable(e.parent());
+                if (details == null) return true;
                 if (details.hasAttr("open")) details.removeAttr("open");
                 else details.attr("open", "");
                 render();
@@ -463,20 +642,36 @@ public final class Session {
     }
 
     /**
-     * [e]'s counterpart in a fresh copy of the document, which becomes the session's: a picture
-     * being drawn keeps reading the old one, so nothing changes under it.
+     * [e]'s [attr] as the page file has it, placeholders not filled in: filled at the click, for whoever
+     * clicked (a shared screen's copy was filled for nobody), and checked when it goes to the console.
+     */
+    private String original(Element e, String attr) {
+        Element o = counterpart(e, page.document);
+        return o != null ? o.attr(attr) : e.attr(attr);
+    }
+
+    /** Runs [template] as the console, its placeholders filled for [p]; not if a value would change the command's shape. */
+    private void console(String template, Player p) {
+        String command = Placeholders.command(strip(template), p, plugin.getLogger());
+        if (command != null) Bukkit.dispatchCommand(Bukkit.getConsoleSender(), command);
+    }
+
+    /**
+     * [e] (an element of [doc]) in a fresh copy of the document, which becomes the session's: a picture
+     * being drawn keeps reading the old one, so nothing changes under it. Null if it is not there.
      */
     private Element editable(Element e) {
-        int index = doc.getAllElements().indexOf(e);
         Document copy = doc.clone();
+        Element mine = counterpart(e, copy);
+        hover = counterpart(hover, copy);
+        pressed = counterpart(pressed, copy);
         doc = copy;
-        hover = null;
-        pressed = null;
-        return index < 0 ? e : copy.getAllElements().get(index);
+        return mine;
     }
 
     private void toggle(Element original) {
         Element input = editable(original);
+        if (input == null) return;
         boolean radio = input.attr("type").equalsIgnoreCase("radio");
         if (radio) {
             String name = input.attr("name");
@@ -490,42 +685,44 @@ public final class Session {
         render();
     }
 
-    private void action(String raw) {
+    private void action(String raw, Player p) {
         String a = raw.trim();
         String l = a.toLowerCase(Locale.ROOT);
         if (l.equals("close")) close.run();
-        else if (l.equals("back")) goBack();
+        else if (l.equals("back")) goBack(p);
         else if (l.equals("reload")) {
-            if (pageName != null) open(pageName, null, false);
+            if (pageName != null) open(pageName, null, false, p);
         } else if (l.equals("top")) {
             scrollY = 0;
             render();
-        } else if (l.startsWith("page:")) navigate(a.substring(5).trim());
+        } else if (l.startsWith("page:")) navigate(a.substring(5).trim(), p);
     }
 
+    /** Follows [href], as the page file has it (placeholders not filled in), for [p]. */
     private void link(String href, Player p) {
         String h = href.trim();
         String l = h.toLowerCase(Locale.ROOT);
         if (h.isEmpty() || h.equals("#")) return;
         if (l.startsWith("command:") || l.startsWith("cmd:")) {
-            if (p != null) runAs(p, h.substring(h.indexOf(':') + 1));
+            if (p != null) runAs(p, Placeholders.apply(h.substring(h.indexOf(':') + 1), p));
         } else if (l.startsWith("console:")) {
-            Bukkit.dispatchCommand(Bukkit.getConsoleSender(), strip(h.substring(8)));
+            console(h.substring(8), p);
         } else if (l.startsWith("close:")) {
             close.run();
         } else if (l.startsWith("back:")) {
-            goBack();
+            goBack(p);
         } else if (l.startsWith("http://") || l.startsWith("https://")) {
             // A page cannot be browsed to: the link goes to chat, where it can be clicked.
-            if (p != null) p.sendMessage(Component.text(h, NamedTextColor.AQUA).clickEvent(ClickEvent.openUrl(h)));
+            String url = Placeholders.apply(h, p);
+            if (p != null) p.sendMessage(Component.text(url, NamedTextColor.AQUA).clickEvent(ClickEvent.openUrl(url)));
         } else if (h.startsWith("#")) {
             scrollTo(h.substring(1));
         } else if (!l.contains(":")) {
-            navigate(h);
+            navigate(Placeholders.apply(h, p), p);
         }
     }
 
-    private void navigate(String href) {
+    private void navigate(String href, Player p) {
         String target = plugin.pages().resolveLink(pageName == null ? "" : pageName, href);
         int hash = href.indexOf('#');
         String fragment = hash >= 0 ? href.substring(hash + 1) : null;
@@ -534,16 +731,18 @@ public final class Session {
             scrollTo(fragment);
             return;
         }
-        Player p = player();
-        if (!open(target, fragment, true) && p != null) {
+        if (!open(target, fragment, true, p) && p != null) {
             p.sendActionBar(Component.text("There is no page called " + target, NamedTextColor.RED));
         }
     }
 
+    /** Scrolls to the element with id [id], where the last picture drew it. */
     private void scrollTo(String id) {
         HtmlRenderer.Frame f = frame;
-        Element target = doc == null ? null : doc.getElementById(id);
-        if (f == null || target == null) return;
+        if (f == null || f.page() != page) return;
+        // Looked up in the picture's own document: its positions are of its elements.
+        Element target = f.document().getElementById(id);
+        if (target == null) return;
         double top = f.topOf(target);
         if (Double.isNaN(top)) return;
         scrollY = Math.max(0, Math.min(f.maxScroll(), top));

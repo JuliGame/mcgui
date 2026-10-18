@@ -278,6 +278,8 @@ public final class Page implements Resources {
      * their keys can hold placeholder values (a player's name, a number that changes every refresh).
      */
     private final Map<String, Picture> dataImages = lru(256), svgs = lru(512);
+    /** See {@link #siblingStates()}. */
+    private boolean siblingStates;
     /** Files this page read: when any changes, it is loaded again. */
     public final Set<Path> dependencies = new LinkedHashSet<>();
     public final List<String> problems = new ArrayList<>();
@@ -290,6 +292,7 @@ public final class Page implements Resources {
         // Stylesheets in document order.
         for (Element e : document.select("style, link[rel~=(?i)stylesheet]")) {
             if (e.normalName().equals("style")) {
+                noteSelectors(e.data());
                 CssParser.parse(e.data(), uri, u -> importSheet(u, loader), styles);
             } else {
                 String href = e.attr("href");
@@ -301,6 +304,7 @@ public final class Page implements Resources {
                     problems.add("Could not load stylesheet " + href);
                     continue;
                 }
+                noteSelectors(css);
                 CssParser.parse(css, target, u -> importSheet(u, loader), styles);
             }
         }
@@ -320,7 +324,45 @@ public final class Page implements Resources {
     }
 
     private String importSheet(URI u, Loader loader) {
-        return sheet(u, loader);
+        String css = sheet(u, loader);
+        noteSelectors(css);
+        return css;
+    }
+
+    /**
+     * Whether a :hover or :active selector may also pick elements beside the hovered one, through a
+     * '+' or '~' combinator: then a change of hover can repaint things outside the hovered element.
+     * Read off the stylesheets' text, so it errs towards yes.
+     */
+    public boolean siblingStates() {
+        return siblingStates;
+    }
+
+    private static final Pattern COMMENT = Pattern.compile("/\\*.*?\\*/", Pattern.DOTALL);
+    /** What can hold a '+' or '~' without being a combinator: attribute selectors ([class~=x]) and an+b arguments (2n+1). */
+    private static final Pattern NOT_COMBINATOR = Pattern.compile("\\[[^\\]]*]|\\([-+\\dn\\s]*\\)");
+
+    private void noteSelectors(String css) {
+        if (siblingStates || css == null) return;
+        String s = COMMENT.matcher(css).replaceAll("");
+        // Every selector is what comes before a '{' since the last ';', '}' or '{'. A scan, not a regex:
+        // a declaration such as a long data: URL would make a pattern backtrack for ages.
+        int from = 0;
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == ';' || c == '}') {
+                from = i + 1;
+            } else if (c == '{') {
+                String prelude = s.substring(from, i).toLowerCase(Locale.ROOT);
+                from = i + 1;
+                if (!prelude.contains(":hover") && !prelude.contains(":active")) continue;
+                String rest = NOT_COMBINATOR.matcher(prelude).replaceAll("");
+                if (rest.indexOf('+') >= 0 || rest.indexOf('~') >= 0) {
+                    siblingStates = true;
+                    return;
+                }
+            }
+        }
     }
 
     private String sheet(URI target, Loader loader) {

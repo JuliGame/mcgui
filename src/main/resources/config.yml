@@ -6,8 +6,13 @@ pages-folder: pages
 live-reload: true
 
 # Let pages load stylesheets, fonts and images from the web (Google Fonts, image hosts). They are
-# fetched once and kept in plugins/UIEngine/cache/.
+# fetched once and kept in plugins/UIEngine/cache/. Each fetch may take 15 seconds and 16 MB at most.
 allow-web: true
+
+# Let pages load from this machine and private networks too (localhost, 10.x, 192.168.x, a cloud's
+# metadata address). Off, so that a page, or a stylesheet it pulls in from the web, cannot make the
+# server fetch from inside your network. Turn it on only to serve a page's files from a local web server.
+allow-private-hosts: false
 
 # Threads that draw pages. Drawing happens off the server thread.
 render-threads: 2
