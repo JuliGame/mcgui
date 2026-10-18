@@ -193,6 +193,8 @@ final class UIFrameworkCommand implements TabExecutor {
         private final Rectangle button;
         private boolean hover;
         private int clicks;
+        /** The last few clicks, where the server resolved them: a cross on the picture, to judge them by. */
+        private final java.util.ArrayDeque<int[]> marks = new java.util.ArrayDeque<>();
 
         Demo(Canvas canvas) {
             this.canvas = canvas;
@@ -224,6 +226,12 @@ final class UIFrameworkCommand implements TabExecutor {
             g.setColor(Color.WHITE);
             g.setFont(new Font(Font.SANS_SERIF, Font.BOLD, h / 20));
             centre(g, clicks == 0 ? "Click me" : "Clicked " + clicks + (clicks == 1 ? " time" : " times"), button.x + button.width / 2, button.y + button.height / 2 + h / 60);
+            int arm = Math.max(4, h / 60);
+            for (int[] m : marks) {
+                g.setColor(m[2] == 0 ? Color.RED : Color.YELLOW);
+                g.fillRect(m[0] - arm, m[1] - 1, 2 * arm + 1, 3);
+                g.fillRect(m[0] - 1, m[1] - arm, 3, 2 * arm + 1);
+            }
             g.dispose();
             canvas.draw(img, 0, 0);
         }
@@ -245,8 +253,9 @@ final class UIFrameworkCommand implements TabExecutor {
 
         @Override
         public void click(Player viewer, int x, int y, Click click) {
-            if (!button.contains(x, y)) return;
-            clicks++;
+            marks.addLast(new int[]{x, y, click == Click.LEFT ? 0 : 1});
+            while (marks.size() > 8) marks.removeFirst();
+            if (button.contains(x, y)) clicks++;
             draw();
         }
 
