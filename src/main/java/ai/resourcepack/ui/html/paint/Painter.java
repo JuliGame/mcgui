@@ -655,6 +655,16 @@ public final class Painter {
         };
     }
 
+    /**
+     * How far (device px) any backdrop-filter among [styles] reads what is painted past the clip: a
+     * picture painted in pieces needs this much painted round each piece for its backdrops to match.
+     */
+    public static int backdropReach(Iterable<Style> styles, double scale) {
+        int reach = 0;
+        for (Style s : styles) if (!s.backdropFilter.equals("none")) reach = Math.max(reach, Filters.backdropPad(Filters.backdropBlur(s), scale));
+        return reach;
+    }
+
     static int[] pixels(BufferedImage img) {
         return ((DataBufferInt) img.getRaster().getDataBuffer()).getData();
     }

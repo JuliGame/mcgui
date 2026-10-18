@@ -108,20 +108,31 @@ final class Filters {
         return (int) Math.max(0, Math.min(255, Math.round(v)));
     }
 
+    /** The blur radius (CSS px) of [s]'s backdrop-filter, 0 for none. */
+    static double backdropBlur(Style s) {
+        double blur = 0;
+        for (String fn : Values.splitSpaces(s.backdropFilter)) {
+            if (fn.toLowerCase(Locale.ROOT).startsWith("blur(")) {
+                Len l = Len.parse(fn.substring(5, fn.length() - 1), s.context);
+                if (l != null) blur = l.of(0);
+            }
+        }
+        return blur;
+    }
+
+    /** How far (device px) past a backdrop's edge, and past the clip, its blur reads what is painted. */
+    static int backdropPad(double blur, double scale) {
+        return (int) Math.ceil(blur * scale * 1.5);
+    }
+
     /** backdrop-filter: blur (and tint) what is already painted under [shape], then put it back inside the shape. */
     static void backdrop(Graphics2D g, BufferedImage surface, Shape shape, Style s, double scale) {
         String filter = s.backdropFilter;
         AffineTransform dev = g.getTransform();
         java.awt.Rectangle r = dev.createTransformedShape(shape).getBounds().intersection(new java.awt.Rectangle(0, 0, surface.getWidth(), surface.getHeight()));
         if (r.isEmpty()) return;
-        double blur = 0;
-        for (String fn : Values.splitSpaces(filter)) {
-            if (fn.toLowerCase(Locale.ROOT).startsWith("blur(")) {
-                Len l = Len.parse(fn.substring(5, fn.length() - 1), s.context);
-                if (l != null) blur = l.of(0);
-            }
-        }
-        int pad = (int) Math.ceil(blur * scale * 1.5);
+        double blur = backdropBlur(s);
+        int pad = backdropPad(blur, scale);
         java.awt.Rectangle grab = new java.awt.Rectangle(r);
         grab.grow(pad, pad);
         // Only what can be seen: a partial repaint clips to the part that changed.
