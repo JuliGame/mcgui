@@ -201,7 +201,7 @@ public final class UIEnginePlugin extends JavaPlugin {
 
     /** Hover targets near a resting pointer whose repaint is drawn in advance, while the render threads are idle; 0 for none. */
     int hoverAhead() {
-        return Math.max(0, Math.min(8, cfg.getInt("hover-ahead", 3)));
+        return Math.max(0, Math.min(8, cfg.getInt("hover-ahead", 2)));
     }
 
     boolean wallScroll() {

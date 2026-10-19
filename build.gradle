@@ -127,7 +127,7 @@ tasks.register('loadBench', JavaExec) {
     systemProperty 'java.awt.headless', 'true'
     systemProperty 'samples', file('samples').absolutePath
     systemProperty 'shipped', file('src/main/resources/pages').absolutePath
-    ['pages', 'sessions', 'render', 'modes', 'bands', 'secs', 'warm', 'send', 'out', 'tag', 'nowarmcell', 'adaptive', 'ahead', 'reps', 'verify'].each { k ->
+    ['pages', 'sessions', 'render', 'modes', 'bands', 'secs', 'warm', 'send', 'out', 'tag', 'nowarmcell', 'adaptive', 'ahead', 'reps', 'verify', 'aheadevery'].each { k ->
         if (project.hasProperty(k)) systemProperty k, project.property(k)
     }
     maxHeapSize = '3g'

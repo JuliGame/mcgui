@@ -36,6 +36,36 @@ public final class HoverAhead {
 
     /** The drawings ahead under way, of every session: stopped when real work comes. */
     private static final Set<Job> RUNNING = ConcurrentHashMap.newKeySet();
+    /**
+     * Drawings ahead at once, of every session, at most: one. However many sessions rest their pointers, drawing ahead
+     * takes at most one render thread, one core, and one repaint's garbage at a time (LoadBench, 16 sessions: two at
+     * once doubled the garbage and the GC time for the same hits).
+     */
+    static final int AT_ONCE = 1;
+    private static final java.util.concurrent.atomic.AtomicInteger STARTED = new java.util.concurrent.atomic.AtomicInteger();
+
+    /** Sessions that wanted a turn while another had it: one is offered the next turn (each runs its own check again). */
+    private static final Set<Runnable> WAITING = ConcurrentHashMap.newKeySet();
+
+    /**
+     * A turn to draw ahead, if no other session has it; {@link #release} it when done (or if it never ran). Without one,
+     * [retry] (the same object each time for one session) is run when a turn comes free.
+     */
+    public static boolean claim(Runnable retry) {
+        for (int n; (n = STARTED.get()) < AT_ONCE; ) if (STARTED.compareAndSet(n, n + 1)) return true;
+        WAITING.add(retry);
+        return false;
+    }
+
+    public static void release() {
+        STARTED.decrementAndGet();
+        for (Runnable r : WAITING) {
+            if (WAITING.remove(r)) {
+                r.run();
+                return;
+            }
+        }
+    }
 
     /** Hover targets drawn ahead at most; 0 for none. */
     public final int most;

@@ -114,6 +114,8 @@ public final class Session {
      */
     private final HoverAhead hoverAhead;
     private HoverAhead.Job ahead;
+    /** Looks ahead again, on the server thread: when another session's drawing ahead is over. */
+    private final Runnable lookAgain;
     /** When the pointer last moved (nanoTime), and how fast, canvas pixels a second. */
     private long pointerAt;
     private double pointerVx, pointerVy;
@@ -135,6 +137,7 @@ public final class Session {
         this.designHeight = designHeight;
         this.born = Bukkit.getCurrentTick();
         this.hoverAhead = new HoverAhead(plugin.hoverAhead(), 4L * canvas.width() * canvas.height());
+        this.lookAgain = () -> serverThread.execute(this::lookAhead);
     }
 
     public String pageName() {
@@ -362,22 +365,33 @@ public final class Session {
         // The picture shows the state now (no picture is being drawn, so the render thread's fields are settled).
         List<Element> hoverKey = key(hover, false), pressKey = key(pressed, true);
         if (!hoverKey.equals(drawnHover) || !pressKey.equals(drawnPress)) return;
-        boolean resting = System.nanoTime() - pointerAt > 150_000_000L;
-        HoverAhead.Job job = hoverAhead.job(page, doc, canvas.width(), canvas.height(), scale, f, f.image() == borrowed, drawnHover, drawnPress,
-                hoverKey, pressed, pressKey, x, y, resting ? 0 : pointerVx / scale, resting ? 0 : pointerVy / scale, plugin.renderTimeout());
-        ahead = job;
-        rendering = true;
-        renderers.execute(() -> {
-            try {
-                hoverAhead.run(job);
-            } catch (RuntimeException | Error e) {
-                // It may have left nothing usable; real pictures draw as ever.
-                hoverAhead.drop();
-                if (plugin.debug()) e.printStackTrace();
-            } finally {
-                done();
-            }
-        });
+        if (!HoverAhead.claim(lookAgain)) return;
+        // From here every way out releases the turn: one kept by mistake would stop drawing ahead for every session.
+        try {
+            boolean resting = System.nanoTime() - pointerAt > 150_000_000L;
+            HoverAhead.Job job = hoverAhead.job(page, doc, canvas.width(), canvas.height(), scale, f, f.image() == borrowed, drawnHover, drawnPress,
+                    hoverKey, pressed, pressKey, x, y, resting ? 0 : pointerVx / scale, resting ? 0 : pointerVy / scale, plugin.renderTimeout());
+            ahead = job;
+            rendering = true;
+            renderers.execute(() -> {
+                try {
+                    hoverAhead.run(job);
+                } catch (RuntimeException | Error e) {
+                    // It may have left nothing usable; real pictures draw as ever.
+                    hoverAhead.drop();
+                    if (plugin.debug()) e.printStackTrace();
+                } finally {
+                    HoverAhead.release();
+                    done();
+                }
+            });
+        } catch (RuntimeException e) {
+            // Shutting down (the pool refused the job), or the job could not be set up: nothing runs, so nothing else releases it.
+            HoverAhead.release();
+            ahead = null;
+            rendering = false;
+            if (!(e instanceof java.util.concurrent.RejectedExecutionException) && plugin.debug()) e.printStackTrace();
+        }
     }
 
     /** Whether a render thread is free and nothing waits for one, and no whole picture is being painted. */

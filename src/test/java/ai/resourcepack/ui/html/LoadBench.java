@@ -399,6 +399,7 @@ public final class LoadBench {
         // Drawing hovers ahead, as Session does (HoverAhead).
         final HoverAhead ahead;
         private HoverAhead.Job job;
+        private final Runnable lookAgain = () -> execute(this::lookAhead);
         private long pointerAt;
         private double pointerVx, pointerVy;
         /** Hover frames taken from what was drawn ahead, and hover frames repainted; verify: taken ones that differed from a repaint. */
@@ -413,7 +414,8 @@ public final class LoadBench {
             this.server = server;
             this.mode = mode;
             this.rnd = new Random(1000 + id);
-            this.ahead = new HoverAhead(ahead, 4L * W * H);
+            // -Daheadevery=<n>: only every n-th session draws ahead; the others are the control group.
+            this.ahead = new HoverAhead(id % Integer.getInteger("aheadevery", 1) == 0 ? ahead : 0, 4L * W * H);
             for (int t = 0; t < TILES; t++) lastTiles[t] = canvas.tile(t, Canvas.Encoding.HI);
         }
 
@@ -559,6 +561,7 @@ public final class LoadBench {
             if (ahead.done(f, x, y)) return;
             List<Element> hoverKey = key(hover);
             if (!hoverKey.equals(drawnHover)) return;
+            if (!HoverAhead.claim(lookAgain)) return;
             boolean resting = System.nanoTime() - pointerAt > 150_000_000L;
             HoverAhead.Job j = ahead.job(page, doc, W, H, SCALE, f, false, drawnHover, List.of(), hoverKey, null, List.of(), x, y,
                     resting ? 0 : pointerVx / SCALE, resting ? 0 : pointerVy / SCALE, HtmlRenderer.DEFAULT_TIMEOUT_MS);
@@ -571,6 +574,7 @@ public final class LoadBench {
                     ahead.drop();
                     e.printStackTrace();
                 } finally {
+                    HoverAhead.release();
                     done();
                 }
             });
@@ -975,6 +979,8 @@ public final class LoadBench {
         long[] qWait = {}, rPartial = {}, rFull = {}, drawFull = {}, drawPartial = {};
         /** Hover latency of requests answered from what was drawn ahead, and of the others; and aheadTotals over the window. */
         long[] hoverAhead = {}, hoverPainted = {};
+        /** Hover latency of the sessions that do not draw ahead (all of them with ahead=0; with -Daheadevery, the control group). */
+        long[] hoverControl = {};
         /** Render-thread CPU of partial frames taken from what was drawn ahead, and of those repainted. */
         long[] cpuAhead = {}, cpuPainted = {};
         final long[] ahead = new long[12];
@@ -985,7 +991,8 @@ public final class LoadBench {
         }
 
         void collect(List<Sim> sims, long t0, long t1) {
-            List<Long> hv = new ArrayList<>(), sc = new ArrayList<>(), st = new ArrayList<>(), op = new ArrayList<>(), ha = new ArrayList<>(), hp = new ArrayList<>();
+            List<Long> hv = new ArrayList<>(), sc = new ArrayList<>(), st = new ArrayList<>(), op = new ArrayList<>(), ha = new ArrayList<>(), hp = new ArrayList<>(),
+                    hc = new ArrayList<>();
             List<Long> ca = new ArrayList<>(), cp = new ArrayList<>();
             List<Long> qw = new ArrayList<>(), rp = new ArrayList<>(), rf = new ArrayList<>(), df = new ArrayList<>(), dp = new ArrayList<>();
             long tf = 0, tp = 0;
@@ -999,6 +1006,7 @@ public final class LoadBench {
                             case HOVER -> {
                                 hv.add(l.ns);
                                 (l.ahead ? ha : hp).add(l.ns);
+                                if (!s.ahead.on()) hc.add(l.ns);
                             }
                             case SCROLL -> sc.add(l.ns);
                             case STRESS -> st.add(l.ns);
@@ -1028,6 +1036,7 @@ public final class LoadBench {
             }
             hover = sorted(hv);
             hoverAhead = sorted(ha);
+            hoverControl = sorted(hc);
             cpuAhead = sorted(ca);
             cpuPainted = sorted(cp);
             hoverPainted = sorted(hp);
@@ -1075,6 +1084,7 @@ public final class LoadBench {
             b.append(String.format(" | cpu ms/frame render %.0f painters %.0f encoders %.0f total %.0f", threadCpuMs[0] / fr, threadCpuMs[1] / fr, threadCpuMs[2] / fr, processCpuMs / fr));
             b.append(String.format(" alloc %.1f MB/frame", allocMb / fr));
             if (cfg.ahead == 0) b.append(String.format(" | render cpu/partial frame %.1f ms", pct(cpuPainted, .5)));
+            if (cfg.ahead > 0 && hoverControl.length > 0) b.append(String.format(" | control sessions (not drawing ahead) hover %s (n=%d)", m3(hoverControl), hoverControl.length));
             if (cfg.ahead > 0) {
                 long hoverFrames = ahead[6] + ahead[7];
                 b.append(String.format(" | ahead=%d: hover frames %d/%d drawn ahead (%.0f%%), hover from ahead %s (n=%d) painted %s (n=%d); render cpu/partial frame from ahead %.1f painted %.1f ms; prepared %d taken %d stopped %d; missed: no drawing ahead %d, not picked %d, not reached %d;"
@@ -1103,7 +1113,7 @@ public final class LoadBench {
                     "queue_p90", "tiles_full", "tiles_part", "cpu", "other_cpu", "steal", "live_mb", "peak_mb", "gc_ms", "gc_n", "open_p50", "open_max",
                     "w_batches", "w_tiles", "w_patches", "w_raw", "w_defl", "w_full", "w_deflate_ms", "w_diff_ms", "sender_cpu", "cpu_render_ms", "cpu_painters_ms", "cpu_encoders_ms", "cpu_send_ms", "cpu_server_ms", "cpu_process_ms", "alloc_mb",
                     "ahead", "ah_prepared", "ah_stopped", "ah_taken", "ah_cpu_ms", "ah_used_ms", "ah_alloc_mb", "ah_frames", "painted_frames", "ah_mismatch",
-                    "hover_ahead_n", "hover_ahead_p50", "hover_ahead_p90", "hover_painted_n", "hover_painted_p50", "hover_painted_p90", "gc_live_after", "cpu_part_ahead_p50", "cpu_part_painted_p50", "cpu_part_painted_p90", "miss_nojob", "miss_notpicked", "miss_unfinished");
+                    "hover_ahead_n", "hover_ahead_p50", "hover_ahead_p90", "hover_painted_n", "hover_painted_p50", "hover_painted_p90", "gc_live_after", "cpu_part_ahead_p50", "cpu_part_painted_p50", "cpu_part_painted_p90", "miss_nojob", "miss_notpicked", "miss_unfinished", "aheadevery", "control_n", "control_p50", "control_p90", "control_p99");
         }
 
         String csv(String page) {
@@ -1183,6 +1193,11 @@ public final class LoadBench {
             v.add(String.valueOf(ahead[9]));
             v.add(String.valueOf(ahead[10]));
             v.add(String.valueOf(ahead[11]));
+            v.add(String.valueOf(Integer.getInteger("aheadevery", 1)));
+            v.add(String.valueOf(hoverControl.length));
+            v.add(f(pct(hoverControl, .5)));
+            v.add(f(pct(hoverControl, .9)));
+            v.add(f(pct(hoverControl, .99)));
             return String.join(",", v);
         }
 
