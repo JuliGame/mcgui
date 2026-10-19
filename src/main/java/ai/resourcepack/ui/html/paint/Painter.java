@@ -229,7 +229,12 @@ public final class Painter {
             painted.grow(pad, pad);
             r = r.intersection(painted);
         }
-        if (r.width <= 0 || r.height <= 0) return;
+        if (r.width <= 0 || r.height <= 0) {
+            // Nothing of it lands on this surface (another band's rows, outside a hover's clip), but its hit
+            // regions are still wanted: the first band's painter makes them for the whole picture.
+            if (recordHits) hitsOnly(g, box, x, y);
+            return;
+        }
         // Colour filters work on straight colour, so a filtered layer stays plain ARGB; opacity alone blends faster premultiplied.
         BufferedImage img = new BufferedImage(r.width, r.height, box.style.filter.equals("none") ? BufferedImage.TYPE_INT_ARGB_PRE : BufferedImage.TYPE_INT_ARGB);
         Graphics2D lg = img.createGraphics();
@@ -250,6 +255,17 @@ public final class Painter {
         g.drawImage(img, r.x, r.y, null);
         g.setComposite(old);
         g.setTransform(saved);
+    }
+
+    /** Walks [box]'s subtree for its hit regions alone: under an empty clip nothing is drawn, and culling skips the work. */
+    private void hitsOnly(Graphics2D g, Box box, double x, double y) {
+        Graphics2D hg = (Graphics2D) g.create();
+        hg.clip(new Rectangle2D.Double());
+        try {
+            contextBody(hg, box, x, y);
+        } finally {
+            hg.dispose();
+        }
     }
 
     /**
