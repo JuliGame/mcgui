@@ -37,6 +37,8 @@ public final class MapWall {
     public final int firstMapId;
     /** Right, as seen by somebody facing the wall. */
     public final int rightX, rightZ;
+    /** The centre of the picture, on its surface (see {@link #centre}): asked for by every player's aim, every tick. */
+    private final double centreX, centreY, centreZ;
     private final List<GlowItemFrame> frames = new ArrayList<>();
     private final Set<UUID> frameIds = new HashSet<>();
     /** The frames' entity ids in tile order, empty while there are none; read by the sender and the netty threads. */
@@ -56,6 +58,12 @@ public final class MapWall {
         this.firstMapId = firstMapId;
         this.rightX = facing.getModZ();
         this.rightZ = -facing.getModX();
+        double lateral = rightX + rightZ > 0 ? cols / 2.0 : 1 - cols / 2.0;
+        // Maps sit 1/16 block off the wall; the wall is on the side opposite [facing].
+        double n = facing.getModX() + facing.getModZ() > 0 ? 1.0 / 16 : 1 - 1.0 / 16;
+        centreX = facing.getModX() != 0 ? anchorX + n : anchorX + lateral;
+        centreY = anchorY + 1 - rows / 2.0;
+        centreZ = facing.getModX() != 0 ? anchorZ + lateral : anchorZ + n;
     }
 
     public int tiles() { return cols * rows; }
@@ -88,17 +96,12 @@ public final class MapWall {
 
     /** The centre of the picture, on its surface. */
     public Location centre() {
-        double lateral = rightX + rightZ > 0 ? cols / 2.0 : 1 - cols / 2.0;
-        double y = anchorY + 1 - rows / 2.0;
-        // Maps sit 1/16 block off the wall; the wall is on the side opposite [facing].
-        double n = facing.getModX() + facing.getModZ() > 0 ? 1.0 / 16 : 1 - 1.0 / 16;
-        return facing.getModX() != 0 ? new Location(world, anchorX + n, y, anchorZ + lateral) : new Location(world, anchorX + lateral, y, anchorZ + n);
+        return new Location(world, centreX, centreY, centreZ);
     }
 
     /** The world point at surface pixel (px, py), 128 pixels to a block, from the top-left. */
     public Vector pointAt(double px, double py) {
-        Location c = centre();
-        return new Vector(c.getX() + rightX * (px / 128 - cols / 2.0), c.getY() + rows / 2.0 - py / 128, c.getZ() + rightZ * (px / 128 - cols / 2.0));
+        return new Vector(centreX + rightX * (px / 128 - cols / 2.0), centreY + rows / 2.0 - py / 128, centreZ + rightZ * (px / 128 - cols / 2.0));
     }
 
     /**
@@ -106,17 +109,16 @@ public final class MapWall {
      * misses, comes from behind, or meets it further than [maxDistance] blocks away.
      */
     public double[] pixelAlong(Vector eye, Vector dir, double maxDistance) {
-        Location c = centre();
         double nx = facing.getModX(), nz = facing.getModZ();
         // The picture's plane: points p with (p - c) . n == 0, n pointing out of the picture.
         double denom = dir.getX() * nx + dir.getZ() * nz;
         if (denom >= -1e-6) return null; // parallel, or looking from behind
-        double t = ((c.getX() - eye.getX()) * nx + (c.getZ() - eye.getZ()) * nz) / denom;
+        double t = ((centreX - eye.getX()) * nx + (centreZ - eye.getZ()) * nz) / denom;
         if (t < 0 || t > maxDistance) return null;
         double hx = eye.getX() + dir.getX() * t, hy = eye.getY() + dir.getY() * t, hz = eye.getZ() + dir.getZ() * t;
-        double lateral = (hx - c.getX()) * rightX + (hz - c.getZ()) * rightZ;
+        double lateral = (hx - centreX) * rightX + (hz - centreZ) * rightZ;
         double px = (lateral + cols / 2.0) * 128;
-        double py = (c.getY() + rows / 2.0 - hy) * 128;
+        double py = (centreY + rows / 2.0 - hy) * 128;
         if (px < 0 || py < 0 || px >= cols * 128 || py >= rows * 128) return null;
         return new double[]{px, py, t};
     }
