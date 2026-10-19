@@ -30,7 +30,6 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.WeakHashMap;
 import java.util.concurrent.Executor;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
@@ -42,7 +41,7 @@ import java.util.function.Consumer;
  */
 public final class Session {
     private final UIEnginePlugin plugin;
-    private final ExecutorService renderers;
+    private final Renders renderers;
     /**
      * Back to the server thread as soon as it is free, which between ticks is at once: the Bukkit
      * scheduler would hold each hop (the next picture, what is under the pointer now) for the next tick.
@@ -116,7 +115,7 @@ public final class Session {
     static final int BLANK_AFTER_TICKS = 10;
 
     /** [designHeight]: how many CSS pixels tall the canvas is, unless the first page shown sets its own ui:height. */
-    Session(UIEnginePlugin plugin, ExecutorService renderers, Canvas canvas, UUID viewer, double designHeight) {
+    Session(UIEnginePlugin plugin, Renders renderers, Canvas canvas, UUID viewer, double designHeight) {
         this.plugin = plugin;
         this.renderers = renderers;
         this.serverThread = plugin.serverThread();

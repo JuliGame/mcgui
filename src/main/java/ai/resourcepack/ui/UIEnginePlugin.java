@@ -16,10 +16,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Executor;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * UI Engine: HTML pages from {@code plugins/UIEngine/pages/}, shown in game on wall screens and in
@@ -33,8 +30,7 @@ public final class UIEnginePlugin extends JavaPlugin {
 
     private volatile PageStore pages;
     private Screens screens;
-    private ExecutorService renderers;
-    private int renderThreads;
+    private Renders renderers;
     private Executor serverThread;
     private final List<BukkitTask> tasks = new ArrayList<>();
     private BukkitTask watcher;
@@ -49,13 +45,7 @@ public final class UIEnginePlugin extends JavaPlugin {
         serverThread = task -> main.execute(() -> {
             if (isEnabled()) task.run();
         });
-        renderThreads = renderThreadsSetting();
-        AtomicInteger n = new AtomicInteger();
-        renderers = Executors.newFixedThreadPool(renderThreads, r -> {
-            Thread t = new Thread(r, "UIEngine-render-" + n.incrementAndGet());
-            t.setDaemon(true);
-            return t;
-        });
+        renderers = new Renders();
         pages = newPageStore();
         pictures = newFirstPictures();
         screens = new Screens(this, renderers);
@@ -85,20 +75,13 @@ public final class UIEnginePlugin extends JavaPlugin {
         if (screens != null) screens.shutdown();
         if (pages != null) pages.close();
         if (renderers != null) {
-            renderers.shutdownNow();
             try {
-                renderers.awaitTermination(2, TimeUnit.SECONDS);
+                renderers.close(2, TimeUnit.SECONDS);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
         }
         HandlerList.unregisterAll(this);
-    }
-
-    private int renderThreadsSetting() {
-        int cores = Runtime.getRuntime().availableProcessors();
-        // Never more than the cores the game leaves free: past that threads only queue behind each other (LoadBench).
-        return Math.max(1, Math.min(cores - 1, cfg.getInt("render-threads", Math.max(1, cores / 2))));
     }
 
     /** The pages folder the config names (made, with the examples, if it is not there), with a loader as the config says. */
@@ -129,9 +112,9 @@ public final class UIEnginePlugin extends JavaPlugin {
     /**
      * Reads config.yml and the pages again, keeping placed screens. The page store and its loader are
      * made anew, so pages-folder, allow-web and allow-private-hosts apply, and URLs that failed are
-     * tried again. Returns what only a restart applies, or null.
+     * tried again.
      */
-    String reload() {
+    void reload() {
         reloadConfig();
         cfg = getConfig();
         PageStore old = pages;
@@ -142,7 +125,6 @@ public final class UIEnginePlugin extends JavaPlugin {
         Placeholders.reset();
         watch();
         for (String name : pages.names()) screens.reloaded(name);
-        return renderThreadsSetting() != renderThreads ? "render-threads changes on the next restart." : null;
     }
 
     private void copyExample(String name, Path folder) throws IOException {

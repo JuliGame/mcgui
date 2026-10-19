@@ -7,6 +7,7 @@ import ai.resourcepack.ui.html.layout.Layout;
 import ai.resourcepack.ui.html.paint.Painter;
 import ai.resourcepack.ui.html.style.Style;
 import ai.resourcepack.ui.html.style.Styler;
+import ai.resourcepack.uiframework.api.Cpu;
 import org.jsoup.nodes.Element;
 
 import java.awt.Graphics2D;
@@ -19,7 +20,6 @@ import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.ForkJoinTask;
 
 /**
@@ -246,11 +246,8 @@ public final class HtmlRenderer {
     private static int bandsFor(int height, int painting) {
         int bands = Math.min(maxBands, height / MIN_BAND_ROWS);
         if (!adaptiveBands || bands <= 1) return bands;
-        return Math.max(1, Math.min(bands, PAINTERS.getParallelism() / painting));
+        return Math.max(1, Math.min(bands, Cpu.threads() / painting));
     }
-
-    /** Shared by every session's full repaints; leaves a core for the game. */
-    private static final ForkJoinPool PAINTERS = new ForkJoinPool(Math.max(1, Runtime.getRuntime().availableProcessors() - 1));
 
     /**
      * Paints [root] into [img] as [bands] horizontal bands at once, each with its own painter into its own
@@ -296,7 +293,7 @@ public final class HtmlRenderer {
                 System.arraycopy(((DataBufferInt) band.getRaster().getDataBuffer()).getData(), (y0 - top) * width, out, y0 * width, (y1 - y0) * width);
                 return painter.hits;
             });
-            tasks.add(bands > 1 ? PAINTERS.submit(task) : task);
+            tasks.add(bands > 1 ? Cpu.pool().submit(task) : task);
         }
         List<Painter.Hit> hits = null;
         try {

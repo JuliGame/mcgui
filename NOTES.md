@@ -80,7 +80,7 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
   stays straight `TYPE_INT_ARGB`, because `Filters` edits its pixels as
   straight colour.
 - **A full picture is painted in up to four bands at once**, fewer when several pictures
-  are painting (the painter threads are split between them: a band costs CPU, see
+  are painting (UI Framework's `Cpu` threads are split between them: a band costs CPU, see
   `sh gradlew loadBench`) (`HtmlRenderer.paintBands`), each by its own `Painter` into its own image,
   with a margin above and below as deep as the furthest blur can reach.
   The bands are deliberately not clipped: an extra clip changes how Java2D

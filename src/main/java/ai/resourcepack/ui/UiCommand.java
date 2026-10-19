@@ -82,8 +82,8 @@ final class UiCommand implements TabExecutor {
             }
             case "reload" -> {
                 if (!permitted(sender, permissionFor("reload"))) return true;
-                String restart = plugin.reload();
-                say(sender, "Reloaded the config and every page." + (restart == null ? "" : " " + restart), NamedTextColor.GREEN);
+                plugin.reload();
+                say(sender, "Reloaded the config and every page.", NamedTextColor.GREEN);
             }
             default -> say(sender, "/ui open <page> [player] · close [player] · place <page> [cols] [rows] [name] [shared] · remove [name] · list · reload",
                     NamedTextColor.GRAY);

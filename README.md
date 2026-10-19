@@ -23,7 +23,7 @@ renderer by eye.
 | `/ui close [player]` | Closes it |
 | `/ui place <page> [cols] [rows] [name] [shared]` | Puts a page on the wall you look at (the block becomes the top-left corner) |
 | `/ui remove [name]` | Takes a wall screen down (or the one you look at) |
-| `/ui list` · `/ui reload` | Pages and screens · read the config and every page again (`render-threads` needs a restart) |
+| `/ui list` · `/ui reload` | Pages and screens · read the config and every page again |
 
 ### Permissions
 

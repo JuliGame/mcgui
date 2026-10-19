@@ -14,11 +14,9 @@ allow-web: true
 # server fetch from inside your network. Turn it on only to serve a page's files from a local web server.
 allow-private-hosts: false
 
-# Threads that draw pages. Drawing happens off the server thread. A higher number is clamped to the
-# number of cores minus one (and at least 1): more threads than free cores were slower in tests, not
-# faster, as they only fight over the same cores. 2 is plenty for up to about 8 players using pages
-# at once; with 16 or more, or pages whose hover redraws the whole picture, use cores minus one.
-render-threads: 2
+# Drawing happens off the server thread, on UI Framework's shared pool of CPU threads (its `cpu-threads`
+# setting, default: the cores minus one), the same threads that encode the pictures for the maps. There
+# is no separate number of render threads: one budget keeps the game's own thread from waiting for a core.
 
 # Seconds one picture of a page may take to draw. A page that takes longer is given up and reported
 # like one that cannot be drawn (the screen goes back to the page it showed), so that it cannot hold a
