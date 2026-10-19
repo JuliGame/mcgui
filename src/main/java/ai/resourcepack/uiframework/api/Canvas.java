@@ -10,7 +10,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.ForkJoinPool;
-import java.util.concurrent.atomic.AtomicReferenceArray;
 import java.util.stream.IntStream;
 
 /**
@@ -20,7 +19,12 @@ import java.util.stream.IntStream;
  * <p>Kept as interleaved YCbCr, the form the hi-colour encoding stores, so only the 128×128 tiles a
  * drawing actually changed are re-encoded, and only those are re-sent: a static page costs nothing
  * once it has arrived, and hovering a button re-sends a few tiles. Published tile arrays are never
- * mutated, so the sender compares them by identity.
+ * mutated, so the sender compares them by identity. A drawing is published whole: {@link #snapshot()}
+ * never sees half of one.
+ *
+ * <p>{@link #scroll} moves the picture by whole tiles and keeps each moved tile's arrays, so the sender
+ * can tell that a viewer already has them and point their frames at the maps they are in instead of
+ * sending them again.
  *
  * <p>Make one with {@link UIFramework#canvas(int, int)}. One canvas may be shown on any number of
  * screens and views at once.
@@ -33,11 +37,10 @@ public final class Canvas {
     private final Palette palette;
     private final int cols, rows, width, height;
     private final byte[] ycc;
-    private final AtomicReferenceArray<byte[]> hi;
-    /** HI_OWN tiles with the HI array each was made from, so a stale one is never handed out. */
-    private final AtomicReferenceArray<Own> hiOwn;
-    /** PLAIN tiles with the HI array each was made with: made only when somebody without the pack looks. */
-    private final AtomicReferenceArray<Own> plain;
+    /** The published tiles, never changed once published: a drawing publishes a new array. */
+    private volatile Tile[] tiles;
+    /** Odd while a drawing changes [ycc], so a PLAIN tile made from it meanwhile is not kept. */
+    private volatile long changing;
     private volatile long version;
     /** Told whenever new tiles are published, so they go out at once (the engine's sender). */
     private final Runnable published;
@@ -56,18 +59,17 @@ public final class Canvas {
         this.width = cols * 128;
         this.height = rows * 128;
         this.ycc = new byte[width * height * 3];
-        int tiles = cols * rows;
-        hi = new AtomicReferenceArray<>(tiles);
-        hiOwn = new AtomicReferenceArray<>(tiles);
-        plain = new AtomicReferenceArray<>(tiles);
+        int count = cols * rows;
         for (int i = 0; i < ycc.length; i += 3) {
             ycc[i] = 0;
             ycc[i + 1] = (byte) 128;
             ycc[i + 2] = (byte) 128;
         }
-        List<Integer> all = new ArrayList<>(tiles);
-        for (int t = 0; t < tiles; t++) all.add(t);
-        encode(all);
+        Tile[] all = new Tile[count];
+        List<Integer> every = new ArrayList<>(count);
+        for (int t = 0; t < count; t++) every.add(t);
+        encode(every, all);
+        tiles = all;
     }
 
     public int cols() { return cols; }
@@ -86,6 +88,16 @@ public final class Canvas {
      * flattened onto black). An int RGB or ARGB image, or a sub-image of one, is read in place.
      */
     public void draw(BufferedImage image, int x, int y) {
+        scroll(0, image, x, y);
+    }
+
+    /**
+     * Move the picture up by [rows] whole map rows (down if negative), then draw [image] at (x, y), and
+     * publish both as one change. Tiles that only moved keep their arrays, so a viewer who has them is
+     * re-pointed rather than sent them again; the rows moved in from the other edge hold what scrolled
+     * out until [image] covers them (draw the whole new view, or at least the rows that came in).
+     */
+    public void scroll(int rows, BufferedImage image, int x, int y) {
         int w = image.getWidth(), h = image.getHeight();
         int type = image.getType();
         WritableRaster r = image.getRaster();
@@ -94,40 +106,64 @@ public final class Canvas {
             // A sub-image shares its parent's array: start where it does, and step by the parent's row length.
             int stride = sm.getScanlineStride();
             int offset = db.getOffset() - r.getSampleModelTranslateY() * stride - r.getSampleModelTranslateX();
-            draw(db.getData(), offset, stride, w, h, x, y);
+            apply(rows, db.getData(), offset, stride, w, h, x, y);
         } else {
-            draw(image.getRGB(0, 0, w, h, null, 0, w), 0, w, w, h, x, y);
+            apply(rows, image.getRGB(0, 0, w, h, null, 0, w), 0, w, w, h, x, y);
         }
     }
 
     /** Draw a [w] × [h] block of RGB pixels (row-major; the top byte is ignored) with its top-left at (x, y). */
     public void draw(int[] rgb, int w, int h, int x, int y) {
-        draw(rgb, 0, w, w, h, x, y);
+        apply(0, rgb, 0, w, w, h, x, y);
     }
 
     /** Rows per piece of work when converting a big drawing on several cores. */
     private static final int BAND = 32;
 
-    /** [rgb] holds the drawing's pixel (i, j) at [offset] + j × [stride] + i. */
-    private void draw(int[] rgb, int offset, int stride, int w, int h, int x, int y) {
+    /** Move by [shift] map rows, then draw: [rgb] holds the drawing's pixel (i, j) at [offset] + j × [stride] + i. */
+    private void apply(int shift, int[] rgb, int offset, int stride, int w, int h, int x, int y) {
         int x0 = Math.max(0, x), y0 = Math.max(0, y);
         int x1 = Math.min(width, x + w), y1 = Math.min(height, y + h);
-        if (x0 >= x1 || y0 >= y1) return;
-        boolean[] dirty = new boolean[cols * rows];
-        int bands = (y1 - y0 + BAND - 1) / BAND;
-        // Rows are independent: a big drawing (a whole new page) is converted on several cores at once.
-        if (bands > 1 && (long) (x1 - x0) * (y1 - y0) >= 128 * 128) {
-            run(() -> IntStream.range(0, bands).parallel().forEach(b ->
-                    convert(rgb, offset, stride, x, y, x0, x1, y0 + b * BAND, Math.min(y1, y0 + (b + 1) * BAND), dirty)));
-        } else {
-            convert(rgb, offset, stride, x, y, x0, x1, y0, y1, dirty);
+        boolean moves = shift != 0 && Math.abs(shift) < rows;
+        boolean draws = x0 < x1 && y0 < y1;
+        if (!moves && !draws) return;
+        Tile[] next = tiles.clone();
+        changing++;
+        try {
+            if (moves) rotate(shift, next);
+            List<Integer> changed = new ArrayList<>();
+            if (draws) {
+                boolean[] dirty = new boolean[cols * rows];
+                int bands = (y1 - y0 + BAND - 1) / BAND;
+                // Rows are independent: a big drawing (a whole new page) is converted on several cores at once.
+                if (bands > 1 && (long) (x1 - x0) * (y1 - y0) >= 128 * 128) {
+                    run(() -> IntStream.range(0, bands).parallel().forEach(b ->
+                            convert(rgb, offset, stride, x, y, x0, x1, y0 + b * BAND, Math.min(y1, y0 + (b + 1) * BAND), dirty)));
+                } else {
+                    convert(rgb, offset, stride, x, y, x0, x1, y0, y1, dirty);
+                }
+                for (int t = 0; t < dirty.length; t++) if (dirty[t]) changed.add(t);
+            }
+            if (!moves && changed.isEmpty()) return;
+            encode(changed, next);
+        } finally {
+            changing++;
         }
-        List<Integer> changed = new ArrayList<>();
-        for (int t = 0; t < dirty.length; t++) if (dirty[t]) changed.add(t);
-        if (changed.isEmpty()) return;
-        encode(changed);
+        tiles = next;
         version++;
         published.run();
+    }
+
+    /** The picture's rows, and [next]'s tiles with them, moved up by [shift] map rows, round to the other edge. */
+    private void rotate(int shift, Tile[] next) {
+        int k = Math.floorMod(shift, rows);
+        int bytes = k * 128 * width * 3;
+        byte[] top = Arrays.copyOf(ycc, bytes);
+        System.arraycopy(ycc, bytes, ycc, 0, ycc.length - bytes);
+        System.arraycopy(top, 0, ycc, ycc.length - bytes, bytes);
+        Tile[] was = next.clone();
+        int n = was.length, by = k * cols;
+        for (int t = 0; t < n; t++) next[t] = was[(t + by) % n];
     }
 
     /** Rows [from, to) of the canvas: convert, compare with what is there, store, and mark changed tiles. */
@@ -177,39 +213,74 @@ public final class Canvas {
 
     /** One tile's map colour bytes in [encoding]. The array is never changed after it is returned. */
     public byte[] tile(int index, Encoding encoding) {
-        return switch (encoding) {
-            case HI -> hi.get(index);
-            case PLAIN -> {
-                // Derived from the picture when first asked for, and kept until the HI tile changes.
-                byte[] base = hi.get(index);
-                Own own = plain.get(index);
-                if (own == null || own.base != base) {
-                    byte[] out = new byte[TILE];
-                    palette.encodePlain(ycc, width, (index % cols) * 128, (index / cols) * 128, out);
-                    own = new Own(base, out);
-                    plain.set(index, own);
-                }
-                yield own.tile;
-            }
-            case HI_OWN -> {
-                // Derived lazily from the HI tile and kept until that changes: only views need it.
-                byte[] base = hi.get(index);
-                Own own = hiOwn.get(index);
-                if (own == null || own.base != base) {
-                    own = new Own(base, palette.markOwn(base, cols, rows));
-                    hiOwn.set(index, own);
-                }
-                yield own.tile;
-            }
-        };
+        return snapshot().tile(index, encoding);
     }
 
-    private record Own(byte[] base, byte[] tile) {}
+    /** The tiles as published now: one whole drawing, whatever is drawn after. */
+    public Snapshot snapshot() {
+        return new Snapshot(tiles);
+    }
+
+    /** The tiles of one published drawing. */
+    public final class Snapshot {
+        private final Tile[] at;
+
+        private Snapshot(Tile[] at) {
+            this.at = at;
+        }
+
+        /** Tile [index]'s map colour bytes in [encoding]. The array is never changed after it is returned. */
+        public byte[] tile(int index, Encoding encoding) {
+            Tile t = at[index];
+            return switch (encoding) {
+                case HI -> t.hi;
+                case HI_OWN -> t.own(palette, cols, rows);
+                case PLAIN -> t.plain(Canvas.this, index, at);
+            };
+        }
+    }
+
+    /**
+     * One encoded tile, with what is made from it on demand. Moves with the picture when it scrolls, so
+     * what was made from it moves too and stays the same array.
+     */
+    private static final class Tile {
+        final byte[] hi;
+        private byte[] own, plain;
+
+        Tile(byte[] hi) {
+            this.hi = hi;
+        }
+
+        /** Made once, the first time a view needs it; one array whichever thread asks first. */
+        synchronized byte[] own(Palette palette, int cols, int rows) {
+            if (own == null) own = palette.markOwn(hi, cols, rows);
+            return own;
+        }
+
+        /** Made from the picture the first time somebody without the pack looks, while this tile is at [index] in [at]. */
+        byte[] plain(Canvas canvas, int index, Tile[] at) {
+            synchronized (this) {
+                if (plain != null) return plain;
+            }
+            long before = canvas.changing;
+            byte[] out = new byte[TILE];
+            canvas.palette.encodePlain(canvas.ycc, canvas.width, (index % canvas.cols) * 128, (index / canvas.cols) * 128, out);
+            // Kept only if the picture did not change under it and this tile is still where it was read from;
+            // otherwise it may be of other pixels, and is made again next time.
+            if ((before & 1) != 0 || canvas.changing != before || canvas.tiles != at) return out;
+            synchronized (this) {
+                if (plain == null) plain = out;
+                return plain;
+            }
+        }
+    }
 
     /** Tiles are independent, so a full-screen change is encoded on several cores at once. */
-    private void encode(List<Integer> list) {
-        if (list.size() == 1) encode(list.get(0));
-        else run(() -> IntStream.range(0, list.size()).parallel().forEach(i -> encode(list.get(i))));
+    private void encode(List<Integer> list, Tile[] into) {
+        if (list.isEmpty()) return;
+        if (list.size() == 1) encode(list.get(0), into);
+        else run(() -> IntStream.range(0, list.size()).parallel().forEach(i -> encode(list.get(i), into)));
     }
 
     /** Runs [work] (which splits itself up) on the shared encoder pool and waits for it. */
@@ -223,11 +294,11 @@ public final class Canvas {
         }
     }
 
-    private void encode(int t) {
+    private void encode(int t, Tile[] into) {
         // A fresh array each time: the sender may still hold the old one. PLAIN is made from it when asked for.
         byte[] h = new byte[TILE];
         palette.encodeHi(ycc, width, (t % cols) * 128, (t / cols) * 128, h);
-        hi.set(t, h);
+        into[t] = new Tile(h);
     }
 
     /** How a tile is sent: which colours mean what to the player's client. */
