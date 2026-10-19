@@ -60,14 +60,15 @@ public final class Canvas {
         hi = new AtomicReferenceArray<>(tiles);
         hiOwn = new AtomicReferenceArray<>(tiles);
         plain = new AtomicReferenceArray<>(tiles);
-        for (int i = 0; i < ycc.length; i += 3) {
-            ycc[i] = 0;
-            ycc[i + 1] = (byte) 128;
-            ycc[i + 2] = (byte) 128;
-        }
-        List<Integer> all = new ArrayList<>(tiles);
-        for (int t = 0; t < tiles; t++) all.add(t);
-        encode(all);
+        // Black: Y 0, Cb and Cr 128. Filled by doubling copies, not pixel by pixel (a 16x9 canvas is 7 MB).
+        ycc[1] = (byte) 128;
+        ycc[2] = (byte) 128;
+        for (int n = 3; n < ycc.length; n *= 2) System.arraycopy(ycc, 0, ycc, n, Math.min(n, ycc.length - n));
+        // Every tile of a blank canvas encodes to the same bytes, and tile arrays are never changed once
+        // handed out, so they all share one. This runs on the server thread when a viewer reaches a wall.
+        encode(0);
+        byte[] blank = hi.get(0);
+        for (int t = 1; t < tiles; t++) hi.set(t, blank);
     }
 
     public int cols() { return cols; }
