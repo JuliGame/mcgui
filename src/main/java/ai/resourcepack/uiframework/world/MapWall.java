@@ -40,6 +40,7 @@ public final class MapWall {
     public final int firstMapId;
     /** Right, as seen by somebody facing the wall. */
     public final int rightX, rightZ;
+    private final int[] ownMaps;
     /** A shared wall's frames: real entities, in the world for everybody. */
     private final List<GlowItemFrame> frames = new ArrayList<>();
     private final Set<UUID> frameIds = new HashSet<>();
@@ -68,11 +69,16 @@ public final class MapWall {
         this.firstMapId = firstMapId;
         this.rightX = facing.getModZ();
         this.rightZ = -facing.getModX();
+        ownMaps = new int[cols * rows];
+        for (int t = 0; t < ownMaps.length; t++) ownMaps[t] = mapId(t);
     }
 
     public int tiles() { return cols * rows; }
 
     public int mapId(int tile) { return firstMapId + tile; }
+
+    /** Each tile's own map id, in tile order: one array for the wall's life, which nobody may change. */
+    public int[] ownMaps() { return ownMaps; }
 
     /** The entity id of the frame showing [tile], or -1 while the frames are not in the world. */
     public int entityId(int tile) {

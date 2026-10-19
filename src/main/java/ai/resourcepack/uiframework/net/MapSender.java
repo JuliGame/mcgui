@@ -17,6 +17,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.LockSupport;
@@ -69,6 +70,8 @@ public final class MapSender implements AutoCloseable {
         final List<Object> packets = new ArrayList<>();
         final List<Patch> patches = new ArrayList<>();
         long batchCost;
+        /** Bumped whenever patches are forgotten (a failed write), which no snapshot or pointing would show. */
+        final AtomicInteger forgets = new AtomicInteger();
     }
 
     /** One patch on its way: the tile it brings map [id] up to, and the wall's in-flight count it is in. */
@@ -83,6 +86,15 @@ public final class MapSender implements AutoCloseable {
         /** The map each tile is sent to: what each frame showed when the snapshot was taken. */
         int[] maps;
         final ArrayDeque<Integer> queue = new ArrayDeque<>();
+        /**
+         * The last time every tile was found on the client already: that drawing, pointing, pointer and forget
+         * count. While all four stay the same nothing can differ, and the tile by tile check is skipped: with
+         * dozens of walls in range of dozens of players, that check was most of this thread's time.
+         */
+        Canvas.Snapshot settled;
+        int[] settledMaps;
+        PointerSpot settledPointer;
+        int settledForgets;
 
         Frame(Canvas canvas, int tiles) {
             this.canvas = canvas;
@@ -267,9 +279,7 @@ public final class MapSender implements AutoCloseable {
         Wire.Frames f = v.pointing;
         int[] p = f == null ? null : f.pointing(wall);
         if (p != null && p.length == wall.tiles()) return p;
-        int[] own = new int[wall.tiles()];
-        for (int t = 0; t < own.length; t++) own[t] = wall.mapId(t);
-        return own;
+        return wall.ownMaps();
     }
 
     /** The tile [a]'s viewer should have: the canvas's, with the pointer drawn in for plain viewers. */
@@ -311,12 +321,24 @@ public final class MapSender implements AutoCloseable {
             // Snapshot every tile that differs from what the client has; this set is what goes next.
             Canvas.Snapshot snap = a.canvas.snapshot();
             int[] maps = maps(v, a.wall);
+            int forgets = v.forgets.get();
+            if (snap.sameAs(frame.settled) && maps == frame.settledMaps && forgets == frame.settledForgets
+                    && java.util.Objects.equals(a.pointer, frame.settledPointer)) return;
             boolean changed = false;
             for (int t = 0; t < tiles; t++) {
                 frame.tile[t] = tileFor(a, v, snap, t);
                 changed |= frame.tile[t] != v.sent.get(maps[t]);
             }
-            if (!changed) return;
+            if (!changed) {
+                frame.settled = snap;
+                frame.settledMaps = maps;
+                frame.settledPointer = a.pointer;
+                frame.settledForgets = forgets;
+                return;
+            }
+            // Sending again: the client is no longer known to hold this drawing (a canvas can take back an
+            // earlier drawing's very tiles, see Canvas#show), until a check finds every tile there once more.
+            frame.settled = null;
             int[] to = v.pointing == null ? null : repointed(maps, frame.tile, v.sent);
             // Pointing never changes while a snapshot is part sent, so its tiles all go where it was taken.
             if (to != null && shift(a, v, frame, maps, to)) return;
@@ -486,6 +508,7 @@ public final class MapSender implements AutoCloseable {
      */
     private static void forget(Viewer v, List<Patch> patches) {
         for (Patch p : patches) v.sent.remove(p.id, p.tile);
+        v.forgets.incrementAndGet();
     }
 
     /** Patches written (or given up on): no longer in flight. */
