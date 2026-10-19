@@ -307,7 +307,16 @@ public final class Screens implements Listener {
             this.session = session;
         }
 
-        @Override public Canvas canvas() { return session.canvas; }
+        /**
+         * Nothing until the page is on it (see Session.BLANK_AFTER_TICKS), so the view is sent the page first, not
+         * a blank: the view opens at once, and its frames go up while the page is drawn. Asked at the open too,
+         * for the view's size, before [view] is set.
+         */
+        @Override
+        public Canvas canvas() {
+            return view == null || session.showing() ? session.canvas : null;
+        }
+
         @Override public void pointer(View v, int x, int y) { session.pointer(x, y); }
         @Override public void click(View v, int x, int y, Click click) { session.click(x, y); }
         @Override public void scroll(View v, int x, int y, int notches) { session.scroll(notches); }
@@ -345,7 +354,7 @@ public final class Screens implements Listener {
         Page p = plugin.pages().loaded(n);
         if (p != null) {
             opening.remove(id);
-            return seat(player, n, p, problem);
+            return seat(player, n, p);
         }
         Object ticket = new Object();
         opening.put(id, ticket);
@@ -354,7 +363,7 @@ public final class Screens implements Listener {
             Player now = Bukkit.getPlayer(id);
             if (now == null) return;
             try {
-                if (loaded == null || !seat(now, n, loaded, problem)) problem.accept("Could not open '" + page + "': see the console.");
+                if (loaded == null || !seat(now, n, loaded)) problem.accept("Could not open '" + page + "': see the console.");
             } catch (IllegalStateException e) {
                 problem.accept(e.getMessage());
             }
@@ -362,18 +371,8 @@ public final class Screens implements Listener {
         return true;
     }
 
-    /**
-     * How many ticks a fullscreen open waits for its page to be drawn before the view opens all the same, blank until
-     * it is: so a page that takes long to draw still answers the click at once.
-     */
-    private static final int OPEN_WAIT_TICKS = Session.BLANK_AFTER_TICKS;
-
-    /**
-     * Seats [player] at page [p], named [n], fullscreen: at once if its first picture is already on the canvas (kept
-     * by {@link FirstPictures}), else once it is drawn, so the view opens on the page rather than on a blank screen.
-     * [problem] hears if seating them then fails.
-     */
-    private boolean seat(Player player, String n, Page p, Consumer<String> problem) {
+    /** Seats [player] at page [p], named [n], fullscreen. */
+    private boolean seat(Player player, String n, Page p) {
         int[] size = plugin.viewSize(p);
         Canvas canvas = UIFramework.get().canvas(size[0], size[1]);
         Session session = new Session(plugin, renderers, canvas, player.getUniqueId(), plugin.viewHeight());
@@ -387,41 +386,6 @@ public final class Screens implements Listener {
             if (v != null) v.close();
         };
         if (!session.open(n, null, false)) return false;
-        UUID id = player.getUniqueId();
-        if (session.ready()) {
-            seat(player, seated);
-            return true;
-        }
-        // A ticket, as for a page still loading: a later open or a close in the meantime calls this one off.
-        Object ticket = new Object();
-        opening.put(id, ticket);
-        Runnable reveal = new Runnable() {
-            private boolean done;
-
-            @Override
-            public void run() {
-                if (done) return;
-                done = true;
-                Player now = Bukkit.getPlayer(id);
-                if (now == null || !opening.remove(id, ticket)) {
-                    session.dispose();
-                    return;
-                }
-                try {
-                    seat(now, seated);
-                } catch (IllegalStateException e) {
-                    problem.accept(e.getMessage());
-                }
-            }
-        };
-        session.whenFirstPicture(reveal);
-        Bukkit.getScheduler().runTaskLater(plugin, reveal, OPEN_WAIT_TICKS);
-        return true;
-    }
-
-    /** Seats [player] at [seated]'s page in a view of their own, closing the one they were at. */
-    private void seat(Player player, Seated seated) {
-        Session session = seated.session;
         Seated old = views.put(player.getUniqueId(), seated);
         if (old != null && old.view != null) old.view.close();
         try {
@@ -432,6 +396,7 @@ public final class Screens implements Listener {
             throw e;
         }
         seated.view.pointer(Pointer.ARROW);
+        return true;
     }
 
     /** Closes [player]'s page, or the one still loading for them. */

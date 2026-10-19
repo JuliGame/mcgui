@@ -120,9 +120,10 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
   session's own document by place in document order. One session draws a
   missing picture and the others wanting it wait (`FirstPictures.claim`). The
   frame's image is shared, so a repaint over it copies it first (`borrowed`).
-  Until its first picture is drawn a wall shows nothing (`Session.showing`, at
-  most `BLANK_AFTER_TICKS`) and a fullscreen view does not open
-  (`Screens.seat`), since a blank first is a second packet a map. The warm-up
+  Until its first picture is drawn a wall or view is given no canvas
+  (`Session.showing`, at most `BLANK_AFTER_TICKS`), since a blank first is a
+  second packet a map; a view still opens at once (its frames go up while the
+  page is drawn) and the framework switches to it once the page has arrived. The warm-up
   draws every placed screen's page. `FirstPicturesTest` follows a taken and a
   drawn picture through hovers, presses, scrolls and refreshes;
   `sh gradlew firstPictureBench` gives the CPU per new session both ways.

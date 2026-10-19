@@ -105,14 +105,13 @@ public final class Session {
     private FirstPictures.Picture offered;
     /** The next picture is drawn here, not waited for: the one waited for could not be drawn. */
     private boolean drawOwn;
-    /** Told once, on the server thread, when the first picture is on the canvas or could not be drawn. */
-    private Runnable firstPicture;
     /** The tick this session was made. */
     private final int born;
     /**
-     * Ticks a wall waits for a session's first picture before showing its canvas, blank, all the same. A frame whose
-     * map the client has no colours for draws the map item, so a wall shows nothing new until its page is drawn,
-     * and then the page, one packet a map; a blank first only if drawing takes longer than this.
+     * Ticks a wall or view waits for a session's first picture before showing its canvas, blank, all the same. A frame
+     * whose map the client has no colours for draws the map item, so a screen shows nothing new until its page is
+     * drawn, and then the page, one packet a map; a blank first only if drawing takes longer than this. (A view is
+     * not switched to before its picture has arrived, so there the wait is unseen.)
      */
     static final int BLANK_AFTER_TICKS = 10;
 
@@ -492,7 +491,6 @@ public final class Session {
                     pictures.publish(publish, picture);
                     published = true;
                 }
-                if (before == null) serverThread.execute(this::firstPictureSettled);
                 AtomicInteger failed = FAILURES.remove(p);
                 if (failed != null && failed.get() > 1) {
                     plugin.getLogger().info("Drew page " + name + " after " + failed.get() + " attempts that could not be drawn");
@@ -514,7 +512,6 @@ public final class Session {
                 // where clicks would find nothing: go back to that page, so the screen still works.
                 HtmlRenderer.Frame shown = frame;
                 if (shown != null && shown.page() != p) serverThread.execute(() -> undrawable(p, nav));
-                if (shown == null) serverThread.execute(this::firstPictureSettled);
             } finally {
                 if (publish != null && !published) pictures.abandon(publish);
                 synchronized (Session.this) {
@@ -574,7 +571,6 @@ public final class Session {
         HtmlRenderer.Frame f = picture.frameFor(d);
         if (f == null) return false;
         long t0 = System.nanoTime();
-        boolean first = frame == null;
         canvas.show(picture.canvas);
         borrowed = f.image();
         drawnHover = hoverKey;
@@ -589,7 +585,6 @@ public final class Session {
         }
         // As after drawing a new page: what the pointer is over now.
         serverThread.execute(this::repoint);
-        if (first) serverThread.execute(this::firstPictureSettled);
         return true;
     }
 
@@ -608,20 +603,8 @@ public final class Session {
         }
     }
 
-    /** Runs [then] on the server thread once the first picture is on the canvas or could not be drawn. */
-    void whenFirstPicture(Runnable then) {
-        if (frame != null) then.run();
-        else firstPicture = then;
-    }
-
-    private void firstPictureSettled() {
-        Runnable then = firstPicture;
-        firstPicture = null;
-        if (then != null) then.run();
-    }
-
     /**
-     * Whether a wall shows this session's canvas yet: once the first picture is on it, or, if that takes longer
+     * Whether its screen shows this session's canvas yet: once the first picture is on it, or, if that takes longer
      * than {@link #BLANK_AFTER_TICKS}, blank until it is.
      */
     boolean showing() {
