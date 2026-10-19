@@ -39,6 +39,8 @@ public final class Pipeline {
     private final Map<UUID, Mouse> mice = new ConcurrentHashMap<>();
     private final Map<UUID, Integer> pinned = new ConcurrentHashMap<>();
     private final Map<UUID, Filter> filters = new ConcurrentHashMap<>();
+    /** Players held still for a client-placed pointer: their client is told they fly at a speed of nothing. */
+    private final Set<UUID> held = ConcurrentHashMap.newKeySet();
     private final Logger log;
 
     public Pipeline(Nms nms, Logger log) {
@@ -46,7 +48,7 @@ public final class Pipeline {
         this.log = log;
     }
 
-    /** A seated player's mouse. Both run on the netty thread, as the packet arrives. */
+    /** A seated player's mouse. Every method runs on the netty thread, as the packet arrives. */
     public interface Mouse {
         /** They turned their head to (yaw, pitch). */
         void turned(float yaw, float pitch);
@@ -56,6 +58,9 @@ public final class Pipeline {
 
         /** They clicked or scrolled; the rotation that comes next is where they were looking when they did. */
         default void clicked() {}
+
+        /** One of their client's ticks ended: whatever it sent that tick (clicks, a rotation) has arrived. */
+        default void tickEnded() {}
     }
 
     private record Pending(UUID player, Runnable then) {}
@@ -82,6 +87,17 @@ public final class Pipeline {
         Filter f = filters.get(player);
         ChannelHandlerContext ctx = f == null ? null : f.ctx;
         if (ctx != null) ctx.writeAndFlush(packet, ctx.voidPromise());
+    }
+
+    /**
+     * While [on], every abilities packet to [player] says they fly, cannot stop flying, and move at a
+     * speed of nothing ({@link Nms#heldAbilities}); the server keeps their real abilities, and sending
+     * those again (see {@link Nms#resendAbilities}) after this is turned off puts them back. Needs the
+     * handler {@link #conceal} puts in.
+     */
+    public void hold(UUID player, boolean on) {
+        if (on) held.add(player);
+        else held.remove(player);
     }
 
     /**
@@ -146,6 +162,7 @@ public final class Pipeline {
 
     public void forget(UUID player) {
         concealed.remove(player);
+        held.remove(player);
         unwatch(player);
         filters.remove(player);
         // A ping the player never answered would otherwise keep its view, canvas and all, for good.
@@ -195,6 +212,7 @@ public final class Pipeline {
         mice.clear();
         pinned.clear();
         concealed.clear();
+        held.clear();
     }
 
     /** Stays in the pipeline once added; it passes everything through untouched while its player is not seated. */
@@ -226,6 +244,8 @@ public final class Pipeline {
                         mouse.teleported();
                     } else if (nms.isClick(msg)) {
                         mouse.clicked();
+                    } else if (nms.isTickEnd(msg)) {
+                        mouse.tickEnded();
                     } else {
                         float[] turn = nms.rotation(msg);
                         if (turn != null) mouse.turned(turn[0], turn[1]);
@@ -245,6 +265,7 @@ public final class Pipeline {
                 promise.trySuccess();
                 return;
             }
+            if (held.contains(id) && nms.isAbilities(msg)) msg = nms.heldAbilities(msg);
             ctx.write(concealed.contains(id) ? blank(msg) : msg, promise);
         }
 

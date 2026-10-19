@@ -20,6 +20,7 @@ import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextColor;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import org.bukkit.Bukkit;
+import org.bukkit.Fluid;
 import org.bukkit.GameMode;
 import org.bukkit.Input;
 import org.bukkit.Location;
@@ -27,6 +28,9 @@ import org.bukkit.NamespacedKey;
 import org.bukkit.Registry;
 import org.bukkit.World;
 import org.bukkit.WeatherType;
+import org.bukkit.attribute.Attribute;
+import org.bukkit.attribute.AttributeInstance;
+import org.bukkit.attribute.AttributeModifier;
 import org.bukkit.block.BlockFace;
 import org.bukkit.entity.ArmorStand;
 import org.bukkit.entity.Display;
@@ -36,6 +40,7 @@ import org.bukkit.entity.Interaction;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.TextDisplay;
+import org.bukkit.entity.Vehicle;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
@@ -55,11 +60,13 @@ import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerSwapHandItemsEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
+import org.bukkit.event.player.PlayerVelocityEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
+import org.bukkit.util.BoundingBox;
 import org.bukkit.util.Transformation;
 import org.bukkit.util.Vector;
 import org.joml.Quaternionf;
@@ -76,18 +83,24 @@ import java.util.function.Predicate;
 import java.util.logging.Level;
 
 /**
- * Fullscreen views. A seated player rides an invisible armour stand with their camera locked onto an
- * invisible mannequin whose eyes look straight at a wall of maps only they can see. A passenger keeps
- * sending its rotation, so turning the mouse moves a pointer; the attack and use keys click, the wheel
- * scrolls (the hotbar snaps back), movement keys are keys, and sneaking gets up.
+ * Fullscreen views. A seated player's camera looks at a wall of maps only they can see; turning the
+ * mouse moves a pointer, the attack and use keys click, the wheel scrolls (the hotbar snaps back),
+ * movement keys are keys, and sneaking gets up.
  *
- * <p>Players with the pack see the pointer as a text display in front of the picture, which their
- * client glides between updates at its own frame rate; players without it get it drawn into the maps.
- * The mouse is read off the wire as each packet arrives and the pointer's move goes straight back,
- * rather than both waiting for the next tick; the client only sends its rotation 20 times a second,
- * whatever the server's tick rate, so that is as fresh as the pointer can be.
+ * <p>With the pack and {@code views.client-pointer}, the player's own eye is the camera and their
+ * client places the picture and the pointer itself, every frame, from where it looks (see
+ * {@link Shaders}). They are held still where their eye is on the flagged spot: not riding anything
+ * (a passenger's yaw reaches the screen a tick late), but flying, as far as their client knows, at a
+ * speed of nothing, with attribute modifiers that stop walking, jumping, falling and knockback (see
+ * {@link #hold}). Everyone else rides an invisible armour stand with their camera locked onto an
+ * invisible mannequin looking at the wall; their rotation moves a pointer the server places.
  *
- * <p>With the pack the shader stretches the picture to fill the window (see {@link Shaders}), so it is
+ * <p>Players with the pack see the server-placed pointer as a text display in front of the picture,
+ * which their client glides between updates; players without it get it drawn into the maps. The mouse
+ * is read off the wire as each packet arrives and the pointer's move goes straight back, rather than
+ * both waiting for the next tick.
+ *
+ * <p>With the pack the shader stretches the picture to fill the window, so a server-placed view is
  * placed to fill only part of the player's view: every frame then stays on screen even for a narrower
  * FOV than they told us, and a frame the client thinks is off screen is never drawn at all.
  */
@@ -108,14 +121,18 @@ public final class Views implements Listener {
     private static final int SETTLE_TIMEOUT = 20;
     /**
      * Size of the Interaction round a client-placed pointer's eye, in blocks: its far side (where a look
-     * from inside hits it) is nearer than any block face (at least 0.27 away, see open), so a click hits
-     * it whichever way the player looks.
+     * from inside hits it) is nearer than anything a look can hit in the eye's own block, which is air
+     * (see clientEye), so a click hits it whichever way the player looks.
      */
     private static final float CLIENT_TARGET = 0.02f;
     /** The widest turn either side of the picture's centre a client-placed pointer may need: below ±180°. */
     private static final double CLIENT_MAX_YAW = 150;
     /** The steepest: below the client's own ±90° limit, with room for a fast flick past the edge. */
     private static final double CLIENT_MAX_PITCH = 75;
+    /** How far a client-placed view may move the player's eye up or down to find room to hold them, in blocks. */
+    private static final double CLIENT_MAX_LIFT = 1.5;
+    /** How far round a held player other entities are hidden from them, in blocks: their client would push them. */
+    private static final double PUSH_MARGIN = 2.0;
 
     private final Plugin plugin;
     private final Settings settings;
@@ -156,7 +173,10 @@ public final class Views implements Listener {
         final double speed;
         /** The yaw that looks straight at the picture's centre. */
         final float refYaw;
+        /** What a server-placed pointer's player rides; null for a client-placed pointer, whose player rides nothing. */
         final ArmorStand vehicle;
+        /** Where a client-placed pointer's player is held: their feet, so their eye is on the flagged spot. */
+        final Location seat;
         /** The entity the camera is locked to; null for a client-placed pointer, whose camera is the player's own eye. */
         final LivingEntity camera;
         final Interaction target;
@@ -189,10 +209,12 @@ public final class Views implements Listener {
          */
         int clicksSeen, clicksPlaced;
         double clickX, clickY;
-        /** Prototype measurement: the cursor when the last click went by, before its rotation. */
+        /** The cursor when the last click went by, before its rotation (logged with views.debug-pointer). */
         double preClickX, preClickY;
-        /** Clicks handled before the rotation after them had arrived; run once it has. */
+        /** Clicks handled before the rotation after them had arrived; run once it has, or the client's tick has ended without one. */
         final List<java.util.function.BiConsumer<Integer, Integer>> waitingClicks = new ArrayList<>();
+        /** The server tick the first of [waitingClicks] began waiting. */
+        int waitingSince;
         Input lastInput;
         final Map<Key, Boolean> held = new EnumMap<>(Key.class);
         long lastClickTick = -10, lastRightClickTick = -10;
@@ -206,7 +228,7 @@ public final class Views implements Listener {
         volatile boolean caughtUp;
 
         ViewImpl(Player p, ViewContent content, Canvas canvas, MapWall wall, ViewOptions options, boolean withPack, boolean clientPointer,
-                 double speed, ArmorStand vehicle, LivingEntity camera, Interaction target, TextDisplay pointer, Location returnTo, Location cameraAt) {
+                 double speed, ArmorStand vehicle, Location seat, LivingEntity camera, Interaction target, TextDisplay pointer, Location returnTo, Location cameraAt) {
             this.player = p.getUniqueId();
             this.content = content;
             this.canvas = canvas;
@@ -217,6 +239,7 @@ public final class Views implements Listener {
             this.speed = speed;
             this.refYaw = cameraAt.getYaw();
             this.vehicle = vehicle;
+            this.seat = seat;
             this.camera = camera;
             this.target = target;
             this.pointer = pointer;
@@ -235,10 +258,16 @@ public final class Views implements Listener {
         }
 
         List<Entity> entities() {
-            List<Entity> out = new ArrayList<>(List.of(vehicle, target));
+            List<Entity> out = new ArrayList<>(List.of(target));
+            if (vehicle != null) out.add(vehicle);
             if (camera != null) out.add(camera);
             if (pointer != null) out.add(pointer);
             return out;
+        }
+
+        /** Where the player is kept while the view is shown. */
+        Location heldAt() {
+            return clientPointer ? seat : vehicle.getLocation();
         }
 
         @Override public Player player() { return Bukkit.getPlayer(player); }
@@ -285,36 +314,32 @@ public final class Views implements Listener {
         close(player, CloseReason.CLOSED);
         Canvas canvas = content.canvas();
         boolean withPack = hasPack.test(player.getUniqueId());
-        boolean clientPointer = withPack && settings.clientPointer;
         double fov = viewFov(player, withPack ? STRETCHED_FIT : 1.0);
         Location from = player.getLocation();
         MapWall wall = inFront(player, canvas.cols(), canvas.rows(), fov);
         if (wall == null) throw new IllegalStateException("There isn't enough room around " + player.getName() + " for a view");
         World world = wall.world;
         Location cam = wall.cameraLocation(fov);
+        // Where a client-placed picture really is no longer matters, only that the camera is flagged: so a
+        // spot by the player's own eye where they can be held (see clientEye). Without one, the server pointer.
+        Location eye = withPack && settings.clientPointer ? clientEye(player, wall.facing) : null;
+        if (withPack && settings.clientPointer && eye == null) debug("no room to hold " + player.getName() + " still: the server places their pointer");
+        boolean clientPointer = eye != null;
+        Location seat = null;
         if (clientPointer) {
-            // Where the picture really is no longer matters, only that the camera is flagged: so the middle
-            // of the block the player's own eye is in (air, as they stand there), 3/128 off it along the
-            // flagged axis. Every block face is then at least 0.27 away: more than the half-width of
-            // the eye box the client tests for its in-wall overlay, and far more than the target round
-            // the eye, which a click must hit before any block. The frames' block is plainly the camera's.
-            Location eye = player.getEyeLocation();
-            double x = Math.floor(eye.getX()) + 0.5, y = Math.floor(eye.getY()) + 0.5, z = Math.floor(eye.getZ()) + 0.5;
-            if (wall.facing.getModX() != 0) x += Shaders.FLAG_PHASE;
-            else z += Shaders.FLAG_PHASE;
-            cam = new Location(world, x, y, z, cam.getYaw(), 0);
+            eye.setYaw(cam.getYaw());
+            cam = eye;
+            seat = cam.clone().subtract(0, standingEyeHeight(player), 0);
         }
         // Spawned unseen: the maps go out first, and the frames only appear once they can show them.
         wall.spawn(plugin, player, false, clientPointer ? stackBlock(cam) : null);
         double speed = clientPointer ? clientSpeed(canvas) : settings.cursorSpeed * canvas.height() / 768.0;
 
         // With a client-placed pointer the camera is the player's own eye, which turns with the mouse:
-        // they sit exactly where it puts their eye on the flagged spot. Otherwise a camera entity looks at
+        // they are held where it is on the flagged spot (see reveal). Otherwise a camera entity looks at
         // the wall and they sit out of the way.
         LivingEntity camera = clientPointer ? null : spawnCamera(cam);
-        Location seatAt = clientPointer ? cam.clone().subtract(0, eyeAboveSeat(player), 0)
-                : cam.clone().subtract(cam.getDirection().multiply(1.5)).subtract(0, 1.6, 0);
-        ArmorStand vehicle = world.spawn(seatAt, ArmorStand.class, a -> {
+        ArmorStand vehicle = clientPointer ? null : world.spawn(cam.clone().subtract(cam.getDirection().multiply(1.5)).subtract(0, 1.6, 0), ArmorStand.class, a -> {
             a.setMarker(true);
             a.setInvisible(true);
             a.setGravity(false);
@@ -352,9 +377,11 @@ public final class Views implements Listener {
             d.setPersistent(false);
             d.setVisibleByDefault(false);
         });
-        for (Entity e : camera == null ? List.of(vehicle, target) : List.of(camera, vehicle, target)) player.showEntity(plugin, e);
+        player.showEntity(plugin, target);
+        if (vehicle != null) player.showEntity(plugin, vehicle);
+        if (camera != null) player.showEntity(plugin, camera);
 
-        ViewImpl view = new ViewImpl(player, content, canvas, wall, options, withPack, clientPointer, speed, vehicle, camera, target, pointer, from, cam);
+        ViewImpl view = new ViewImpl(player, content, canvas, wall, options, withPack, clientPointer, speed, vehicle, seat, camera, target, pointer, from, cam);
         views.put(player.getUniqueId(), view);
         // Remembered on the player, so a crash mid-view cannot leave them stuck in adventure mode or in the ground.
         player.getPersistentDataContainer().set(seatKey, PersistentDataType.STRING, player.getGameMode().name());
@@ -366,6 +393,7 @@ public final class Views implements Listener {
             @Override public void turned(float yaw, float pitch) { Views.this.turned(view, yaw, pitch); }
             @Override public void teleported() { view.awaitingTeleport = false; }
             @Override public void clicked() { Views.this.clicked(view); }
+            @Override public void tickEnded() { Views.this.tickEnded(view); }
         }, view.pointerId);
         // Hides the first-person arm; nobody else sees the seated player at all.
         player.addPotionEffect(new PotionEffect(PotionEffectType.INVISIBILITY, PotionEffect.INFINITE_DURATION, 0, false, false, false));
@@ -419,14 +447,67 @@ public final class Views implements Listener {
     }
 
     /**
-     * How far a rider's eye is above the marker armour stand they ride: a marker carries its rider at its
-     * own position, by a point 0.6 (scaled) above the player's feet, and a standing player's eye is 1.62
-     * (a float, scaled) above their feet. As the client works it out, so the eye lands on the flagged spot.
+     * A standing player's eye height, as their client works it out: 1.62F times their scale, in float
+     * ({@code Avatar.STANDING_DIMENSIONS}, {@code EntityDimensions.scale}). Their camera is that far above
+     * their feet once it has settled ({@code Camera.tick} and {@code alignWithEntity}), so feet put this far
+     * below the flagged spot put the camera on it, to a rounding error far inside the shader's tolerance.
      */
-    private static double eyeAboveSeat(Player player) {
-        org.bukkit.attribute.AttributeInstance attr = player.getAttribute(org.bukkit.attribute.Attribute.SCALE);
-        float scale = attr == null ? 1f : (float) attr.getValue();
-        return (double) (1.62f * scale) - 0.6 * scale;
+    private static double standingEyeHeight(Player player) {
+        return 1.62f * scaleOf(player);
+    }
+
+    /** The player's scale as their client reads it (a float). */
+    private static float scaleOf(Player player) {
+        AttributeInstance attr = player.getAttribute(Attribute.SCALE);
+        return attr == null ? 1f : (float) attr.getValue();
+    }
+
+    /**
+     * Where a client-placed view puts [player]'s eye, or null if there is nowhere to hold them. The
+     * middle of a block, 3/128 off it along [facing]'s axis, so the shader sees the camera as flagged:
+     * the block their eye is in, or the nearest one above or below within {@link #CLIENT_MAX_LIFT}
+     * where (1) that block is air, so a look in any direction hits the target round the eye before any
+     * block, the client draws no in-wall overlay or fluid fog, and every face is at least 0.27 away; (2)
+     * their whole standing box is clear of every collision, or their client would crouch them (which
+     * moves the eye) or push them out sideways ({@code Player.updatePlayerPose},
+     * {@code LocalPlayer.moveTowardsClosestSpace}); and (3) no lava touches it. Water may: a flying
+     * player is not pushed by it (see hold).
+     */
+    private static Location clientEye(Player player, BlockFace facing) {
+        Location at = player.getEyeLocation();
+        World world = at.getWorld();
+        int bx = at.getBlockX(), bz = at.getBlockZ(), from = at.getBlockY();
+        double x = bx + 0.5, z = bz + 0.5;
+        if (facing.getModX() != 0) x += Shaders.FLAG_PHASE;
+        else z += Shaders.FLAG_PHASE;
+        float scale = scaleOf(player);
+        double eyeHeight = standingEyeHeight(player);
+        // As the client makes a player's box (EntityDimensions.makeBoundingBox), less the 1e-7 it allows when testing a pose.
+        double half = 0.6f * scale / 2.0f - 1e-7, height = 1.8f * scale;
+        List<Integer> rows = new ArrayList<>();
+        for (int y = from - 2; y <= from + 2; y++) if (Math.abs(y + 0.5 - at.getY()) <= CLIENT_MAX_LIFT) rows.add(y);
+        rows.sort(java.util.Comparator.comparingDouble(y -> Math.abs(y + 0.5 - at.getY())));
+        for (int y : rows) {
+            double eyeY = y + 0.5, feet = eyeY - eyeHeight;
+            if (feet < world.getMinHeight() || feet + height > world.getMaxHeight()) continue;
+            if (!world.getBlockAt(bx, y, bz).getType().isAir()) continue;
+            BoundingBox box = new BoundingBox(x - half, feet + 1e-7, z - half, x + half, feet + height - 1e-7, z + half);
+            if (world.hasCollisionsIn(box) || touchesLava(world, box)) continue;
+            return new Location(world, x, eyeY, z);
+        }
+        return null;
+    }
+
+    private static boolean touchesLava(World world, BoundingBox box) {
+        for (int x = (int) Math.floor(box.getMinX()); x <= (int) Math.floor(box.getMaxX()); x++) {
+            for (int y = (int) Math.floor(box.getMinY()); y <= (int) Math.floor(box.getMaxY()); y++) {
+                for (int z = (int) Math.floor(box.getMinZ()); z <= (int) Math.floor(box.getMaxZ()); z++) {
+                    Fluid f = world.getFluidData(x, y, z).getFluidType();
+                    if (f == Fluid.LAVA || f == Fluid.FLOWING_LAVA) return true;
+                }
+            }
+        }
+        return false;
     }
 
     /**
@@ -487,6 +568,10 @@ public final class Views implements Listener {
             }
             // A client that never takes the teleport (another plugin cancelled it) must not leave the mouse dead.
             if (v.awaitingTeleport && now >= v.settleBy) v.awaitingTeleport = false;
+            if (v.clientPointer) {
+                keepStill(p, v);
+                settleClicks(v, now);
+            }
             report(v);
             movePointer(v);
             if (now % 40 == 0) v.privateView.refresh(p);
@@ -508,13 +593,12 @@ public final class Views implements Listener {
             if (!v.clientPointer) sendPointer(v);
         }
         if (v.clientPointer) {
-            // Put where riding will carry them, looking at the picture's centre, so mounting moves nothing
-            // and their eye is on the flagged spot from the first frame. Their own eye stays the camera.
-            Location seat = v.vehicle.getLocation().subtract(0, 0.6 * scaleOf(p), 0);
-            seat.setYaw(v.refYaw);
-            seat.setPitch(0);
-            p.teleport(seat);
-            v.vehicle.addPassenger(p);
+            // Held first, so their client never runs a tick at the seat in which it could move them. Their
+            // eye is on the flagged spot from the first frame after the teleport, looking at the picture's
+            // centre, and their own eye stays the camera.
+            hold(p);
+            p.setGliding(false);
+            p.teleport(v.seat);
         } else {
             p.teleport(v.vehicle.getLocation());
             v.vehicle.addPassenger(p);
@@ -527,9 +611,67 @@ public final class Views implements Listener {
         p.sendActionBar(Component.text("Sneak to leave", NamedTextColor.GRAY));
     }
 
-    private static double scaleOf(Player player) {
-        org.bukkit.attribute.AttributeInstance attr = player.getAttribute(org.bukkit.attribute.Attribute.SCALE);
-        return attr == null ? 1.0 : (float) attr.getValue();
+    /** What {@link #hold} changes, each under the one key {@code uiframework:seated}. */
+    private static final List<Attribute> HELD = List.of(Attribute.MOVEMENT_SPEED, Attribute.JUMP_STRENGTH, Attribute.GRAVITY,
+            Attribute.STEP_HEIGHT, Attribute.KNOCKBACK_RESISTANCE, Attribute.EXPLOSION_KNOCKBACK_RESISTANCE);
+
+    /**
+     * Holds [player] still for a client-placed pointer, where nothing they press moves their eye. Their
+     * client is told they fly, at a flying and walking speed of nothing, and cannot stop (see
+     * {@link Pipeline#hold}): with their feet in the air a player otherwise moves 0.02 a tick for each
+     * movement key whatever their movement_speed ({@code Player.getFlyingSpeed}), and flying also turns off
+     * crouching (which lowers the eye), swimming, climbing, gliding, water currents, bubble columns,
+     * levitation and cobwebs ({@code Player}, {@code LivingEntity.travelInAir}). Then attribute modifiers,
+     * transient so a crash cannot save them, all under one key so {@link #release} can always take them
+     * off: movement_speed, jump_strength, gravity and step_height times zero (a total multiplier of -1
+     * zeroes whatever the other modifiers add up to), knockback_resistance and
+     * explosion_knockback_resistance plus one. Gravity at zero also keeps the server from kicking them
+     * for floating ({@code ServerGamePacketListenerImpl.getMaximumFlyingTicks}).
+     */
+    private void hold(Player player) {
+        for (Attribute a : HELD) {
+            AttributeInstance attr = player.getAttribute(a);
+            if (attr == null) continue;
+            boolean resistance = a == Attribute.KNOCKBACK_RESISTANCE || a == Attribute.EXPLOSION_KNOCKBACK_RESISTANCE;
+            attr.removeModifier(seatKey);
+            attr.addTransientModifier(new AttributeModifier(seatKey, resistance ? 1 : -1,
+                    resistance ? AttributeModifier.Operation.ADD_NUMBER : AttributeModifier.Operation.MULTIPLY_SCALAR_1));
+        }
+        pipeline.hold(player.getUniqueId(), true);
+        nms.resendAbilities(player);
+    }
+
+    /** Undoes {@link #hold}, whether or not it was done: safe on every way out, and on join after a crash. */
+    private void release(Player player) {
+        removeModifiers(player);
+        pipeline.hold(player.getUniqueId(), false);
+        if (player.isOnline()) nms.resendAbilities(player);
+    }
+
+    /** Takes {@link #hold}'s modifiers off [player], by key: nothing happens to an attribute without one. */
+    private void removeModifiers(Player player) {
+        for (Attribute a : HELD) {
+            AttributeInstance attr = player.getAttribute(a);
+            if (attr != null) attr.removeModifier(seatKey);
+        }
+    }
+
+    /**
+     * A held player's client still moves them when something pushes them: an entity overlapping them
+     * (their client runs {@code LivingEntity.pushEntities} for itself) or a piston. So everything that could
+     * push them is hidden from them as it comes near, and if their client reports them anywhere but the
+     * seat all the same, they are put back, with their rotation left alone.
+     */
+    private void keepStill(Player p, ViewImpl v) {
+        for (Entity e : p.getWorld().getNearbyEntities(p.getBoundingBox().expand(PUSH_MARGIN))) {
+            if (e instanceof LivingEntity || e instanceof Vehicle) v.privateView.hide(p, e);
+        }
+        if (v.awaitingTeleport) return;
+        Location at = p.getLocation();
+        if (at.getX() != v.seat.getX() || at.getY() != v.seat.getY() || at.getZ() != v.seat.getZ()) {
+            debug("moved off the seat by " + at.toVector().subtract(v.seat.toVector()) + ": putting " + p.getName() + " back");
+            nms.teleportKeepingRotation(p, v.seat.getX(), v.seat.getY(), v.seat.getZ());
+        }
     }
 
     /**
@@ -599,21 +741,8 @@ public final class Views implements Listener {
         boolean moved = cx != v.cursorX || cy != v.cursorY;
         v.cursorX = cx;
         v.cursorY = cy;
-        if (v.clicksPlaced != v.clicksSeen) {
-            // The rotation after a click: where its pointer was drawn.
-            v.clicksPlaced = v.clicksSeen;
-            v.clickX = cx;
-            v.clickY = cy;
-            if (!v.waitingClicks.isEmpty()) {
-                List<java.util.function.BiConsumer<Integer, Integer>> run = new ArrayList<>(v.waitingClicks);
-                v.waitingClicks.clear();
-                int px = (int) cx, py = (int) cy;
-                nms.serverThread().execute(() -> {
-                    if (v.closed || views.get(v.player) != v) return;
-                    for (java.util.function.BiConsumer<Integer, Integer> click : run) click.accept(px, py);
-                });
-            }
-        }
+        // The rotation after a click: where its pointer was drawn.
+        if (v.clicksPlaced != v.clicksSeen) placeClicks(v, "its rotation");
         if (moved) queueReport(v);
         double backX = Math.max(0, Math.min(w - 1.0, whole)) - whole, backY = cy - y;
         if (!v.correcting && (Math.abs(backX) > 0.5 || Math.abs(backY) > 0.5)) {
@@ -621,7 +750,7 @@ public final class Views implements Listener {
             if (p == null) return;
             v.correcting = true;
             float dyaw = (float) (backX / v.speed), dpitch = (float) (backY / v.speed);
-            plugin.getLogger().info("[pointer] past the edge: turning back " + dyaw + "," + dpitch);
+            debug("past the edge: turning back " + dyaw + "," + dpitch);
             pipeline.sendNow(v.player, nms.rotate(dyaw, true, dpitch, true));
             pipeline.afterClientCaughtUp(p, () -> v.correcting = false);
         }
@@ -647,9 +776,52 @@ public final class Views implements Listener {
     }
 
     /**
+     * On the netty thread: one of the client's ticks ended. A client that is not riding sends its rotation
+     * only when it has changed ({@code LocalPlayer.sendPosition}), and sends it after that tick's clicks and
+     * before this ({@code Minecraft.tick}): a click no rotation has followed by now was made with the mouse
+     * still, where the pointer already is.
+     */
+    private void tickEnded(ViewImpl v) {
+        synchronized (v) {
+            if (!v.clientPointer || !v.revealed || v.closed || v.awaitingTeleport) return;
+            if (v.clicksPlaced != v.clicksSeen) placeClicks(v, "the end of its tick (a still mouse)");
+        }
+    }
+
+    /**
+     * Server thread, each tick: clicks still waiting from an earlier tick go where the pointer is now (a
+     * client that never says its tick has ended, or a rotation lost on the way). Never before their next tick.
+     */
+    private void settleClicks(ViewImpl v, int now) {
+        synchronized (v) {
+            if (!v.waitingClicks.isEmpty() && now > v.waitingSince) placeClicks(v, "the next server tick");
+        }
+    }
+
+    /**
+     * Every click seen so far was made with the pointer at the cursor as it is now: remember that for
+     * the clicks still to be handled, and run the ones already waiting. Under the view's lock.
+     */
+    private void placeClicks(ViewImpl v, String after) {
+        v.clicksPlaced = v.clicksSeen;
+        v.clickX = v.cursorX;
+        v.clickY = v.cursorY;
+        if (v.waitingClicks.isEmpty()) return;
+        List<java.util.function.BiConsumer<Integer, Integer>> run = new ArrayList<>(v.waitingClicks);
+        v.waitingClicks.clear();
+        int px = (int) v.clickX, py = (int) v.clickY;
+        debug(run.size() + " click(s) placed after " + after + " at " + px + "," + py);
+        nms.serverThread().execute(() -> {
+            if (v.closed || views.get(v.player) != v) return;
+            for (java.util.function.BiConsumer<Integer, Integer> click : run) click.accept(px, py);
+        });
+    }
+
+    /**
      * Runs [click] with where the pointer was when it was made. For a client-placed pointer that is the
      * cursor from the rotation after the click on the wire, which the client sent the same tick (see
-     * {@link ViewImpl#clicksSeen}); if that has not arrived yet, [click] waits for it. Server thread.
+     * {@link ViewImpl#clicksSeen}), or, with the mouse still, the cursor as it was; if neither is known
+     * yet, [click] waits (see tickEnded and settleClicks). Server thread.
      */
     private void atClick(ViewImpl v, java.util.function.BiConsumer<Integer, Integer> click) {
         int x, y;
@@ -660,15 +832,21 @@ public final class Views implements Listener {
             } else if (v.clicksPlaced == v.clicksSeen) {
                 x = (int) v.clickX;
                 y = (int) v.clickY;
-                // Prototype measurement: where the cursor was before the click's own rotation (what using it would miss by).
-                plugin.getLogger().info("[pointer] click at " + x + "," + y + ", before its rotation " + (int) v.preClickX + "," + (int) v.preClickY);
+                // Where the cursor was before the click's own rotation: what using it would have missed by.
+                debug("click at " + x + "," + y + ", before its rotation " + (int) v.preClickX + "," + (int) v.preClickY);
             } else {
-                plugin.getLogger().info("[pointer] click waits for its rotation, before it " + (int) v.preClickX + "," + (int) v.preClickY);
+                debug("click waits for its rotation, before it " + (int) v.preClickX + "," + (int) v.preClickY);
+                if (v.waitingClicks.isEmpty()) v.waitingSince = Bukkit.getCurrentTick();
                 v.waitingClicks.add(click);
                 return;
             }
         }
         click.accept(x, y);
+    }
+
+    /** A {@code [pointer]} line in the log, with views.debug-pointer on. */
+    private void debug(String message) {
+        if (settings.debugPointer) plugin.getLogger().info("[pointer] " + message);
     }
 
     /** Sends the pointer to where the cursor is, now; the client glides it there over a tick. */
@@ -755,7 +933,7 @@ public final class Views implements Listener {
         pipeline.unwatch(player.getUniqueId());
         // The player first, and the content after: a content that throws must never leave them seated,
         // invisible and hidden, with the view already gone so that nothing could close it again.
-        if (player.isOnline()) {
+        if (player.isOnline() && v.vehicle != null) {
             nms.setCamera(player, player);
             v.vehicle.removePassenger(player);
         }
@@ -806,6 +984,7 @@ public final class Views implements Listener {
         player.getPersistentDataContainer().remove(seatKey);
         for (Player other : Bukkit.getOnlinePlayers()) other.showPlayer(plugin, player);
         pipeline.conceal(player, false);
+        release(player);
     }
 
     public void closeAll(CloseReason reason) {
@@ -853,6 +1032,8 @@ public final class Views implements Listener {
     @EventHandler
     public void onJoin(PlayerJoinEvent e) {
         Player player = e.getPlayer();
+        // Transient, so never saved with the player, but taken off whatever: removing them is harmless.
+        removeModifiers(player);
         String mode = player.getPersistentDataContainer().get(seatKey, PersistentDataType.STRING);
         if (mode != null) {
             GameMode gm;
@@ -985,6 +1166,7 @@ public final class Views implements Listener {
         }
     }
 
+    /** A server-placed pointer's player got off their armour stand some other way than sneaking (see onInput). */
     @EventHandler
     public void onDismount(EntityDismountEvent e) {
         if (!(e.getEntity() instanceof Player p)) return;
@@ -999,8 +1181,19 @@ public final class Views implements Listener {
         // Before the reveal they still stand on their own feet, and reveal() would undo a teleport by
         // seating them: so a real move closes a view still loading too. A nudge (a move correction) does
         // not matter either way, as getting up puts them back where they opened it.
-        Location to = e.getTo(), at = v.revealed ? v.vehicle.getLocation() : e.getFrom();
+        Location to = e.getTo(), at = v.revealed ? v.heldAt() : e.getFrom();
         if (to.getWorld() != at.getWorld() || to.distanceSquared(at) > 4) close(e.getPlayer(), CloseReason.INTERRUPTED);
+    }
+
+    /**
+     * Nothing the server pushes a held player with may move them (the client moves itself by any
+     * velocity it is sent): it is sent as nothing instead. Not cancelled, or the server would keep
+     * trying to send it and do so once they get up.
+     */
+    @EventHandler(ignoreCancelled = true)
+    public void onVelocity(PlayerVelocityEvent e) {
+        ViewImpl v = views.get(e.getPlayer().getUniqueId());
+        if (v != null && v.clientPointer && v.revealed) e.setVelocity(new Vector());
     }
 
     @EventHandler

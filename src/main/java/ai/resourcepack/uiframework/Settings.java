@@ -21,6 +21,8 @@ public final class Settings {
     public final double cursorSpeed;
     /** With the pack: the client draws the pointer itself every frame from where the player looks. */
     public final boolean clientPointer;
+    /** Log each click's resolved spot and each pointer correction ({@code [pointer]} lines), for testing. */
+    public final boolean debugPointer;
     public final int mapIdBase;
 
     private Settings(FileConfiguration c) {
@@ -36,6 +38,7 @@ public final class Settings {
         defaultFov = c.getInt("views.default-fov", 70);
         cursorSpeed = c.getDouble("views.cursor-speed", 8.0);
         clientPointer = c.getBoolean("views.client-pointer", true);
+        debugPointer = c.getBoolean("views.debug-pointer", false);
         mapIdBase = c.getInt("map-id-base", 2_000_000_000);
     }
 

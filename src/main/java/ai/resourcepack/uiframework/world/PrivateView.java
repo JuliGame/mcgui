@@ -78,6 +78,13 @@ final class PrivateView {
         }
     }
 
+    /** Stops [player] seeing [e] until the view closes, like what is in the way (see refresh). */
+    void hide(Player player, Entity e) {
+        if (plugin == null || e == player || !e.isVisibleByDefault() || !player.canSee(e)) return;
+        unseen.add(e);
+        player.hideEntity(plugin, e);
+    }
+
     /** Puts back everything this view hid, except what [stillHidden] says must stay hidden for another reason. */
     void close(Plugin plugin, Player player, Predicate<Entity> stillHidden) {
         for (Entity e : unseen) if (e.isValid() && !stillHidden.test(e)) player.showEntity(plugin, e);
