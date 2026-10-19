@@ -1,5 +1,6 @@
 package ai.resourcepack.ui.html.css;
 
+import ai.resourcepack.ui.html.RenderBudget;
 import ai.resourcepack.ui.html.style.Styler;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
@@ -56,7 +57,7 @@ class CssParserTest {
         CssParser.parse("@import url('wide.css') (min-width: 1000px); @import url('narrow.css') (max-width: 999px);", PAGE, sheets::get, author);
         for (int width : new int[]{500, 1200}) {
             Document doc = Jsoup.parse("<p>a</p>");
-            Styler styler = new Styler(new Stylesheet(), author, width, 576, Selector.State.NONE, PAGE);
+            Styler styler = new Styler(new Stylesheet(), author, width, 576, Selector.State.NONE, PAGE, RenderBudget.NONE);
             styler.run(doc.selectFirst("html"));
             assertEquals(0xFF008000, styler.styles.get(doc.selectFirst("p")).color, "at " + width + " px");
         }

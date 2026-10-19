@@ -1,5 +1,6 @@
 package ai.resourcepack.ui.html.paint;
 
+import ai.resourcepack.ui.html.RenderBudget;
 import ai.resourcepack.ui.html.css.Values;
 import ai.resourcepack.ui.html.style.Len;
 import ai.resourcepack.ui.html.style.Style;
@@ -25,6 +26,12 @@ final class Shadows {
 
     record Shadow(double x, double y, double blur, double spread, int color, boolean inset) {}
 
+    /**
+     * Blurs wider than this (CSS px) are this wide, as Firefox caps them: a shadow blurred further is a
+     * faint haze over a whole picture, and each one costs a blur and a blend that big, per text run.
+     */
+    static final double MAX_BLUR = 300;
+
     static List<Shadow> parse(String value, Style s) {
         List<Shadow> out = new ArrayList<>();
         if (value == null || value.isBlank() || value.trim().equalsIgnoreCase("none")) return out;
@@ -47,14 +54,14 @@ final class Shadows {
                 if (c != null) color = c;
             }
             if (lens.size() < 2) continue;
-            out.add(new Shadow(lens.get(0), lens.get(1), lens.size() > 2 ? Math.max(0, lens.get(2)) : 0, lens.size() > 3 ? lens.get(3) : 0,
+            out.add(new Shadow(lens.get(0), lens.get(1), lens.size() > 2 ? Math.min(MAX_BLUR, Math.max(0, lens.get(2))) : 0, lens.size() > 3 ? lens.get(3) : 0,
                     color == null ? s.color : color, inset));
         }
         return out;
     }
 
     /** An outer box shadow for a border box at (x, y), only outside the box itself; [surface] as for {@link #blurred}. */
-    static void outer(Graphics2D g, double x, double y, double w, double h, double[] radii, Shadow sh, double scale, java.awt.Rectangle surface) {
+    static void outer(Graphics2D g, double x, double y, double w, double h, double[] radii, Shadow sh, double scale, java.awt.Rectangle surface, RenderBudget budget) {
         if ((sh.color >>> 24) == 0) return;
         double[] r = Shapes.outset(radii, sh.spread);
         Shape shape = Shapes.rect(x + sh.x - sh.spread, y + sh.y - sh.spread, w + 2 * sh.spread, h + 2 * sh.spread, r);
@@ -63,12 +70,12 @@ final class Shadows {
         Area outside = new Area(new Rectangle2D.Double(-1e5, -1e5, 2e5, 2e5));
         outside.subtract(new Area(Shapes.rect(x, y, w, h, radii)));
         g.clip(outside);
-        blurred(g, shape, sh.color, sh.blur, scale, surface);
+        blurred(g, shape, sh.color, sh.blur, scale, surface, budget);
         g.setClip(old);
     }
 
     /** An inset shadow inside [padding]. */
-    static void inner(Graphics2D g, Shape padding, Shadow sh, double scale, java.awt.Rectangle surface) {
+    static void inner(Graphics2D g, Shape padding, Shadow sh, double scale, java.awt.Rectangle surface, RenderBudget budget) {
         if ((sh.color >>> 24) == 0) return;
         Rectangle2D b = padding.getBounds2D();
         Area ring = new Area(new Rectangle2D.Double(b.getX() - sh.blur * 3 - Math.abs(sh.x) - 10, b.getY() - sh.blur * 3 - Math.abs(sh.y) - 10,
@@ -77,7 +84,7 @@ final class Shadows {
         ring.subtract(new Area(hole));
         Shape old = g.getClip();
         g.clip(padding);
-        blurred(g, ring, sh.color, sh.blur, scale, surface);
+        blurred(g, ring, sh.color, sh.blur, scale, surface, budget);
         g.setClip(old);
     }
 
@@ -97,7 +104,7 @@ final class Shadows {
      * Fills [shape] with [color], blurred by [blur] CSS pixels (a Gaussian of sigma blur/2). [surface] is
      * the device bounds of what [g] draws on: only the part of the blur that can land there is worked out.
      */
-    static void blurred(Graphics2D g, Shape shape, int color, double blur, double scale, java.awt.Rectangle surface) {
+    static void blurred(Graphics2D g, Shape shape, int color, double blur, double scale, java.awt.Rectangle surface, RenderBudget budget) {
         if (blur <= 0.25) {
             g.setColor(new Color(color, true));
             g.fill(shape);
@@ -140,7 +147,7 @@ final class Shadows {
         ig.translate(-r.x, -r.y);
         ig.fill(devShape);
         ig.dispose();
-        Blur.blur(img, sigma / k);
+        Blur.blur(img, sigma / k, budget);
         AffineTransform saved = g.getTransform();
         java.awt.Composite oldComposite = g.getComposite();
         Object oldInterpolation = g.getRenderingHint(RenderingHints.KEY_INTERPOLATION);
@@ -159,9 +166,9 @@ final class Shadows {
         g.setTransform(saved);
     }
 
-    static void text(Graphics2D g, TextShaper shaper, String text, Font font, double x, double y, Shadow sh, double scale, java.awt.Rectangle surface) {
+    static void text(Graphics2D g, TextShaper shaper, String text, Font font, double x, double y, Shadow sh, double scale, java.awt.Rectangle surface, RenderBudget budget) {
         if ((sh.color >>> 24) == 0) return;
         Shape glyphs = shaper.outline(text, font, x, y);
-        blurred(g, glyphs, sh.color, sh.blur, scale, surface);
+        blurred(g, glyphs, sh.color, sh.blur, scale, surface, budget);
     }
 }

@@ -78,8 +78,14 @@ public final class HtmlRenderer {
     }
 
     /**
+     * How long a render may take before it is given up (ms), unless the caller says otherwise: a page
+     * heavy enough to take longer would otherwise hold a render thread for as long as it likes.
+     */
+    public static final long DEFAULT_TIMEOUT_MS = 2000;
+
+    /**
      * Renders [page] into a [width] × [height] pixel image, [scale] image pixels per CSS pixel,
-     * scrolled down by [scrollY] CSS pixels.
+     * scrolled down by [scrollY] CSS pixels, within {@link #DEFAULT_TIMEOUT_MS}.
      */
     public static Frame render(Page page, int width, int height, double scale, double scrollY, Selector.State state) {
         return render(page, page.document, width, height, scale, scrollY, state);
@@ -87,26 +93,30 @@ public final class HtmlRenderer {
 
     /**
      * Renders [document], a copy of [page]'s own (a player's, with their placeholders filled in),
-     * using the page's styles, fonts and images.
+     * using the page's styles, fonts and images, within {@link #DEFAULT_TIMEOUT_MS}.
      */
     public static Frame render(Page page, org.jsoup.nodes.Document document, int width, int height, double scale, double scrollY, Selector.State state) {
-        return render(page, document, width, height, scale, scrollY, state, null, null);
+        return render(page, document, width, height, scale, scrollY, state, null, null, DEFAULT_TIMEOUT_MS);
     }
 
     /**
      * Repaints only [clip] (CSS pixels of the viewport) of [base], the image of an earlier frame of the
      * same page at the same scroll: what a change of hover state needs. Everything is still styled
      * and laid out, so the frame's hit regions are whole; only the pixels outside the clip are skipped.
+     * [base] and [clip] are null for a whole new picture.
+     * Gives up with {@link RenderAbandoned} after [timeoutMs] (0 for never), with whatever part of
+     * [clip] it had got to already painted on [base].
      */
     public static Frame render(Page page, org.jsoup.nodes.Document document, int width, int height, double scale, double scrollY,
-                               Selector.State state, BufferedImage base, java.awt.geom.Rectangle2D clip) {
+                               Selector.State state, BufferedImage base, java.awt.geom.Rectangle2D clip, long timeoutMs) {
+        RenderBudget budget = RenderBudget.of(timeoutMs);
         double vw = width / scale, vh = height / scale;
         Element html = document.selectFirst("html");
         if (html == null) html = document;
-        Styler styler = new Styler(Page.UA, page.styles, vw, vh, state, page.uri);
+        Styler styler = new Styler(Page.UA, page.styles, vw, vh, state, page.uri, budget);
         styler.run(html);
         Box root = new BoxBuilder(styler, page, page.uri).build(html);
-        Layout layout = new Layout(page.shaper, vw, vh);
+        Layout layout = new Layout(page.shaper, vw, vh, budget);
         double pageHeight = layout.run(root);
         double scroll = Math.max(0, Math.min(scrollY, pageHeight - vh));
         // Premultiplied: Java2D blends onto it directly, where a plain ARGB surface costs a conversion of
@@ -115,12 +125,12 @@ public final class HtmlRenderer {
         List<Painter.Hit> hits;
         int bands = base == null && clip == null ? Math.min(MAX_BANDS, height / MIN_BAND_ROWS) : 1;
         if (bands > 1) {
-            hits = paintBands(page, root, img, bands, Painter.blurReach(styler.styles.values(), scale), scale, vw, vh, scroll);
+            hits = paintBands(page, root, img, bands, Painter.blurReach(styler.styles.values(), scale), scale, vw, vh, scroll, budget);
         } else {
             Graphics2D g = img.createGraphics();
             g.scale(scale, scale);
             if (clip != null) g.clip(clip);
-            Painter painter = new Painter(page.shaper, page, vw, vh, scroll);
+            Painter painter = new Painter(page.shaper, page, vw, vh, scroll, budget);
             painter.paint(g, root, img, scale);
             g.dispose();
             hits = painter.hits;
@@ -138,10 +148,12 @@ public final class HtmlRenderer {
      * picture, then copies each band's rows in. Styling and layout are done once and only read here.
      * Each band also paints [reach] rows past its edges, so a backdrop-filter near an edge blurs what a
      * whole picture would have under it rather than another band's half-painted rows. Returns the hit
-     * regions (the first band's painter finds them all; the others make none).
+     * regions (the first band's painter finds them all; the others make none). Every band checks
+     * [budget]; the first to fail cancels it, so the others stop at their next check rather than
+     * painting on for a picture nobody will see.
      */
     private static List<Painter.Hit> paintBands(Page page, Box root, BufferedImage img, int bands, int reach, double scale,
-                                                double vw, double vh, double scroll) {
+                                                double vw, double vh, double scroll, RenderBudget budget) {
         int width = img.getWidth(), height = img.getHeight();
         int[] out = ((DataBufferInt) img.getRaster().getDataBuffer()).getData();
         List<ForkJoinTask<List<Painter.Hit>>> tasks = new ArrayList<>(bands);
@@ -157,18 +169,27 @@ public final class HtmlRenderer {
                 g.scale(scale, scale);
                 // No clip: the band's own edges stop the drawing, so the painter sees exactly what a whole
                 // picture's would (a clip changes how Java2D intersects overflow clips, by a pixel).
-                Painter painter = new Painter(page.shaper, page, vw, vh, scroll);
+                Painter painter = new Painter(page.shaper, page, vw, vh, scroll, budget);
                 if (!first) painter.withoutHits();
-                painter.paint(g, root, band, scale);
-                g.dispose();
+                try {
+                    painter.paint(g, root, band, scale);
+                } finally {
+                    g.dispose();
+                }
                 System.arraycopy(((DataBufferInt) band.getRaster().getDataBuffer()).getData(), (y0 - top) * width, out, y0 * width, (y1 - y0) * width);
                 return painter.hits;
             }));
         }
         List<Painter.Hit> hits = null;
-        for (ForkJoinTask<List<Painter.Hit>> t : tasks) {
-            List<Painter.Hit> h = t.join();
-            if (hits == null) hits = h;
+        try {
+            for (ForkJoinTask<List<Painter.Hit>> t : tasks) {
+                List<Painter.Hit> h = t.join();
+                if (hits == null) hits = h;
+            }
+        } catch (RuntimeException | Error e) {
+            budget.cancel();
+            for (ForkJoinTask<List<Painter.Hit>> t : tasks) t.cancel(false); // those not started yet never start
+            throw e;
         }
         return hits;
     }

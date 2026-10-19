@@ -1,5 +1,7 @@
 package ai.resourcepack.ui.html.paint;
 
+import ai.resourcepack.ui.html.RenderBudget;
+
 import java.awt.image.BufferedImage;
 import java.awt.image.DataBufferInt;
 
@@ -13,7 +15,7 @@ final class Blur {
      */
     private static final double MAX_SIGMA = 100_000;
 
-    static void blur(BufferedImage img, double sigma) {
+    static void blur(BufferedImage img, double sigma, RenderBudget budget) {
         if (!(sigma >= 0.5)) return;
         sigma = Math.min(sigma, MAX_SIGMA);
         int w = img.getWidth(), h = img.getHeight();
@@ -22,8 +24,8 @@ final class Blur {
         int[] sizes = boxes(sigma);
         for (int s : sizes) {
             int r = (s - 1) / 2;
-            pass(px, tmp, w, h, r);
-            pass(tmp, px, h, w, r);
+            pass(px, tmp, w, h, r, budget);
+            pass(tmp, px, h, w, r, budget);
         }
     }
 
@@ -37,10 +39,10 @@ final class Blur {
     }
 
     /** [src] blurred by [sigma]: [src] itself (blurred in place) or a smaller blurred copy to draw at [src]'s size. */
-    static BufferedImage blurredCopy(BufferedImage src, double sigma) {
+    static BufferedImage blurredCopy(BufferedImage src, double sigma, RenderBudget budget) {
         double k = shrink(sigma);
         if (k <= 1) {
-            blur(src, sigma);
+            blur(src, sigma, budget);
             return src;
         }
         int w = Math.max(1, (int) Math.ceil(src.getWidth() / k)), h = Math.max(1, (int) Math.ceil(src.getHeight() / k));
@@ -51,7 +53,7 @@ final class Blur {
         g.setComposite(java.awt.AlphaComposite.Src);
         g.drawImage(src, 0, 0, w, h, null);
         g.dispose();
-        blur(small, sigma / k);
+        blur(small, sigma / k, budget);
         return small;
     }
 
@@ -69,12 +71,13 @@ final class Blur {
     }
 
     /** One horizontal box blur of radius [r] over every channel, writing transposed (so two calls do both axes). */
-    private static void pass(int[] src, int[] dst, int w, int h, int r) {
+    private static void pass(int[] src, int[] dst, int w, int h, int r, RenderBudget budget) {
         int d = r + r + 1;
         // Each output is round(sum / d), worked out as (2 sum + d) / 2d with a multiply instead of four
         // double divisions: exact, since sums are at most 255 d and an odd d never leaves a half to round.
         long m = ((1L << 40) + 2L * d - 1) / (2L * d);
         for (int y = 0; y < h; y++) {
+            budget.check();
             int row = y * w;
             // The window round x = 0: r copies of the first pixel (the edge repeats), the row up to r,
             // and copies of the last pixel for whatever of the window lies past the row's end.

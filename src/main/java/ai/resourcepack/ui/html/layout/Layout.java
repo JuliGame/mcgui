@@ -1,5 +1,6 @@
 package ai.resourcepack.ui.html.layout;
 
+import ai.resourcepack.ui.html.RenderBudget;
 import ai.resourcepack.ui.html.style.Len;
 import ai.resourcepack.ui.html.style.Style;
 import ai.resourcepack.ui.html.text.TextShaper;
@@ -21,6 +22,7 @@ import java.util.Map;
 public final class Layout {
     final TextShaper shaper;
     final double vw, vh;
+    final RenderBudget budget;
     final InlineLayout inline;
     final FlexLayout flex;
     final GridLayout grid;
@@ -30,10 +32,11 @@ public final class Layout {
     private final Map<Box, double[]> intrinsic = new IdentityHashMap<>();
     Box root;
 
-    public Layout(TextShaper shaper, double viewportWidth, double viewportHeight) {
+    public Layout(TextShaper shaper, double viewportWidth, double viewportHeight, RenderBudget budget) {
         this.shaper = shaper;
         this.vw = viewportWidth;
         this.vh = viewportHeight;
+        this.budget = budget;
         this.inline = new InlineLayout(this);
         this.flex = new FlexLayout(this);
         this.grid = new GridLayout(this);
@@ -132,6 +135,7 @@ public final class Layout {
         // the same inputs give the same result, so only changed ones are worked out again.
         double[] in = {cbW, cbH, forcedW, forcedH};
         if (box.laidOutWith != null && java.util.Arrays.equals(box.laidOutWith, in)) return;
+        budget.check();
         box.laidOutWith = in;
         if (box.lines != null) box.lines = null;
         clearFragments(box);

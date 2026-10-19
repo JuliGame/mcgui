@@ -1,5 +1,6 @@
 package ai.resourcepack.ui.html.paint;
 
+import ai.resourcepack.ui.html.RenderBudget;
 import ai.resourcepack.ui.html.css.Values;
 import ai.resourcepack.ui.html.layout.Box;
 import ai.resourcepack.ui.html.res.Resources;
@@ -42,6 +43,8 @@ public final class Painter {
     private final Resources res;
     private final double viewportW, viewportH;
     private final double scrollY;
+    /** Checked per stacking context, box, line and blur row: a picture that takes too long is given up. */
+    private final RenderBudget budget;
     /** The surface being painted on, for backdrop-filter. */
     private BufferedImage surface;
     private double deviceScale = 1;
@@ -61,12 +64,13 @@ public final class Painter {
     /** Page-space transform in force (for hit regions). */
     private AffineTransform pageTx = new AffineTransform();
 
-    public Painter(TextShaper shaper, Resources res, double viewportW, double viewportH, double scrollY) {
+    public Painter(TextShaper shaper, Resources res, double viewportW, double viewportH, double scrollY, RenderBudget budget) {
         this.shaper = shaper;
         this.res = res;
         this.viewportW = viewportW;
         this.viewportH = viewportH;
         this.scrollY = scrollY;
+        this.budget = budget;
     }
 
     /**
@@ -111,7 +115,7 @@ public final class Painter {
             }
             if (!canvasSource.style.backgroundImages.isEmpty()) {
                 Rectangle2D area = canvasSource == root ? page : new Rectangle2D.Double(0, 0, viewportW, Math.max(viewportH, root.overflowBottom));
-                Backgrounds.paint(g, canvasSource.style, res, area, page, surfaceBounds());
+                Backgrounds.paint(g, canvasSource.style, res, area, page, surfaceBounds(), budget);
             }
             g.setTransform(saved);
         }
@@ -133,6 +137,7 @@ public final class Painter {
 
     /** Paints a stacking context (or a positioned box treated as one) whose border box is at (x, y). */
     private void context(Graphics2D g, Box box, double x, double y) {
+        budget.check();
         Style s = box.style;
         if (box.fixed) y += scrollY;
         AffineTransform savedTx = g.getTransform();
@@ -237,7 +242,7 @@ public final class Painter {
         contextBody(lg, box, x, y);
         surface = savedSurface;
         lg.dispose();
-        Filters.apply(img, box.style.filter, deviceScale, box.style);
+        Filters.apply(img, box.style.filter, deviceScale, box.style, budget);
         AffineTransform saved = g.getTransform();
         g.setTransform(new AffineTransform());
         Composite old = g.getComposite();
@@ -416,6 +421,7 @@ public final class Painter {
         // Inline boxes' backgrounds and borders under the text.
         inlineDecorations(g, block, x, y);
         for (Box.Line line : block.lines) {
+            budget.check();
             for (Box.Item it : line.items) {
                 if (it.text != null) {
                     text(g, it, x, y);
@@ -451,7 +457,7 @@ public final class Painter {
             g.setColor(new Color(s.backgroundColor, true));
             g.fill(shape);
         }
-        if (!s.backgroundImages.isEmpty()) Backgrounds.paint(g, s, res, r, shape, surfaceBounds());
+        if (!s.backgroundImages.isEmpty()) Backgrounds.paint(g, s, res, r, shape, surfaceBounds(), budget);
         double left = f.first ? box.b[3] : 0, right = f.last ? box.b[1] : 0;
         drawBorders(g, s, r, radii, new double[]{box.b[0], right, box.b[2], left});
         hit(shape, s, box.element != null ? box.element : box.owner);
@@ -481,7 +487,7 @@ public final class Painter {
         // text-shadow, first one on top.
         for (int i = shadows.size() - 1; i >= 0; i--) {
             Shadows.Shadow sh = shadows.get(i);
-            Shadows.text(g, shaper, text, font, tx + sh.x(), ty + sh.y(), sh, deviceScale, surfaceBounds());
+            Shadows.text(g, shaper, text, font, tx + sh.x(), ty + sh.y(), sh, deviceScale, surfaceBounds(), budget);
         }
         Integer fill = s.textFillColor;
         boolean clipText = s.backgroundClips.contains("text") && !s.backgroundImages.isEmpty();
@@ -530,7 +536,7 @@ public final class Painter {
             mg.setColor(new Color(s.backgroundColor, true));
             mg.fill(area);
         }
-        Backgrounds.paint(mg, s, res, area, area, new java.awt.Rectangle(r.width, r.height));
+        Backgrounds.paint(mg, s, res, area, area, new java.awt.Rectangle(r.width, r.height), budget);
         mg.dispose();
         AffineTransform saved = g.getTransform();
         g.setTransform(new AffineTransform());
@@ -634,6 +640,7 @@ public final class Painter {
     }
 
     private void background(Graphics2D g, Box b, double x, double y) {
+        budget.check();
         Style s = b.style;
         double[] radii = Shapes.radii(b);
         Shape border = Shapes.rect(x, y, b.w, b.h, radii);
@@ -641,9 +648,9 @@ public final class Painter {
             List<Shadows.Shadow> shadows = Shadows.parse(s.boxShadow, s);
             for (int i = shadows.size() - 1; i >= 0; i--) {
                 Shadows.Shadow sh = shadows.get(i);
-                if (!sh.inset()) Shadows.outer(g, x, y, b.w, b.h, radii, sh, deviceScale, surfaceBounds());
+                if (!sh.inset()) Shadows.outer(g, x, y, b.w, b.h, radii, sh, deviceScale, surfaceBounds(), budget);
             }
-            if (!s.backdropFilter.equals("none") && surface != null) Filters.backdrop(g, surface, border, s, deviceScale);
+            if (!s.backdropFilter.equals("none") && surface != null) Filters.backdrop(g, surface, border, s, deviceScale, budget);
             Shape clipBox = switch (Backgrounds.pick(s.backgroundClips, 0, "border-box")) {
                 case "padding-box" -> padding(b, x, y);
                 case "content-box" -> Shapes.rect(x + b.contentX(), y + b.contentY(), b.contentW(), b.contentH(),
@@ -657,10 +664,10 @@ public final class Painter {
             }
             if (!textClip && !s.backgroundImages.isEmpty()) {
                 Rectangle2D area = new Rectangle2D.Double(x + b.b[3], y + b.b[0], b.w - b.b[1] - b.b[3], b.h - b.b[0] - b.b[2]);
-                Backgrounds.paint(g, s, res, area, clipBox, surfaceBounds());
+                Backgrounds.paint(g, s, res, area, clipBox, surfaceBounds(), budget);
             }
             if (b.inner == Box.Inner.REPLACED) replaced(g, b, x, y, radii);
-            for (Shadows.Shadow sh : shadows) if (sh.inset()) Shadows.inner(g, padding(b, x, y), sh, deviceScale, surfaceBounds());
+            for (Shadows.Shadow sh : shadows) if (sh.inset()) Shadows.inner(g, padding(b, x, y), sh, deviceScale, surfaceBounds(), budget);
             drawBorders(g, s, new Rectangle2D.Double(x, y, b.w, b.h), radii, b.b);
         }
         hit(border, s, b.element != null ? b.element : b.owner);

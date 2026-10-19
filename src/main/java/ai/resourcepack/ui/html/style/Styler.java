@@ -1,5 +1,6 @@
 package ai.resourcepack.ui.html.style;
 
+import ai.resourcepack.ui.html.RenderBudget;
 import ai.resourcepack.ui.html.css.CssParser;
 import ai.resourcepack.ui.html.css.Declaration;
 import ai.resourcepack.ui.html.css.Selector;
@@ -30,6 +31,7 @@ public final class Styler {
     private final double vw, vh;
     private final Selector.State state;
     private final URI base;
+    private final RenderBudget budget;
 
     /** Styles of elements and of their ::before / ::after / ::marker, by element. */
     public final Map<Element, Style> styles = new IdentityHashMap<>();
@@ -41,13 +43,14 @@ public final class Styler {
     private final Map<Element, Map<String, String>> customs = new IdentityHashMap<>();
     private double rootFontSize = 16;
 
-    public Styler(Stylesheet ua, Stylesheet author, double vw, double vh, Selector.State state, URI base) {
+    public Styler(Stylesheet ua, Stylesheet author, double vw, double vh, Selector.State state, URI base, RenderBudget budget) {
         this.ua = ua;
         this.author = author;
         this.vw = vw;
         this.vh = vh;
         this.state = state;
         this.base = base;
+        this.budget = budget;
     }
 
     private record Weighted(int tier, int specificity, int order, Declaration d) {}
@@ -58,6 +61,7 @@ public final class Styler {
     }
 
     private void walk(Element e, Element parent) {
+        budget.check();
         Style parentStyle = parent == null ? null : styles.get(parent);
         Map<String, String> parentCustoms = parent == null ? Map.of() : customs.get(parent);
         List<Weighted> list = collect(e, null);

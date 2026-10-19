@@ -41,7 +41,7 @@ public final class RenderBench {
             for (int i = -10; i < runs; i++) {
                 Canvas canvas = new Canvas(palette, W / 128, H / 128);
                 long t0 = System.nanoTime();
-                HtmlRenderer.Frame f = HtmlRenderer.render(page, page.document, W, H, SCALE, 0, Selector.State.NONE);
+                HtmlRenderer.Frame f = HtmlRenderer.render(page, page.document, W, H, SCALE, 0, Selector.State.NONE, null, null, 0);
                 long t1 = System.nanoTime();
                 canvas.draw(f.image(), 0, 0);
                 long t2 = System.nanoTime();
@@ -49,7 +49,7 @@ public final class RenderBench {
                 Rectangle2D dirty = target == null ? null : dirty(f, target);
                 if (dirty != null) {
                     t3 = System.nanoTime();
-                    HtmlRenderer.Frame h = HtmlRenderer.render(page, page.document, W, H, SCALE, 0, hovered, f.image(), dirty);
+                    HtmlRenderer.Frame h = HtmlRenderer.render(page, page.document, W, H, SCALE, 0, hovered, f.image(), dirty, 0);
                     t4 = System.nanoTime();
                     int x0 = (int) Math.floor(dirty.getX() * SCALE), y0 = (int) Math.floor(dirty.getY() * SCALE);
                     int x1 = Math.min(W, (int) Math.ceil(dirty.getMaxX() * SCALE)), y1 = Math.min(H, (int) Math.ceil(dirty.getMaxY() * SCALE));

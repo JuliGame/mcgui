@@ -1,5 +1,6 @@
 package ai.resourcepack.ui.html.paint;
 
+import ai.resourcepack.ui.html.RenderBudget;
 import ai.resourcepack.ui.html.css.Values;
 import ai.resourcepack.ui.html.res.Picture;
 import ai.resourcepack.ui.html.res.Resources;
@@ -32,18 +33,19 @@ final class Backgrounds {
      * Paints every background layer of [s] into [area] (the positioning box), clipped to [clip].
      * [surface] is the device bounds of what [g] draws on: tiles are laid only where they can be seen.
      */
-    static void paint(Graphics2D g, Style s, Resources res, Rectangle2D area, Shape clip, java.awt.Rectangle surface) {
+    static void paint(Graphics2D g, Style s, Resources res, Rectangle2D area, Shape clip, java.awt.Rectangle surface, RenderBudget budget) {
         List<String> images = s.backgroundImages;
         Shape old = g.getClip();
         g.clip(clip);
         // The first layer is on top: paint from the last.
         for (int i = images.size() - 1; i >= 0; i--) {
+            budget.check();
             String layer = images.get(i).trim();
             if (layer.equalsIgnoreCase("none")) continue;
             String size = pick(s.backgroundSizes, i, "auto");
             String pos = pick(s.backgroundPositions, i, "0% 0%");
             String repeat = pick(s.backgroundRepeats, i, "repeat");
-            layer(g, layer, s, res, area, size, pos, repeat, surface);
+            layer(g, layer, s, res, area, size, pos, repeat, surface, budget);
         }
         g.setClip(old);
     }
@@ -54,7 +56,7 @@ final class Backgrounds {
     }
 
     private static void layer(Graphics2D g, String layer, Style s, Resources res, Rectangle2D area, String size, String pos, String repeat,
-                              java.awt.Rectangle surface) {
+                              java.awt.Rectangle surface, RenderBudget budget) {
         String lower = layer.toLowerCase(Locale.ROOT);
         Picture pic = null;
         double natW, natH;
@@ -109,6 +111,7 @@ final class Backgrounds {
             for (double x = x0; rx ? x < visible.getMaxX() : x == x0; x += tile[0]) {
                 // Only against absurdly small tiles: a 2 px pattern over a whole 2x view is about 150 000.
                 if (++tiles > MAX_TILES) break tiling;
+                if ((tiles & 1023) == 0) budget.check();
                 if (gradient) {
                     g.translate(x - x0, y - y0);
                     g.fill(fill);

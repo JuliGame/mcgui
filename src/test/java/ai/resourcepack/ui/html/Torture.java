@@ -32,12 +32,15 @@ import java.util.stream.Stream;
  * <p>Sources: a folder (every file in it), {@code cases} (the generated pathological pages, written to
  * {@code build/torture/cases}), or {@code fuzz:<count>:<seed>} (generated random pages, see {@link HtmlFuzz}).
  * Options: {@code -Dtimeout=<s>} (30), {@code -Dheap=<size>} (2g), {@code -Donly=<substring>},
- * {@code -Dout=<tsv>}. Run with {@code ./gradlew torture -Psrc=cases}.
+ * {@code -Dout=<tsv>}, {@code -Dbudget=<ms>} (each render's own deadline, as the plugin's render-timeout;
+ * {@link HtmlRenderer#DEFAULT_TIMEOUT_MS} unless given, 0 for none). A render that gives up is ABANDONED,
+ * its column the time it took to, with how long the band painters took to stop after it. Run with {@code ./gradlew torture -Psrc=cases}.
  */
 public final class Torture {
     private static final int W = 2048, H = 1152;
     private static final double SCALE = 2;
     static final Path BUILD = Path.of("build/torture");
+    static final long BUDGET_MS = Long.getLong("budget", HtmlRenderer.DEFAULT_TIMEOUT_MS);
 
     public static void main(String[] args) throws Exception {
         int timeout = Integer.getInteger("timeout", 30);
@@ -76,7 +79,7 @@ public final class Torture {
     private static int runChild(Path list, int from, int timeout, String heap, List<String> items, List<String[]> results, PrintStream tsv)
             throws Exception {
         String java = Path.of(System.getProperty("java.home"), "bin", "java").toString();
-        Process p = new ProcessBuilder(java, "-Xmx" + heap, "-Djava.awt.headless=true", "-Dtimeout=" + timeout,
+        Process p = new ProcessBuilder(java, "-Xmx" + heap, "-Djava.awt.headless=true", "-Dtimeout=" + timeout, "-Dbudget=" + BUDGET_MS,
                 "-cp", System.getProperty("java.class.path"), Child.class.getName(), list.toString(), Integer.toString(from))
                 .redirectError(ProcessBuilder.Redirect.DISCARD).start();
         BlockingQueue<String> lines = new LinkedBlockingQueue<>();
@@ -195,8 +198,10 @@ public final class Torture {
                     // A band painter's exception comes back from join() as a copy, with the original as its cause.
                     Throwable root = run.error;
                     while (root.getCause() != null && root.getCause() != root) root = root.getCause();
+                    if (root instanceof RenderAbandoned) outcome = "ABANDONED";
                     String msg = (root.getClass().getSimpleName() + ": " + root.getMessage()).replaceAll("\\s+", " ");
                     detail = msg.substring(0, Math.min(160, msg.length())) + " in " + run.stage + " @ " + frames(root.getStackTrace());
+                    if (root instanceof RenderAbandoned) detail = "in " + run.stage + ", painters idle " + idleAfter() + " ms later @ " + frames(root.getStackTrace());
                 } else {
                     outcome = "ok";
                     detail = run.problems;
@@ -208,6 +213,16 @@ public final class Torture {
                 if (outcome.equals("OOM")) System.exit(4);
             }
             System.exit(0);
+        }
+
+        /** How long (ms) until no band painter is still in the renderer's code, up to 10 s ("10000+"). */
+        private static String idleAfter() throws InterruptedException {
+            long t0 = System.nanoTime();
+            while (System.nanoTime() - t0 < 10_000_000_000L) {
+                if (painters().isEmpty()) return Long.toString((System.nanoTime() - t0) / 1_000_000);
+                Thread.sleep(5);
+            }
+            return "10000+";
         }
 
         /** Where the band painters are, when a render is stuck waiting for them. */
@@ -243,7 +258,7 @@ public final class Torture {
         final String item;
         final Page.Loader loader;
         volatile String stage = "read";
-        volatile long bytes = -1, loadNs = -1, fullNs = -1, scrollNs = -1;
+        volatile long bytes = -1, loadNs = -1, fullNs = -1, scrollNs = -1, stageStart;
         volatile double height = -1;
         volatile Throwable error;
         volatile String problems = "";
@@ -274,15 +289,22 @@ public final class Torture {
                 loadNs = t1 - t0;
                 problems = page.problems.size() + " problems";
                 stage = "full";
-                HtmlRenderer.Frame f = HtmlRenderer.render(page, W, H, SCALE, 0, Selector.State.NONE);
+                stageStart = t1;
+                HtmlRenderer.Frame f = HtmlRenderer.render(page, page.document, W, H, SCALE, 0, Selector.State.NONE, null, null, BUDGET_MS);
                 long t2 = System.nanoTime();
                 fullNs = t2 - t1;
                 height = f.pageHeight();
                 stage = "scroll";
-                HtmlRenderer.render(page, W, H, SCALE, f.maxScroll() / 2, Selector.State.NONE);
+                stageStart = t2;
+                HtmlRenderer.render(page, page.document, W, H, SCALE, f.maxScroll() / 2, Selector.State.NONE, null, null, BUDGET_MS);
                 scrollNs = System.nanoTime() - t2;
                 stage = "done";
             } catch (Throwable e) {
+                // How long the render took to give up.
+                if (e instanceof RenderAbandoned) {
+                    if (stage.equals("full")) fullNs = System.nanoTime() - stageStart;
+                    else if (stage.equals("scroll")) scrollNs = System.nanoTime() - stageStart;
+                }
                 error = e;
             }
         }

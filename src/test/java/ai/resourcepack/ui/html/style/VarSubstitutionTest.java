@@ -1,5 +1,6 @@
 package ai.resourcepack.ui.html.style;
 
+import ai.resourcepack.ui.html.RenderBudget;
 import ai.resourcepack.ui.html.css.CssParser;
 import ai.resourcepack.ui.html.css.Selector;
 import ai.resourcepack.ui.html.css.Stylesheet;
@@ -17,7 +18,7 @@ class VarSubstitutionTest {
         Stylesheet ua = new Stylesheet(), author = new Stylesheet();
         CssParser.parse(Styler.UA_CSS, null, u -> null, ua);
         CssParser.parse(css, null, u -> null, author);
-        Styler styler = new Styler(ua, author, 1024, 576, Selector.State.NONE, null);
+        Styler styler = new Styler(ua, author, 1024, 576, Selector.State.NONE, null, RenderBudget.NONE);
         assertTimeoutPreemptively(Duration.ofSeconds(5), () -> styler.run(doc.selectFirst("html")));
         return styler;
     }

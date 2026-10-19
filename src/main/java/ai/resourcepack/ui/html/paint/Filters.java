@@ -1,5 +1,6 @@
 package ai.resourcepack.ui.html.paint;
 
+import ai.resourcepack.ui.html.RenderBudget;
 import ai.resourcepack.ui.html.css.Values;
 import ai.resourcepack.ui.html.style.Len;
 import ai.resourcepack.ui.html.style.Style;
@@ -8,22 +9,36 @@ import java.awt.Graphics2D;
 import java.awt.Shape;
 import java.awt.geom.AffineTransform;
 import java.awt.image.BufferedImage;
+import java.util.List;
 import java.util.Locale;
 
 /** filter (on a layer) and backdrop-filter (on what is already painted behind a box). */
 final class Filters {
     private Filters() {}
 
-    static void apply(BufferedImage img, String filter, double scale, Style s) {
+    /**
+     * Functions past this many in one filter or backdrop-filter are left out. Each is a pass over the
+     * whole layer, and a page asking for a thousand of them would otherwise hold a render for minutes.
+     */
+    static final int MAX_FUNCTIONS = 16;
+
+    /** The functions of [filter], the first {@link #MAX_FUNCTIONS} of them. */
+    static List<String> functions(String filter) {
+        List<String> all = Values.splitSpaces(filter);
+        return all.size() > MAX_FUNCTIONS ? all.subList(0, MAX_FUNCTIONS) : all;
+    }
+
+    static void apply(BufferedImage img, String filter, double scale, Style s, RenderBudget budget) {
         if (filter == null || filter.equals("none")) return;
-        for (String fn : Values.splitSpaces(filter)) {
+        for (String fn : functions(filter)) {
+            budget.check();
             int open = fn.indexOf('(');
             if (open < 0 || !fn.endsWith(")")) continue;
             String name = fn.substring(0, open).toLowerCase(Locale.ROOT);
             String arg = fn.substring(open + 1, fn.length() - 1).trim();
             if (name.equals("blur")) {
                 Len l = Len.parse(arg.isEmpty() ? "0" : arg, s.context);
-                if (l != null) Blur.blur(img, l.of(0) * scale);
+                if (l != null) Blur.blur(img, l.of(0) * scale, budget);
                 continue;
             }
             if (name.equals("drop-shadow")) continue;
@@ -36,7 +51,7 @@ final class Filters {
     static double blurRadius(String filter, Style s) {
         if (filter == null || filter.equals("none")) return 0;
         double sum = 0;
-        for (String fn : Values.splitSpaces(filter)) {
+        for (String fn : functions(filter)) {
             if (!fn.toLowerCase(Locale.ROOT).startsWith("blur(") || !fn.endsWith(")")) continue;
             String arg = fn.substring(5, fn.length() - 1).trim();
             Len l = Len.parse(arg.isEmpty() ? "0" : arg, s.context);
@@ -124,7 +139,7 @@ final class Filters {
     /** The blur radius (CSS px) of [s]'s backdrop-filter, 0 for none. */
     static double backdropBlur(Style s) {
         double blur = 0;
-        for (String fn : Values.splitSpaces(s.backdropFilter)) {
+        for (String fn : functions(s.backdropFilter)) {
             if (fn.toLowerCase(Locale.ROOT).startsWith("blur(")) {
                 Len l = Len.parse(fn.substring(5, fn.length() - 1), s.context);
                 if (l != null) blur = l.of(0);
@@ -139,7 +154,7 @@ final class Filters {
     }
 
     /** backdrop-filter: blur (and tint) what is already painted under [shape], then put it back inside the shape. */
-    static void backdrop(Graphics2D g, BufferedImage surface, Shape shape, Style s, double scale) {
+    static void backdrop(Graphics2D g, BufferedImage surface, Shape shape, Style s, double scale, RenderBudget budget) {
         String filter = s.backdropFilter;
         AffineTransform dev = g.getTransform();
         java.awt.Rectangle r = dev.createTransformedShape(shape).getBounds().intersection(new java.awt.Rectangle(0, 0, surface.getWidth(), surface.getHeight()));
@@ -164,8 +179,9 @@ final class Filters {
         cg.drawImage(surface.getSubimage(grab.x, grab.y, grab.width, grab.height), 0, 0, null);
         cg.dispose();
         // A backdrop is opaque where something was drawn; blur it like a photo (small, for a wide blur).
-        copy = Blur.blurredCopy(copy, blur / 2 * scale);
-        for (String fn : Values.splitSpaces(filter)) {
+        copy = Blur.blurredCopy(copy, blur / 2 * scale, budget);
+        for (String fn : functions(filter)) {
+            budget.check();
             String l = fn.toLowerCase(Locale.ROOT);
             int open = l.indexOf('(');
             if (open < 0 || l.startsWith("blur")) continue;

@@ -1,6 +1,7 @@
 package ai.resourcepack.ui;
 
 import ai.resourcepack.uiframework.api.UIFramework;
+import ai.resourcepack.ui.html.HtmlRenderer;
 import ai.resourcepack.ui.html.Page;
 import org.bukkit.Bukkit;
 import org.bukkit.configuration.file.FileConfiguration;
@@ -158,6 +159,11 @@ public final class UIEnginePlugin extends JavaPlugin {
 
     boolean debug() {
         return cfg.getBoolean("debug", false);
+    }
+
+    /** How long one picture may take to draw (ms) before it is given up and reported like any page that cannot be drawn; 0 for no limit. */
+    long renderTimeout() {
+        return Math.max(0, Math.round(cfg.getDouble("render-timeout", HtmlRenderer.DEFAULT_TIMEOUT_MS / 1000.0) * 1000));
     }
 
     boolean clickSound() {

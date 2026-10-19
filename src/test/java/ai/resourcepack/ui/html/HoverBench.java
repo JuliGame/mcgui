@@ -18,7 +18,7 @@ public final class HoverBench {
         double scale = 2;
         for (int round = 0; round < 3; round++) {
             long t0 = System.nanoTime();
-            HtmlRenderer.Frame full = HtmlRenderer.render(page, page.document, w, h, scale, 0, Selector.State.NONE);
+            HtmlRenderer.Frame full = HtmlRenderer.render(page, page.document, w, h, scale, 0, Selector.State.NONE, null, null, 0);
             long t1 = System.nanoTime();
             Element target = page.document.selectFirst(selector);
             Rectangle2D area = null;
@@ -31,10 +31,10 @@ public final class HoverBench {
             }
             Rectangle2D dirty = new Rectangle2D.Double(area.getX() - 48, area.getY() - 48, area.getWidth() + 96, area.getHeight() + 96);
             long t2 = System.nanoTime();
-            HtmlRenderer.render(page, page.document, w, h, scale, 0, HtmlRenderer.state(target, null), full.image(), dirty);
+            HtmlRenderer.render(page, page.document, w, h, scale, 0, HtmlRenderer.state(target, null), full.image(), dirty, 0);
             long t3 = System.nanoTime();
             long t4 = System.nanoTime();
-            HtmlRenderer.render(page, page.document, w, h, scale, 0, HtmlRenderer.state(target, null), full.image(), new Rectangle2D.Double(0, 0, 1, 1));
+            HtmlRenderer.render(page, page.document, w, h, scale, 0, HtmlRenderer.state(target, null), full.image(), new Rectangle2D.Double(0, 0, 1, 1), 0);
             long t5 = System.nanoTime();
             System.out.printf("full %d ms, hover repaint %d ms (%.0f x %.0f css px), style+layout+walk only %d ms%n", (t1 - t0) / 1_000_000,
                     (t3 - t2) / 1_000_000, dirty.getWidth(), dirty.getHeight(), (t5 - t4) / 1_000_000);

@@ -304,6 +304,7 @@ public final class Session {
         String fragment = pendingFragment;
         pendingFragment = null;
         double scale = scale();
+        long timeout = plugin.renderTimeout();
         renderers.execute(() -> {
             try {
                 long t0 = System.nanoTime();
@@ -323,7 +324,7 @@ public final class Session {
                     // A page where hovering one element restyles its siblings ('+', '~') is drawn whole.
                     changed = p.siblingStates() ? null : dirtyRegion(before, moved);
                     if (changed != null && small(changed, before)) {
-                        f = HtmlRenderer.render(p, d, canvas.width(), canvas.height(), scale, s, state, before.image(), changed);
+                        f = HtmlRenderer.render(p, d, canvas.width(), canvas.height(), scale, s, state, before.image(), changed, timeout);
                         // The new state may reach further than the old one did (a shadow only hovering adds): then
                         // paint both. If it cannot be told, or it is too much, draw it all.
                         Rectangle2D after = dirtyRegion(f, moved);
@@ -331,19 +332,19 @@ public final class Session {
                             f = null;
                         } else if (!changed.contains(after)) {
                             changed = changed.createUnion(after);
-                            f = small(changed, before) ? HtmlRenderer.render(p, d, canvas.width(), canvas.height(), scale, s, state, before.image(), changed) : null;
+                            f = small(changed, before) ? HtmlRenderer.render(p, d, canvas.width(), canvas.height(), scale, s, state, before.image(), changed, timeout) : null;
                         }
                         if (f != null && sameLayout(before, f, changed)) partial = true;
                         else f = null;
                     }
                 }
                 if (f == null) {
-                    f = HtmlRenderer.render(p, d, canvas.width(), canvas.height(), scale, s, state);
+                    f = HtmlRenderer.render(p, d, canvas.width(), canvas.height(), scale, s, state, null, null, timeout);
                     if (fragment != null && !fragment.isEmpty()) {
                         Element target = d.getElementById(fragment);
                         double top = target == null ? Double.NaN : f.topOf(target);
                         if (!Double.isNaN(top)) {
-                            f = HtmlRenderer.render(p, d, canvas.width(), canvas.height(), scale, top, state);
+                            f = HtmlRenderer.render(p, d, canvas.width(), canvas.height(), scale, top, state, null, null, timeout);
                             double scrolled = f.scrollY();
                             // Unless the player has moved on (another page, or scrolled) while this was drawn.
                             serverThread.execute(() -> {
