@@ -48,7 +48,7 @@ public final class Painter {
     /** The surface being painted on, for backdrop-filter. */
     private BufferedImage surface;
     private double deviceScale = 1;
-    /** Where the surface's top-left is in the whole picture it is a piece of (device px): a band starts part way down. */
+    /** Where the surface's top-left is on the page (device px): a band or a view starts part way down, a layer part way in. */
     private int originX, originY;
 
     /**
@@ -127,7 +127,9 @@ public final class Painter {
             }
         }
         g.setColor(Color.WHITE);
-        g.fill(new Rectangle2D.Double(0, 0, viewportW, viewportH));
+        // All of the page, not only the view: a picture can be taller than the view (a ScrollCache's), and a band
+        // paints rows past the picture's edges for the blurs there.
+        g.fill(new Rectangle2D.Double(0, -scrollY, viewportW, Math.max(scrollY + viewportH, root.overflowBottom)));
         if (!transparent(canvasSource.style)) {
             Rectangle2D page = new Rectangle2D.Double(0, 0, viewportW, Math.max(viewportH, root.overflowBottom));
             AffineTransform saved = g.getTransform();
@@ -288,7 +290,12 @@ public final class Painter {
         surface = img;
         // Layers inside are needed exactly where this one's filter reads.
         needed = part;
+        // The layer starts at r on the surface: a backdrop inside it blurs on the same grid as one outside.
+        originX += r.x;
+        originY += r.y;
         contextBody(lg, box, x, y);
+        originX -= r.x;
+        originY -= r.y;
         surface = savedSurface;
         needed = savedNeeded;
         lg.dispose();
@@ -906,7 +913,7 @@ public final class Painter {
         };
     }
 
-    /** The surface painted on is the piece of a bigger picture that starts at ([x], [y]) in it. */
+    /** The surface painted on starts at ([x], [y]) device px of the page, so backdrops blur on a grid fixed to the page. */
     public Painter origin(int x, int y) {
         originX = x;
         originY = y;

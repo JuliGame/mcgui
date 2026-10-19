@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<!-- A long page with a position: fixed bar, for the scroll benchmark: what is fixed moves on the page with every
+     scroll, so a session draws each notch whole here (no ScrollCache). -->
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: system-ui, sans-serif; color: #1f2937; background: #f1f5f9; padding-top: 72px; }
+  .bar { position: fixed; top: 0; left: 0; right: 0; height: 64px; padding: 0 40px; display: flex; align-items: center; gap: 24px;
+         background: rgba(255,255,255,.7); backdrop-filter: blur(10px); border-bottom: 1px solid #cbd5e1; z-index: 10; }
+  .bar b { font-size: 22px; color: #0f766e; }
+  section { margin: 20px 40px; padding: 26px 30px; border-radius: 16px; background: #fff; box-shadow: 0 10px 24px -8px rgba(15,23,42,.25); }
+  section:hover { box-shadow: 0 14px 30px -6px rgba(13,148,136,.45); }
+  h2 { font-size: 24px; margin-bottom: 8px; color: #0f766e; }
+  p { font-size: 16px; line-height: 1.6; }
+</style>
+</head>
+<body>
+<div class="bar"><b>Server rules</b><span>Read them once; staff will assume you did.</span></div>
+<section><h2>1. Be kind</h2><p>No harassment, slurs or threats, in chat, on signs or in builds. Disagree with the idea, not the person; staff decide what crosses the line.</p></section>
+<section><h2>2. No griefing</h2><p>Do not break, take or change what is not yours, claimed or not. Unclaimed land near somebody's base is still theirs to the eye; ask first.</p></section>
+<section><h2>3. No cheating</h2><p>No hacked clients, x-ray packs, duplication or auto-clickers. Minimaps and shaders are fine. If you are not sure, ask staff before you use it.</p></section>
+<section><h2>4. Keep chat readable</h2><p>No spam, no walls of capitals, no advertising other servers. English in global chat, any language in private messages.</p></section>
+<section><h2>5. Trade fairly</h2><p>Deliver what you sold, pay what you promised. Scams are griefing with extra steps, and are treated the same way.</p></section>
+<section><h2>6. Builds near spawn</h2><p>Nothing within three hundred blocks of spawn without a plot from the town council; the council meets on Sundays at the town hall.</p></section>
+<section><h2>7. Redstone and lag</h2><p>Clocks that never stop, huge mob farms and item lag machines are removed. Put a switch on what you build so staff can turn it off.</p></section>
+<section><h2>8. Accounts</h2><p>One account per player. Shared accounts are banned together, and a ban follows the person to every account they play on.</p></section>
+<section><h2>9. Appeals</h2><p>Banned? Appeal on the forum within thirty days, honestly. Appeals that blame the staff, the lag or a cousin are read last.</p></section>
+<section><h2>10. Staff have the last word</h2><p>These rules cannot cover everything. When they do not, staff decide, and the decision stands until the council says otherwise.</p></section>
+</body>
+</html>

@@ -172,8 +172,9 @@ final class Filters {
 
     /**
      * backdrop-filter: blur (and tint) what is already painted under [shape], then put it back inside the shape.
-     * [originX] and [originY] are where [surface]'s top-left is in the picture it is a piece of (a band): the blur is worked
-     * out on a grid fixed to that picture, so every way of painting it (whole, in bands, a rectangle at a time) blurs alike.
+     * [originX] and [originY] are where [surface]'s top-left is on the page (device px): the blur is worked out on a grid
+     * fixed to the page, so every way of painting it (whole, in bands, a rectangle at a time, a view cut from a taller
+     * picture) blurs alike.
      */
     static void backdrop(Graphics2D g, BufferedImage surface, Shape shape, Style s, double scale, int originX, int originY, RenderBudget budget) {
         String filter = s.backdropFilter;
@@ -196,7 +197,7 @@ final class Filters {
         }
         grab = grab.intersection(bounds);
         if (grab.isEmpty()) return;
-        // Out to whole cells of the picture's grid, where the surface has nothing (its edge) the edge pixels carry on.
+        // Out to whole cells of the page's grid, where the surface has nothing (its edge) the edge pixels carry on.
         int gx = Math.floorDiv(grab.x + originX, k) * k - originX, gy = Math.floorDiv(grab.y + originY, k) * k - originY;
         int gw = Math.floorDiv(grab.x + grab.width + originX + k - 1, k) * k - originX - gx;
         int gh = Math.floorDiv(grab.y + grab.height + originY + k - 1, k) * k - originY - gy;

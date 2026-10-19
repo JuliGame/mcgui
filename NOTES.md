@@ -89,6 +89,25 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
   one painter, worked out by `html/Repaint` (which also grows the painted area by a backdrop's reach and
   keeps only the changed part: `RepaintTest` compares every hover with a fresh picture). `sh gradlew renderBench` times a page's full render, its
   `Canvas.draw` and a hover repaint.
+- **A scroll is cut from a taller picture** (`html/ScrollCache`): the first
+  notch paints up to four views of the page round the view (more ahead of the
+  scroll than behind), and later notches copy the view's rows out of it, since
+  painting is nearly all a picture costs. Hover and press repaints go into that
+  picture, over their whole region rather than only what is in view. A page
+  with anything `position: fixed` is drawn whole every notch. Scroll positions
+  are whole canvas pixels (`ScrollCache.snap`), so a cut view matches a fresh
+  one; band margins run past the picture's edges for the same reason (a blur at
+  the view's edge reads the page beyond it). A session drops its cache after
+  15 s of not scrolling, or on any change of document, page or size.
+  `renderBench -Pscroll=1` times both ways and checks every cut view's pixels.
+- **A partial repaint takes in every blurred layer its region meets**
+  (`Repaint.region`): a `filter: blur()` layer that the clip cuts would blur
+  with a cut edge. A backdrop is painted again with a margin instead (see
+  above). A blur that reads past the picture's top or bottom where the page
+  goes on means a full picture, which paints the page there.
+- **Backdrops blur on a grid fixed to the page** (`Painter.origin`, in device
+  pixels from the page's top-left), so a band, a rectangle repaint, a whole
+  view and a view cut from a taller picture all blur alike.
 - **Gradient text is a mask**, not a clip: Java2D clips are not antialiased,
   and clipping a gradient to glyph outlines gave jagged letters.
 - **Map pixels are not screen pixels.** A view is 16×9 maps (2048×1152) by
