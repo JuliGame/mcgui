@@ -250,7 +250,7 @@ public final class Style {
             case "right" -> right = lenOrAuto(v);
             case "bottom" -> bottom = lenOrAuto(v);
             case "left" -> left = lenOrAuto(v);
-            case "z-index" -> zIndex = l.equals("auto") ? null : (int) Double.parseDouble(l);
+            case "z-index" -> zIndex = l.equals("auto") ? null : (int) num(l);
             case "width" -> {
                 widthKeyword = keyword(l);
                 width = widthKeyword != null ? null : lenOrAuto(v);
@@ -305,15 +305,15 @@ public final class Style {
             }
             case "overflow-x" -> overflowX = l;
             case "overflow-y" -> overflowY = l;
-            case "opacity" -> opacity = Math.max(0, Math.min(1, l.endsWith("%") ? Double.parseDouble(l.substring(0, l.length() - 1)) / 100 : Double.parseDouble(l)));
+            case "opacity" -> opacity = Math.max(0, Math.min(1, l.endsWith("%") ? num(l.substring(0, l.length() - 1)) / 100 : num(l)));
             case "visibility" -> visibility = l;
             case "aspect-ratio" -> {
                 String r = l.replace("auto", "").trim();
                 if (r.isEmpty()) aspectRatio = null;
                 else {
                     String[] parts = r.split("/");
-                    double a = Double.parseDouble(parts[0].trim());
-                    double b = parts.length > 1 ? Double.parseDouble(parts[1].trim()) : 1;
+                    double a = num(parts[0].trim());
+                    double b = parts.length > 1 ? num(parts[1].trim()) : 1;
                     aspectRatio = b == 0 ? null : a / b;
                 }
             }
@@ -343,7 +343,7 @@ public final class Style {
                 case "bold" -> 700;
                 case "bolder" -> Math.min(900, (parent == null ? 400 : parent.fontWeight) + 300);
                 case "lighter" -> Math.max(100, (parent == null ? 400 : parent.fontWeight) - 300);
-                default -> (int) Math.max(1, Math.min(1000, Double.parseDouble(l)));
+                default -> (int) Math.max(1, Math.min(1000, num(l)));
             };
             case "font-style" -> italic = l.startsWith("italic") || l.startsWith("oblique");
             case "line-height" -> {
@@ -389,7 +389,7 @@ public final class Style {
             case "word-break" -> wordBreak = l;
             case "overflow-wrap", "word-wrap" -> overflowWrap = l;
             case "-webkit-text-fill-color" -> textFillColor = l.equals("currentcolor") ? null : Values.color(v, color);
-            case "-webkit-line-clamp", "line-clamp" -> lineClamp = l.equals("none") ? 0 : (int) Double.parseDouble(l);
+            case "-webkit-line-clamp", "line-clamp" -> lineClamp = l.equals("none") ? 0 : (int) num(l);
             case "list-style-type" -> listStyleType = l;
             case "list-style-position" -> listStylePosition = l;
             case "cursor" -> cursor = Values.splitCommas(l).get(Values.splitCommas(l).size() - 1).trim();
@@ -402,13 +402,13 @@ public final class Style {
             case "align-content" -> alignContent = alignment(l);
             case "justify-items" -> justifyItems = alignment(l);
             case "justify-self" -> justifySelf = alignment(l);
-            case "flex-grow" -> flexGrow = Math.max(0, Double.parseDouble(l));
-            case "flex-shrink" -> flexShrink = Math.max(0, Double.parseDouble(l));
+            case "flex-grow" -> flexGrow = Math.max(0, num(l));
+            case "flex-shrink" -> flexShrink = Math.max(0, num(l));
             case "flex-basis" -> {
                 flexBasisContent = l.equals("content") || keyword(l) != null;
                 flexBasis = l.equals("auto") || flexBasisContent ? null : len(v);
             }
-            case "order" -> order = (int) Double.parseDouble(l);
+            case "order" -> order = (int) num(l);
             case "row-gap" -> rowGap = l.equals("normal") ? null : len(v);
             case "column-gap" -> columnGap = l.equals("normal") ? null : len(v);
             case "grid-template-columns" -> gridTemplateColumns = v;
@@ -438,6 +438,13 @@ public final class Style {
             }
             default -> {}
         }
+    }
+
+    /** A number as {@link Values#number} reads it; anything else throws, which drops the declaration (see {@link #compute}). */
+    private static double num(String l) {
+        Double d = Values.number(l);
+        if (d == null) throw new NumberFormatException(l);
+        return d;
     }
 
     private static String unquote(String s) {

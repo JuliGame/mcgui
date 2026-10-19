@@ -60,9 +60,21 @@ public final class Values {
         return out;
     }
 
+    /**
+     * A CSS number (digits, a point, a sign, an exponent), or null. Java's own forms are not numbers
+     * here ({@code NaN}, {@code Infinity}, {@code 1d}, hex), and neither is one too big for a double:
+     * an infinite opacity or line-height poisons every sum it meets.
+     */
     public static Double number(String s) {
+        s = s.trim();
+        if (s.isEmpty()) return null;
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if ((c < '0' || c > '9') && c != '.' && c != '+' && c != '-' && c != 'e' && c != 'E') return null;
+        }
         try {
-            return Double.parseDouble(s.trim());
+            double d = Double.parseDouble(s);
+            return Double.isFinite(d) ? d : null;
         } catch (NumberFormatException e) {
             return null;
         }
