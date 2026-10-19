@@ -82,6 +82,48 @@ public final class Canvas {
         tiles = all;
     }
 
+    /** A copy of [from] as it is now (see {@link #copy()}). */
+    private Canvas(Canvas from) {
+        this.published = from.published;
+        this.palette = from.palette;
+        this.cols = from.cols;
+        this.rows = from.rows;
+        this.width = from.width;
+        this.height = from.height;
+        this.ycc = from.ycc.clone();
+        this.hiTiled = new AtomicReferenceArray<>(cols * rows);
+        this.tiles = from.tiles;
+        this.version = from.version;
+    }
+
+    /**
+     * A new canvas showing this one's picture: the same published tiles (the same arrays, so nothing is encoded,
+     * and a viewer who already has them is sent nothing), its colours copied, telling the same sender. Call it
+     * from the thread that draws into this one, or on a canvas nothing draws into any more.
+     */
+    public Canvas copy() {
+        return new Canvas(this);
+    }
+
+    /**
+     * Show [from]'s picture, as one published change like a drawing: its tiles (the same arrays, nothing is
+     * encoded or converted), its colours copied. [from] must be the same size, and nothing may draw into it
+     * meanwhile (a {@link #copy()} kept aside, say). Draw into this canvas after it as after any drawing.
+     */
+    public void show(Canvas from) {
+        if (from.cols != cols || from.rows != rows) throw new IllegalArgumentException("Not the same size: " + from.cols + "x" + from.rows);
+        if (from == this) return;
+        changing++;
+        try {
+            System.arraycopy(from.ycc, 0, ycc, 0, ycc.length);
+        } finally {
+            changing++;
+        }
+        tiles = from.tiles;
+        version++;
+        published.run();
+    }
+
     public int cols() { return cols; }
     public int rows() { return rows; }
     /** In pixels: cols × 128. */

@@ -65,6 +65,7 @@ Depend on `UIFramework` in your `plugin.yml`, compile against this jar, then:
 UIFramework engine = UIFramework.get();
 Canvas canvas = engine.canvas(4, 3);               // 512 x 384 pixels
 canvas.draw(image, 0, 0);                          // only changed tiles are re-sent
+other.show(canvas.copy());                         // same picture, same tiles: nothing re-encoded or re-sent
 engine.placeWall(topLeft, BlockFace.SOUTH, 4, 3, viewer -> canvas);
 engine.openView(player, () -> canvas, ViewOptions.DEFAULT);
 ```
