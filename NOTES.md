@@ -72,7 +72,8 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
   The bands are deliberately not clipped: an extra clip changes how Java2D
   rounds overflow clips, by a pixel at their edges. Hit regions come from the
   first band, which lays out the whole page. Partial (hover) repaints are still
-  one painter. `sh gradlew renderBench` times a page's full render, its
+  one painter, worked out by `html/Repaint` (which also grows the painted area by a backdrop's reach and
+  keeps only the changed part: `RepaintTest` compares every hover with a fresh picture). `sh gradlew renderBench` times a page's full render, its
   `Canvas.draw` and a hover repaint.
 - **Gradient text is a mask**, not a clip: Java2D clips are not antialiased,
   and clipping a gradient to glyph outlines gave jagged letters.
