@@ -25,10 +25,13 @@ import java.util.Deque;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.WeakHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 /**
@@ -366,6 +369,10 @@ public final class Session {
                 drawnPress = pressKey;
                 drawnName = name;
                 frame = f;
+                AtomicInteger failed = FAILURES.remove(p);
+                if (failed != null && failed.get() > 1) {
+                    plugin.getLogger().info("Drew page " + name + " after " + failed.get() + " attempts that could not be drawn");
+                }
                 if (plugin.debug()) {
                     plugin.getLogger().info(String.format("Drew %s for %s in %d ms%s", pageName, viewer, (System.nanoTime() - t0) / 1_000_000,
                             partial ? String.format(" (only %.0f x %.0f)", changed.getWidth(), changed.getHeight()) : ""));
@@ -373,7 +380,9 @@ public final class Session {
                 // A new page under a still pointer: what it is over has changed.
                 if (!partial) serverThread.execute(this::repoint);
             } catch (RuntimeException | Error e) {
-                plugin.getLogger().warning("Could not draw page " + name + ": " + e);
+                // Once per page revision: a page too heavy to draw fails on every hover and scroll, for every viewer.
+                int failures = FAILURES.computeIfAbsent(p, k -> new AtomicInteger()).incrementAndGet();
+                if (failures == 1) plugin.getLogger().warning("Could not draw page " + name + ": " + e + " (repeats are counted, not logged)");
                 if (plugin.debug()) e.printStackTrace();
                 // A page that cannot be drawn at all leaves the last picture, of another page, on the screen,
                 // where clicks would find nothing: go back to that page, so the screen still works.
@@ -397,6 +406,9 @@ public final class Session {
             }
         });
     }
+
+    /** Pages (one revision each: a reload makes a new Page) that failed to draw, and how many times since they last drew. */
+    private static final Map<Page, AtomicInteger> FAILURES = Collections.synchronizedMap(new WeakHashMap<>());
 
     /** Room round a changed element for what it may draw outside itself on hover beyond its shadows and blur: a lift, a glow. */
     private static final double DIRTY_MARGIN = 48;
