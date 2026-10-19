@@ -67,6 +67,8 @@ public final class LoadBench {
     static final int TILES = (W / 128) * (H / 128);
     static final double SCROLL_STEP = 80;
     static final double STRESS_STEP = 37;
+    /** Requests answered later than this are listed (-Dslow=<ms>). */
+    static final long SLOW_NS = Long.getLong("slow", 10_000) * 1_000_000L;
 
     // ------------------------------------------------------------------------------------ run
 
@@ -895,6 +897,7 @@ public final class LoadBench {
                 synchronized (s.lats) {
                     for (Lat l : s.lats) {
                         if (l.at < t0 || l.at >= t1) continue;
+                        if (l.ns > SLOW_NS) System.out.printf("  slow request: session %d kind %d asked at %.0f ms into the window, answered after %.0f ms%n", s.id, l.kind, (l.at - t0) / 1e6, l.ns / 1e6);
                         requests++;
                         switch (l.kind) {
                             case HOVER -> hv.add(l.ns);
