@@ -45,3 +45,45 @@ processResources {
         expand(version: project.version)
     }
 }
+
+// Tests and a benchmark against a real Paper server's own classes (its netty pipeline handlers, packet
+// codecs and compressor), for what reflection reaches on a running server. Only with a server directory
+// that has run once (versions/ and libraries/), and a Java 25 toolchain, which Paper 26 is built for:
+//   sh gradlew paperTest -PpaperServer=/path/to/server
+//   sh gradlew paperBench -PpaperServer=/path/to/server
+def paperServer = findProperty('paperServer')
+if (paperServer != null) {
+    sourceSets {
+        paperTest {
+            compileClasspath += sourceSets.main.output
+            runtimeClasspath += sourceSets.main.output
+        }
+    }
+    dependencies {
+        paperTestImplementation fileTree("$paperServer/versions") { include '**/*.jar' }
+        paperTestImplementation fileTree("$paperServer/libraries") { include '**/*.jar' }
+        paperTestImplementation 'org.junit.jupiter:junit-jupiter:5.11.0'
+        paperTestRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    }
+    def java25 = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(25) }
+    tasks.named('compilePaperTestJava') {
+        javaCompiler = javaToolchains.compilerFor { languageVersion = JavaLanguageVersion.of(25) }
+        options.release = 25
+    }
+    def paperJvmArgs = ['--enable-native-access=ALL-UNNAMED', '-Xmx2g']
+    tasks.register('paperTest', Test) {
+        testClassesDirs = sourceSets.paperTest.output.classesDirs
+        classpath = sourceSets.paperTest.runtimeClasspath
+        javaLauncher = java25
+        jvmArgs paperJvmArgs
+        useJUnitPlatform()
+        testLogging { showStandardStreams = true; events 'passed', 'failed'; exceptionFormat 'full' }
+    }
+    tasks.register('paperBench', JavaExec) {
+        classpath = sourceSets.paperTest.runtimeClasspath
+        mainClass = 'ai.resourcepack.uiframework.net.SharedCompressionBench'
+        javaLauncher = java25
+        jvmArgs paperJvmArgs + ['-Xlog:gc:file=build/paperBench-gc.log']
+        args((findProperty('benchArgs') ?: '').toString().tokenize())
+    }
+}

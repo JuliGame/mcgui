@@ -17,6 +17,8 @@ public final class Settings {
     public final int bytesPerSecond;
     public final double viewDistance;
     public final double reach;
+    /** Compress each map patch once for every player who can take the same bytes, rather than once per player. */
+    public final boolean sharedCompression;
     public final int defaultFov;
     public final double cursorSpeed;
     /** With the pack: the client draws the pointer itself every frame from where the player looks. */
@@ -35,6 +37,7 @@ public final class Settings {
         bytesPerSecond = Math.max(64 * 1024, c.getInt("screens.max-bytes-per-second-per-player", 16_000_000));
         viewDistance = c.getDouble("screens.view-distance", 48);
         reach = c.getDouble("screens.reach", 8);
+        sharedCompression = c.getBoolean("screens.shared-compression", true);
         defaultFov = c.getInt("views.default-fov", 70);
         cursorSpeed = c.getDouble("views.cursor-speed", 8.0);
         clientPointer = c.getBoolean("views.client-pointer", true);

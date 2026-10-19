@@ -110,6 +110,10 @@ public final class MapSender implements AutoCloseable {
      */
     private final Map<UUID, long[]> left = new ConcurrentHashMap<>();
     private long lastWarning;
+    /** This pass: how many viewers each canvas has in each encoding, so a tile more than one is sent is made once. */
+    private final Map<Watch, Integer> watching = new HashMap<>();
+
+    private record Watch(Canvas canvas, Canvas.Encoding encoding) {}
 
     public MapSender(Wire wire, Palette palette, int bytesPerSecond, Logger log) {
         this.wire = wire;
@@ -216,6 +220,8 @@ public final class MapSender implements AutoCloseable {
         long refill = bytesPerSecond * (now - lastRun) / 1_000_000_000L;
         lastRun = now;
         Set<UUID> seen = new HashSet<>();
+        watching.clear();
+        for (Assignment a : assignments) watching.merge(new Watch(a.canvas, a.encoding), 1, Integer::sum);
         for (Assignment a : assignments) {
             Viewer v = viewers.computeIfAbsent(a.player.getUniqueId(), k -> fresh(k, now));
             if (seen.add(a.player.getUniqueId())) {
@@ -331,7 +337,7 @@ public final class MapSender implements AutoCloseable {
             // Counted in flight from now, so delivered() never sees the tile as sent before it is written.
             v.inFlight.addAndGet(cost);
             wallInFlight.addAndGet(cost);
-            v.packets.add(patch(id, rect, current));
+            v.packets.add(patch(a, id, rect, current));
             v.patches.add(new Patch(id, current, cost, wallInFlight));
             v.batchCost += cost;
             v.budget -= cost;
@@ -340,10 +346,10 @@ public final class MapSender implements AutoCloseable {
         }
     }
 
-    private Object patch(int id, int[] rect, byte[] tile) {
-        byte[] data = new byte[rect[2] * rect[3]];
-        for (int y = 0; y < rect[3]; y++) System.arraycopy(tile, (rect[1] + y) * 128 + rect[0], data, y * rect[2], rect[2]);
-        return wire.patch(id, rect[0], rect[1], rect[2], rect[3], data);
+    /** The packet for [rect] of [tile] to map [id]: the same one for every viewer the wire can give it to. */
+    private Object patch(Assignment a, int id, int[] rect, byte[] tile) {
+        Integer viewers = watching.get(new Watch(a.canvas, a.encoding));
+        return wire.patch(a.player, id, rect[0], rect[1], rect[2], rect[3], tile, viewers != null && viewers > 1);
     }
 
     /**
@@ -413,7 +419,7 @@ public final class MapSender implements AutoCloseable {
                 continue;
             }
             int c = rect[2] * rect[3];
-            packets.add(patch(id, rect, current));
+            packets.add(patch(a, id, rect, current));
             patches.add(new Patch(id, current, c, wallInFlight));
             cost += c;
         }

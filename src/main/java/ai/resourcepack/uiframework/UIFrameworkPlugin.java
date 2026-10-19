@@ -12,6 +12,7 @@ import ai.resourcepack.uiframework.net.MapSender;
 import ai.resourcepack.uiframework.net.Nms;
 import ai.resourcepack.uiframework.net.Pipeline;
 import ai.resourcepack.uiframework.net.ServerWire;
+import ai.resourcepack.uiframework.net.SharedCompression;
 import ai.resourcepack.uiframework.pack.ResourcePack;
 import ai.resourcepack.uiframework.render.Palette;
 import ai.resourcepack.uiframework.world.Views;
@@ -42,6 +43,7 @@ public final class UIFrameworkPlugin extends JavaPlugin implements UIFramework, 
     private Palette palette;
     private ResourcePack pack;
     private MapSender sender;
+    private ServerWire wire;
     private Pipeline pipeline;
     private Walls walls;
     private Views views;
@@ -66,7 +68,8 @@ public final class UIFrameworkPlugin extends JavaPlugin implements UIFramework, 
             getLogger().log(Level.SEVERE, "Could not build or serve the resource pack", e);
         }
         pipeline = new Pipeline(nms, getLogger());
-        sender = new MapSender(new ServerWire(nms, pipeline), palette, settings.bytesPerSecond, getLogger());
+        wire = new ServerWire(nms, pipeline, settings.sharedCompression ? SharedCompression.create(ServerWire.packets(nms), getLogger()) : null);
+        sender = new MapSender(wire, palette, settings.bytesPerSecond, getLogger());
         views = new Views(this, settings, nms, pipeline, id -> pack != null && pack.has(id), sender, settings.mapIdBase);
         walls = new Walls(this, settings.mapIdBase + VIEW_ID_SPAN, settings.viewDistance, settings.reach, views::seated);
         var pm = getServer().getPluginManager();
@@ -93,6 +96,7 @@ public final class UIFrameworkPlugin extends JavaPlugin implements UIFramework, 
         // After the views, whose closing still writes through them.
         if (pipeline != null) step("take the handlers out of players' connections", () -> pipeline.close(Bukkit.getOnlinePlayers()));
         if (sender != null) step("stop sending map pictures", sender::close);
+        if (wire != null) step("let go of the map compressor", wire::close);
         if (pack != null) step("stop serving the resource pack", pack::close);
         HandlerList.unregisterAll((org.bukkit.plugin.Plugin) this);
     }
