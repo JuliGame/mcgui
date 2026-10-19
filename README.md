@@ -77,6 +77,7 @@ Page settings, all optional:
 <meta name="ui:size" content="12x7">    <!-- fullscreen size in maps (config: views.size) -->
 <meta name="ui:height" content="576">   <!-- the page is laid out this many CSS px tall -->
 <meta name="ui:refresh" content="5">    <!-- refill placeholders every 5 seconds (0.5 at the most often; 0: never) -->
+<meta name="ui:scroll-step" content="tile"> <!-- a notch of the wheel: CSS px, or "tile" for one map row (config: scroll-step) -->
 ```
 
 Controls while a page is open: mouse moves the pointer, either button clicks,

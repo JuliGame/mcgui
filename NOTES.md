@@ -84,6 +84,16 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
   the view's edge reads the page beyond it). A session drops its cache after
   15 s of not scrolling, or on any change of document, page or size.
   `renderBench -Pscroll=1` times both ways and checks every cut view's pixels.
+- **A scroll by whole map rows moves the canvas** (`Canvas.scroll`, in
+  `Session.submit`): the framework then points each viewer's frames at the
+  maps their client already has and sends only the rows that came in, in one
+  bundle (about 1/9 of the bytes of a notch on a 16x9 view). Only the rows that
+  came in are drawn when the last view was cut from the same tall picture;
+  otherwise the whole view is drawn over the moved canvas. A notch is whole rows
+  only with `scroll-step: tile` (config or `<meta name="ui:scroll-step">`),
+  except the one that reaches an end of the page. `TileScrollTest` rebuilds
+  what the client shows from the packets and compares it with a fresh render;
+  `sh gradlew tileBench` gives bytes, packets and CPU per notch.
 - **A partial repaint takes in every blur its region meets**
   (`Session.dirtyRegion`): a `filter: blur()` layer or a `backdrop-filter`
   grab that the clip cuts would blur with a cut edge. One cut by the picture's
