@@ -36,6 +36,15 @@ views:
   # Log where each click on a client-drawn pointer lands, and every correction, as [pointer] lines. For testing.
   debug-pointer: false
 
+# Threads for everything that burns CPU off the server thread: drawing pages (UI Engine and any plugin on
+# top of this one), converting pictures to map colours and encoding them. All of it shares this one pool,
+# so it can never have more threads running than this, however many players are using screens. The
+# server thread needs a core of its own: with more threads here than cores minus one, it waits for a
+# core like any other thread and ticks late. 0 means the cores minus one (at least 1). Raise it only on
+# a machine with cores to spare, for faster pictures when many players change them at once; a higher
+# number than the cores is a bad idea. Read at start (changing it needs a restart).
+cpu-threads: 0
+
 # Map ids this engine owns. They never get saved-map files, so they cannot collide with real maps as
 # long as the world has fewer maps than this.
 map-id-base: 2000000000

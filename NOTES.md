@@ -68,7 +68,17 @@ user-facing description; this file is the part that bites.
   `UIFramework.serverThread()`, the server's own task queue, which Paper
   drains while it waits for the next tick: still the server thread, but not up
   to 50 ms late.
-- **`Canvas.draw` converts on every core**, in bands of 32 rows on a shared
+- **One pool for all CPU-heavy work: `api/Cpu`.** `cpu-threads` (default: the cores
+  minus one) is the most threads that convert, encode or draw at once, for this
+  plugin and any plugin on top of it (UI Engine's render jobs and painter bands run
+  on it too). Never make another pool for work like that: pools add up, the sum
+  passes the core count and the server thread waits for a core (Java priorities do
+  nothing on Linux). Work on the pool may wait for work it forks (a pool thread
+  that waits runs queued work, or hands its place to a spare, so a wait cannot use
+  the budget up), but must not wait on the network or on the server thread.
+  `MapSender` (one thread of its own), the pack's web server and netty are not
+  part of the budget.
+- **`Canvas.draw` converts on every core**, in bands of 32 rows on that
   pool. It reads `INT_RGB`, `INT_ARGB` and `INT_ARGB_PRE` rasters in place,
   sub-images included; any other type goes through `getRGB`, which is several
   times slower. Only HI tiles are made when a picture is drawn: a PLAIN tile is

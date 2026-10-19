@@ -24,6 +24,8 @@ public final class Settings {
     /** Log each click's resolved spot and each pointer correction ({@code [pointer]} lines), for testing. */
     public final boolean debugPointer;
     public final int mapIdBase;
+    /** Threads for all CPU-heavy work (0: the cores minus one); see {@link ai.resourcepack.uiframework.api.Cpu}. */
+    public final int cpuThreads;
 
     private Settings(FileConfiguration c) {
         packMode = PackMode.valueOf(c.getString("resource-pack.mode", "serve").toUpperCase(Locale.ROOT));
@@ -40,6 +42,7 @@ public final class Settings {
         clientPointer = c.getBoolean("views.client-pointer", true);
         debugPointer = c.getBoolean("views.debug-pointer", false);
         mapIdBase = c.getInt("map-id-base", 2_000_000_000);
+        cpuThreads = Math.max(0, c.getInt("cpu-threads", 0));
     }
 
     public static Settings load(FileConfiguration c) {

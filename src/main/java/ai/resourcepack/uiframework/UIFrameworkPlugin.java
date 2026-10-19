@@ -2,6 +2,7 @@ package ai.resourcepack.uiframework;
 
 import ai.resourcepack.uiframework.api.Canvas;
 import ai.resourcepack.uiframework.api.CloseReason;
+import ai.resourcepack.uiframework.api.Cpu;
 import ai.resourcepack.uiframework.api.UIFramework;
 import ai.resourcepack.uiframework.api.View;
 import ai.resourcepack.uiframework.api.ViewContent;
@@ -51,6 +52,7 @@ public final class UIFrameworkPlugin extends JavaPlugin implements UIFramework, 
     public void onEnable() {
         saveDefaultConfig();
         settings = Settings.load(getConfig());
+        Cpu.configure(settings.cpuThreads);
         try {
             nms = new Nms(getServer());
         } catch (ReflectiveOperationException | LinkageError e) {
@@ -94,6 +96,7 @@ public final class UIFrameworkPlugin extends JavaPlugin implements UIFramework, 
         if (pipeline != null) step("take the handlers out of players' connections", () -> pipeline.close(Bukkit.getOnlinePlayers()));
         if (sender != null) step("stop sending map pictures", sender::close);
         if (pack != null) step("stop serving the resource pack", pack::close);
+        Cpu.shutdown();
         HandlerList.unregisterAll((org.bukkit.plugin.Plugin) this);
     }
 

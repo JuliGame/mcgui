@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.ForkJoinWorkerThread;
 import java.util.concurrent.atomic.AtomicReferenceArray;
 import java.util.stream.IntStream;
 
@@ -31,8 +32,6 @@ import java.util.stream.IntStream;
  * screens and views at once.
  */
 public final class Canvas {
-    /** Shared by every canvas; leaves a core for the game. */
-    private static final ForkJoinPool ENCODERS = new ForkJoinPool(Math.max(1, Runtime.getRuntime().availableProcessors() - 1));
     public static final int TILE = 128 * 128;
 
     private final Palette palette;
@@ -345,10 +344,19 @@ public final class Canvas {
         else run(() -> IntStream.range(0, list.size()).parallel().forEach(i -> encode(list.get(i), into)));
     }
 
-    /** Runs [work] (which splits itself up) on the shared encoder pool and waits for it. */
+    /**
+     * Runs [work] (which splits itself up) on {@link Cpu}'s pool and waits for it. Called from one of the pool's own
+     * threads (a render job drawing its picture) it runs on that thread and splits into the pool, so it takes no
+     * thread beyond the budget and cannot wait for a thread that is itself waiting.
+     */
     private static void run(Runnable work) {
+        ForkJoinPool pool = Cpu.pool();
+        if (Thread.currentThread() instanceof ForkJoinWorkerThread w && w.getPool() == pool) {
+            work.run();
+            return;
+        }
         try {
-            ENCODERS.submit(work).get();
+            pool.submit(work).get();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         } catch (java.util.concurrent.ExecutionException e) {
