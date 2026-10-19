@@ -1,22 +1,26 @@
 package ai.resourcepack.ui.html.css;
 
+import org.jsoup.nodes.Element;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
- * Every rule a page's styles add up to, in order, indexed by what their rightmost selector part
- * needs (an id, a class, a tag) so matching an element only tries the rules that could apply.
+ * Every rule a page's styles add up to, in order, indexed as Blink's RuleSet is: by what the rightmost
+ * part of each selector needs (an id, being the root, a class, an attribute, a tag) and by the
+ * pseudo-element it styles, so matching an element only tries the rules that could apply. Built once per
+ * page as its sheets are read, and only read while rendering.
  */
 public final class Stylesheet {
+    /** What a rule styles: the element itself, or one of its pseudo-elements. */
+    public static final int ELEMENT = 0, BEFORE = 1, AFTER = 2, PLACEHOLDER = 3, MARKER = 4, KINDS = 5;
+
     public final List<FontFace> fontFaces = new ArrayList<>();
     final List<Rule> all = new ArrayList<>();
-    final Map<String, List<Rule>> byId = new HashMap<>();
-    final Map<String, List<Rule>> byClass = new HashMap<>();
-    final Map<String, List<Rule>> byTag = new HashMap<>();
-    final List<Rule> universal = new ArrayList<>();
+    final Index[] kinds = new Index[KINDS];
     /** Whether any rule depends on :hover or :active, so a page without one never re-renders on hover. */
     public boolean dynamic;
     /** The selector parts that say :hover (or :active): what decides whether a move of the pointer changes anything. */
@@ -25,23 +29,91 @@ public final class Stylesheet {
     /** One selector of a rule, with its declarations: a rule with three selectors is three of these. */
     public record Rule(Selector selector, List<Declaration> declarations, Media media, int order) {}
 
+    /** The rules of one kind, each in exactly one bucket. Keys are ASCII lower case, so quirks mode finds them too. */
+    static final class Index {
+        final Map<String, List<Rule>> byId = new HashMap<>(), byClass = new HashMap<>(), byAttr = new HashMap<>(), byTag = new HashMap<>();
+        final List<Rule> root = new ArrayList<>(), universal = new ArrayList<>();
+    }
+
+    public static int kind(String pseudoElement) {
+        if (pseudoElement == null) return ELEMENT;
+        return switch (pseudoElement) {
+            case "before" -> BEFORE;
+            case "after" -> AFTER;
+            case "placeholder" -> PLACEHOLDER;
+            case "marker" -> MARKER;
+            default -> -1;
+        };
+    }
+
     void add(List<Selector> selectors, List<Declaration> declarations, Media media) {
         for (Selector s : selectors) {
             Rule r = new Rule(s, declarations, media, all.size());
             all.add(r);
-            if (s.dynamic()) dynamic = true;
+            if (s.dynamic) dynamic = true;
             for (Selector.Compound c : s.compounds) {
                 for (Selector.Pseudo p : c.pseudos) {
                     if (p.name().equals("hover") && !hoverParts.contains(c)) hoverParts.add(c);
                     if (p.name().equals("active") && !activeParts.contains(c)) activeParts.add(c);
                 }
             }
+            int kind = kind(s.pseudoElement);
+            // One that can never match is kept in the list of rules (its urls still load) but not indexed.
+            if (s.never || kind < 0) continue;
+            Index ix = kinds[kind];
+            if (ix == null) ix = kinds[kind] = new Index();
             Selector.Compound key = s.subject();
-            if (key.id != null) byId.computeIfAbsent(key.id, k -> new ArrayList<>()).add(r);
-            else if (!key.classes.isEmpty()) byClass.computeIfAbsent(key.classes.get(0), k -> new ArrayList<>()).add(r);
-            else if (key.tag != null) byTag.computeIfAbsent(key.tag, k -> new ArrayList<>()).add(r);
-            else universal.add(r);
+            String attr = null;
+            for (String[] a : key.attrs) {
+                if (!a[0].startsWith("abs:")) {
+                    attr = a[0];
+                    break;
+                }
+            }
+            if (key.id != null) bucket(ix.byId, key.id).add(r);
+            else if (isRoot(key)) ix.root.add(r);
+            else if (!key.classes.isEmpty()) bucket(ix.byClass, rarest(ix.byClass, key.classes)).add(r);
+            else if (attr != null) bucket(ix.byAttr, attr).add(r);
+            else if (key.tag != null) bucket(ix.byTag, key.tag).add(r);
+            else ix.universal.add(r);
         }
+    }
+
+    /** Of a subject's classes ({@code .btn.btn-sm}), the one fewest rules so far are keyed by: likely the rarer on elements too. */
+    private static String rarest(Map<String, List<Rule>> byClass, List<String> classes) {
+        String best = null;
+        int fewest = Integer.MAX_VALUE;
+        for (String c : classes) {
+            List<Rule> l = byClass.get(lower(c));
+            int n = l == null ? 0 : l.size();
+            if (n <= fewest) {
+                best = c;
+                fewest = n;
+            }
+        }
+        return best;
+    }
+
+    private static boolean isRoot(Selector.Compound c) {
+        for (Selector.Pseudo p : c.pseudos) if (p.name().equals("root")) return true;
+        return false;
+    }
+
+    private static List<Rule> bucket(Map<String, List<Rule>> map, String key) {
+        return map.computeIfAbsent(lower(key), k -> new ArrayList<>());
+    }
+
+    /** [s] with A-Z as a-z: the same string when there are none. */
+    static String lower(String s) {
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c >= 'A' && c <= 'Z') {
+                char[] a = s.toCharArray();
+                for (int k = i; k < a.length; k++) if (a[k] >= 'A' && a[k] <= 'Z') a[k] += 32;
+                return new String(a);
+            }
+        }
+        return s;
     }
 
     public int size() {
@@ -53,14 +125,16 @@ public final class Stylesheet {
      * ancestors, innermost first. Two pointer positions with the same list draw the same picture, so
      * moving the pointer within a button redraws nothing.
      */
-    public List<org.jsoup.nodes.Element> stateKey(org.jsoup.nodes.Element e, boolean active) {
+    public List<Element> stateKey(Element e, boolean active) {
         List<Selector.Compound> parts = active ? activeParts : hoverParts;
         if (e == null || parts.isEmpty()) return List.of();
-        List<org.jsoup.nodes.Element> out = new ArrayList<>();
-        for (org.jsoup.nodes.Element p = e; p != null; p = p.parent()) {
-            Selector.State st = active ? new Selector.State(java.util.Set.of(), java.util.Set.of(p)) : new Selector.State(java.util.Set.of(p), java.util.Set.of());
+        org.jsoup.nodes.Document doc = e.ownerDocument();
+        boolean quirks = doc != null && doc.quirksMode() == org.jsoup.nodes.Document.QuirksMode.quirks;
+        List<Element> out = new ArrayList<>();
+        for (Element p = e; p != null; p = p.parent()) {
+            Selector.State st = active ? new Selector.State(Set.of(), Set.of(p)) : new Selector.State(Set.of(p), Set.of());
             for (Selector.Compound c : parts) {
-                if (Selector.matchCompound(c, p, st)) {
+                if (Selector.matchCompound(c, p, st, quirks)) {
                     out.add(p);
                     break;
                 }
@@ -72,20 +146,5 @@ public final class Stylesheet {
     /** Every rule, in order. */
     public List<Rule> rules() {
         return all;
-    }
-
-    /** The rules that might match an element with this tag, id and classes, in no particular order. */
-    public void candidates(String tag, String id, Iterable<String> classes, List<Rule> out) {
-        out.addAll(universal);
-        List<Rule> t = byTag.get(tag.toLowerCase(Locale.ROOT));
-        if (t != null) out.addAll(t);
-        if (id != null && !id.isEmpty()) {
-            List<Rule> i = byId.get(id);
-            if (i != null) out.addAll(i);
-        }
-        for (String c : classes) {
-            List<Rule> r = byClass.get(c);
-            if (r != null) out.addAll(r);
-        }
     }
 }

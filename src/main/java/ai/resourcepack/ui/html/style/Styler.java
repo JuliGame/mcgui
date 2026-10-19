@@ -3,14 +3,18 @@ package ai.resourcepack.ui.html.style;
 import ai.resourcepack.ui.html.RenderBudget;
 import ai.resourcepack.ui.html.css.CssParser;
 import ai.resourcepack.ui.html.css.Declaration;
+import ai.resourcepack.ui.html.css.Matcher;
 import ai.resourcepack.ui.html.css.Selector;
 import ai.resourcepack.ui.html.css.Shorthands;
 import ai.resourcepack.ui.html.css.Stylesheet;
 
+import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
@@ -18,12 +22,20 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.WeakHashMap;
 
 /**
  * The cascade: which declarations win for each element, with {@code var()} substituted and
  * shorthands expanded, then computed into a {@link Style}. Precedence, lowest first: the browser's
  * defaults, presentational attributes ({@code <img width>}), the page's rules, {@code style=""},
  * then the same again for {@code !important} in reverse order of origin.
+ *
+ * <p>A pass over a document that was styled before (same sheets, same size) starts from what that pass
+ * found, which is kept per document (see {@link Memo}): an element's rules that do not depend on hover
+ * state are not matched again, the ones that do are tried again, and an element whose rules came out
+ * the same, under a parent that came out the same, keeps its computed style. So a hover restyles only
+ * what the hover can change. A document is never edited once drawn (a click edits a fresh copy), which
+ * is what makes this safe.
  */
 public final class Styler {
     private final Stylesheet ua;
@@ -40,8 +52,17 @@ public final class Styler {
     public final Map<Element, Style> placeholder = new IdentityHashMap<>();
     public final Map<Element, Style> marker = new IdentityHashMap<>();
     private final Map<Element, Map<String, String>> declared = new IdentityHashMap<>();
-    private final Map<Element, Map<String, String>> customs = new IdentityHashMap<>();
+    private final Map<Element, Customs> customs = new IdentityHashMap<>();
     private double rootFontSize = 16;
+
+    private Matcher matcher;
+    /** What the last pass over this document found (null if none, or once the document stops fitting it), and this pass. */
+    private Memo previous, memo;
+    /** The place in document order of the element being styled, counting those under display: none too. */
+    private int next;
+    private final List<Stylesheet.Rule> matched = new ArrayList<>(), dynamic = new ArrayList<>();
+    private final Map<Shared, Shared> shared = new HashMap<>();
+    private final List<Weighted> scratch = new ArrayList<>();
 
     public Styler(Stylesheet ua, Stylesheet author, double vw, double vh, Selector.State state, URI base, RenderBudget budget) {
         this.ua = ua;
@@ -57,63 +78,209 @@ public final class Styler {
 
     /** Styles [root] and everything under it. */
     public void run(Element root) {
-        walk(root, null);
+        Document doc = root.ownerDocument();
+        matcher = new Matcher(state, doc != null && doc.quirksMode() == Document.QuirksMode.quirks, vw, vh);
+        for (Element p = root.parent(); p != null; p = p.parent()) matcher.ancestors.push(p);
+        previous = Memo.take(root, this);
+        memo = new Memo(ua, author, vw, vh, previous == null ? 64 : previous.size);
+        boolean done = false;
+        try {
+            walk(root, null, true);
+            done = true;
+        } finally {
+            memo.size = next;
+            // An abandoned pass leaves the last whole one, which still fits the document.
+            Memo.keep(root, done ? memo : previous);
+        }
     }
 
-    private void walk(Element e, Element parent) {
+    private void walk(Element e, Element parent, boolean parentKept) {
         budget.check();
-        Style parentStyle = parent == null ? null : styles.get(parent);
-        Map<String, String> parentCustoms = parent == null ? Map.of() : customs.get(parent);
-        List<Weighted> list = collect(e, null);
-        Map<String, String> own = customProps(list, parentCustoms);
+        int at = next++;
+        Node old = previous == null ? null : previous.node(at);
+        if (old != null && !old.fits(e)) {
+            // Not the document the memo was made from after all: nothing further on can be trusted.
+            previous = null;
+            old = null;
+        }
+        Node node = new Node(e);
+        memo.put(at, node);
+        Found found = found(e, Stylesheet.ELEMENT, old);
+        node.found[Stylesheet.ELEMENT] = found;
+        boolean kept = parentKept && old != null && found == old.found[Stylesheet.ELEMENT];
+        Style s;
+        Customs own;
+        Map<String, String> decl;
+        if (kept) {
+            s = old.style;
+            own = old.customs;
+            decl = old.declared;
+        } else {
+            Style parentStyle = parent == null ? null : styles.get(parent);
+            Customs parentCustoms = parent == null ? Customs.NONE : customs.get(parent);
+            Shared key = parent == null || !plain(e) ? null : new Shared(Stylesheet.ELEMENT, found, parentStyle, parentCustoms, declared.get(parent));
+            Shared same = key == null ? null : shared.get(key);
+            if (same != null) {
+                s = same.style;
+                own = same.customs;
+                decl = same.declared;
+            } else {
+                List<Weighted> list = weighted(e, Stylesheet.ELEMENT, found);
+                own = customProps(list, parentCustoms);
+                Map<String, String> all = resolve(list, own, parent);
+                s = Style.compute(all, parentStyle, rootFontSize, vw, vh);
+                decl = notInherited(all);
+                if (key != null) shared.put(key, key.with(s, own, decl));
+            }
+        }
+        node.style = s;
+        node.customs = own;
+        node.declared = decl;
         customs.put(e, own);
-        Map<String, String> decl = resolve(list, own, parent);
         declared.put(e, decl);
-        Style s = Style.compute(decl, parentStyle, rootFontSize, vw, vh);
         if (parent == null) rootFontSize = s.fontSize;
         styles.put(e, s);
         if (!s.display.equals("none")) {
-            pseudo(e, "before", s, own, before);
-            pseudo(e, "after", s, own, after);
-            if (e.hasAttr("placeholder")) pseudo(e, "placeholder", s, own, placeholder);
-            if (s.display.equals("list-item")) pseudo(e, "marker", s, own, marker);
-            for (Element child : e.children()) walk(child, e);
+            pseudo(e, Stylesheet.BEFORE, s, own, decl, before, old, node, kept);
+            pseudo(e, Stylesheet.AFTER, s, own, decl, after, old, node, kept);
+            if (e.hasAttr("placeholder")) pseudo(e, Stylesheet.PLACEHOLDER, s, own, decl, placeholder, old, node, kept);
+            if (s.display.equals("list-item")) pseudo(e, Stylesheet.MARKER, s, own, decl, marker, old, node, kept);
+            matcher.ancestors.push(e);
+            for (Element child : e.children()) walk(child, e, kept);
+            matcher.ancestors.pop(e);
+        } else {
+            next += descendants(e);
         }
     }
 
-    private void pseudo(Element e, String name, Style parentStyle, Map<String, String> parentCustoms, Map<Element, Style> into) {
-        List<Weighted> list = collect(e, name);
-        if (list.isEmpty() && !name.equals("placeholder")) return;
-        if (name.equals("marker") && list.isEmpty()) return;
-        Map<String, String> own = customProps(list, parentCustoms);
-        Map<String, String> decl = resolve(list, own, e);
-        if (name.equals("before") || name.equals("after")) {
-            String content = decl.get("content");
-            if (content == null || content.equals("none") || content.equals("normal")) return;
-        }
-        into.put(e, Style.compute(decl, parentStyle, rootFontSize, vw, vh));
+    private static int descendants(Element e) {
+        int n = 0;
+        for (Element c = e.firstElementChild(); c != null; c = c.nextElementSibling()) n += 1 + descendants(c);
+        return n;
     }
 
-    /** Every declaration that applies to [e] (or its [pseudo]-element), lowest precedence first. */
-    private List<Weighted> collect(Element e, String pseudo) {
-        List<Weighted> out = new ArrayList<>();
-        List<Stylesheet.Rule> candidates = new ArrayList<>();
-        String tag = e.normalName();
-        for (int origin = 0; origin < 2; origin++) {
-            Stylesheet sheet = origin == 0 ? ua : author;
-            candidates.clear();
-            sheet.candidates(tag, e.id(), e.classNames(), candidates);
-            for (Stylesheet.Rule r : candidates) {
-                if (!eqPseudo(r.selector().pseudoElement, pseudo)) continue;
-                if (r.media() != null && !r.media().matches(vw, vh)) continue;
-                if (!r.selector().matches(e, state)) continue;
-                for (Declaration d : r.declarations()) {
-                    int tier = d.important() ? (origin == 0 ? 6 : 4) : (origin == 0 ? 0 : 2);
-                    out.add(new Weighted(tier, r.selector().specificity, r.order(), d));
+    /** Whether only rules style [e]: no style="" and no presentational attributes, so another element with its rules styles the same. */
+    private boolean plain(Element e) {
+        if (!e.attr("style").isBlank()) return false;
+        scratch.clear();
+        presentational(e, scratch);
+        return scratch.isEmpty();
+    }
+
+    private void pseudo(Element e, int kind, Style parentStyle, Customs parentCustoms, Map<String, String> parentDeclared,
+                        Map<Element, Style> into, Node old, Node node, boolean kept) {
+        Found found = found(e, kind, old);
+        node.found[kind] = found;
+        Style st;
+        if (kept && found == old.found[kind]) {
+            st = old.pseudo[kind];
+        } else if (found == Found.NONE && kind != Stylesheet.PLACEHOLDER) {
+            st = null;
+        } else {
+            Shared key = new Shared(kind, found, parentStyle, parentCustoms, parentDeclared);
+            Shared same = shared.get(key);
+            if (same != null) {
+                st = same.style;
+            } else {
+                st = null;
+                List<Weighted> list = weighted(e, kind, found);
+                if (!list.isEmpty() || kind == Stylesheet.PLACEHOLDER) {
+                    Customs own = customProps(list, parentCustoms);
+                    Map<String, String> decl = resolve(list, own, e);
+                    String content = decl.get("content");
+                    boolean drawn = (kind != Stylesheet.BEFORE && kind != Stylesheet.AFTER)
+                            || !(content == null || content.equals("none") || content.equals("normal"));
+                    if (drawn) st = Style.compute(decl, parentStyle, rootFontSize, vw, vh);
                 }
+                shared.put(key, key.with(st, null, null));
             }
         }
-        if (pseudo == null) {
+        node.pseudo[kind] = st;
+        if (st != null) into.put(e, st);
+    }
+
+    /**
+     * What an element (or pseudo-element) with these rules computes to under a parent with this style,
+     * these custom properties and these declared values (Blink's MatchedPropertiesCache, which also needs
+     * the inherited values to be the same): siblings with the same classes, and the children of those,
+     * work it out once. A shared style is never one of the element's ancestors' (those had other parents).
+     */
+    private static final class Shared {
+        final int kind;
+        final Stylesheet.Rule[] rules;
+        final Style parent;
+        final Customs parentCustoms;
+        final Map<String, String> parentDeclared;
+        final int hash;
+        Style style;
+        Customs customs;
+        Map<String, String> declared;
+
+        Shared(int kind, Found found, Style parent, Customs parentCustoms, Map<String, String> parentDeclared) {
+            this.kind = kind;
+            this.rules = found.applied();
+            this.parent = parent;
+            this.parentCustoms = parentCustoms;
+            this.parentDeclared = parentDeclared;
+            int h = kind;
+            for (Stylesheet.Rule r : rules) h = 31 * h + r.order();
+            h = 31 * h + System.identityHashCode(parent);
+            h = 31 * h + System.identityHashCode(parentCustoms);
+            this.hash = 31 * h + System.identityHashCode(parentDeclared);
+        }
+
+        Shared with(Style style, Customs customs, Map<String, String> declared) {
+            this.style = style;
+            this.customs = customs;
+            this.declared = declared;
+            return this;
+        }
+
+        @Override
+        public int hashCode() {
+            return hash;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (!(o instanceof Shared k) || k.hash != hash || k.kind != kind || k.parent != parent || k.parentCustoms != parentCustoms
+                    || k.parentDeclared != parentDeclared || k.rules.length != rules.length) return false;
+            for (int i = 0; i < rules.length; i++) if (k.rules[i] != rules[i]) return false;
+            return true;
+        }
+    }
+
+    /**
+     * The rules that style [e] as [kind]. With the [old] node of a pass over the same document, only the
+     * rules that depend on hover state are tried again, and [old]'s own answer comes back if they match
+     * as they did, so the caller can tell nothing changed.
+     */
+    private Found found(Element e, int kind, Node old) {
+        Found was = old == null ? null : old.found[kind];
+        if (was != null) {
+            if (was.dynamic.length == 0) return was;
+            boolean[] hits = new boolean[was.dynamic.length];
+            for (int i = 0; i < hits.length; i++) hits[i] = matcher.matches(was.dynamic[i], e);
+            return Arrays.equals(hits, was.hits) ? was : new Found(was.fixed, was.fixedUa, was.dynamic, was.dynamicUa, hits);
+        }
+        matched.clear();
+        dynamic.clear();
+        matcher.collect(ua, e, kind, matched, dynamic);
+        int fixedUa = matched.size(), dynamicUa = dynamic.size();
+        matcher.collect(author, e, kind, matched, dynamic);
+        if (matched.isEmpty() && dynamic.isEmpty()) return Found.NONE;
+        Stylesheet.Rule[] d = dynamic.toArray(Found.NO_RULES);
+        boolean[] hits = new boolean[d.length];
+        for (int i = 0; i < d.length; i++) hits[i] = matcher.matches(d[i], e);
+        return new Found(matched.toArray(Found.NO_RULES), fixedUa, d, dynamicUa, hits);
+    }
+
+    /** Every declaration that applies to [e] (or its [kind] of pseudo-element) with [found]'s rules, lowest precedence first. */
+    private List<Weighted> weighted(Element e, int kind, Found found) {
+        List<Weighted> out = new ArrayList<>();
+        for (int i = 0; i < found.fixed.length; i++) add(found.fixed[i], i < found.fixedUa, out);
+        for (int i = 0; i < found.dynamic.length; i++) if (found.hits[i]) add(found.dynamic[i], i < found.dynamicUa, out);
+        if (kind == Stylesheet.ELEMENT) {
             presentational(e, out);
             String inline = e.attr("style");
             if (!inline.isBlank()) {
@@ -126,8 +293,106 @@ public final class Styler {
         return out;
     }
 
-    private static boolean eqPseudo(String a, String b) {
-        return a == null ? b == null : a.equals(b);
+    private static void add(Stylesheet.Rule r, boolean ua, List<Weighted> out) {
+        for (Declaration d : r.declarations()) {
+            int tier = d.important() ? (ua ? 6 : 4) : (ua ? 0 : 2);
+            out.add(new Weighted(tier, r.selector().specificity, r.order(), d));
+        }
+    }
+
+    /** The rules one element matched for one kind: those that do not depend on hover state, and those that do with whether they did. */
+    private static final class Found {
+        static final Stylesheet.Rule[] NO_RULES = new Stylesheet.Rule[0];
+        static final Found NONE = new Found(NO_RULES, 0, NO_RULES, 0, new boolean[0]);
+        /** The first fixedUa of fixed (dynamicUa of dynamic) are the browser's. */
+        final Stylesheet.Rule[] fixed, dynamic;
+        final int fixedUa, dynamicUa;
+        final boolean[] hits;
+
+        private Stylesheet.Rule[] applied;
+
+        Found(Stylesheet.Rule[] fixed, int fixedUa, Stylesheet.Rule[] dynamic, int dynamicUa, boolean[] hits) {
+            this.fixed = fixed;
+            this.fixedUa = fixedUa;
+            this.dynamic = dynamic;
+            this.dynamicUa = dynamicUa;
+            this.hits = hits;
+        }
+
+        /** The rules that apply: the fixed ones, then the dynamic ones that matched. */
+        Stylesheet.Rule[] applied() {
+            if (applied == null) {
+                int n = fixed.length;
+                for (boolean h : hits) if (h) n++;
+                if (n == fixed.length) {
+                    applied = fixed;
+                } else {
+                    applied = Arrays.copyOf(fixed, n);
+                    for (int i = 0, k = fixed.length; i < hits.length; i++) if (hits[i]) applied[k++] = dynamic[i];
+                }
+            }
+            return applied;
+        }
+    }
+
+    /** What a pass found for one element. */
+    private static final class Node {
+        final String tag;
+        final int children;
+        final Found[] found = new Found[Stylesheet.KINDS];
+        final Style[] pseudo = new Style[Stylesheet.KINDS];
+        Style style;
+        Customs customs;
+        /** Only the properties that are not inherited: all a descendant's 'inherit' reads. */
+        Map<String, String> declared;
+
+        Node(Element e) {
+            tag = e.normalName();
+            children = e.childrenSize();
+        }
+
+        boolean fits(Element e) {
+            return tag.equals(e.normalName()) && children == e.childrenSize();
+        }
+    }
+
+    /**
+     * One pass's nodes, by place in document order, kept for the next pass over the same document. Kept
+     * by the root element, weakly, and holding no element: it goes when the document does.
+     */
+    private static final class Memo {
+        private static final Map<Element, Memo> KEPT = Collections.synchronizedMap(new WeakHashMap<>());
+        final Stylesheet ua, author;
+        final double vw, vh;
+        Node[] nodes;
+        int size;
+
+        Memo(Stylesheet ua, Stylesheet author, double vw, double vh, int capacity) {
+            this.ua = ua;
+            this.author = author;
+            this.vw = vw;
+            this.vh = vh;
+            nodes = new Node[Math.max(16, capacity)];
+        }
+
+        /** The memo of [root]'s last pass if it is for the same sheets and size, taken so no other pass shares it. */
+        static Memo take(Element root, Styler s) {
+            Memo m = KEPT.remove(root);
+            return m != null && m.ua == s.ua && m.author == s.author && m.vw == s.vw && m.vh == s.vh ? m : null;
+        }
+
+        static void keep(Element root, Memo m) {
+            if (m != null) KEPT.put(root, m);
+        }
+
+        Node node(int at) {
+            return at < size ? nodes[at] : null;
+        }
+
+        void put(int at, Node n) {
+            if (at >= nodes.length) nodes = Arrays.copyOf(nodes, Math.max(at + 1, nodes.length * 2));
+            nodes[at] = n;
+        }
     }
 
     /** HTML attributes that style: width and height on images, bgcolor, align, color on font. */
@@ -167,18 +432,76 @@ public final class Styler {
     }
 
     /** The custom properties of an element: its parent's, with its own declared ones on top. */
-    private static Map<String, String> customProps(List<Weighted> list, Map<String, String> parent) {
+    private static Customs customProps(List<Weighted> list, Customs parent) {
         Map<String, String> own = null;
         for (Weighted w : list) {
-            if (!w.d.property().startsWith("--")) continue;
-            if (own == null) own = new HashMap<>(parent);
-            own.put(w.d.property(), w.d.value());
+            String name = w.d.property();
+            if (!name.startsWith("--")) continue;
+            // Sheets like Tailwind's set the same few dozen on every element: the parent's serve until
+            // a value differs from them.
+            if (own == null) {
+                if (w.d.value().equals(parent.get(name))) continue;
+                own = new HashMap<>();
+            }
+            own.put(name, w.d.value());
         }
-        return own == null ? parent : own;
+        return own == null ? parent : parent.with(own);
+    }
+
+    /**
+     * Custom properties: an element's own over its parent's, not a copy of them (github's :root sets
+     * hundreds, and an element setting one more copied them all). Past a depth the chain is flattened,
+     * so a lookup stays short however deep the page.
+     */
+    private static final class Customs {
+        static final Customs NONE = new Customs(null, Map.of(), 0);
+        private static final int MAX_DEPTH = 16;
+        private final Customs parent;
+        private final Map<String, String> own;
+        private final int depth;
+
+        private Customs(Customs parent, Map<String, String> own, int depth) {
+            this.parent = parent;
+            this.own = own;
+            this.depth = depth;
+        }
+
+        String get(String name) {
+            for (Customs c = this; c != null; c = c.parent) {
+                String v = c.own.get(name);
+                if (v != null) return v;
+            }
+            return null;
+        }
+
+        Customs with(Map<String, String> mine) {
+            if (depth < MAX_DEPTH) return new Customs(this, mine, depth + 1);
+            Map<String, String> all = new HashMap<>();
+            collect(all);
+            all.putAll(mine);
+            return new Customs(null, all, 0);
+        }
+
+        /** Every property here into [into], nearer ones winning. */
+        private void collect(Map<String, String> into) {
+            if (parent != null) parent.collect(into);
+            into.putAll(own);
+        }
+    }
+
+    /** [all] without the inherited properties, which a child takes from its parent's style, not from these. */
+    private static Map<String, String> notInherited(Map<String, String> all) {
+        Map<String, String> out = null;
+        for (Map.Entry<String, String> en : all.entrySet()) {
+            if (Style.INHERITED.contains(en.getKey())) continue;
+            if (out == null) out = new HashMap<>();
+            out.put(en.getKey(), en.getValue());
+        }
+        return out == null ? Map.of() : out;
     }
 
     /** The winning value of each longhand, vars substituted. */
-    private Map<String, String> resolve(List<Weighted> list, Map<String, String> customs, Element parent) {
+    private Map<String, String> resolve(List<Weighted> list, Customs customs, Element parent) {
         Map<String, String> out = new LinkedHashMap<>();
         Map<String, Optional<String>> expanded = null;
         for (Weighted w : list) {
@@ -223,7 +546,7 @@ public final class Styler {
      * [customs] (empty if it was invalid), so one used twice at every level of a chain is worked out
      * once, not 2^levels times.
      */
-    private static String substitute(String value, Map<String, String> customs, Map<String, Optional<String>> expanded, int depth, int limit) {
+    private static String substitute(String value, Customs customs, Map<String, Optional<String>> expanded, int depth, int limit) {
         if (depth > 16) return null;
         StringBuilder b = new StringBuilder();
         int i = 0;
@@ -254,7 +577,7 @@ public final class Styler {
         }
     }
 
-    private static String expand(String name, String custom, Map<String, String> customs, Map<String, Optional<String>> expanded, int depth) {
+    private static String expand(String name, String custom, Customs customs, Map<String, Optional<String>> expanded, int depth) {
         Optional<String> done = expanded.get(name);
         if (done != null) return done.orElse(null);
         // Invalid while it is being worked out: a property that refers back to itself is a cycle.

@@ -23,27 +23,69 @@ public final class Selector {
     final List<Character> combinators;  // between compounds: ' ', '>', '+', '~'
     public final int specificity;
     public final String pseudoElement;  // "before", "after", "marker", "placeholder", or null
+    /** Whether it depends on :hover or :active, anywhere in it. */
+    final boolean dynamic;
+    /** Whether some compound can match nothing (an unsupported pseudo-class), so the selector never matches. */
+    final boolean never;
+    /** Names some ancestor of the subject must have, hashed for {@link AncestorFilter}. */
+    final int[] ancestorHashes;
+    /** The names the subject itself must have (tag, id, classes, attributes), one bit each of 64, see {@link #bit}. */
+    final long subjectMask;
 
     private Selector(List<Compound> compounds, List<Character> combinators) {
         this.compounds = compounds;
         this.combinators = combinators;
         int s = 0;
         String pe = null;
+        boolean dyn = false, nev = false;
         for (Compound c : compounds) {
             s += c.specificity();
             if (c.pseudoElement != null) pe = c.pseudoElement;
+            dyn |= c.dynamic();
+            nev |= c.never;
         }
         this.specificity = s;
         this.pseudoElement = pe;
+        this.dynamic = dyn;
+        this.never = nev;
+        this.ancestorHashes = ancestorHashes(compounds, combinators);
+        Compound c = subject();
+        long m = 0;
+        if (c.tag != null) m |= bit(AncestorFilter.hash(c.tag, AncestorFilter.TAG));
+        if (c.id != null) m |= bit(AncestorFilter.hash(c.id, AncestorFilter.ID));
+        for (String cls : c.classes) m |= bit(AncestorFilter.hash(cls, AncestorFilter.CLASS));
+        for (String[] a : c.attrs) if (!a[0].startsWith("abs:")) m |= bit(AncestorFilter.hash(a[0], AncestorFilter.ATTR));
+        this.subjectMask = m;
+    }
+
+    /** One bit for a hashed name: an element lacks a name whose bit its own mask does not have. */
+    static long bit(int hash) {
+        return 1L << (hash >>> 26);
+    }
+
+    /**
+     * The names in compounds that must match an ancestor of the subject: those followed by a descendant
+     * or child combinator (whatever comes after, the element they match is the parent of an ancestor, of
+     * the subject, or of a preceding sibling of either). Only the names in the compounds themselves, not
+     * those in :is() or :not(); at most 8, nearest the subject first.
+     */
+    private static int[] ancestorHashes(List<Compound> compounds, List<Character> combinators) {
+        int[] out = new int[8];
+        int n = 0;
+        for (int i = compounds.size() - 2; i >= 0 && n < out.length; i--) {
+            char comb = combinators.get(i);
+            if (comb != ' ' && comb != '>') continue;
+            Compound c = compounds.get(i);
+            if (c.id != null && n < out.length) out[n++] = AncestorFilter.hash(c.id, AncestorFilter.ID);
+            for (String cls : c.classes) if (n < out.length) out[n++] = AncestorFilter.hash(cls, AncestorFilter.CLASS);
+            for (String[] a : c.attrs) if (n < out.length && !a[0].startsWith("abs:")) out[n++] = AncestorFilter.hash(a[0], AncestorFilter.ATTR);
+            if (c.tag != null && n < out.length) out[n++] = AncestorFilter.hash(c.tag, AncestorFilter.TAG);
+        }
+        return java.util.Arrays.copyOf(out, n);
     }
 
     Compound subject() {
         return compounds.get(compounds.size() - 1);
-    }
-
-    boolean dynamic() {
-        for (Compound c : compounds) if (c.dynamic()) return true;
-        return false;
     }
 
     public static final class Compound {
@@ -64,7 +106,7 @@ public final class Selector {
         boolean dynamic() {
             for (Pseudo p : pseudos) {
                 if (p.name.equals("hover") || p.name.equals("active")) return true;
-                if (p.args != null) for (Selector s : p.args) if (s.dynamic()) return true;
+                if (p.args != null) for (Selector s : p.args) if (s.dynamic) return true;
             }
             return false;
         }
@@ -314,8 +356,9 @@ public final class Selector {
 
     // ---------------------------------------------------------------- matching
 
-    public boolean matches(Element e, State state) {
-        return matchFrom(compounds.size() - 1, e, state) == MATCH;
+    /** Whether [e] matches, in hover state [state]; ids and classes ignore ASCII case if the document is in [quirks] mode. */
+    public boolean matches(Element e, State state, boolean quirks) {
+        return !never && matchFrom(compounds.size() - 1, e, state, quirks) == MATCH;
     }
 
     /**
@@ -326,29 +369,29 @@ public final class Selector {
      */
     private static final int MATCH = 0, FAILS_HERE = 1, FAILS_ALL_SIBLINGS = 2, FAILS_COMPLETELY = 3;
 
-    private int matchFrom(int index, Element e, State state) {
-        if (!matchCompound(compounds.get(index), e, state)) return FAILS_HERE;
+    private int matchFrom(int index, Element e, State state, boolean quirks) {
+        if (!matchCompound(compounds.get(index), e, state, quirks)) return FAILS_HERE;
         if (index == 0) return MATCH;
         char comb = combinators.get(index - 1);
         switch (comb) {
             case '>' -> {
                 Element p = e.parent();
-                return p == null ? FAILS_COMPLETELY : matchFrom(index - 1, p, state);
+                return p == null ? FAILS_COMPLETELY : matchFrom(index - 1, p, state, quirks);
             }
             case '+' -> {
                 Element s = e.previousElementSibling();
-                return s == null ? FAILS_ALL_SIBLINGS : matchFrom(index - 1, s, state);
+                return s == null ? FAILS_ALL_SIBLINGS : matchFrom(index - 1, s, state, quirks);
             }
             case '~' -> {
                 for (Element s = e.previousElementSibling(); s != null; s = s.previousElementSibling()) {
-                    int r = matchFrom(index - 1, s, state);
+                    int r = matchFrom(index - 1, s, state, quirks);
                     if (r != FAILS_HERE) return r;
                 }
                 return FAILS_ALL_SIBLINGS;
             }
             default -> {
                 for (Element p = e.parent(); p != null; p = p.parent()) {
-                    int r = matchFrom(index - 1, p, state);
+                    int r = matchFrom(index - 1, p, state, quirks);
                     if (r == MATCH || r == FAILS_COMPLETELY) return r;
                 }
                 return FAILS_COMPLETELY;
@@ -356,13 +399,48 @@ public final class Selector {
         }
     }
 
-    static boolean matchCompound(Compound c, Element e, State state) {
+    static boolean matchCompound(Compound c, Element e, State state, boolean quirks) {
         if (c.never) return false;
         if (c.tag != null && !c.tag.equals(e.normalName())) return false;
-        if (c.id != null && !c.id.equals(e.id())) return false;
-        for (String cls : c.classes) if (!e.hasClass(cls)) return false;
+        if (c.id != null && !(quirks ? asciiEqualsIgnoreCase(c.id, e.id()) : c.id.equals(e.id()))) return false;
+        if (!c.classes.isEmpty()) {
+            String list = e.attr("class");
+            for (String cls : c.classes) if (!hasClass(list, cls, quirks)) return false;
+        }
         for (String[] a : c.attrs) if (!attr(e, a)) return false;
-        for (Pseudo p : c.pseudos) if (!pseudo(p, e, state)) return false;
+        for (Pseudo p : c.pseudos) if (!pseudo(p, e, state, quirks)) return false;
+        return true;
+    }
+
+    /** HTML's whitespace, what separates the names in a class attribute. */
+    static boolean space(char c) {
+        return c == ' ' || c == '\t' || c == '\n' || c == '\f' || c == '\r';
+    }
+
+    /** Whether the class attribute [list] has [cls], ignoring ASCII case in quirks mode, as browsers do. */
+    static boolean hasClass(String list, String cls, boolean quirks) {
+        int n = list.length(), len = cls.length();
+        for (int i = 0; i < n; ) {
+            while (i < n && space(list.charAt(i))) i++;
+            int start = i;
+            while (i < n && !space(list.charAt(i))) i++;
+            if (i - start == len && (quirks ? asciiRegionEqualsIgnoreCase(list, start, cls, len) : list.startsWith(cls, start))) return true;
+        }
+        return false;
+    }
+
+    static boolean asciiEqualsIgnoreCase(String a, String b) {
+        return a.length() == b.length() && asciiRegionEqualsIgnoreCase(b, 0, a, a.length());
+    }
+
+    private static boolean asciiRegionEqualsIgnoreCase(String s, int from, String t, int len) {
+        for (int k = 0; k < len; k++) {
+            char x = s.charAt(from + k), y = t.charAt(k);
+            if (x == y) continue;
+            if (x >= 'A' && x <= 'Z') x += 32;
+            if (y >= 'A' && y <= 'Z') y += 32;
+            if (x != y) return false;
+        }
         return true;
     }
 
@@ -386,7 +464,7 @@ public final class Selector {
         };
     }
 
-    private static boolean pseudo(Pseudo p, Element e, State state) {
+    private static boolean pseudo(Pseudo p, Element e, State state, boolean quirks) {
         switch (p.name) {
             case "always":
                 return true;
@@ -395,11 +473,11 @@ public final class Selector {
             case "active":
                 return state.active().contains(e);
             case "not":
-                for (Selector s : p.args) if (s.matches(e, state)) return false;
+                for (Selector s : p.args) if (s.matches(e, state, quirks)) return false;
                 return true;
             case "is":
             case "where":
-                for (Selector s : p.args) if (s.matches(e, state)) return true;
+                for (Selector s : p.args) if (s.matches(e, state, quirks)) return true;
                 return false;
             case "root":
                 return e.parent() == null || e.parent() instanceof org.jsoup.nodes.Document;

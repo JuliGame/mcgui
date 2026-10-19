@@ -20,7 +20,7 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
 
 | Package | What |
 |---|---|
-| `html/css` | Parsing (`CssParser`, `Selector`, `Media`), shorthand expansion, colour and value reading |
+| `html/css` | Parsing (`CssParser`, `Selector`, `Media`), the rule index (`Stylesheet`) and matching (`Matcher`, `AncestorFilter`), shorthand expansion, colour and value reading |
 | `html/style` | The cascade (`Styler`, with the browser's default sheet `UA_CSS`), computed styles (`Style`), lengths (`Len`: px, %, and calc/min/max/clamp kept symbolic until layout) |
 | `html/layout` | The box tree (`BoxBuilder`), and `Layout` with `InlineLayout`, `FlexLayout`, `GridLayout`, `TableLayout` |
 | `html/paint` | `Painter` (stacking order, hit regions), backgrounds and gradients, shadows and blur, filters, transforms, form controls |
@@ -39,6 +39,20 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
   grid lay an item out several times (measure, size, stretch), and without the
   memo nested flex containers cost 2^depth. A layout that depends on something
   other than its four inputs breaks the memo.
+- **Matching tries only the rules an element could match**, as browsers do: `Stylesheet` buckets each
+  rule by its rightmost compound (id, `:root`, a class, an attribute name, a tag, or none) and by the
+  pseudo-element it styles; `Matcher` skips a rule whose subject needs a name the element lacks (a
+  64-bit mask) or whose ancestors need names no ancestor has (`AncestorFilter`, a counting Bloom filter
+  the style walk pushes and pops). Both may only say "maybe": a selector feature that matches by
+  something else than these names must not put its rule in a bucket, or contribute a hash. `MatcherTest`
+  checks the index against trying every rule. Ids and classes ignore ASCII case only in quirks mode.
+- **Styles are reused between passes over one document.** `Styler` keeps what a pass found (per element
+  by place in document order, weakly by the root element, holding no elements) and the next pass with the
+  same sheets and size starts from it: only rules that depend on :hover/:active are tried again, and an
+  element whose rules came out the same under a parent that did keeps its `Style` object. Within a pass,
+  elements with the same rules under the same parent style share one `Style`. So a `Style` must never be
+  modified after `Style.compute`, and a document must never be edited once drawn (a click edits a fresh
+  copy, `Session.editable`).
 - **Measuring must not disturb a layout in progress**: `minContent`/
   `maxContent` resolve edges with an unknown containing block, so
   `intrinsicPair` saves and restores the box's margins, borders and paddings.
