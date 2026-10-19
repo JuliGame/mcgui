@@ -217,8 +217,11 @@ public final class UIEnginePlugin extends JavaPlugin {
                 int[] size = viewSize(page);
                 var canvas = UIFramework.get().canvas(size[0], size[1]);
                 double scale = canvas.height() / Screens.designHeight(page, viewHeight());
+                // A copy: the page's own document is copied by sessions on other render threads meanwhile, and drawing
+                // fills in jsoup's child lists, which a copy being made at the same moment could read half written.
+                var doc = page.document.clone();
                 for (int i = 0; i < WARM_ROUNDS; i++) {
-                    var frame = ai.resourcepack.ui.html.HtmlRenderer.render(page, canvas.width(), canvas.height(), scale, i * 40.0,
+                    var frame = ai.resourcepack.ui.html.HtmlRenderer.render(page, doc, canvas.width(), canvas.height(), scale, i * 40.0,
                             ai.resourcepack.ui.html.css.Selector.State.NONE);
                     canvas.draw(frame.image(), 0, 0);
                 }
@@ -269,7 +272,7 @@ public final class UIEnginePlugin extends JavaPlugin {
                 if (!kept.claim(key, p -> {}).mine()) continue;
                 FirstPictures.Picture picture = null;
                 try {
-                    var frame = HtmlRenderer.render(page, filled.doc(), size[0] * 128, size[1] * 128, scale, 0, HtmlRenderer.state(null, null),
+                    var frame = HtmlRenderer.render(page, filled.copy(), size[0] * 128, size[1] * 128, scale, 0, HtmlRenderer.state(null, null),
                             null, null, renderTimeout());
                     var canvas = UIFramework.get().canvas(size[0], size[1]);
                     canvas.draw(frame.image(), 0, 0);

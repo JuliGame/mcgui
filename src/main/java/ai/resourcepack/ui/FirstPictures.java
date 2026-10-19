@@ -3,18 +3,15 @@ package ai.resourcepack.ui;
 import ai.resourcepack.ui.html.HtmlRenderer;
 import ai.resourcepack.ui.html.Page;
 import ai.resourcepack.ui.html.paint.Painter;
-import ai.resourcepack.ui.html.style.Style;
 import ai.resourcepack.uiframework.api.Canvas;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
-import org.jsoup.select.Elements;
 
 import java.awt.image.BufferedImage;
 import java.awt.image.DataBufferInt;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.IdentityHashMap;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -25,9 +22,11 @@ import java.util.function.Consumer;
 
 /**
  * The first picture of each page at each size, kept so that the next session to show that page there starts
- * from it instead of drawing it. Its canvas is handed the picture's tiles (the same arrays: nothing is drawn or
- * encoded), so the first thing its viewer is sent is the page, one packet a map, and it carries on from the
- * picture's hit regions and styles, put on its own copy of the document, exactly as if it had drawn it itself.
+ * from it instead of drawing it. Its canvas is handed the picture's tiles and colours (the same arrays: nothing is
+ * drawn, encoded or copied), so the first thing its viewer is sent is the page, one packet a map, and it carries on
+ * from the picture's own frame and document, shared, exactly as if it had drawn it itself. What a session draws
+ * into later (the image, the canvas's colours) is copied first, on the render thread; the document and the frame
+ * are never drawn into (see {@link Picture}). A session that only watches holds next to nothing of its own.
  *
  * <p>Keyed by all a first picture depends on ({@link Key}): the page, one revision of it (a reload makes a new
  * {@link Page}), the canvas's size in maps, the scale, and every placeholder value filled into the document.
@@ -159,63 +158,47 @@ final class FirstPictures {
     }
 
     /**
-     * One first picture: the frame drawn, its canvas, and where in document order each element its hit regions
-     * and styles name is, so they can be put on another copy of the document. Never changed once made; its image
-     * is shared by every frame made from it, so whoever paints into one copies it first.
+     * One first picture: the frame drawn, with its document, and its canvas. Never changed once made, and shared
+     * whole by every session that takes it: they show its frame and keep its document as their own until a click
+     * gives them a copy (Session.editable). Drawing never writes to a document or a frame, only to images and
+     * canvases, and those are copied before they are drawn into: the image by whoever paints into it ({@link #own}),
+     * the canvas's colours by the canvas itself (Canvas.detach, on the drawing thread).
      */
     static final class Picture {
         final Key key;
-        private final HtmlRenderer.Frame frame;
-        /** Each hit region's element, as its place in document order. */
-        private final int[] hitAt;
-        /** Each element's style, by place in document order; null where it has none. */
-        private final Style[] styles;
-        private final int styled;
+        /** The picture's frame: its image, hit regions and styles, of [frame.document()]. */
+        final HtmlRenderer.Frame frame;
         /** The canvas with the picture on it, which nothing draws into any more. */
         final Canvas canvas;
         final long bytes;
 
-        private Picture(Key key, HtmlRenderer.Frame frame, int[] hitAt, Style[] styles, int styled, Canvas canvas) {
+        private Picture(Key key, HtmlRenderer.Frame frame, Canvas canvas) {
             this.key = key;
             this.frame = frame;
-            this.hitAt = hitAt;
-            this.styles = styles;
-            this.styled = styled;
             this.canvas = canvas;
             BufferedImage img = frame.image();
             // Its pixels, the canvas's colours (3 bytes a pixel) and tiles (1), and a little for each region and style.
             long pixels = (long) img.getWidth() * img.getHeight();
-            this.bytes = 4 * pixels + 4L * canvas.width() * canvas.height() + 96L * hitAt.length + 8L * styles.length;
+            this.bytes = 4 * pixels + 4L * canvas.width() * canvas.height() + 96L * frame.hits().size() + 64L * frame.styles().size();
         }
 
         /**
          * [frame], a whole first picture of [key]'s document, drawn onto [canvas], which nothing draws into after
-         * (a {@link Canvas#copy()} taken at once). On the thread that drew it. Null if a hit region or style names
-         * an element that is not in the document, which another copy could not be given.
+         * (a {@link Canvas#copy()} taken at once). On the thread that drew it, before anyone else can see it.
          */
         static Picture of(Key key, HtmlRenderer.Frame frame, Canvas canvas) {
-            Elements all = frame.document().getAllElements();
-            Map<Element, Integer> place = new IdentityHashMap<>(all.size() * 2);
-            for (int i = 0; i < all.size(); i++) place.put(all.get(i), i);
-            List<Painter.Hit> hits = frame.hits();
-            int[] hitAt = new int[hits.size()];
-            for (int i = 0; i < hitAt.length; i++) {
-                Painter.Hit h = hits.get(i);
-                Integer at = place.get(h.element());
-                if (at == null) return null;
-                hitAt[i] = at;
+            for (Painter.Hit h : frame.hits()) {
                 // Every session sharing these reads them: an Area works its bounds out the first time it is asked,
                 // so that is done here, before they are shared, and they are only read from then on.
                 h.shape().getBounds2D();
                 if (h.clip() != null) h.clip().getBounds2D();
             }
-            Style[] styles = new Style[all.size()];
-            for (Map.Entry<Element, Style> e : frame.styles().entrySet()) {
-                Integer at = place.get(e.getKey());
-                if (at == null) return null;
-                styles[at] = e.getValue();
-            }
-            return new Picture(key, frame, hitAt, styles, frame.styles().size(), canvas);
+            // The document is drawn by several sessions at once from now on. jsoup keeps each element's child elements
+            // the first time they are asked for, in its attributes, adding an entry (and the attributes themselves if
+            // it had none): done here for every element, so that later reads only ever replace that entry's value
+            // (under jsoup's own lock) and never change the attributes another thread is reading.
+            for (Element e : frame.document().getAllElements()) e.children();
+            return new Picture(key, frame, canvas);
         }
 
         /** The picture (shared: copy it before painting into it). */
@@ -223,24 +206,9 @@ final class FirstPictures {
             return frame.image();
         }
 
-        /**
-         * The picture as a frame of [doc], a copy of the same page filled with the same values: its regions and
-         * styles on [doc]'s elements. Null if [doc] is not shaped like the document it was drawn of.
-         */
-        HtmlRenderer.Frame frameFor(Document doc) {
-            Elements all = doc.getAllElements();
-            if (all.size() != styles.length) return null;
-            List<Painter.Hit> from = frame.hits();
-            List<Painter.Hit> hits = new ArrayList<>(from.size());
-            for (int i = 0; i < hitAt.length; i++) {
-                Painter.Hit h = from.get(i);
-                hits.add(new Painter.Hit(h.shape(), h.clip(), all.get(hitAt[i]), h.pointer()));
-            }
-            Map<Element, Style> styleOf = new IdentityHashMap<>(styled * 2);
-            for (int i = 0; i < styles.length; i++) if (styles[i] != null) styleOf.put(all.get(i), styles[i]);
-            HtmlRenderer.Frame f = frame;
-            return new HtmlRenderer.Frame(f.image(), f.scale(), f.viewportWidth(), f.viewportHeight(), f.pageHeight(), f.scrollY(),
-                    hits, styleOf, doc, f.page());
+        /** The document the picture is of, shared by every session showing it (never written to). */
+        Document document() {
+            return frame.document();
         }
     }
 }

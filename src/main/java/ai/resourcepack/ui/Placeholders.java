@@ -10,6 +10,9 @@ import org.jsoup.nodes.Node;
 import org.jsoup.nodes.TextNode;
 
 import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
 import java.util.function.UnaryOperator;
 import java.util.logging.Logger;
 import java.util.regex.Matcher;
@@ -46,11 +49,21 @@ public final class Placeholders {
     }
 
     /**
-     * A copy of a page's document filled in for a player. [key] is every value put in, in document order: two
-     * copies of the same page with the same key are the same document. [personal]: some value was the player's
-     * own (their name, where they are, anything PlaceholderAPI filled), so the copy is theirs alone.
+     * A page's document as filled in for a player: the values, worked out (on the server thread, where they are
+     * read) without copying the document. [values] are every value put in, in document order, and [key] all of
+     * them in one string: two copies of the same page with the same key are the same document. [personal]: some
+     * value was the player's own (their name, where they are, anything PlaceholderAPI filled), so the copy is theirs
+     * alone. {@link #copy()} makes the filled copy, on any thread.
      */
-    public record Filled(Document doc, String key, boolean personal) {}
+    public record Filled(Document source, List<String> values, String key, boolean personal) {
+        /** A copy of [source] with [values] put in: what the player sees. Any thread; [source] is only read. */
+        public Document copy() {
+            Document copy = source.clone();
+            Iterator<String> next = values.iterator();
+            walk(copy, text -> next.next(), true);
+            return copy;
+        }
+    }
 
     /** [doc] with its placeholders filled for [player] (null: the server's own values only). */
     public static Filled fill(Document doc, Player player) {
@@ -60,52 +73,53 @@ public final class Placeholders {
     /**
      * [doc] with [fill] applied to every text and attribute that may hold a placeholder. Personal if [anyone]
      * (what the text is filled with for nobody in particular; null when [fill] is that already) gives another value.
+     * [doc] is only read: it is the page's own, shared by every session and copied on render threads.
      */
     static Filled fill(Document doc, UnaryOperator<String> fill, UnaryOperator<String> anyone) {
-        Document copy = doc.clone();
-        Walk w = new Walk(fill, anyone);
-        w.walk(copy);
-        return new Filled(copy, w.key.toString(), w.personal);
-    }
-
-    private static final class Walk {
-        final UnaryOperator<String> fill, anyone;
-        final StringBuilder key = new StringBuilder();
-        boolean personal;
-
-        Walk(UnaryOperator<String> fill, UnaryOperator<String> anyone) {
-            this.fill = fill;
-            this.anyone = anyone;
-        }
-
-        String apply(String text) {
+        List<String> values = new ArrayList<>();
+        StringBuilder key = new StringBuilder();
+        boolean[] personal = {false};
+        walk(doc, text -> {
             String out = fill.apply(text);
+            values.add(out);
             // Separated by a character no value has, so "ab" + "c" never reads as "a" + "bc".
             key.append(out).append('\0');
-            if (!personal && anyone != null && !out.equals(anyone.apply(text))) personal = true;
+            if (!personal[0] && anyone != null && !out.equals(anyone.apply(text))) personal[0] = true;
             return out;
-        }
+        }, false);
+        return new Filled(doc, values, key.toString(), personal[0]);
+    }
 
-        void walk(Node node) {
-            if (node instanceof TextNode t) {
-                String text = t.getWholeText();
-                if (text.indexOf('{') >= 0 || text.indexOf('%') >= 0) t.text(apply(text));
-                return;
+    /**
+     * Every text and attribute of [node] that may hold a placeholder, in document order, given to [value]; put back
+     * as it answers if [write]. Read only otherwise: not even an empty attribute list is made (jsoup makes one on
+     * {@code attributes()}).
+     */
+    private static void walk(Node node, UnaryOperator<String> value, boolean write) {
+        if (node instanceof TextNode t) {
+            String text = t.getWholeText();
+            if (text.indexOf('{') >= 0 || text.indexOf('%') >= 0) {
+                String out = value.apply(text);
+                if (write) t.text(out);
             }
-            if (node instanceof Element e) {
-                // Scripts and styles are not text a player reads; leave CSS braces alone.
-                String tag = e.normalName();
-                if (tag.equals("style") || tag.equals("script")) return;
+            return;
+        }
+        if (node instanceof Element e) {
+            // Scripts and styles are not text a player reads; leave CSS braces alone.
+            String tag = e.normalName();
+            if (tag.equals("style") || tag.equals("script")) return;
+            if (e.attributesSize() > 0) {
                 for (Attribute a : e.attributes()) {
                     String v = a.getValue();
                     if (v.indexOf('{') >= 0 || v.indexOf('%') >= 0) {
                         if (a.getKey().equals("style")) continue;
-                        a.setValue(apply(v));
+                        String out = value.apply(v);
+                        if (write) a.setValue(out);
                     }
                 }
             }
-            for (Node child : node.childNodes()) walk(child);
         }
+        for (int i = 0, n = node.childNodeSize(); i < n; i++) walk(node.childNode(i), value, write);
     }
 
     public static String apply(String text, Player player) {

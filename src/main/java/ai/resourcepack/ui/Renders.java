@@ -10,9 +10,9 @@ import java.util.concurrent.TimeUnit;
  * Where the plugin's render jobs run: UI Framework's shared {@link Cpu} pool, the same threads that paint a
  * picture's bands and encode its tiles, so all of it together never runs more threads than {@code cpu-threads}.
  * This only counts the plugin's own jobs so that {@link #close} can stop taking new ones and wait for the ones
- * running (the pool is not the plugin's to shut down).
+ * running (the pool is not the plugin's to shut down). Not final: tests count the jobs they hand it.
  */
-final class Renders implements Executor {
+class Renders implements Executor {
     private int running;
     private boolean closed;
 

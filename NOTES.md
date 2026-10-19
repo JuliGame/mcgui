@@ -115,18 +115,29 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
   size, the scale and every placeholder value filled in (`Placeholders.Filled`),
   and only for the first picture of a copy of the page (top, nothing hovered or
   pressed or clicked, no fragment, no value of the viewer's own). A session that
-  finds it kept takes it on the server thread: `Canvas.show` hands its canvas
-  the same tile arrays, and the frame's hit regions and styles are put on the
-  session's own document by place in document order. One session draws a
-  missing picture and the others wanting it wait (`FirstPictures.claim`). The
-  frame's image is shared, so a repaint over it copies it first (`borrowed`).
+  finds it kept takes it on the server thread, copying nothing: `Canvas.show`
+  hands its canvas the same tile arrays and colour buffer, and the session's
+  frame and document are the picture's own, shared with every session that
+  took it. Whatever draws copies first, on the render thread: the canvas its
+  colours (`Canvas.detach`, at its first drawing), a repaint the frame's image
+  (`borrowed`, `FirstPictures.own`). Documents and frames are never written to
+  by drawing; a click that changes the document gives the session a copy
+  (`Session.editable`). `Placeholders.fill` only works the values out (on the
+  server thread); the filled copy is made on a render thread (`Filled.copy`)
+  when the session draws, so `Session.doc` is null until the first picture.
+  A new `Canvas` holds no colours until its first drawing. One session draws a
+  missing picture and the others wanting it wait (`FirstPictures.claim`).
   Until its first picture is drawn a wall or view is given no canvas
   (`Session.showing`, at most `BLANK_AFTER_TICKS`), since a blank first is a
   second packet a map; a view still opens at once (its frames go up while the
   page is drawn) and the framework switches to it once the page has arrived. The warm-up
   draws every placed screen's page. `FirstPicturesTest` follows a taken and a
-  drawn picture through hovers, presses, scrolls and refreshes;
-  `sh gradlew firstPictureBench` gives the CPU per new session both ways.
+  drawn picture through hovers, presses, scrolls and refreshes, and
+  `SharedPictureTest` does the same with real `Session`s (`SessionRig`: no
+  server needed), checking the kept picture is never drawn into;
+  `sh gradlew firstPictureBench` gives the CPU per new session both ways, and
+  `sh gradlew sessionBench` the server thread's CPU and allocation per new
+  viewer and the live heap per watching session.
 - **A partial repaint takes in every blurred layer its region meets**
   (`Repaint.region`): a `filter: blur()` layer that the clip cuts would blur
   with a cut edge. A backdrop is painted again with a margin instead (see

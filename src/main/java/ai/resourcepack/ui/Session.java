@@ -56,11 +56,19 @@ public final class Session {
 
     private String pageName;
     private Page page;
-    /** This session's copy of the page's document; [hover] and [pressed] are always elements of it. */
-    private Document doc;
     /**
-     * What [doc] was filled from, and whether it is still only that (nothing clicked has changed it): only such a
-     * document's first picture is shared with other sessions ({@link FirstPictures}).
+     * This session's copy of the page's document; [hover] and [pressed] are always elements of it. Null from the
+     * moment a page is shown until its first picture is drawn or taken: a render thread makes the copy then, off the
+     * server thread (see {@link Placeholders.Filled#copy}), and [hover] and [pressed] are null meanwhile. A taken first
+     * picture's document is shared with that picture and every session that took it ({@link FirstPictures}): drawing
+     * never writes to a document, and a click that changes it gives this session a copy of its own first
+     * ({@link #editable}). Written under the session's lock; the render thread only ever sets it from null.
+     */
+    private volatile Document doc;
+    /**
+     * What [doc] is filled from (written under the session's lock), and whether the document is still only that
+     * (nothing clicked has changed it): only such a document's first picture is shared with other sessions
+     * ({@link FirstPictures}).
      */
     private Placeholders.Filled filled;
     private boolean pristine;
@@ -185,8 +193,11 @@ public final class Session {
         }
         pageName = n;
         page = p;
-        filled = Placeholders.fill(p.document, player());
-        doc = filled.doc();
+        Placeholders.Filled f = Placeholders.fill(p.document, player());
+        synchronized (this) {
+            filled = f;
+            doc = null;
+        }
         pristine = true;
         scrollY = scroll;
         hover = null;
@@ -230,8 +241,11 @@ public final class Session {
         plugin.pages().load(name).thenAcceptAsync(p -> {
             if (closed || navigation != nav || p == null || p == page || !name.equals(pageName)) return;
             page = p;
-            filled = Placeholders.fill(p.document, player());
-            doc = filled.doc();
+            Placeholders.Filled f = Placeholders.fill(p.document, player());
+            synchronized (this) {
+                filled = f;
+                doc = null;
+            }
             pristine = true;
             // The new file can be shaped differently: nothing carries over by position.
             hover = null;
@@ -256,8 +270,12 @@ public final class Session {
         if (top != null && top.page().equals(name) && top.scroll() == f.scrollY()) back.pop();
         pageName = name;
         page = f.page();
-        // The picture's document was this session's, so it was never changed after being drawn.
-        doc = f.document();
+        // The picture's document was this session's (or shared with a kept picture), so it was never changed after being drawn.
+        synchronized (this) {
+            doc = f.document();
+        }
+        // Not what [filled] describes: never kept or taken as a first picture.
+        pristine = false;
         scrollY = f.scrollY();
         hover = null;
         pressed = null;
@@ -276,14 +294,26 @@ public final class Session {
         if (refreshTicks > 0 && page != null && now >= nextRefresh) {
             nextRefresh = now + refreshTicks;
             Placeholders.Filled fresh = Placeholders.fill(page.document, player());
-            // What clicks changed (an open <details>, a ticked box) and what the pointer is on carry over.
-            boolean untouched = pristine && doc == filled.doc();
-            keepFormState(doc, fresh.doc());
-            hover = counterpart(hover, fresh.doc());
-            pressed = counterpart(pressed, fresh.doc());
-            filled = fresh;
-            doc = fresh.doc();
-            pristine = untouched;
+            // Every value the same: the copy would be the same document, and its picture the same picture.
+            if (filled != null && fresh.source() == filled.source() && fresh.key().equals(filled.key())) return;
+            Document d = doc;
+            if (pristine && hover == null && pressed == null) {
+                // Nothing to carry over: copied when it is drawn (or the first picture taken), off the server thread.
+                synchronized (this) {
+                    filled = fresh;
+                    doc = null;
+                }
+            } else {
+                // What clicks changed (an open <details>, a ticked box) and what the pointer is on carry over.
+                Document copy = fresh.copy();
+                if (d != null) keepFormState(d, copy);
+                hover = counterpart(hover, copy);
+                pressed = counterpart(pressed, copy);
+                synchronized (this) {
+                    filled = fresh;
+                    doc = copy;
+                }
+            }
             render();
         }
     }
@@ -310,7 +340,7 @@ public final class Session {
      * document order finds it.
      */
     private static Element counterpart(Element e, Document to) {
-        if (e == null) return null;
+        if (e == null || to == null) return null;
         Document from = e.ownerDocument();
         if (from == to) return e;
         if (from == null) return null;
@@ -341,7 +371,8 @@ public final class Session {
 
     private void submit() {
         Page p = page;
-        Document d = doc;
+        Document held = doc;
+        Placeholders.Filled fill = filled;
         double s = scrollY;
         int nav = navigation;
         var state = HtmlRenderer.state(hover, pressed);
@@ -356,7 +387,7 @@ public final class Session {
         boolean shift = plugin.tileShift();
         // The first picture of this copy of the page, as every session's is: taken from FirstPictures if it is kept
         // there, waited for if another session is drawing it, else drawn here and kept for the next.
-        FirstPictures.Key first = drawOwn ? null : firstKey(p, d, s, fragment, scale);
+        FirstPictures.Key first = drawOwn ? null : firstKey(p, held, s, fragment, scale);
         FirstPictures.Picture take = offered;
         offered = null;
         drawOwn = false;
@@ -369,7 +400,8 @@ public final class Session {
             } else {
                 first = null;
             }
-            if (take != null && adopt(take, d, name, hoverKey, pressKey)) {
+            if (take != null) {
+                adopt(take, name);
                 rendering = false;
                 return;
             }
@@ -378,7 +410,16 @@ public final class Session {
         FirstPictures pictures = plugin.firstPictures();
         renderers.execute(() -> {
             boolean published = false;
+            // The document to draw: the session's, or, if it has none yet (a page just shown), a copy made here.
+            Document d = held;
             try {
+                if (d == null) {
+                    d = fill.copy();
+                    // The session's from now on, unless another page or fill was shown meanwhile.
+                    synchronized (Session.this) {
+                        if (doc == null && filled == fill) doc = d;
+                    }
+                }
                 long t0 = System.nanoTime();
                 HtmlRenderer.Frame before = frame;
                 HtmlRenderer.Frame f = null;
@@ -484,9 +525,9 @@ public final class Session {
                 frame = f;
                 if (publish != null && !partial && c == null && f.document() == d && f.scrollY() == 0) {
                     // This session's first picture of the page, drawn as any session's would be: kept for the next to
-                    // show it here, with the canvas as it is now. Its image is shared from now on.
+                    // show it here, with the canvas as it is now. Its image (and document) are shared from now on.
                     FirstPictures.Picture picture = FirstPictures.Picture.of(publish, f, canvas.copy());
-                    if (picture != null) borrowed = f.image();
+                    borrowed = f.image();
                     pictures.publish(publish, picture);
                     published = true;
                 }
@@ -550,41 +591,43 @@ public final class Session {
 
 
     /**
-     * The key of [d]'s first picture if the picture to be drawn is one ({@link FirstPictures}): the first of this copy
-     * of the page, at its top, nothing hovered or pressed, nothing clicked changed, no #fragment, and filled with
-     * nobody's own values. Else null. [s], [fragment] and [scale] are what is to be drawn.
+     * The key of the first picture of the page as filled in [filled] if the picture to be drawn is one
+     * ({@link FirstPictures}): the first of this copy of the page ([d], or none yet), at its top, nothing hovered or
+     * pressed, nothing clicked changed, no #fragment, and filled with nobody's own values. Else null. [s],
+     * [fragment] and [scale] are what is to be drawn.
      */
     private FirstPictures.Key firstKey(Page p, Document d, double s, String fragment, double scale) {
         HtmlRenderer.Frame f = frame;
         if (!plugin.firstPictures().enabled() || fragment != null || s != 0 || hover != null || pressed != null) return null;
-        if (!pristine || filled == null || filled.doc() != d || filled.personal() || f != null && f.document() == d) return null;
+        if (!pristine || filled == null || filled.source() != p.document || filled.personal() || d != null && f != null && f.document() == d) return null;
         return new FirstPictures.Key(pageName, p, canvas.cols(), canvas.rows(), scale, filled.key());
     }
 
     /**
-     * Takes [picture] as this session's picture of [d], as if it had drawn it: the canvas shows it (its tiles, nothing
-     * drawn), and the frame is it, on [d]'s elements. False, with nothing changed, if [d] is not shaped like it. On the
-     * server thread, in place of drawing ([rendering] is set).
+     * Takes [picture] as this session's picture, as if it had drawn it: the canvas shows it (its tiles and colours,
+     * nothing drawn or copied), the frame is its frame, and the document its document, shared with it and every
+     * other session that took it (see {@link #doc}). On the server thread, under the session's lock, in place of
+     * drawing ([rendering] is set); nothing here is in proportion to the picture's size.
      */
-    private boolean adopt(FirstPictures.Picture picture, Document d, String name, List<Element> hoverKey, List<Element> pressKey) {
-        HtmlRenderer.Frame f = picture.frameFor(d);
-        if (f == null) return false;
+    private void adopt(FirstPictures.Picture picture, String name) {
         long t0 = System.nanoTime();
+        HtmlRenderer.Frame f = picture.frame;
         canvas.show(picture.canvas);
+        // A copy of the same page filled with the same values, with nothing hovered, pressed or clicked: the very same document.
+        doc = picture.document();
         borrowed = f.image();
-        drawnHover = hoverKey;
-        drawnPress = pressKey;
+        drawnHover = List.of();
+        drawnPress = List.of();
         drawnName = name;
         cache = null;
         frame = f;
         FAILURES.remove(f.page());
         if (plugin.debug()) {
-            plugin.getLogger().info(String.format("Took the first picture of %s for %s in %.2f ms (%s)", name, viewer, (System.nanoTime() - t0) / 1e6,
+            plugin.getLogger().info(String.format("Took the first picture of %s for %s in %.3f ms (%s)", name, viewer, (System.nanoTime() - t0) / 1e6,
                     plugin.firstPictures().stats()));
         }
         // As after drawing a new page: what the pointer is over now.
         serverThread.execute(this::repoint);
-        return true;
     }
 
     /** The first picture this session waited for was drawn by another session ([picture]), or could not be (null). */
@@ -825,14 +868,19 @@ public final class Session {
 
     /**
      * [e] (an element of [doc]) in a fresh copy of the document, which becomes the session's: a picture
-     * being drawn keeps reading the old one, so nothing changes under it. Null if it is not there.
+     * being drawn keeps reading the old one, so nothing changes under it, and a document shared with a kept first
+     * picture (and the sessions that took it) is never written to. Null if it is not there.
      */
     private Element editable(Element e) {
         Document copy = doc.clone();
         Element mine = counterpart(e, copy);
         hover = counterpart(hover, copy);
         pressed = counterpart(pressed, copy);
-        doc = copy;
+        synchronized (this) {
+            doc = copy;
+        }
+        // Changed by a click from what it was filled as: its pictures are this session's alone.
+        pristine = false;
         return mine;
     }
 
