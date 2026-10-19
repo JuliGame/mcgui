@@ -50,16 +50,23 @@ class TileScrollTest {
     private ScrollCache cache;
     private double at;
     private Selector.State state = Selector.State.NONE;
+    private Canvas.Encoding encoding;
     /** Every picture the canvas showed, as a fresh render: a bundle must leave the client on one of them. */
     private final List<byte[][]> shown = new ArrayList<>();
 
     @BeforeEach
     void open() {
+        open(Canvas.Encoding.HI);
+    }
+
+    private void open(Canvas.Encoding encoding) {
+        this.encoding = encoding;
+        shown.clear();
         canvas = new Canvas(palette, COLS, ROWS);
         MapWall wall = new MapWall(null, 0, 100, 0, BlockFace.NORTH, COLS, ROWS, 5000);
         client = new RecordingWire(wall);
         sender = new MapSender(client, palette, Integer.MAX_VALUE, Logger.getAnonymousLogger());
-        sender.update(List.of(new MapSender.Assignment(RecordingWire.player(), wall, canvas, Canvas.Encoding.HI, null)));
+        sender.update(List.of(new MapSender.Assignment(RecordingWire.player(), wall, canvas, encoding, null)));
         // Part way down, so the view can go up three rows and down three.
         at = 4 * ROW;
         canvas.draw(HtmlRenderer.render(LONG, W, H, SCALE, at, state).image(), 0, 0);
@@ -92,6 +99,27 @@ class TileScrollTest {
         scroll(2);
         sender.pass();
         scroll(-1);
+        sender.pass();
+        settle();
+        assertOnClient();
+    }
+
+    /**
+     * A view whose pointer the client draws (HI_TILED): its frames all lie in one block and the client places each
+     * map by the column and row marked in it, not by its frame. After a move by whole rows no map may carry the
+     * marks of a place whose picture it does not hold, even for a moment between two bundles.
+     */
+    @Test
+    void aClientPointerViewScrollsByWholeRows() {
+        open(Canvas.Encoding.HI_TILED);
+        for (int rows : new int[]{1, 2, -1, -3}) {
+            scroll(rows);
+            settle();
+            assertOnClient();
+        }
+        scroll(1);
+        sender.pass();
+        scroll(-2);
         sender.pass();
         settle();
         assertOnClient();
@@ -200,19 +228,42 @@ class TileScrollTest {
         Canvas c = new Canvas(palette, COLS, ROWS);
         c.draw(HtmlRenderer.render(LONG, W, H, SCALE, at, state).image(), 0, 0);
         byte[][] out = new byte[COLS * ROWS][];
-        for (int t = 0; t < out.length; t++) out[t] = c.tile(t, Canvas.Encoding.HI);
+        for (int t = 0; t < out.length; t++) out[t] = c.tile(t, encoding);
         return out;
     }
 
     private boolean onClient(byte[][] picture) {
+        if (encoding == Canvas.Encoding.HI_TILED) return placed(picture) == null;
         for (int t = 0; t < picture.length; t++) if (!Arrays.equals(picture[t], client.shown(t))) return false;
         return true;
     }
 
+    /**
+     * For HI_TILED, where the client places a map by its marks: null if the maps the frames show are [picture]'s
+     * tiles, each exactly once whichever frame shows it, else what is wrong. The marks differ from place to place,
+     * so a map with another place's picture, or one place shown twice, does not match.
+     */
+    private String placed(byte[][] picture) {
+        boolean[] found = new boolean[picture.length];
+        for (int f = 0; f < picture.length; f++) {
+            byte[] map = client.shown(f);
+            int t = 0;
+            while (t < picture.length && !(Arrays.equals(picture[t], map) && !found[t])) t++;
+            if (t == picture.length) return "frame " + f + " shows a map that is no place's tile at " + at;
+            found[t] = true;
+        }
+        return null;
+    }
+
     private void assertOnClient() {
         byte[][] want = shown.get(shown.size() - 1);
-        for (int t = 0; t < want.length; t++) {
-            assertArrayEquals(want[t], client.shown(t), "tile " + t + " (row " + t / COLS + ") at " + at);
+        if (encoding == Canvas.Encoding.HI_TILED) {
+            String wrong = placed(want);
+            assertTrue(wrong == null, wrong);
+        } else {
+            for (int t = 0; t < want.length; t++) {
+                assertArrayEquals(want[t], client.shown(t), "tile " + t + " (row " + t / COLS + ") at " + at);
+            }
         }
         assertFalse(client.inFlight());
     }
