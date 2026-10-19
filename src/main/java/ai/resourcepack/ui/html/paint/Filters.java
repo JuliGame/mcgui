@@ -43,7 +43,7 @@ final class Filters {
             }
             if (name.equals("drop-shadow")) continue;
             double amount = amount(arg, name);
-            colour(Painter.pixels(img), name, amount);
+            colour(Painter.pixels(img), img.getWidth() * img.getHeight(), name, amount);
         }
     }
 
@@ -86,8 +86,9 @@ final class Filters {
         }
     }
 
-    private static void colour(int[] px, String name, double a) {
-        for (int i = 0; i < px.length; i++) {
+    /** The first [n] pixels of [px] (an image's: its array may be longer, see {@link PixelPool}) filtered by [name]. */
+    private static void colour(int[] px, int n, String name, double a) {
+        for (int i = 0; i < n; i++) {
             int p = px[i];
             int alpha = p >>> 24;
             if (alpha == 0) continue;
@@ -202,21 +203,24 @@ final class Filters {
         int gw = Math.floorDiv(grab.x + grab.width + originX + k - 1, k) * k - originX - gx;
         int gh = Math.floorDiv(grab.y + grab.height + originY + k - 1, k) * k - originY - gy;
         // Drawn rather than copied raw, so a premultiplied surface arrives as straight colour for the filters below.
-        BufferedImage copy = new BufferedImage(gw, gh, BufferedImage.TYPE_INT_ARGB);
+        // Every pixel of it is drawn or extended below; from this thread's pool, handed back once drawn in.
+        BufferedImage copy = PixelPool.image(gw, gh, BufferedImage.TYPE_INT_ARGB);
         java.awt.Graphics2D cg = copy.createGraphics();
         cg.setComposite(java.awt.AlphaComposite.Src);
         cg.drawImage(surface.getSubimage(grab.x, grab.y, grab.width, grab.height), grab.x - gx, grab.y - gy, null);
         cg.dispose();
         extend(Painter.pixels(copy), gw, gh, grab.x - gx, grab.y - gy, grab.width, grab.height);
         // A backdrop is opaque where something was drawn; blur it like a photo (small, for a wide blur).
-        copy = Blur.blurredCopy(copy, sigma, k, budget);
+        BufferedImage blurred = Blur.blurredCopy(copy, sigma, k, budget);
+        if (blurred != copy) PixelPool.give(copy);
+        copy = blurred;
         for (String fn : functions(filter)) {
             budget.check();
             String l = fn.toLowerCase(Locale.ROOT);
             int open = l.indexOf('(');
             if (open < 0 || l.startsWith("blur")) continue;
             String name = l.substring(0, open);
-            colour(Painter.pixels(copy), name, amount(l.substring(open + 1, l.length() - 1).trim(), name));
+            colour(Painter.pixels(copy), copy.getWidth() * copy.getHeight(), name, amount(l.substring(open + 1, l.length() - 1).trim(), name));
         }
         Shape old = g.getClip();
         g.clip(shape);
@@ -230,6 +234,7 @@ final class Filters {
         if (oldInterpolation != null) g.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION, oldInterpolation);
         g.setTransform(saved);
         g.setClip(old);
+        PixelPool.give(copy);
     }
 
     /** Fills what is round the [w] x [h] block at ([x], [y]) in a [width] x [height] picture with the block's nearest edge pixels. */

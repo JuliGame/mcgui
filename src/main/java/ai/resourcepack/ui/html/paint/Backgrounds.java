@@ -832,6 +832,9 @@ final class Backgrounds {
             }
             AffineTransform toUser = inv;
             return new java.awt.PaintContext() {
+                /** Reused from one call to the next, as the linear gradient's: Java2D asks for one span at a time. */
+                private java.awt.image.WritableRaster raster;
+
                 @Override public void dispose() {}
 
                 @Override public java.awt.image.ColorModel getColorModel() {
@@ -840,17 +843,20 @@ final class Backgrounds {
 
                 @Override
                 public java.awt.image.Raster getRaster(int x, int y, int w, int h) {
-                    java.awt.image.WritableRaster raster = getColorModel().createCompatibleWritableRaster(w, h);
-                    int[] data = new int[w * h];
+                    if (raster == null || raster.getWidth() < w || raster.getHeight() < h) {
+                        raster = getColorModel().createCompatibleWritableRaster(Math.max(w, raster == null ? 0 : raster.getWidth()),
+                                Math.max(h, raster == null ? 0 : raster.getHeight()));
+                    }
+                    int[] data = ((java.awt.image.DataBufferInt) raster.getDataBuffer()).getData();
+                    int stride = ((java.awt.image.SinglePixelPackedSampleModel) raster.getSampleModel()).getScanlineStride();
                     Point2D.Double p = new Point2D.Double();
                     for (int j = 0; j < h; j++) for (int i = 0; i < w; i++) {
                         p.setLocation(x + i + 0.5, y + j + 0.5);
                         toUser.transform(p, p);
                         double ang = Math.toDegrees(Math.atan2(p.x - cx, -(p.y - cy))) - from;
                         double t = ((ang % 360) + 360) % 360 / 360;
-                        data[j * w + i] = colorAt(t);
+                        data[j * stride + i] = colorAt(t);
                     }
-                    raster.setDataElements(0, 0, w, h, data);
                     return raster;
                 }
             };

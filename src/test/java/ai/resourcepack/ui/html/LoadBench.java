@@ -219,6 +219,8 @@ public final class LoadBench {
         sleepUntil(warmEnd);
         for (MemoryPoolMXBean p : ManagementFactory.getMemoryPoolMXBeans()) if (p.getType() == MemoryType.HEAP) p.resetPeakUsage();
         long gc0 = gcMs(), gcN0 = gcCount();
+        PAUSES.start();
+        long up0 = ManagementFactory.getRuntimeMXBean().getUptime();
         long cpu0 = OS.getProcessCpuTime();
         long[] th0 = threadCpu();
         long[] sys0 = procStat();
@@ -253,6 +255,8 @@ public final class LoadBench {
         long[] th1 = threadCpu();
         long[] sys1 = procStat();
         long t1 = System.nanoTime();
+        long up1 = ManagementFactory.getRuntimeMXBean().getUptime();
+        Pauses.Window pauses = PAUSES.stop();
         long gc1 = gcMs(), gcN1 = gcCount();
         long peak = 0;
         for (MemoryPoolMXBean p : ManagementFactory.getMemoryPoolMXBeans()) if (p.getType() == MemoryType.HEAP) peak += p.getPeakUsage().getUsed();
@@ -290,6 +294,8 @@ public final class LoadBench {
         for (int i = 0; i < 5; i++) r.allocMb += (th1[5 + i] - th0[5 + i]) / 1048576.0;
         r.processCpuMs = (cpu1 - cpu0) / 1e6;
         r.why = why;
+        r.pauses = pauses;
+        r.uptime = new long[]{up0, up1};
         r.senderCpu = sender == null ? 0 : (senderEnd - sender0) / 1e9 / wall * 100;
         r.firstMs = sims.stream().mapToDouble(s -> s.firstFrameNs > 0 ? (s.firstFrameNs - open) / 1e6 : Double.NaN).toArray();
         r.secs = wall;
@@ -316,6 +322,55 @@ public final class LoadBench {
             out[5 + g] += Math.max(0, sun.getThreadAllocatedBytes(t.getId()));
         }
         return out;
+    }
+
+    // ------------------------------------------------------------------------------------ GC pauses
+
+    // The stand-in for the server thread is {@link Ticker} (ThreadBudget's: wake and finish lateness, -Dtickwork); BufferReuse's
+    // own ticker of the same kind was folded into it at the merge, so one tick thread runs, not two.
+
+    /** Every collection's pause in a window, from the collectors' notifications (the -Xlog:gc file has the same, finer). */
+    static final Pauses PAUSES = new Pauses();
+
+    static final class Pauses {
+        record Window(int young, int humongous, int other, double totalMs, double maxMs) {}
+
+        private int young, humongous, other;
+        private double total, max;
+        private boolean recording;
+
+        Pauses() {
+            for (GarbageCollectorMXBean b : ManagementFactory.getGarbageCollectorMXBeans()) {
+                if (!(b instanceof javax.management.NotificationEmitter e)) continue;
+                e.addNotificationListener((note, hb) -> {
+                    if (!note.getType().equals(com.sun.management.GarbageCollectionNotificationInfo.GARBAGE_COLLECTION_NOTIFICATION)) return;
+                    var info = com.sun.management.GarbageCollectionNotificationInfo.from((javax.management.openmbean.CompositeData) note.getUserData());
+                    record(info.getGcName(), info.getGcCause(), info.getGcInfo().getDuration());
+                }, null, null);
+            }
+        }
+
+        private synchronized void record(String name, String cause, long ms) {
+            if (!recording) return;
+            // G1's concurrent cycle runs beside the program; its bean's duration is the whole cycle, not a pause.
+            if (name.contains("Concurrent")) return;
+            if (name.contains("Young")) young++;
+            else other++;
+            if (cause.contains("Humongous")) humongous++;
+            total += ms;
+            max = Math.max(max, ms);
+        }
+
+        synchronized void start() {
+            young = humongous = other = 0;
+            total = max = 0;
+            recording = true;
+        }
+
+        synchronized Window stop() {
+            recording = false;
+            return new Window(young, humongous, other, total, max);
+        }
     }
 
     private static void sleepUntil(long nanoTime) {
@@ -382,6 +437,8 @@ public final class LoadBench {
         int[] goal;
 
         volatile HtmlRenderer.Frame frame;
+        /** As Session's: where whole pictures are painted (render thread only, one render at a time). */
+        private final PooledPicture pooled = new PooledPicture();
         private boolean rendering, dirty, closed;
         private List<Req> reqs = new ArrayList<>();
         private List<Element> drawnHover = List.of(), drawnPress = List.of();
@@ -444,6 +501,7 @@ public final class LoadBench {
                 try {
                     long t0 = System.nanoTime();
                     HtmlRenderer.Frame before = frame;
+                    pooled.start(before);
                     HtmlRenderer.Frame f = null;
                     Rectangle2D changed = null;
                     boolean partial = false;
@@ -470,7 +528,9 @@ public final class LoadBench {
                             why(4 + r.why().ordinal());
                         }
                     }
-                    if (f == null) f = HtmlRenderer.render(p, d, W, H, SCALE, s, state);
+                    if (f == null) {
+                        f = HtmlRenderer.render(p, d, pooled.take(W, H), SCALE, s, state, HtmlRenderer.DEFAULT_TIMEOUT_MS);
+                    }
                     long t1 = System.nanoTime();
                     if (partial) {
                         int x0 = Math.max(0, (int) Math.floor(changed.getX() * SCALE)), y0 = Math.max(0, (int) Math.floor(changed.getY() * SCALE));
@@ -491,11 +551,13 @@ public final class LoadBench {
                     }
                     drawnHover = hoverKey;
                     frame = f;
+                    pooled.shown(f);
                     if (firstFrameNs == 0) firstFrameNs = t2;
                     recs.add(new Rec(t2, t0 - submitted, t1 - t0, t2 - t1, partial, tiles, mine.size() - 1));
                     for (Req r : mine) lats.add(new Lat(r.t, r.kind, t2 - r.t));
                     if (!partial) execute(this::repoint);
                 } catch (RuntimeException | Error e) {
+                    pooled.failed(frame);
                     System.err.println("render failed: " + e);
                     e.printStackTrace();
                 } finally {
@@ -821,6 +883,9 @@ public final class LoadBench {
         double[] runq = new double[4];
         /** Most threads in the pool, most running, most render jobs in flight. */
         int[] peak = new int[3];
+        /** GC pauses in the window; the window in JVM uptime ms (for -Xlog:gc). */
+        Pauses.Window pauses = new Pauses.Window(0, 0, 0, 0, 0);
+        long[] uptime = {0, 0};
 
         Result(Cfg cfg) {
             this.cfg = cfg;
@@ -910,6 +975,8 @@ public final class LoadBench {
             b.append(String.format(" | cpu %.0f%% other %.0f%% steal %.0f%% | live %.0f MB peak %.0f MB gc %d ms/%d | open %.0f/%.0f ms", cpu, otherCpu, stealPct, liveMb,
                     peakMb, gcMs, gcN, f.length == 0 ? Double.NaN : f[f.length / 2], f.length == 0 ? Double.NaN : f[f.length - 1]));
             b.append(String.format(" | tick late wake %.2f/%.2f/%.2f finish %.2f/%.2f/%.2f ms (n=%.0f, %.1f%% over 5 ms) | runnable pool threads mean %.2f p99 %.0f max %.0f, over cores-1 %.1f%% of samples | pool threads/running/jobs max %d/%d/%d", tick[0], tick[1], tick[2], tick[3], tick[4], tick[5], tick[6], tick[7], runq[0], runq[1], runq[2], runq[3], peak[0], peak[1], peak[2]));
+            b.append(String.format(" | gc pauses young %d (humongous %d) other %d, total %.0f ms, max %.0f ms | uptime %d-%d",
+                    pauses.young(), pauses.humongous(), pauses.other(), pauses.totalMs(), pauses.maxMs(), uptime[0], uptime[1]));
             if (cfg.mode.equals("stress")) b.append(String.format(" | tiles/frame full %.0f", tilesFull));
             else b.append(String.format(" | why-full first/doc/scroll/nop/sib/nodirty/big/grew/moved %s", Arrays.toString(why)));
             if (wire != null && wire.batches() > 0) {
@@ -927,7 +994,8 @@ public final class LoadBench {
                     "fps", "render_full_p50", "render_full_p90", "render_part_p50", "render_part_p90", "draw_full_p50", "draw_full_p90", "draw_part_p50", "queue_p50",
                     "queue_p90", "tiles_full", "tiles_part", "cpu", "other_cpu", "steal", "live_mb", "peak_mb", "gc_ms", "gc_n", "open_p50", "open_max",
                     "w_batches", "w_tiles", "w_patches", "w_raw", "w_defl", "w_full", "w_deflate_ms", "w_diff_ms", "sender_cpu", "cpu_render_ms", "cpu_painters_ms", "cpu_encoders_ms", "cpu_send_ms", "cpu_server_ms", "cpu_process_ms", "alloc_mb",
-                    "tick_wake_p50", "tick_wake_p99", "tick_wake_max", "tick_fin_p50", "tick_fin_p99", "tick_fin_max", "tick_n", "tick_late5_pct", "runq_mean", "runq_p99", "runq_max", "runq_over_pct");
+                    "tick_wake_p50", "tick_wake_p99", "tick_wake_max", "tick_fin_p50", "tick_fin_p99", "tick_fin_max", "tick_n", "tick_late5_pct", "runq_mean", "runq_p99", "runq_max", "runq_over_pct",
+                    "gc_young", "gc_humongous", "gc_other", "gc_pause_ms", "gc_pause_max", "up0", "up1");
         }
 
         String csv(String page) {
@@ -987,6 +1055,13 @@ public final class LoadBench {
             v.add(f(allocMb));
             for (double d : tick) v.add(f(d));
             for (double d : runq) v.add(f(d));
+            v.add(String.valueOf(pauses.young()));
+            v.add(String.valueOf(pauses.humongous()));
+            v.add(String.valueOf(pauses.other()));
+            v.add(f(pauses.totalMs()));
+            v.add(f(pauses.maxMs()));
+            v.add(String.valueOf(uptime[0]));
+            v.add(String.valueOf(uptime[1]));
             return String.join(",", v);
         }
 

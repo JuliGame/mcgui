@@ -130,9 +130,17 @@ final class FirstPictures {
     /** [f] with a copy of its image of its own, to paint into: [f]'s is shared with a picture kept here. */
     static HtmlRenderer.Frame own(HtmlRenderer.Frame f) {
         BufferedImage from = f.image();
-        BufferedImage to = new BufferedImage(from.getWidth(), from.getHeight(), from.getType());
+        return own(f, new BufferedImage(from.getWidth(), from.getHeight(), from.getType()));
+    }
+
+    /** As {@link #own(HtmlRenderer.Frame)}, copying into [to] (of [f]'s image's size and type, read by nothing else), a pooled picture say. */
+    static HtmlRenderer.Frame own(HtmlRenderer.Frame f, BufferedImage to) {
+        BufferedImage from = f.image();
+        if (to.getWidth() != from.getWidth() || to.getHeight() != from.getHeight() || to.getType() != from.getType()) {
+            throw new IllegalArgumentException("Not the same size and type as the picture");
+        }
         int[] src = ((DataBufferInt) from.getRaster().getDataBuffer()).getData();
-        System.arraycopy(src, 0, ((DataBufferInt) to.getRaster().getDataBuffer()).getData(), 0, src.length);
+        System.arraycopy(src, 0, ((DataBufferInt) to.getRaster().getDataBuffer()).getData(), 0, from.getWidth() * from.getHeight());
         return new HtmlRenderer.Frame(to, f.scale(), f.viewportWidth(), f.viewportHeight(), f.pageHeight(), f.scrollY(), f.hits(), f.styles(),
                 f.document(), f.page());
     }

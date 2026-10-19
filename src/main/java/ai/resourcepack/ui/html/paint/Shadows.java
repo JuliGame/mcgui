@@ -133,7 +133,7 @@ final class Shadows {
         int j1 = Math.min(h, (int) Math.ceil((vis.getMaxY() + margin - r.y) / sy));
         if (vis.isEmpty() || i1 <= i0 || j1 <= j0) return;
         if ((long) (i1 - i0) * (j1 - j0) > 25_000_000L) return;
-        BufferedImage img = new BufferedImage(i1 - i0, j1 - j0, BufferedImage.TYPE_INT_ARGB_PRE);
+        BufferedImage img = PixelPool.image(i1 - i0, j1 - j0, BufferedImage.TYPE_INT_ARGB_PRE);
         Graphics2D ig = img.createGraphics();
         // Fill with the shadow's colour at zero alpha first, so blurring only ever mixes alpha.
         ig.setComposite(AlphaComposite.Src);
@@ -164,6 +164,7 @@ final class Shadows {
         g.setComposite(oldComposite);
         if (oldInterpolation != null) g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, oldInterpolation);
         g.setTransform(saved);
+        PixelPool.give(img);
     }
 
     static void text(Graphics2D g, TextShaper shaper, String text, Font font, double x, double y, Shadow sh, double scale, java.awt.Rectangle surface, RenderBudget budget) {

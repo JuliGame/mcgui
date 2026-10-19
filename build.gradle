@@ -133,6 +133,19 @@ tasks.register('loadBench', JavaExec) {
     if (project.hasProperty('jvm')) jvmArgs project.property('jvm').split(' ')
 }
 
+// Bytes allocated per whole picture, hover repaint and notch of the wheel, on every thread (AllocBench).
+// -Ppages=<file,file> (default the shipped menu and shop, the landing sample and the long test page), -Pruns=<n>, -Pops=full,hover,notch, -Pjvm=<flags>.
+tasks.register('allocBench', JavaExec) {
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'ai.resourcepack.ui.html.AllocBench'
+    args = (project.findProperty('pages') ?: 'src/main/resources/pages/menu.html,samples/landing.html,src/main/resources/pages/shop.html,src/test/resources/scroll/long.html')
+            .toString().split(',').findAll { it }.collect { file(it).absolutePath }
+    systemProperty 'java.awt.headless', 'true'
+    ['runs', 'ops'].each { if (project.hasProperty(it)) systemProperty it, project.property(it) }
+    maxHeapSize = '2g'
+    if (project.hasProperty('jvm')) jvmArgs project.property('jvm').split(' ')
+}
+
 // What a notch of the wheel costs in bytes, packets and CPU, with the canvas moved by whole map rows and drawn whole (TileBench).
 // -Pruns=<n>, -Pnotches=<n>, -Ppage=<file> (default the long test page).
 tasks.register('tileBench', JavaExec) {

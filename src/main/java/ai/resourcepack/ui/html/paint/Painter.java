@@ -279,7 +279,8 @@ public final class Painter {
             }
         }
         // Colour filters work on straight colour, so a filtered layer stays plain ARGB; opacity alone blends faster premultiplied.
-        BufferedImage img = new BufferedImage(r.width, r.height, box.style.filter.equals("none") ? BufferedImage.TYPE_INT_ARGB_PRE : BufferedImage.TYPE_INT_ARGB);
+        // From this thread's pool, handed back once blended in: nothing keeps a layer.
+        BufferedImage img = PixelPool.image(r.width, r.height, box.style.filter.equals("none") ? BufferedImage.TYPE_INT_ARGB_PRE : BufferedImage.TYPE_INT_ARGB);
         Graphics2D lg = img.createGraphics();
         lg.setRenderingHints(g.getRenderingHints());
         lg.translate(-r.x, -r.y);
@@ -301,7 +302,9 @@ public final class Painter {
         lg.dispose();
         int ox = r.x, oy = r.y;
         if (part != null && (part.width < r.width || part.height < r.height)) {
-            img = copy(img, part);
+            BufferedImage whole = img;
+            img = copy(whole, part);
+            PixelPool.give(whole);
             ox += part.x;
             oy += part.y;
         }
@@ -313,11 +316,12 @@ public final class Painter {
         g.drawImage(img, ox, oy, null);
         g.setComposite(old);
         g.setTransform(saved);
+        PixelPool.give(img);
     }
 
-    /** The [part] of [img], as an image of its own of the same type (Blur and Filters work on a whole pixel array). */
+    /** The [part] of [img], as an image of its own of the same type (Blur and Filters work on a whole pixel array), from this thread's pool. */
     private static BufferedImage copy(BufferedImage img, java.awt.Rectangle part) {
-        BufferedImage out = new BufferedImage(part.width, part.height, img.getType());
+        BufferedImage out = PixelPool.image(part.width, part.height, img.getType());
         int[] from = pixels(img), to = pixels(out);
         for (int y = 0; y < part.height; y++) System.arraycopy(from, (part.y + y) * img.getWidth() + part.x, to, y * part.width, part.width);
         return out;
@@ -605,7 +609,7 @@ public final class Painter {
         java.awt.Rectangle r = dev.createTransformedShape(glyphs.getBounds2D()).getBounds();
         r.grow(2, 2);
         if (r.width <= 0 || r.height <= 0 || (long) r.width * r.height > 16_000_000L) return;
-        BufferedImage mask = new BufferedImage(r.width, r.height, BufferedImage.TYPE_INT_ARGB_PRE);
+        BufferedImage mask = PixelPool.image(r.width, r.height, BufferedImage.TYPE_INT_ARGB_PRE);
         Graphics2D mg = mask.createGraphics();
         mg.setRenderingHints(g.getRenderingHints());
         mg.translate(-r.x, -r.y);
@@ -624,6 +628,7 @@ public final class Painter {
         g.setTransform(new AffineTransform());
         g.drawImage(mask, r.x, r.y, null);
         g.setTransform(saved);
+        PixelPool.give(mask);
     }
 
     /** The box whose background shows through gradient text: the nearest ancestor with that background. */

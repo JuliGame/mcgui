@@ -19,13 +19,18 @@ final class Blur {
         if (!(sigma >= 0.5)) return;
         sigma = Math.min(sigma, MAX_SIGMA);
         int w = img.getWidth(), h = img.getHeight();
+        // The image's array may be longer than its pixels (a PixelPool image): only w x h of it are blurred.
         int[] px = ((DataBufferInt) img.getRaster().getDataBuffer()).getData();
-        int[] tmp = new int[px.length];
-        int[] sizes = boxes(sigma);
-        for (int s : sizes) {
-            int r = (s - 1) / 2;
-            pass(px, tmp, w, h, r, budget);
-            pass(tmp, px, h, w, r, budget);
+        int[] tmp = PixelPool.ints(w * h);
+        try {
+            int[] sizes = boxes(sigma);
+            for (int s : sizes) {
+                int r = (s - 1) / 2;
+                pass(px, tmp, w, h, r, budget);
+                pass(tmp, px, h, w, r, budget);
+            }
+        } finally {
+            PixelPool.give(tmp);
         }
     }
 
@@ -56,7 +61,8 @@ final class Blur {
 
     /**
      * [src], whose width and height are multiples of [k] (from {@link #step}), blurred by [sigma]: [src] itself, blurred
-     * in place, if [k] is 1, else a copy [k] times smaller, blurred, to draw at [src]'s size. Each pixel of the small
+     * in place, if [k] is 1, else a copy [k] times smaller, blurred, to draw at [src]'s size, from this thread's
+     * {@link PixelPool} (the caller hands it back). Each pixel of the small
      * picture is the one at its own multiple of [k] in [src], so a caller that starts [src] at a multiple of [k] of
      * a bigger picture gets what any other start gives.
      */
@@ -66,7 +72,7 @@ final class Blur {
             return src;
         }
         int w = src.getWidth() / k, h = src.getHeight() / k;
-        BufferedImage small = new BufferedImage(w, h, src.getType());
+        BufferedImage small = PixelPool.image(w, h, src.getType());
         java.awt.Graphics2D g = small.createGraphics();
         g.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION, java.awt.RenderingHints.VALUE_INTERPOLATION_BILINEAR);
         g.setRenderingHint(java.awt.RenderingHints.KEY_RENDERING, java.awt.RenderingHints.VALUE_RENDER_QUALITY);

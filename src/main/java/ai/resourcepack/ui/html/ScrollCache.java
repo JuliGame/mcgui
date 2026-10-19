@@ -32,11 +32,11 @@ public final class ScrollCache {
     private final BufferedImage view;
     private volatile long used = System.nanoTime();
 
-    private ScrollCache(HtmlRenderer.Frame strip, int width, int height) {
+    private ScrollCache(HtmlRenderer.Frame strip, int width, int height, BufferedImage view) {
         this.strip = strip;
         this.width = width;
         this.height = height;
-        this.view = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB_PRE);
+        this.view = view != null ? view : new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB_PRE);
     }
 
     /**
@@ -46,8 +46,20 @@ public final class ScrollCache {
      */
     public static ScrollCache paint(Page page, org.jsoup.nodes.Document document, int width, int height, double scale, double scrollY, double from,
                                     Selector.State state, int views, long timeoutMs) {
-        HtmlRenderer.Frame strip = HtmlRenderer.renderStrip(page, document, width, height, scale, scrollY, scrollY >= from, views * height, state, timeoutMs);
-        return possible(strip) ? new ScrollCache(strip, width, height) : null;
+        return paint(page, document, width, height, scale, scrollY, from, state, views, timeoutMs, null, null);
+    }
+
+    /**
+     * As above, painting the tall picture over [old]'s if it is as big ([old] is a picture of the caller's nothing reads
+     * any more: it is of no use from now on), and cutting views into [view] (a [width] × [height] premultiplied image,
+     * a {@link PooledPicture}'s, say) rather than a new one; either may be null. A tall picture is several views' worth
+     * (37 MB at 2048 x 1152), so a session scrolling down a long page made one of those for garbage every few notches.
+     */
+    public static ScrollCache paint(Page page, org.jsoup.nodes.Document document, int width, int height, double scale, double scrollY, double from,
+                                    Selector.State state, int views, long timeoutMs, ScrollCache old, BufferedImage view) {
+        BufferedImage reuse = old == null ? null : old.strip.image();
+        HtmlRenderer.Frame strip = HtmlRenderer.renderStrip(page, document, width, height, scale, scrollY, scrollY >= from, views * height, state, timeoutMs, reuse);
+        return possible(strip) ? new ScrollCache(strip, width, height, view) : null;
     }
 
     /** Whether a view of [f]'s page can be cut from a taller picture: nothing on it is fixed to the view. */
