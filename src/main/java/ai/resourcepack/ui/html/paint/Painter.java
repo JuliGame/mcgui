@@ -453,13 +453,15 @@ public final class Painter {
         Rectangle2D r = new Rectangle2D.Double(fx, fy, Math.max(0, f.w), f.h);
         double[] radii = Shapes.radii(box);
         Shape shape = Shapes.rect(r.getX(), r.getY(), r.getWidth(), r.getHeight(), radii);
-        if ((s.backgroundColor >>> 24) != 0) {
-            g.setColor(new Color(s.backgroundColor, true));
-            g.fill(shape);
+        if (seen(g, r.getX(), r.getY(), r.getWidth(), r.getHeight(), SLACK)) {
+            if ((s.backgroundColor >>> 24) != 0) {
+                g.setColor(new Color(s.backgroundColor, true));
+                g.fill(shape);
+            }
+            if (!s.backgroundImages.isEmpty()) Backgrounds.paint(g, s, res, r, shape, surfaceBounds(), budget);
+            double left = f.first ? box.b[3] : 0, right = f.last ? box.b[1] : 0;
+            drawBorders(g, s, r, radii, new double[]{box.b[0], right, box.b[2], left});
         }
-        if (!s.backgroundImages.isEmpty()) Backgrounds.paint(g, s, res, r, shape, surfaceBounds(), budget);
-        double left = f.first ? box.b[3] : 0, right = f.last ? box.b[1] : 0;
-        drawBorders(g, s, r, radii, new double[]{box.b[0], right, box.b[2], left});
         hit(shape, s, box.element != null ? box.element : box.owner);
     }
 
@@ -644,8 +646,9 @@ public final class Painter {
         Style s = b.style;
         double[] radii = Shapes.radii(b);
         Shape border = Shapes.rect(x, y, b.w, b.h, radii);
-        if (!s.hidden()) {
-            List<Shadows.Shadow> shadows = Shadows.parse(s.boxShadow, s);
+        List<Shadows.Shadow> shadows = s.hidden() ? List.of() : Shadows.parse(s.boxShadow, s);
+        // Most of a long page is outside a band or a hover's clip: what it paints there is cut off anyway.
+        if (!s.hidden() && seen(g, x, y, b.w, b.h, SLACK + outerReach(shadows))) {
             for (int i = shadows.size() - 1; i >= 0; i--) {
                 Shadows.Shadow sh = shadows.get(i);
                 if (!sh.inset()) Shadows.outer(g, x, y, b.w, b.h, radii, sh, deviceScale, surfaceBounds(), budget);
@@ -671,6 +674,22 @@ public final class Painter {
             drawBorders(g, s, new Rectangle2D.Double(x, y, b.w, b.h), radii, b.b);
         }
         hit(border, s, b.element != null ? b.element : b.owner);
+    }
+
+    /** How far (CSS px) [shadows]' outer ones paint past the box: offset, spread and blur, as {@link Shadows#blurred} pads it. */
+    private double outerReach(List<Shadows.Shadow> shadows) {
+        double reach = 0;
+        for (Shadows.Shadow sh : shadows) {
+            if (sh.inset()) continue;
+            reach = Math.max(reach, Math.max(Math.abs(sh.x()), Math.abs(sh.y())) + Math.max(0, sh.spread()) + shadowSpread(sh) / deviceScale);
+        }
+        return reach;
+    }
+
+    /** Whether anything painted within [grow] of the rectangle (x, y, w, h) can still land on the surface. */
+    private boolean seen(Graphics2D g, double x, double y, double w, double h, double grow) {
+        Rectangle2D vis = visible(g, surfaceBounds());
+        return vis != null && vis.intersects(x - grow, y - grow, w + 2 * grow, h + 2 * grow);
     }
 
     private void bordersOnly(Graphics2D g, Box b, double x, double y) {
