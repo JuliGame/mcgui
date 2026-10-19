@@ -16,6 +16,8 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
@@ -102,20 +104,50 @@ class TileScrollTest {
         Element card = cardInView();
         state = HtmlRenderer.state(card, null);
         cache = null;
-        canvas.draw(HtmlRenderer.render(LONG, W, H, SCALE, at, state).image(), 0, 0);
-        shown.add(fresh());
-        settle();
-        assertOnClient();
+        hover();
         scroll(1);
         settle();
         assertOnClient();
         state = Selector.State.NONE;
         cache = null;
-        canvas.draw(HtmlRenderer.render(LONG, W, H, SCALE, at, state).image(), 0, 0);
-        shown.add(fresh());
+        hover();
         scroll(-2);
         settle();
         assertOnClient();
+    }
+
+    /**
+     * Draws the view in the new hover state over the canvas and checks what that sends: after a shift the frames
+     * point at other maps than their own, and a repaint must still go to the maps they show, as only the tiles the
+     * hover changed, each as the rectangle that changed.
+     */
+    private void hover() {
+        byte[][] before = shown.get(shown.size() - 1);
+        canvas.draw(HtmlRenderer.render(LONG, W, H, SCALE, at, state).image(), 0, 0);
+        byte[][] after = fresh();
+        shown.add(after);
+        Set<Integer> changed = new TreeSet<>();
+        long bytes = 0;
+        for (int t = 0; t < after.length; t++) {
+            int[] rect = RecordingWire.changed(before[t], after[t]);
+            if (rect == null) continue;
+            changed.add(t);
+            bytes += (long) rect[2] * rect[3];
+        }
+        assertFalse(changed.isEmpty(), "the hover changes something in view");
+        assertTrue(client.repointed(), "after a shift, frames show other maps than their own");
+        client.log.clear();
+        settle();
+        assertOnClient();
+        Set<Integer> sent = new TreeSet<>();
+        long sentBytes = 0;
+        for (RecordingWire.Patch p : client.log) {
+            sent.add(client.tileShowing(p.id()));
+            sentBytes += p.colors().length;
+        }
+        assertEquals(changed, sent, "the tiles the hover changed, each once");
+        assertEquals(changed.size(), client.log.size());
+        assertEquals(bytes, sentBytes, "only the rectangles that changed");
     }
 
     /**

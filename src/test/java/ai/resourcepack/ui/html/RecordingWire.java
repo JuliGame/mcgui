@@ -6,6 +6,7 @@ import org.bukkit.entity.Player;
 
 import java.lang.reflect.Proxy;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -34,6 +35,8 @@ final class RecordingWire implements Wire {
     Runnable afterBundle = () -> {};
     /** Counted as delivered. */
     long patches, repoints, bundles, rawBytes;
+    /** Every patch delivered, in order, until a test clears it. */
+    final List<Patch> log = new ArrayList<>();
     /** Patch colours deflated one packet at a time, as a compressed connection sends them (counted when [deflate]). */
     long deflatedBytes;
     boolean deflate;
@@ -117,6 +120,7 @@ final class RecordingWire implements Wire {
             byte[] map = maps.computeIfAbsent(p.id, k -> new byte[128 * 128]);
             for (int y = 0; y < p.h; y++) System.arraycopy(p.colors, y * p.w, map, (p.y + y) * 128 + p.x, p.w);
             patches++;
+            log.add(p);
             rawBytes += p.colors.length;
             if (deflate) {
                 deflater.reset();
@@ -127,6 +131,33 @@ final class RecordingWire implements Wire {
         } else {
             throw new IllegalArgumentException("Not a packet of this wire: " + packet);
         }
+    }
+
+    /** The tile whose frame shows map [id], or -1 if none does. */
+    int tileShowing(int id) {
+        for (int t = 0; t < shows.length; t++) if (shows[t] == id) return t;
+        return -1;
+    }
+
+    /** Whether any frame shows another map than its own. */
+    boolean repointed() {
+        for (int t = 0; t < shows.length; t++) if (shows[t] != wall.mapId(t)) return true;
+        return false;
+    }
+
+    /** The smallest rectangle {x, y, w, h} of a map where [a] and [b] differ, or null if they do not. */
+    static int[] changed(byte[] a, byte[] b) {
+        int minX = 128, minY = 128, maxX = -1, maxY = -1;
+        for (int y = 0; y < 128; y++) {
+            for (int x = 0; x < 128; x++) {
+                if (a[y * 128 + x] == b[y * 128 + x]) continue;
+                minX = Math.min(minX, x);
+                maxX = Math.max(maxX, x);
+                minY = Math.min(minY, y);
+                maxY = y;
+            }
+        }
+        return maxX < 0 ? null : new int[]{minX, minY, maxX - minX + 1, maxY - minY + 1};
     }
 
     /** What the client shows in [tile]: the colours of the map its frame shows, or null if it has none yet. */
