@@ -331,8 +331,8 @@ public final class Views implements Listener {
             cam = eye;
             seat = cam.clone().subtract(0, standingEyeHeight(player), 0);
         }
-        // Spawned unseen: the maps go out first, and the frames only appear once they can show them.
-        wall.spawn(plugin, player, false, clientPointer ? stackBlock(cam) : null);
+        // On their client only, and not yet: the maps go out first, and the frames only appear once they can show them.
+        wall.spawnFor(nms, player, clientPointer ? stackBlock(cam) : null);
         double speed = clientPointer ? clientSpeed(canvas) : settings.cursorSpeed * canvas.height() / 768.0;
 
         // With a client-placed pointer the camera is the player's own eye, which turns with the mouse:
@@ -584,7 +584,7 @@ public final class Views implements Listener {
         v.awaitingTeleport = true;
         v.revealed = true;
         // All in one tick, so the client applies them together with the camera switch.
-        v.wall.showTo(plugin, p);
+        v.wall.showTo(p);
         v.privateView.open(plugin, p);
         if (v.pointer != null) {
             // Spawned for them where it belongs: the server's later moves of it never reach them (see Pipeline.watch).
