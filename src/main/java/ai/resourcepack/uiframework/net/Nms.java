@@ -20,6 +20,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.IntUnaryOperator;
 
 /**
@@ -303,6 +304,18 @@ public final class Nms {
      */
     public boolean writeNow(Player player, List<?> packets, Consumer<Boolean> done) {
         if (packets.isEmpty()) return true;
+        return writeNow(player, channel -> {
+            ChannelFuture last = null;
+            for (Object p : packets) last = channel.write(p);
+            return last;
+        }, done);
+    }
+
+    /**
+     * As {@link #writeNow(Player, List, Consumer)}, with the writes [writer] makes on the connection's thread;
+     * it returns the future of the last one (null for none).
+     */
+    public boolean writeNow(Player player, Function<Channel, ChannelFuture> writer, Consumer<Boolean> done) {
         Object listener;
         Channel channel;
         try {
@@ -321,15 +334,15 @@ public final class Nms {
                         done.accept(false);
                         return;
                     }
-                    last = null;
-                    for (Object p : packets) last = channel.write(p);
+                    last = writer.apply(channel);
                     channel.flush();
                 } catch (RuntimeException e) {
                     // [done] must always run, or the bytes stay counted as in flight and the player's pictures stall.
                     done.accept(false);
                     return;
                 }
-                last.addListener(f -> done.accept(f.isSuccess()));
+                if (last == null) done.accept(true);
+                else last.addListener(f -> done.accept(f.isSuccess()));
             });
         } catch (RejectedExecutionException e) {
             return false; // the event loop is shutting down with the server

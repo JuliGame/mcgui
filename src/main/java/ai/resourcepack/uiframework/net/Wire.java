@@ -14,6 +14,16 @@ public interface Wire {
     /** A packet that brings the [w] × [h] rectangle at (x, y) of map [mapId] to [colors]. */
     Object patch(int mapId, int x, int y, int w, int h, byte[] colors);
 
+    /**
+     * A packet that brings the [w] × [h] rectangle at (x, y) of map [mapId] to that rectangle of [tile] (128 × 128,
+     * never changed once published), for [player]; [shared]: other players are sent the same tile now too. A wire
+     * may hand several players the same object for the same tile, rectangle and map; by default this copies the
+     * rectangle out for {@link #patch(int, int, int, int, int, byte[])}.
+     */
+    default Object patch(Player player, int mapId, int x, int y, int w, int h, byte[] tile, boolean shared) {
+        return patch(mapId, x, y, w, h, SharedCompression.rectangle(tile, x, y, w, h));
+    }
+
     /** A packet that makes [wall]'s frame for [tile] show map [mapId], or null while the frame is not in the world. */
     Object repoint(MapWall wall, int tile, int mapId);
 

@@ -250,7 +250,7 @@ public final class Pipeline {
      * rewritten on its way out to show the one in [pointing]. Kept for as long as the connection lasts, which is
      * as long as the client keeps its frames and maps.
      */
-    private final class FrameMaps extends ChannelOutboundHandlerAdapter implements Wire.Frames {
+    private final class FrameMaps extends ChannelOutboundHandlerAdapter implements Wire.Frames, SharedCompression.LeavesMapsAlone {
         /** By wall: the map each tile shows, for walls where any is not its own. Written by the sender thread. */
         private final Map<MapWall, int[]> pointing = Collections.synchronizedMap(new WeakHashMap<>());
         volatile boolean added;
@@ -308,7 +308,7 @@ public final class Pipeline {
     }
 
     /** Stays in the pipeline once added; it passes everything through untouched while its player is not seated. */
-    private final class Filter extends ChannelDuplexHandler {
+    private final class Filter extends ChannelDuplexHandler implements SharedCompression.LeavesMapsAlone {
         private final UUID id;
         private final Object player;
         volatile ChannelHandlerContext ctx;

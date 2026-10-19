@@ -23,6 +23,11 @@ screens:
   view-distance: 48
   # How far away a player can point at and click a wall screen, in blocks.
   reach: 8
+  # Compress each map picture once, on UI Framework's own thread, and write the same bytes to everyone
+  # watching it, instead of every player's connection compressing its own copy on the network threads.
+  # A connection whose packets another plugin reads or rewrites on their way out (ViaVersion, ProtocolLib,
+  # PacketEvents) still gets packets as before, so that plugin sees them; the log says so once.
+  shared-compression: true
 
 views:
   # A view is fitted to the player's field of view. Minecraft does not tell the server what a player's
