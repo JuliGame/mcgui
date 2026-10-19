@@ -213,6 +213,9 @@ public final class LoadBench {
         sleepUntil(warmEnd);
         for (MemoryPoolMXBean p : ManagementFactory.getMemoryPoolMXBeans()) if (p.getType() == MemoryType.HEAP) p.resetPeakUsage();
         long gc0 = gcMs(), gcN0 = gcCount();
+        TICK.start();
+        PAUSES.start();
+        long up0 = ManagementFactory.getRuntimeMXBean().getUptime();
         long cpu0 = OS.getProcessCpuTime();
         long[] th0 = threadCpu();
         long[] sys0 = procStat();
@@ -225,6 +228,9 @@ public final class LoadBench {
         long[] th1 = threadCpu();
         long[] sys1 = procStat();
         long t1 = System.nanoTime();
+        long up1 = ManagementFactory.getRuntimeMXBean().getUptime();
+        long[] ticks = TICK.stop();
+        Pauses.Window pauses = PAUSES.stop();
         long gc1 = gcMs(), gcN1 = gcCount();
         long peak = 0;
         for (MemoryPoolMXBean p : ManagementFactory.getMemoryPoolMXBeans()) if (p.getType() == MemoryType.HEAP) peak += p.getPeakUsage().getUsed();
@@ -263,6 +269,9 @@ public final class LoadBench {
         for (int i = 0; i < 5; i++) r.allocMb += (th1[5 + i] - th0[5 + i]) / 1048576.0;
         r.processCpuMs = (cpu1 - cpu0) / 1e6;
         r.why = why;
+        r.ticks = ticks;
+        r.pauses = pauses;
+        r.uptime = new long[]{up0, up1};
         r.senderCpu = sender == null ? 0 : (senderEnd - sender0) / 1e9 / wall * 100;
         r.firstMs = sims.stream().mapToDouble(s -> s.firstFrameNs > 0 ? (s.firstFrameNs - open) / 1e6 : Double.NaN).toArray();
         r.secs = wall;
@@ -286,6 +295,104 @@ public final class LoadBench {
             out[5 + g] += Math.max(0, sun.getThreadAllocatedBytes(t.getId()));
         }
         return out;
+    }
+
+    // ------------------------------------------------------------------------------------ the server thread, and GC pauses
+
+    /**
+     * Stands in for the Minecraft server thread: wakes every 50 ms (a tick), works 0.5 ms, and records how late it woke.
+     * Late wake-ups are what a player feels as a tick spike: a GC pause stops it like every Java thread, and render and
+     * encoder threads compete with it for the cores. Records only between {@link #start} and {@link #stop}.
+     */
+    static final Ticker TICK = new Ticker();
+
+    static final class Ticker {
+        private static final long PERIOD = 50_000_000L, WORK = 500_000L;
+        private final long[] late = new long[1 << 16];
+        private int n;
+        private volatile boolean recording;
+
+        Ticker() {
+            Thread t = new Thread(this::loop, "LoadBench-tick");
+            t.setDaemon(true);
+            t.start();
+        }
+
+        private void loop() {
+            long next = System.nanoTime() + PERIOD;
+            while (true) {
+                long d;
+                while ((d = next - System.nanoTime()) > 0) LockSupport.parkNanos(d);
+                long woke = System.nanoTime();
+                if (recording) {
+                    synchronized (this) {
+                        if (n < late.length) late[n++] = woke - next;
+                    }
+                }
+                long until = woke + WORK;
+                while (System.nanoTime() < until) Thread.onSpinWait();
+                // A fixed schedule, as the server keeps one: a late tick does not move the next.
+                next += PERIOD;
+                if (next < System.nanoTime() - PERIOD) next = System.nanoTime() + PERIOD;
+            }
+        }
+
+        synchronized void start() {
+            n = 0;
+            recording = true;
+        }
+
+        /** How late (ns) each tick of the window woke, sorted. */
+        synchronized long[] stop() {
+            recording = false;
+            long[] out = Arrays.copyOf(late, n);
+            Arrays.sort(out);
+            return out;
+        }
+    }
+
+    /** Every collection's pause in a window, from the collectors' notifications (the -Xlog:gc file has the same, finer). */
+    static final Pauses PAUSES = new Pauses();
+
+    static final class Pauses {
+        record Window(int young, int humongous, int other, double totalMs, double maxMs) {}
+
+        private int young, humongous, other;
+        private double total, max;
+        private boolean recording;
+
+        Pauses() {
+            for (GarbageCollectorMXBean b : ManagementFactory.getGarbageCollectorMXBeans()) {
+                if (!(b instanceof javax.management.NotificationEmitter e)) continue;
+                e.addNotificationListener((note, hb) -> {
+                    if (!note.getType().equals(com.sun.management.GarbageCollectionNotificationInfo.GARBAGE_COLLECTION_NOTIFICATION)) return;
+                    var info = com.sun.management.GarbageCollectionNotificationInfo.from((javax.management.openmbean.CompositeData) note.getUserData());
+                    record(info.getGcName(), info.getGcCause(), info.getGcInfo().getDuration());
+                }, null, null);
+            }
+        }
+
+        private synchronized void record(String name, String cause, long ms) {
+            if (!recording) return;
+            // G1's concurrent cycle runs beside the program; its bean's duration is the whole cycle, not a pause.
+            if (name.contains("Concurrent")) return;
+            if (name.contains("Young")) young++;
+            else other++;
+            if (cause.contains("Humongous")) humongous++;
+            total += ms;
+            max = Math.max(max, ms);
+        }
+
+        synchronized void start() {
+            young = humongous = other = 0;
+            total = max = 0;
+            recording = true;
+        }
+
+        synchronized Window stop() {
+            recording = false;
+            return new Window(young, humongous, other, total, max);
+        }
     }
 
     private static void sleepUntil(long nanoTime) {
@@ -785,6 +892,10 @@ public final class LoadBench {
         long requests, dropped, partialFrames, fullFrames, noops;
         long[] qWait = {}, rPartial = {}, rFull = {}, drawFull = {}, drawPartial = {};
         double tilesFull, tilesPartial;
+        /** How late each simulated server tick woke (ns, sorted); GC pauses in the window; the window in JVM uptime ms (for -Xlog:gc). */
+        long[] ticks = {};
+        Pauses.Window pauses = new Pauses.Window(0, 0, 0, 0, 0);
+        long[] uptime = {0, 0};
 
         Result(Cfg cfg) {
             this.cfg = cfg;
@@ -873,6 +984,10 @@ public final class LoadBench {
             b.append(String.format(" alloc %.1f MB/frame", allocMb / fr));
             b.append(String.format(" | cpu %.0f%% other %.0f%% steal %.0f%% | live %.0f MB peak %.0f MB gc %d ms/%d | open %.0f/%.0f ms", cpu, otherCpu, stealPct, liveMb,
                     peakMb, gcMs, gcN, f.length == 0 ? Double.NaN : f[f.length / 2], f.length == 0 ? Double.NaN : f[f.length - 1]));
+            b.append(String.format(" | tick late p50/p99/max %.2f/%.2f/%.2f ms (n=%d, >5ms %d) | gc pauses young %d (humongous %d) other %d, total %.0f ms, max %.0f ms | uptime %d-%d",
+                    pct(ticks, .5), pct(ticks, .99), ticks.length == 0 ? Double.NaN : ticks[ticks.length - 1] / 1e6, ticks.length,
+                    Arrays.stream(ticks).filter(t -> t > 5_000_000L).count(), pauses.young(), pauses.humongous(), pauses.other(), pauses.totalMs(), pauses.maxMs(),
+                    uptime[0], uptime[1]));
             if (cfg.mode.equals("stress")) b.append(String.format(" | tiles/frame full %.0f", tilesFull));
             else b.append(String.format(" | why-full first/doc/scroll/nop/sib/nodirty/big/grew/moved %s", Arrays.toString(why)));
             if (wire != null && wire.batches() > 0) {
@@ -889,7 +1004,8 @@ public final class LoadBench {
                     "scroll_p50", "scroll_p90", "scroll_p99", "stress_n", "stress_p50", "stress_p90", "stress_p99", "requests", "dropped", "full_frames", "partial_frames",
                     "fps", "render_full_p50", "render_full_p90", "render_part_p50", "render_part_p90", "draw_full_p50", "draw_full_p90", "draw_part_p50", "queue_p50",
                     "queue_p90", "tiles_full", "tiles_part", "cpu", "other_cpu", "steal", "live_mb", "peak_mb", "gc_ms", "gc_n", "open_p50", "open_max",
-                    "w_batches", "w_tiles", "w_patches", "w_raw", "w_defl", "w_full", "w_deflate_ms", "w_diff_ms", "sender_cpu", "cpu_render_ms", "cpu_painters_ms", "cpu_encoders_ms", "cpu_send_ms", "cpu_server_ms", "cpu_process_ms", "alloc_mb");
+                    "w_batches", "w_tiles", "w_patches", "w_raw", "w_defl", "w_full", "w_deflate_ms", "w_diff_ms", "sender_cpu", "cpu_render_ms", "cpu_painters_ms", "cpu_encoders_ms", "cpu_send_ms", "cpu_server_ms", "cpu_process_ms", "alloc_mb",
+                    "tick_n", "tick_p50", "tick_p99", "tick_max", "tick_over5", "gc_young", "gc_humongous", "gc_other", "gc_pause_ms", "gc_pause_max", "up0", "up1");
         }
 
         String csv(String page) {
@@ -947,6 +1063,18 @@ public final class LoadBench {
             for (double d : threadCpuMs) v.add(f(d));
             v.add(f(processCpuMs));
             v.add(f(allocMb));
+            v.add(String.valueOf(ticks.length));
+            v.add(f(pct(ticks, .5)));
+            v.add(f(pct(ticks, .99)));
+            v.add(f(ticks.length == 0 ? Double.NaN : ticks[ticks.length - 1] / 1e6));
+            v.add(String.valueOf(Arrays.stream(ticks).filter(t -> t > 5_000_000L).count()));
+            v.add(String.valueOf(pauses.young()));
+            v.add(String.valueOf(pauses.humongous()));
+            v.add(String.valueOf(pauses.other()));
+            v.add(f(pauses.totalMs()));
+            v.add(f(pauses.maxMs()));
+            v.add(String.valueOf(uptime[0]));
+            v.add(String.valueOf(uptime[1]));
             return String.join(",", v);
         }
 
