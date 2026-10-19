@@ -5,10 +5,10 @@ import ai.resourcepack.ui.html.style.Len;
 import ai.resourcepack.ui.html.style.Style;
 import ai.resourcepack.ui.html.text.TextShaper;
 
-import java.util.ArrayList;
 import java.util.IdentityHashMap;
-import java.util.List;
+import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Lays out a box tree: block flow with margin collapsing, inline content ({@link InlineLayout}),
@@ -28,7 +28,7 @@ public final class Layout {
     final GridLayout grid;
     final TableLayout table;
     /** Absolutely positioned boxes waiting for their containing block to be sized. */
-    private final Map<Box, List<Box>> pending = new IdentityHashMap<>();
+    private final Map<Box, Set<Box>> pending = new IdentityHashMap<>();
     private final Map<Box, double[]> intrinsic = new IdentityHashMap<>();
     Box root;
 
@@ -456,10 +456,9 @@ public final class Layout {
     /** Queues an absolutely positioned box for its containing block. */
     void defer(Box c) {
         Box cb = containingBlock(c);
-        List<Box> list = pending.computeIfAbsent(cb, k -> new ArrayList<>());
-        // A box laid out twice (a stretched flex item) defers its absolutes twice.
-        for (Box x : list) if (x == c) return;
-        list.add(c);
+        // A box laid out twice (a stretched flex item) defers its absolutes twice: a set keeps one, in order.
+        // (Box has no equals of its own, so this is by identity; a list searched each time was O(n²) in siblings.)
+        pending.computeIfAbsent(cb, k -> new LinkedHashSet<>()).add(c);
     }
 
     private Box containingBlock(Box c) {
@@ -489,7 +488,7 @@ public final class Layout {
     }
 
     void positionAbsolutes(Box cb) {
-        List<Box> list = pending.remove(cb);
+        Set<Box> list = pending.remove(cb);
         if (list == null) return;
         boolean viewport = cb == root;
         double pw = viewport ? vw : cb.w - cb.b[1] - cb.b[3];
