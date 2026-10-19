@@ -143,7 +143,9 @@ public final class SharedCompressionBench {
         SharedCompression shared = after ? SharedCompression.create(PaperNet.PACKETS, Logger.getAnonymousLogger(), -1) : null;
         BenchWire wire = new BenchWire(shared);
         MapWall wall = new MapWall(null, 0, 100, 0, BlockFace.NORTH, COLS, ROWS, 7000);
-        MapSender sender = new MapSender(wire, palette, Integer.MAX_VALUE, Logger.getAnonymousLogger());
+        // 100 MB/s: every change goes in one pass (a burst is 25 MB), and a slow draw between passes cannot
+        // overflow the sender's refill (bytes per second times nanoseconds), as Integer.MAX_VALUE does past 4 s.
+        MapSender sender = new MapSender(wire, palette, 100_000_000, Logger.getAnonymousLogger());
         List<Canvas> canvases = new ArrayList<>();
         List<MapSender.Assignment> assignments = new ArrayList<>();
         Canvas one = new Canvas(palette, COLS, ROWS);
