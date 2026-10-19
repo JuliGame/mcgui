@@ -90,6 +90,13 @@ public final class MapSender implements AutoCloseable {
     private final Thread loop = new Thread(this::run, "UIFramework-send");
     private volatile boolean closed;
     private long lastRun = System.nanoTime();
+    /** The most a player's budget can build up to: a quarter of a second, so a burst after a quiet moment goes out at once. */
+    private final long burst;
+    /**
+     * Budgets of players dropped in the last quarter second ({budget, when}). One who comes straight back carries on
+     * from there, so stepping out of range and back cannot earn a fresh burst; anyone else starts with a full one.
+     */
+    private final Map<UUID, long[]> left = new ConcurrentHashMap<>();
     private long lastWarning;
 
     public MapSender(Nms nms, Palette palette, int bytesPerSecond, Logger log) {
@@ -97,6 +104,7 @@ public final class MapSender implements AutoCloseable {
         this.palette = palette;
         this.bytesPerSecond = bytesPerSecond;
         this.maxInFlight = Math.max(512 * 1024L, bytesPerSecond / 20L);
+        this.burst = bytesPerSecond / 4L;
         this.log = log;
         loop.setDaemon(true);
     }
@@ -136,7 +144,19 @@ public final class MapSender implements AutoCloseable {
 
     /** Forget what a player has, so everything is resent (new world, rejoin, pack change). */
     public void reset(UUID player) {
-        viewers.remove(player);
+        Viewer v = viewers.remove(player);
+        if (v != null) left.put(player, new long[]{v.budget, System.nanoTime()});
+    }
+
+    /**
+     * A player new to the screens. They start with the full burst: a view opened or a wall walked up to is the
+     * quietest moment there is, and starting from nothing made a 16x9 picture trickle out over 150 ms.
+     */
+    private Viewer fresh(UUID id, long now) {
+        Viewer v = new Viewer();
+        long[] was = left.remove(id);
+        v.budget = was == null ? burst : Math.min(burst, was[0] + bytesPerSecond * (now - was[1]) / 1_000_000_000L);
+        return v;
     }
 
     public void start() {
@@ -179,9 +199,8 @@ public final class MapSender implements AutoCloseable {
         lastRun = now;
         Set<UUID> seen = new HashSet<>();
         for (Assignment a : assignments) {
-            Viewer v = viewers.computeIfAbsent(a.player.getUniqueId(), k -> new Viewer());
-            // A quarter of a second of budget can build up, so a burst after a quiet moment goes out at once.
-            if (seen.add(a.player.getUniqueId())) v.budget = Math.min(v.budget + refill, bytesPerSecond / 4L);
+            Viewer v = viewers.computeIfAbsent(a.player.getUniqueId(), k -> fresh(k, now));
+            if (seen.add(a.player.getUniqueId())) v.budget = Math.min(v.budget + refill, burst);
             v.walls.add(a.wall);
             // Each on its own: one that fails must not hold up every assignment after it.
             try {
@@ -197,8 +216,14 @@ public final class MapSender implements AutoCloseable {
                 warn(e);
             }
         }
-        // Players who left every screen: drop their state so walking back resends everything.
-        viewers.keySet().retainAll(seen);
+        // Players who left every screen: drop their state so walking back resends everything, keeping their budget a moment.
+        for (var it = viewers.entrySet().iterator(); it.hasNext(); ) {
+            var e = it.next();
+            if (seen.contains(e.getKey())) continue;
+            left.put(e.getKey(), new long[]{e.getValue().budget, now});
+            it.remove();
+        }
+        left.values().removeIf(was -> now - was[1] > 250_000_000L); // refilled to the full burst by now anyway
         // And each player's frames for walls they are no longer near, even where others still are.
         for (Viewer v : viewers.values()) {
             v.frames.keySet().retainAll(v.walls);
