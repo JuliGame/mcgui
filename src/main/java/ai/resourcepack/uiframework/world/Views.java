@@ -107,9 +107,9 @@ public final class Views implements Listener {
     /** Ticks to wait for the client to take the teleport to the seat before reading the mouse regardless. */
     private static final int SETTLE_TIMEOUT = 20;
     /**
-     * Size of the Interaction round a client-placed pointer's eye, in blocks. Its nearest face must be
-     * nearer than any block face can be (the flagged coordinate can be 3/128 of a block from one), so a
-     * click hits it whichever way the player looks.
+     * Size of the Interaction round a client-placed pointer's eye, in blocks: its far side (where a look
+     * from inside hits it) is nearer than any block face (at least 0.27 away, see open), so a click hits
+     * it whichever way the player looks.
      */
     private static final float CLIENT_TARGET = 0.02f;
     /** The widest turn either side of the picture's centre a client-placed pointer may need: below ±180°. */
