@@ -79,6 +79,7 @@ public final class LoadBench {
         double secs = Double.parseDouble(System.getProperty("secs", "12"));
         double warm = Double.parseDouble(System.getProperty("warm", "2"));
         boolean send = Boolean.getBoolean("send");
+        HtmlRenderer.adaptiveBands = Boolean.parseBoolean(System.getProperty("adaptive", "true"));
         String out = System.getProperty("out", "");
         String tag = System.getProperty("tag", "");
         Path samples = Path.of(System.getProperty("samples", "samples")), shipped = Path.of(System.getProperty("shipped", "src/main/resources/pages"));
@@ -214,6 +215,7 @@ public final class LoadBench {
         for (MemoryPoolMXBean p : ManagementFactory.getMemoryPoolMXBeans()) if (p.getType() == MemoryType.HEAP) p.resetPeakUsage();
         long gc0 = gcMs(), gcN0 = gcCount();
         long cpu0 = OS.getProcessCpuTime();
+        long[] th0 = threadCpu();
         long[] sys0 = procStat();
         long sender0 = sender == null ? 0 : sender.reset();
         for (AtomicInteger w : WHY) w.set(0);
@@ -221,6 +223,7 @@ public final class LoadBench {
         long tEnd = t0 + (long) (cfg.secs * 1e9);
         sleepUntil(tEnd);
         long cpu1 = OS.getProcessCpuTime();
+        long[] th1 = threadCpu();
         long[] sys1 = procStat();
         long t1 = System.nanoTime();
         long gc1 = gcMs(), gcN1 = gcCount();
@@ -257,12 +260,33 @@ public final class LoadBench {
         r.gcMs = gc1 - gc0;
         r.gcN = gcN1 - gcN0;
         r.wire = wire;
+        for (int i = 0; i < 5; i++) r.threadCpuMs[i] = (th1[i] - th0[i]) / 1e6;
+        for (int i = 0; i < 5; i++) r.allocMb += (th1[5 + i] - th0[5 + i]) / 1048576.0;
+        r.processCpuMs = (cpu1 - cpu0) / 1e6;
         r.why = why;
         r.senderCpu = sender == null ? 0 : (senderEnd - sender0) / 1e9 / wall * 100;
         r.firstMs = sims.stream().mapToDouble(s -> s.firstFrameNs > 0 ? (s.firstFrameNs - open) / 1e6 : Double.NaN).toArray();
         r.secs = wall;
         sims.clear();
         return r;
+    }
+
+    /** CPU ns so far of {render threads, painter pool, encoder pool, sender, server thread}, then the bytes each group has allocated: what a frame costs whatever else the machine is doing. */
+    private static long[] threadCpu() {
+        var mx = ManagementFactory.getThreadMXBean();
+        var sun = (com.sun.management.ThreadMXBean) mx;
+        long[] out = new long[10];
+        for (Thread t : Thread.getAllStackTraces().keySet()) {
+            long c = mx.getThreadCpuTime(t.getId());
+            if (c < 0) continue;
+            String n = t.getName();
+            int g = n.startsWith("LoadBench-render") ? 0 : n.startsWith("ForkJoinPool-1-") ? 1 : n.startsWith("ForkJoinPool-2-") ? 2
+                    : n.equals("LoadBench-send") ? 3 : n.equals("LoadBench-server") ? 4 : -1;
+            if (g < 0) continue;
+            out[g] += c;
+            out[5 + g] += Math.max(0, sun.getThreadAllocatedBytes(t.getId()));
+        }
+        return out;
     }
 
     private static void sleepUntil(long nanoTime) {
@@ -852,6 +876,9 @@ public final class LoadBench {
         Sender.Totals wire;
         long[] hover = {}, scroll = {}, stressLat = {}, openLat = {};
         int[] why = new int[9];
+        /** CPU ms in the window: render threads, painters, encoders, sender, server thread; and the whole process. */
+        final double[] threadCpuMs = new double[5];
+        double processCpuMs, allocMb;
         long requests, dropped, partialFrames, fullFrames, noops;
         long[] qWait = {}, rPartial = {}, rFull = {}, drawFull = {}, drawPartial = {};
         double tilesFull, tilesPartial;
@@ -937,6 +964,9 @@ public final class LoadBench {
             b.append(String.format(" | drop %d/%d | fr %.1f/s (full %d, part %d) | render full %.0f/%.0f part %.0f  draw full %.0f part %.0f  queue %.0f/%.0f ms",
                     dropped, requests, fps(), fullFrames, partialFrames, pct(rFull, .5), pct(rFull, .9), pct(rPartial, .5), pct(drawFull, .5),
                     pct(drawPartial, .5), pct(qWait, .5), pct(qWait, .9)));
+            long fr = Math.max(1, partialFrames + fullFrames);
+            b.append(String.format(" | cpu ms/frame render %.0f painters %.0f encoders %.0f total %.0f", threadCpuMs[0] / fr, threadCpuMs[1] / fr, threadCpuMs[2] / fr, processCpuMs / fr));
+            b.append(String.format(" alloc %.1f MB/frame", allocMb / fr));
             b.append(String.format(" | cpu %.0f%% other %.0f%% steal %.0f%% | live %.0f MB peak %.0f MB gc %d ms/%d | open %.0f/%.0f ms", cpu, otherCpu, stealPct, liveMb,
                     peakMb, gcMs, gcN, f.length == 0 ? Double.NaN : f[f.length / 2], f.length == 0 ? Double.NaN : f[f.length - 1]));
             if (cfg.mode.equals("stress")) b.append(String.format(" | tiles/frame full %.0f", tilesFull));
@@ -955,7 +985,7 @@ public final class LoadBench {
                     "scroll_p50", "scroll_p90", "scroll_p99", "stress_n", "stress_p50", "stress_p90", "stress_p99", "requests", "dropped", "full_frames", "partial_frames",
                     "fps", "render_full_p50", "render_full_p90", "render_part_p50", "render_part_p90", "draw_full_p50", "draw_full_p90", "draw_part_p50", "queue_p50",
                     "queue_p90", "tiles_full", "tiles_part", "cpu", "other_cpu", "steal", "live_mb", "peak_mb", "gc_ms", "gc_n", "open_p50", "open_max",
-                    "w_batches", "w_tiles", "w_patches", "w_raw", "w_defl", "w_full", "w_deflate_ms", "w_diff_ms", "sender_cpu");
+                    "w_batches", "w_tiles", "w_patches", "w_raw", "w_defl", "w_full", "w_deflate_ms", "w_diff_ms", "sender_cpu", "cpu_render_ms", "cpu_painters_ms", "cpu_encoders_ms", "cpu_send_ms", "cpu_server_ms", "cpu_process_ms", "alloc_mb");
         }
 
         String csv(String page) {
@@ -1010,6 +1040,9 @@ public final class LoadBench {
             v.add(f(w.deflateNs() / 1e6));
             v.add(f(w.diffNs() / 1e6));
             v.add(f(senderCpu));
+            for (double d : threadCpuMs) v.add(f(d));
+            v.add(f(processCpuMs));
+            v.add(f(allocMb));
             return String.join(",", v);
         }
 

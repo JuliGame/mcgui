@@ -113,17 +113,24 @@ public final class HtmlRenderer {
         // every pixel both ways on every fill. The page is painted on opaque white, so nothing reads alpha.
         BufferedImage img = base != null ? base : new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB_PRE);
         List<Painter.Hit> hits;
-        int bands = base == null && clip == null ? Math.min(maxBands, height / MIN_BAND_ROWS) : 1;
-        if (bands > 1) {
-            hits = paintBands(page, root, img, bands, Painter.blurReach(styler.styles.values(), scale), scale, vw, vh, scroll);
-        } else {
-            Graphics2D g = img.createGraphics();
-            g.scale(scale, scale);
-            if (clip != null) g.clip(clip);
-            Painter painter = new Painter(page.shaper, page, vw, vh, scroll);
-            painter.paint(g, root, img, scale);
-            g.dispose();
-            hits = painter.hits;
+        boolean full = base == null && clip == null;
+        // A full picture counts itself while it paints, so the ones painting at once share the painter threads.
+        int painting = full ? PAINTING.incrementAndGet() : 0;
+        try {
+            int bands = full ? bandsFor(height, painting) : 1;
+            if (bands > 1) {
+                hits = paintBands(page, root, img, bands, Painter.blurReach(styler.styles.values(), scale), scale, vw, vh, scroll);
+            } else {
+                Graphics2D g = img.createGraphics();
+                g.scale(scale, scale);
+                if (clip != null) g.clip(clip);
+                Painter painter = new Painter(page.shaper, page, vw, vh, scroll);
+                painter.paint(g, root, img, scale);
+                g.dispose();
+                hits = painter.hits;
+            }
+        } finally {
+            if (full) PAINTING.decrementAndGet();
         }
         return new Frame(img, scale, vw, vh, pageHeight, scroll, hits, new IdentityHashMap<>(styler.styles), document, page);
     }
@@ -131,6 +138,23 @@ public final class HtmlRenderer {
     /** Full pictures are painted as up to this many horizontal bands at once (1: one painter), none under MIN_BAND_ROWS rows. LoadBench changes it. */
     static volatile int maxBands = 4;
     private static final int MIN_BAND_ROWS = 192;
+    /**
+     * Whether the painter threads are shared out between the full pictures painting at once (else each takes maxBands).
+     * Every band repaints its own margin and walks the whole page, so four bands cost up to 70% more CPU than one
+     * painter on a page with a backdrop blur: worth it while the painters are idle, a waste once render threads
+     * compete for them (LoadBench, with 16 sessions on 2 render threads: 30% less CPU a frame, and the median hover
+     * 40% sooner than either four bands or none). LoadBench changes it to compare.
+     */
+    static volatile boolean adaptiveBands = true;
+    private static final java.util.concurrent.atomic.AtomicInteger PAINTING = new java.util.concurrent.atomic.AtomicInteger();
+
+    /** Bands for a full picture, [painting] pictures (this one included) being painted: each gets its share of the painter threads. */
+    private static int bandsFor(int height, int painting) {
+        int bands = Math.min(maxBands, height / MIN_BAND_ROWS);
+        if (!adaptiveBands || bands <= 1) return bands;
+        return Math.max(1, Math.min(bands, PAINTERS.getParallelism() / painting));
+    }
+
     /** Shared by every session's full repaints; leaves a core for the game. */
     private static final ForkJoinPool PAINTERS = new ForkJoinPool(Math.max(1, Runtime.getRuntime().availableProcessors() - 1));
 
