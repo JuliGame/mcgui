@@ -100,6 +100,16 @@ public final class HtmlRenderer {
      */
     public static Frame render(Page page, org.jsoup.nodes.Document document, int width, int height, double scale, double scrollY,
                                Selector.State state, BufferedImage base, java.awt.geom.Rectangle2D clip) {
+        return render(page, document, width, height, scale, scrollY, state, base, clip, clip);
+    }
+
+    /**
+     * As above, but only [keep] (a rectangle inside [clip]) keeps what was painted: the rest of [clip] is painted
+     * so that what is drawn inside [keep] (a backdrop-filter reads past its box) matches a whole picture's,
+     * and then put back as it was in [base].
+     */
+    public static Frame render(Page page, org.jsoup.nodes.Document document, int width, int height, double scale, double scrollY,
+                               Selector.State state, BufferedImage base, java.awt.geom.Rectangle2D clip, java.awt.geom.Rectangle2D keep) {
         double vw = width / scale, vh = height / scale;
         Element html = document.selectFirst("html");
         if (html == null) html = document;
@@ -112,6 +122,18 @@ public final class HtmlRenderer {
         // Premultiplied: Java2D blends onto it directly, where a plain ARGB surface costs a conversion of
         // every pixel both ways on every fill. The page is painted on opaque white, so nothing reads alpha.
         BufferedImage img = base != null ? base : new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB_PRE);
+        int[] ring = null;
+        int rx0 = 0, ry0 = 0, rx1 = 0, ry1 = 0;
+        if (base != null && clip != null && keep != null && !keep.contains(clip)) {
+            // Out to a pixel past the clip, which Java2D may round outwards.
+            rx0 = Math.max(0, (int) Math.floor(clip.getX() * scale) - 1);
+            ry0 = Math.max(0, (int) Math.floor(clip.getY() * scale) - 1);
+            rx1 = Math.min(width, (int) Math.ceil(clip.getMaxX() * scale) + 1);
+            ry1 = Math.min(height, (int) Math.ceil(clip.getMaxY() * scale) + 1);
+            ring = new int[(rx1 - rx0) * (ry1 - ry0)];
+            int[] px = ((DataBufferInt) img.getRaster().getDataBuffer()).getData();
+            for (int y = ry0; y < ry1; y++) System.arraycopy(px, y * width + rx0, ring, (y - ry0) * (rx1 - rx0), rx1 - rx0);
+        }
         List<Painter.Hit> hits;
         boolean full = base == null && clip == null;
         // A full picture counts itself while it paints, so the ones painting at once share the painter threads.
@@ -131,6 +153,19 @@ public final class HtmlRenderer {
             }
         } finally {
             if (full) PAINTING.decrementAndGet();
+        }
+        if (ring != null) {
+            // Everything in the clip but [keep] goes back as it was.
+            int kx0 = Math.max(0, (int) Math.floor(keep.getX() * scale)), ky0 = Math.max(0, (int) Math.floor(keep.getY() * scale));
+            int kx1 = Math.min(width, (int) Math.ceil(keep.getMaxX() * scale)), ky1 = Math.min(height, (int) Math.ceil(keep.getMaxY() * scale));
+            int[] px = ((DataBufferInt) img.getRaster().getDataBuffer()).getData();
+            for (int y = ry0; y < ry1; y++) {
+                boolean rowKept = y >= ky0 && y < ky1;
+                for (int x = rx0; x < rx1; x++) {
+                    if (rowKept && x >= kx0 && x < kx1) continue;
+                    px[y * width + x] = ring[(y - ry0) * (rx1 - rx0) + x - rx0];
+                }
+            }
         }
         return new Frame(img, scale, vw, vh, pageHeight, scroll, hits, new IdentityHashMap<>(styler.styles), document, page);
     }

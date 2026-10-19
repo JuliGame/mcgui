@@ -1,10 +1,7 @@
 package ai.resourcepack.ui.html;
 
 import ai.resourcepack.ui.html.css.Selector;
-import ai.resourcepack.ui.html.css.Values;
 import ai.resourcepack.ui.html.paint.Painter;
-import ai.resourcepack.ui.html.style.Len;
-import ai.resourcepack.ui.html.style.Style;
 import ai.resourcepack.uiframework.api.Canvas;
 import ai.resourcepack.uiframework.render.Palette;
 import com.sun.management.OperatingSystemMXBean;
@@ -434,25 +431,13 @@ public final class LoadBench {
                             for (Req r : mine) lats.add(new Lat(r.t, r.kind, now - r.t));
                             return;
                         }
-                        changed = p.siblingStates() ? null : dirtyRegion(before, moved);
-                        if (p.siblingStates()) why(4);
-                        else if (changed == null) why(5);
-                        else if (!small(changed, before)) why(6);
-                        if (changed != null && small(changed, before)) {
-                            f = HtmlRenderer.render(p, d, W, H, SCALE, s, state, before.image(), changed);
-                            Rectangle2D after = dirtyRegion(f, moved);
-                            if (after == null) {
-                                why(7);
-                                f = null;
-                            } else if (!changed.contains(after)) {
-                                changed = changed.createUnion(after);
-                                f = small(changed, before) ? HtmlRenderer.render(p, d, W, H, SCALE, s, state, before.image(), changed) : null;
-                            }
-                            if (f != null && sameLayout(before, f, changed)) partial = true;
-                            else {
-                                why(8);
-                                f = null;
-                            }
+                        Repaint.Result r = Repaint.partial(p, d, W, H, SCALE, s, state, before, moved);
+                        if (r.frame() != null) {
+                            f = r.frame();
+                            changed = r.changed();
+                            partial = true;
+                        } else {
+                            why(4 + r.why().ordinal());
                         }
                     }
                     if (f == null) f = HtmlRenderer.render(p, d, W, H, SCALE, s, state);
@@ -638,98 +623,14 @@ public final class LoadBench {
         }
     }
 
-    /** Why a repaint was not partial: 0 first picture, 1 other document or page, 2 scrolled, 3 nothing changed, 4 sibling states, 5 no dirty region, 6 region too big, 7 grew on hover, 8 layout moved. */
-    static final AtomicInteger[] WHY = new AtomicInteger[9];
+    /** Why a repaint was not partial: 0 first picture, 1 other document or page, 2 scrolled, 3 nothing changed, then Repaint.Why from PARTIAL (4, never counted): 5 sibling states, 6 no dirty region, 7 region too big, 8 grew too big, 9 layout moved. */
+    static final AtomicInteger[] WHY = new AtomicInteger[4 + Repaint.Why.values().length];
     static {
         for (int i = 0; i < WHY.length; i++) WHY[i] = new AtomicInteger();
     }
 
     static void why(int i) {
         WHY[i].incrementAndGet();
-    }
-
-    private static final double DIRTY_MARGIN = 48;
-
-    private static Rectangle2D dirtyRegion(HtmlRenderer.Frame f, Set<Element> changed) {
-        Rectangle2D area = null;
-        double reach = DIRTY_MARGIN;
-        for (Painter.Hit h : f.hits()) {
-            boolean inside = false;
-            for (Element e = h.element(); e != null && !inside; e = e.parent()) inside = changed.contains(e);
-            if (!inside) continue;
-            Rectangle2D b = h.shape().getBounds2D();
-            if (area == null) area = new Rectangle2D.Double(b.getX(), b.getY(), b.getWidth(), b.getHeight());
-            else area.add(b);
-            reach = Math.max(reach, paintsOutside(f.style(h.element())));
-        }
-        if (area == null) return null;
-        Rectangle2D view = new Rectangle2D.Double(0, 0, f.viewportWidth(), f.viewportHeight());
-        Rectangle2D padded = new Rectangle2D.Double(area.getX() - reach, area.getY() - f.scrollY() - reach,
-                area.getWidth() + 2 * reach, area.getHeight() + 2 * reach);
-        Rectangle2D out = padded.createIntersection(view);
-        if (out.isEmpty()) return null;
-        for (Painter.Hit h : f.hits()) {
-            Style s = f.style(h.element());
-            if (s == null || s.backdropFilter.equals("none")) continue;
-            Rectangle2D b = h.shape().getBounds2D();
-            if (out.intersects(b.getX(), b.getY() - f.scrollY(), b.getWidth(), b.getHeight())) return null;
-        }
-        return out;
-    }
-
-    private static boolean small(Rectangle2D region, HtmlRenderer.Frame f) {
-        return region.getWidth() * region.getHeight() < 0.6 * f.viewportWidth() * f.viewportHeight();
-    }
-
-    private static double paintsOutside(Style s) {
-        if (s == null) return 0;
-        return Math.max(Math.max(shadowReach(s.boxShadow, s), shadowReach(s.textShadow, s)), blurReach(s.filter, s));
-    }
-
-    private static double shadowReach(String value, Style s) {
-        if (value == null || value.isBlank() || value.trim().equalsIgnoreCase("none")) return 0;
-        double reach = 0;
-        for (String shadow : Values.splitCommas(value)) {
-            double[] lens = new double[4];
-            int n = 0;
-            boolean inset = false;
-            for (String tok : Values.splitSpaces(shadow)) {
-                if (tok.equalsIgnoreCase("inset")) {
-                    inset = true;
-                    continue;
-                }
-                Len l = Len.parse(tok, s.context);
-                if (l != null && n < 4) lens[n++] = Math.abs(l.of(0));
-            }
-            if (inset || n < 2) continue;
-            reach = Math.max(reach, Math.max(lens[0], lens[1]) + lens[3] + 1.5 * lens[2] + 2);
-        }
-        return reach;
-    }
-
-    private static double blurReach(String filter, Style s) {
-        if (filter == null || filter.equals("none")) return 0;
-        double reach = 0;
-        for (String fn : Values.splitSpaces(filter)) {
-            if (!fn.toLowerCase(Locale.ROOT).startsWith("blur(") || !fn.endsWith(")")) continue;
-            String arg = fn.substring(5, fn.length() - 1).trim();
-            Len l = Len.parse(arg.isEmpty() ? "0" : arg, s.context);
-            if (l != null) reach = Math.max(reach, 3 * Math.abs(l.of(0)) + 2);
-        }
-        return reach;
-    }
-
-    private static boolean sameLayout(HtmlRenderer.Frame a, HtmlRenderer.Frame b, Rectangle2D region) {
-        if (a.hits().size() != b.hits().size()) return false;
-        for (int i = 0; i < a.hits().size(); i++) {
-            Rectangle2D ra = a.hits().get(i).shape().getBounds2D(), rb = b.hits().get(i).shape().getBounds2D();
-            if (Math.abs(ra.getX() - rb.getX()) < 0.5 && Math.abs(ra.getY() - rb.getY()) < 0.5
-                    && Math.abs(ra.getWidth() - rb.getWidth()) < 0.5 && Math.abs(ra.getHeight() - rb.getHeight()) < 0.5) continue;
-            Rectangle2D va = new Rectangle2D.Double(ra.getX(), ra.getY() - a.scrollY(), ra.getWidth(), ra.getHeight());
-            Rectangle2D vb = new Rectangle2D.Double(rb.getX(), rb.getY() - b.scrollY(), rb.getWidth(), rb.getHeight());
-            if (!region.contains(va) || !region.contains(vb)) return false;
-        }
-        return true;
     }
 
     // ------------------------------------------------------------------------------------ the wire
@@ -877,7 +778,7 @@ public final class LoadBench {
         double[] firstMs;
         Sender.Totals wire;
         long[] hover = {}, scroll = {}, stressLat = {}, openLat = {};
-        int[] why = new int[9];
+        int[] why = new int[4 + Repaint.Why.values().length];
         /** CPU ms in the window: render threads, painters, encoders, sender, server thread; and the whole process. */
         final double[] threadCpuMs = new double[5];
         double processCpuMs, allocMb;
