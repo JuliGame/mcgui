@@ -11,7 +11,7 @@ user-facing description; this file is the part that bites.
 | `api/` | The public surface: `UIFramework`, `Canvas`, `WallContent`/`WallScreen`, `ViewContent`/`View`, `Pointer`, `Click`, `Key` |
 | `render/Palette` | The map colour table, and the HI (YCbCr in 240 colours) and PLAIN encodings |
 | `pack/` | `Shaders` (both GLSL dialects), `SymbolHash` (the shader's colour lookup), `ResourcePack` (build, serve, who has it) |
-| `net/` | `Nms` (every server internal, by reflection), `MapSender` (diffed map patches, per-player budget), `Pipeline` (ping answers, the hidden inventory) |
+| `net/` | `Nms` (every server internal, by reflection), `MapSender` (diffed map patches, per-player budget, frame re-pointing), `Wire`/`ServerWire` (what the sender writes through), `Pipeline` (ping answers, the hidden inventory, each connection's frame pointing) |
 | `world/` | `MapWall` (the frames), `Walls` (placed walls and crosshair input), `Views` (seating, camera, pointer, input), `PrivateView` (fake air for players without the pack) |
 
 ## Things that are not obvious
@@ -73,6 +73,20 @@ user-facing description; this file is the part that bites.
   sub-images included; any other type goes through `getRGB`, which is several
   times slower. Only HI tiles are made when a picture is drawn: a PLAIN tile is
   made the first time somebody without the pack looks at it.
+- **A scroll by whole tiles moves maps, not pixels.** `Canvas.scroll(rows, ...)`
+  rotates the picture and keeps each moved tile's arrays (and the HI_OWN and
+  PLAIN tiles made from them). `MapSender` sees that a tile a frame should show
+  is already in another of the wall's maps on that client, and points the frame
+  at it (an item-frame data packet with a filled map of that id) instead of
+  sending it; the maps left over take the rows that came in. Pointing is per
+  player: the server's frames never change. The re-points and the new rows go
+  in one `ClientboundBundlePacket`, which the client handles in one go between
+  two frames. A frame the server sends a client afresh (spawned, shown again,
+  resent after a cancelled click) would show its own map, so `Pipeline`'s
+  `uiframework_frames` handler rewrites its item to the map it points at for
+  that connection. The sender's own bundles never carry a new entity, which is
+  how the handler tells them apart. Pointing lives as long as the connection
+  (the client keeps its maps as long), so `MapSender.reset` keeps it.
 - **Content is not trusted.** Every call into a `WallContent` or
   `ViewContent` from the tick, the sender or `Views.close` is guarded and
   logged, `LinkageError` included: a content whose plugin was disabled first
