@@ -78,6 +78,20 @@ public final class Nms {
     private final Field moveEntityId;
     private final Class<?> positionSyncPacket, teleportPacket;
     private final MethodHandle positionSyncId, teleportId;
+    /** What a click or a wheel step sends, each before that client tick's rotation. */
+    private final List<Class<?>> clickPackets;
+    /** What the client sends at the end of each of its ticks, after that tick's clicks and rotation. */
+    private final Class<?> tickEndPacket;          // ServerboundClientTickEndPacket
+    // A held player: flying, as far as their client knows, at a speed of nothing (see heldAbilities).
+    private final Class<?> abilitiesPacket;        // ClientboundPlayerAbilitiesPacket
+    private final MethodHandle abilitiesInvulnerable, abilitiesInstabuild;
+    private final MethodHandle newAbilitiesPacket; // new ClientboundPlayerAbilitiesPacket(Abilities)
+    private final MethodHandle newAbilities;       // new Abilities()
+    private final Field abilityFlying, abilityMayfly, abilityInvulnerable, abilityInstabuild;
+    private final MethodHandle setFlyingSpeed, setWalkingSpeed;
+    private final MethodHandle onUpdateAbilities; // Player#onUpdateAbilities(), which the server player answers by sending them
+    private final MethodHandle playerTeleport;     // ServerGamePacketListenerImpl#teleport(PositionMoveRotation, Set<Relative>)
+    private final java.util.Set<?> keepRotation;   // Relative.X_ROT and Y_ROT: a teleport that leaves the rotation alone
 
     // Frames pointed at other maps for one player: the item a frame shows, and the packets it travels in.
     private final Class<?> bundlePacket;           // ClientboundBundlePacket
@@ -190,12 +204,45 @@ public final class Nms {
         Class<?> componentType = Class.forName("net.minecraft.core.component.DataComponentType");
         mapIdComponent = Class.forName("net.minecraft.core.component.DataComponents").getField("MAP_ID").get(null);
         setComponent = L.unreflect(item.getMethod("set", componentType, Object.class));
+        // Looked up leniently: a click type a version lacks (or renamed) only loses its exact timing.
+        List<Class<?>> clicks = new java.util.ArrayList<>();
+        for (String name : List.of("ServerboundSwingPacket", "ServerboundAttackPacket", "ServerboundInteractPacket",
+                "ServerboundUseItemOnPacket", "ServerboundUseItemPacket", "ServerboundSetCarriedItemPacket")) {
+            try {
+                clicks.add(Class.forName(game + name));
+            } catch (ClassNotFoundException ignored) {
+                // See above.
+            }
+        }
+        clickPackets = List.copyOf(clicks);
+        tickEndPacket = Class.forName(game + "ServerboundClientTickEndPacket");
+        abilitiesPacket = Class.forName(game + "ClientboundPlayerAbilitiesPacket");
+        abilitiesInvulnerable = L.unreflect(abilitiesPacket.getMethod("isInvulnerable"));
+        abilitiesInstabuild = L.unreflect(abilitiesPacket.getMethod("canInstabuild"));
+        Class<?> abilities = Class.forName("net.minecraft.world.entity.player.Abilities");
+        newAbilitiesPacket = L.findConstructor(abilitiesPacket, MethodType.methodType(void.class, abilities));
+        newAbilities = L.findConstructor(abilities, MethodType.methodType(void.class));
+        abilityFlying = abilities.getField("flying");
+        abilityMayfly = abilities.getField("mayfly");
+        abilityInvulnerable = abilities.getField("invulnerable");
+        abilityInstabuild = abilities.getField("instabuild");
+        setFlyingSpeed = L.unreflect(abilities.getMethod("setFlyingSpeed", float.class));
+        setWalkingSpeed = L.unreflect(abilities.getMethod("setWalkingSpeed", float.class));
+        onUpdateAbilities = L.unreflect(Class.forName("net.minecraft.world.entity.player.Player").getMethod("onUpdateAbilities"));
+        Class<?> relative = Class.forName("net.minecraft.world.entity.Relative");
+        playerTeleport = L.unreflect(Class.forName("net.minecraft.server.network.ServerGamePacketListenerImpl")
+                .getMethod("teleport", pmr, java.util.Set.class));
+        keepRotation = java.util.Set.of(enumConstant(relative, "X_ROT"), enumConstant(relative, "Y_ROT"));
     }
 
     private static Field open(Class<?> owner, String name) throws NoSuchFieldException {
         Field f = owner.getDeclaredField(name);
         f.setAccessible(true);
         return f;
+    }
+
+    private static Object enumConstant(Class<?> type, String name) throws NoSuchFieldException, IllegalAccessException {
+        return type.getField(name).get(null);
     }
 
     /** The server's own object behind a Bukkit entity. */
@@ -447,8 +494,73 @@ public final class Nms {
 
     /** Sets a player's pitch and leaves their yaw alone (a relative turn of nothing). */
     public Object pitch(float pitch) {
+        return rotate(0f, true, pitch, false);
+    }
+
+    /** Turns a player to [yaw] and [pitch], each by that much instead where [relativeYaw] / [relativePitch]. */
+    public Object rotate(float yaw, boolean relativeYaw, float pitch, boolean relativePitch) {
         try {
-            return newPlayerRotation.invoke(0f, true, pitch, false);
+            return newPlayerRotation.invoke(yaw, relativeYaw, pitch, relativePitch);
+        } catch (Throwable t) {
+            throw rethrow(t);
+        }
+    }
+
+    /**
+     * Whether [msg] is a click (an attack, a swing, a use, an entity interaction) or a wheel step: the
+     * client sends these while it handles input, before the same tick's rotation.
+     */
+    public boolean isClick(Object msg) {
+        for (Class<?> c : clickPackets) if (c.isInstance(msg)) return true;
+        return false;
+    }
+
+    /** Whether [msg] is the client saying one of its ticks has ended (sent after that tick's clicks and rotation). */
+    public boolean isTickEnd(Object msg) {
+        return tickEndPacket.isInstance(msg);
+    }
+
+    /** Whether [msg] is the server telling a player what they may do: fly, build, take damage. */
+    boolean isAbilities(Object msg) {
+        return abilitiesPacket.isInstance(msg);
+    }
+
+    /**
+     * [abilities] (a player abilities packet) as a held player's client is told them: flying, unable to
+     * stop flying, and at a flying and walking speed of nothing. Invulnerability and instant building are
+     * left as they are.
+     */
+    Object heldAbilities(Object abilities) {
+        try {
+            Object a = newAbilities.invoke();
+            abilityInvulnerable.set(a, (boolean) abilitiesInvulnerable.invoke(abilities));
+            abilityInstabuild.set(a, (boolean) abilitiesInstabuild.invoke(abilities));
+            abilityFlying.set(a, true);
+            abilityMayfly.set(a, false);
+            setFlyingSpeed.invoke(a, 0f);
+            setWalkingSpeed.invoke(a, 0f);
+            return newAbilitiesPacket.invoke(a);
+        } catch (Throwable t) {
+            throw rethrow(t);
+        }
+    }
+
+    /** Sends [player] their abilities again (through the connection's filters, like any other packet). */
+    public void resendAbilities(Player player) {
+        try {
+            onUpdateAbilities.invoke(handle(player));
+        } catch (Throwable t) {
+            throw rethrow(t);
+        }
+    }
+
+    /** Teleports [player] to (x, y, z) without touching their rotation (the client keeps its own). */
+    public void teleportKeepingRotation(Player player, double x, double y, double z) {
+        try {
+            Object listener = listener(player);
+            if (listener == null) return;
+            Object pmr = newPositionMoveRotation.invoke(newVec3.invoke(x, y, z), newVec3.invoke(0.0, 0.0, 0.0), 0f, 0f);
+            playerTeleport.invoke(listener, pmr, keepRotation);
         } catch (Throwable t) {
             throw rethrow(t);
         }

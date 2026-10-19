@@ -30,6 +30,11 @@ views:
   default-fov: 70
   # Pointer speed: how far it moves per degree of mouse turn, for a view 768 pixels tall.
   cursor-speed: 8.0
+  # With the pack, the player's own client draws the pointer every frame from where they look, so it has
+  # no network or tick lag. Off: the server moves the pointer as their rotation arrives (20 times a second).
+  client-pointer: true
+  # Log where each click on a client-drawn pointer lands, and every correction, as [pointer] lines. For testing.
+  debug-pointer: false
 
 # Map ids this engine owns. They never get saved-map files, so they cannot collide with real maps as
 # long as the world has fewer maps than this.

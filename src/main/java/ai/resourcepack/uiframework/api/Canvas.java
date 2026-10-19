@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.atomic.AtomicReferenceArray;
 import java.util.stream.IntStream;
 
 /**
@@ -41,6 +42,12 @@ public final class Canvas {
     private volatile Tile[] tiles;
     /** Odd while a drawing changes [ycc], so a PLAIN tile made from it meanwhile is not kept. */
     private volatile long changing;
+    /**
+     * HI_TILED tiles by place, with the HI array each was made from. Kept per place, not on the Tile: a
+     * HI_TILED tile carries its own column and row, and a Tile moves when the canvas scrolls and is shared
+     * by every place of a blank canvas.
+     */
+    private final AtomicReferenceArray<Own> hiTiled;
     private volatile long version;
     /** Told whenever new tiles are published, so they go out at once (the engine's sender). */
     private final Runnable published;
@@ -60,13 +67,14 @@ public final class Canvas {
         this.height = rows * 128;
         this.ycc = new byte[width * height * 3];
         int count = cols * rows;
+        hiTiled = new AtomicReferenceArray<>(count);
         // Black: Y 0, Cb and Cr 128. Filled by doubling copies, not pixel by pixel (a 16x9 canvas is 7 MB).
         ycc[1] = (byte) 128;
         ycc[2] = (byte) 128;
         for (int n = 3; n < ycc.length; n *= 2) System.arraycopy(ycc, 0, ycc, n, Math.min(n, ycc.length - n));
         // Every tile of a blank canvas encodes to the same bytes, and tiles are never changed once published,
         // so they all share one Tile: what is made from it alone (HI_OWN, PLAIN) is the same for every place.
-        // HI_TILED carries the tile's place, so it is never kept on the Tile (see tile()). This runs on the
+        // HI_TILED carries the tile's place, so it is never kept on the Tile (see Snapshot.tile). This runs on the
         // server thread when a viewer reaches a wall.
         Tile[] all = new Tile[count];
         encode(0, all);
@@ -237,10 +245,20 @@ public final class Canvas {
             return switch (encoding) {
                 case HI -> t.hi;
                 case HI_OWN -> t.own(palette, cols, rows);
+                case HI_TILED -> {
+                    Own own = hiTiled.get(index);
+                    if (own == null || own.base != t.hi) {
+                        own = new Own(t.hi, palette.markTiled(t.hi, cols, rows, index % cols, index / cols));
+                        hiTiled.set(index, own);
+                    }
+                    yield own.tile;
+                }
                 case PLAIN -> t.plain(Canvas.this, index, at);
             };
         }
     }
+
+    private record Own(byte[] base, byte[] tile) {}
 
     /**
      * One encoded tile, with what is made from it on demand. Moves with the picture when it scrolls, so
@@ -309,6 +327,8 @@ public final class Canvas {
         HI,
         /** HI, marked as the viewer's own fullscreen view: their client draws it in front of the world. */
         HI_OWN,
+        /** HI_OWN, carrying each tile's place too, for a view whose pointer the viewer's client draws. */
+        HI_TILED,
         /** Plain map colours, for players without the pack. */
         PLAIN
     }

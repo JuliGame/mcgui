@@ -46,6 +46,29 @@ public final class Shaders {
         return POINTER_RED << 16 | Math.min(255, cols) << 8 | Math.min(255, rows);
     }
 
+    /**
+     * The red of the pointer a seated player's own client places, every frame, from where they look
+     * (see {@link #clientPointerRgb}); green and blue are the view's columns and rows, as for
+     * {@link #POINTER_RED}.
+     */
+    public static final int CLIENT_POINTER_RED = 253;
+
+    /** The client-placed pointer's text colour on a view of [cols] × [rows] maps. */
+    public static int clientPointerRgb(int cols, int rows) {
+        return CLIENT_POINTER_RED << 16 | Math.min(255, cols) << 8 | Math.min(255, rows);
+    }
+
+    /**
+     * How far ahead of the camera, along its flagged axis, the client-placed pointer's text sits for a
+     * pointer speed of [pixelsPerDegree]: the shader reads the speed back from that distance.
+     */
+    public static double clientPointerDistance(double pixelsPerDegree) {
+        return 0.5 + pixelsPerDegree / 512;
+    }
+
+    /** The fastest pointer {@link #clientPointerDistance} can carry. */
+    public static final double CLIENT_POINTER_MAX_SPEED = 255;
+
     private static String f6(double v) {
         return String.format(Locale.ROOT, "%.6f", v);
     }
@@ -118,13 +141,16 @@ public final class Shaders {
             bool mcb_near(float v, float t) { return abs(v - t) < 0.0001; }
             bool mcb_grid(float v) { return mcb_near(v, 0.0) || mcb_near(v, 0.5) || mcb_near(v, 1.0); }
             float mcb_flag(float v) { return abs(fract(v * @STEPS@) - @FRACTION@) < 0.002 ? 1.0 : 0.0; }
-            // Seated cameras sit at a flagged fraction of a block along one horizontal axis.
-            float mcb_seated_flag() {
+            // Seated cameras sit at a flagged fraction of a block along one horizontal axis: 0 for x, 2 for
+            // z, -1 when this camera is not seated.
+            int mcb_flag_axis() {
                 vec3 f = -CameraOffset;
-                if (!mcb_grid(f.y)) return 0.0;
-                float a = mcb_grid(f.z) ? mcb_flag(f.x) : 0.0;
-                return a > 0.0 ? a : (mcb_grid(f.x) ? mcb_flag(f.z) : 0.0);
+                if (!mcb_grid(f.y)) return -1;
+                if (mcb_grid(f.z) && mcb_flag(f.x) > 0.0) return 0;
+                if (mcb_grid(f.x) && mcb_flag(f.z) > 0.0) return 2;
+                return -1;
             }
+            float mcb_seated_flag() { return mcb_flag_axis() >= 0 ? 1.0 : 0.0; }
             // Only orthographic (GUI) draws: perspective projections have ProjMat[3][3] == 0.
             float mcb_seated_now() { return ProjMat[3][3] != 1.0 ? 0.0 : mcb_seated_flag(); }
             vec2 mcb_gui_size() { return vec2(2.0 / abs(ProjMat[0][0]), 2.0 / abs(ProjMat[1][1])); }
@@ -261,6 +287,36 @@ public final class Shaders {
 
                 """ + helpers(VERTEX_HELPERS) + decoderCore(palette) + """
 
+                #if !defined(IS_GUI)
+                // A point at normalised device coordinates [ndc], one block in front of the camera: in the
+                // clip volume whatever the projection, at the same depth for every vertex (no perspective
+                // warp across a quad). The fragment shader sets the real depth.
+                vec4 mcb_flat(vec2 ndc) {
+                    vec4 c = ProjMat * vec4(0.0, 0.0, -1.0, 1.0);
+                    return vec4(ndc * c.w, c.z, c.w);
+                }
+
+                // The pointer the seated player's client places itself, on a view [size] pixels big. Its text
+                // sits ahead of the camera on the flagged axis, towards the view, 0.5 + speed / 512 blocks away
+                // (speed in pixels per degree of turn), square to that axis: so a vertex's offset across the axis
+                // is the glyph's own, from its hot pixel, at 128 pixels to a block. The hot pixel is the view's
+                // centre plus the speed times how far the camera has turned from that axis, held inside the
+                // view; the server works the cursor out the same way from the rotations the client sends.
+                vec2 mcb_client_pointer(vec2 size) {
+                    vec3 axis = mcb_flag_axis() == 0 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 0.0, 1.0);
+                    float along = dot(Position, axis);
+                    vec3 ahead = axis * sign(along);
+                    vec3 right = vec3(-ahead.z, 0.0, ahead.x);
+                    float speed = (abs(along) - 0.5) * 512.0;
+                    // ModelViewMat is the camera's rotation alone; its third row is minus the look direction.
+                    vec3 look = normalize(-vec3(ModelViewMat[0][2], ModelViewMat[1][2], ModelViewMat[2][2]));
+                    vec2 turn = degrees(vec2(atan(dot(look, right), dot(look, ahead)), asin(clamp(-look.y, -1.0, 1.0))));
+                    vec2 hot = clamp(size * 0.5 + turn * speed, vec2(0.0), size - 1.0);
+                    vec2 px = hot + vec2(dot(Position, right), -Position.y) * 128.0;
+                    return vec2(px.x / size.x * 2.0 - 1.0, 1.0 - px.y / size.y * 2.0);
+                }
+                #endif
+
                 void main() {
                     gl_Position = ProjMat * ModelViewMat * vec4(Position, 1.0);
                     mcbReversed = mcb_reversed();
@@ -278,13 +334,28 @@ public final class Shaders {
                         // The pointer: text in the pointer's red, its view's columns and rows in green and blue. Drawn white.
                         ivec3 mcbRgb = ivec3(round(Color.rgb * 255.0));
                         vec2 mcbGrid = vec2(0.0);
+                        int mcbMap = mcb_screen_map();
                         if (mcbRgb.r == @PR@ && mcbRgb.g > 0 && mcbRgb.b > 0) {
                             mcbPointer = 1.0;
                             mcbGrid = vec2(mcbRgb.gb);
                             mcbTint = vec4(1.0, 1.0, 1.0, Color.a);
-                        } else if (mcb_screen_map() == 2) {
+                        } else if (mcbRgb.r == @PC@ && mcbRgb.g > 0 && mcbRgb.b > 0) {
+                            // The pointer this client places itself, from where the camera looks.
+                            mcbPointer = 2.0;
+                            mcbTint = vec4(1.0, 1.0, 1.0, Color.a);
+                            gl_Position = mcb_flat(mcb_client_pointer(vec2(mcbRgb.gb) * 128.0));
+                        } else if (mcbMap == 2) {
                             // Their own view's maps carry its columns and rows next to the marker.
                             mcbGrid = vec2(float(mcb_symbol(ivec2(2, 0))), float(mcb_symbol(ivec2(3, 0))));
+                        } else if (mcbMap == 3) {
+                            // A view whose pointer this client places: each map also carries its own column and
+                            // row, and goes to its place in the window by those and its corner (the map quad's
+                            // texture coordinates are exactly 0 and 1), wherever its frame is and wherever the
+                            // camera looks.
+                            vec2 mcbViewGrid = vec2(float(mcb_symbol(ivec2(2, 0))), float(mcb_symbol(ivec2(3, 0))));
+                            vec2 mcbTile = vec2(float(mcb_symbol(ivec2(2, 1))), float(mcb_symbol(ivec2(3, 1))));
+                            vec2 mcbAt = (mcbTile + UV0) / mcbViewGrid;
+                            gl_Position = mcb_flat(vec2(mcbAt.x * 2.0 - 1.0, 1.0 - mcbAt.y * 2.0));
                         }
                         // Both fill the window whatever its shape and whatever the player's FOV. The picture is centred
                         // on the camera's axis and square to it, so how far a vertex is from that axis, in blocks, as a
@@ -303,7 +374,7 @@ public final class Shaders {
                 #endif
                 #endif
                 }
-                """.replace("@PR@", String.valueOf(POINTER_RED)), d);
+                """.replace("@PR@", String.valueOf(POINTER_RED)).replace("@PC@", String.valueOf(CLIENT_POINTER_RED)), d);
     }
 
     /**
@@ -330,6 +401,7 @@ public final class Shaders {
                 }
 
                 // 0: not ours. 1: a screen. 2: the view of whoever is seated at it (bottom markers swapped).
+                // 3: such a view whose pointer their client places, each map carrying its place (both the fourth).
                 int mcb_screen_map() {
                     if (textureSize(Sampler0, 0) != ivec2(128, 128)
                         || mcb_fetch(ivec2(0, 0)) != @M0@ || mcb_fetch(ivec2(1, 0)) != @M1@) return 0;
@@ -337,6 +409,7 @@ public final class Shaders {
                     ivec3 b = mcb_fetch(ivec2(1, 1));
                     if (a == @M2@ && b == @M3@) return 1;
                     if (a == @M3@ && b == @M2@) return 2;
+                    if (a == @M3@ && b == @M3@) return 3;
                     return 0;
                 }
                 """
@@ -444,7 +517,9 @@ public final class Shaders {
                     vec2 mcbFootprint = fwidth(texCoord0 * 128.0);
                     float mcbDepth = gl_FragCoord.z;
                 #ifndef IS_GUI
-                    if (mcbSeated > 0.5 && mcbPointer > 0.5) mcbDepth = mcb_in_front(128.0);
+                    // The client-placed pointer is as near as depth goes, in front of the picture and of everything.
+                    if (mcbSeated > 0.5 && mcbPointer > 1.5) mcbDepth = mcbReversed > 0.5 ? 1.0 : 0.0;
+                    else if (mcbSeated > 0.5 && mcbPointer > 0.5) mcbDepth = mcb_in_front(128.0);
                     // A shader that writes gl_FragDepth anywhere must write it on every path.
                     gl_FragDepth = mcbDepth;
                 #endif
@@ -459,10 +534,12 @@ public final class Shaders {
                     int mcbMap = mcb_screen_map();
                     if (mcbMap > 0) {
                         // A screen emits its own light: no lightmap, tint or fog, so colours are exact day and night.
-                        vec4 mcbColor = vec4(mcb_sample(texCoord0 * 128.0, mcbFootprint, mcbMap == 2 ? 1 : 0), 1.0);
+                        vec4 mcbColor = vec4(mcb_sample(texCoord0 * 128.0, mcbFootprint, mcbMap >= 2 ? 1 : 0), 1.0);
                 #ifndef IS_GUI
-                        if (mcbMap == 2 && mcbSeated > 0.5) {
-                            mcbDepth = mcb_in_front(64.0);
+                        if (mcbMap >= 2 && mcbSeated > 0.5) {
+                            // A view the client places (3) is just behind its pointer, in front of all else: its
+                            // frames are at the camera, so its own depth means nothing.
+                            mcbDepth = mcbMap == 3 ? (mcbReversed > 0.5 ? 0.99999 : 0.00001) : mcb_in_front(64.0);
                             gl_FragDepth = mcbDepth;
                         }
                 #endif
