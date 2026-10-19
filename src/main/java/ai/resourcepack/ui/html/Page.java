@@ -504,7 +504,13 @@ public final class Page implements Resources {
 
     private static final Pattern URL = Pattern.compile("url\\(\\s*['\"]?([^'\")]+)['\"]?\\s*\\)", Pattern.CASE_INSENSITIVE);
 
-    /** Every image the page could draw, fetched now. */
+    /**
+     * Decoded images of one page take at most this many bytes. Past it, the rest are not loaded (and not
+     * drawn): a page of a thousand distinct photos would otherwise hold gigabytes for as long as it is open.
+     */
+    static final long MAX_IMAGE_BYTES = 256L << 20;
+
+    /** Every image the page could draw, fetched now, up to {@link #MAX_IMAGE_BYTES} decoded. */
     private void loadImages(Loader loader) {
         Set<String> wanted = new LinkedHashSet<>();
         for (Element img : document.select("img[src], img[srcset], video[poster], input[type=image][src], object[data], embed[src]")) {
@@ -517,6 +523,8 @@ public final class Page implements Resources {
         for (Element e : document.select("[style]")) {
             for (Declaration d : CssParser.declarations(e.attr("style"), uri)) urls(d.value(), wanted);
         }
+        long used = 0;
+        int over = 0;
         for (String u : wanted) {
             if (images.containsKey(u)) continue;
             URI target = resolve(null, u);
@@ -524,10 +532,24 @@ public final class Page implements Resources {
             // url(#id) names something in the page itself (an SVG filter, clip or gradient), not an image file.
             if (target.getFragment() != null && file(target) != null && file(target).equals(file(uri))) continue;
             depend(target);
-            Picture p = Pictures.decode(loader.fetch(target, null), u);
-            if (p != null) images.put(u, p);
-            else if (!u.startsWith("data:")) problems.add("Could not load image " + u);
+            byte[] data = loader.fetch(target, null);
+            // Weighed from the header before decoding, so the bytes past the budget are never allocated at all.
+            long size = Pictures.decodedBytes(data, u);
+            if (size > 0 && used + size > MAX_IMAGE_BYTES) {
+                over++;
+                // Kept as a failure, so drawing does not decode a data: one after all.
+                images.put(u, NONE_PICTURE);
+                continue;
+            }
+            Picture p = Pictures.decode(data, u);
+            if (p != null) {
+                images.put(u, p);
+                used += size;
+            } else if (!u.startsWith("data:")) {
+                problems.add("Could not load image " + u);
+            }
         }
+        if (over > 0) problems.add(over + " images not loaded: the page's images would take over " + (MAX_IMAGE_BYTES >> 20) + " MB decoded");
     }
 
     /** Notes a file: [uri] as one this page read, so that changing it loads the page again. */

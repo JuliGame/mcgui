@@ -55,15 +55,43 @@ public final class Pictures {
                 long w = reader.getWidth(0), h = reader.getHeight(0);
                 if (w <= 0 || h <= 0 || w > MAX_SIDE || h > MAX_SIDE) return null;
                 ImageReadParam param = reader.getDefaultReadParam();
-                if (w * h > MAX_PIXELS) {
-                    int step = (int) Math.ceil(Math.sqrt((double) (w * h) / MAX_PIXELS));
-                    param.setSourceSubsampling(step, step, 0, 0);
-                }
+                int step = step(w, h);
+                if (step > 1) param.setSourceSubsampling(step, step, 0, 0);
                 BufferedImage img = reader.read(0, param);
                 return img == null ? null : new Raster(img, w, h);
             } finally {
                 reader.dispose();
             }
+        }
+    }
+
+    /** Every [step]th pixel of a w x h bitmap is read, to keep it under {@link #MAX_PIXELS}. */
+    private static int step(long w, long h) {
+        return w * h > MAX_PIXELS ? (int) Math.ceil(Math.sqrt((double) (w * h) / MAX_PIXELS)) : 1;
+    }
+
+    /**
+     * About how many bytes [data] takes once decoded by {@link #decode} (four per pixel read), from
+     * its header alone; 0 for an SVG (drawn from its markup each time) or what is no bitmap at all.
+     */
+    public static long decodedBytes(byte[] data, String nameHint) {
+        if (data == null || data.length == 0 || looksLikeSvg(data, nameHint)) return 0;
+        try (ImageInputStream in = ImageIO.createImageInputStream(new ByteArrayInputStream(data))) {
+            if (in == null) return 0;
+            Iterator<ImageReader> readers = ImageIO.getImageReaders(in);
+            if (!readers.hasNext()) return 0;
+            ImageReader reader = readers.next();
+            try {
+                reader.setInput(in, true, true);
+                long w = reader.getWidth(0), h = reader.getHeight(0);
+                if (w <= 0 || h <= 0 || w > MAX_SIDE || h > MAX_SIDE) return 0;
+                int step = step(w, h);
+                return ((w + step - 1) / step) * ((h + step - 1) / step) * 4;
+            } finally {
+                reader.dispose();
+            }
+        } catch (IOException | RuntimeException e) {
+            return 0;
         }
     }
 
