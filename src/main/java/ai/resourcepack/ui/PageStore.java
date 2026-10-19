@@ -3,6 +3,7 @@ package ai.resourcepack.ui;
 import ai.resourcepack.ui.html.Page;
 
 import java.io.IOException;
+import java.nio.charset.CharacterCodingException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -38,6 +39,14 @@ public final class PageStore {
     private final AtomicBoolean checking = new AtomicBoolean();
     /** Told the name of every page that reloads. */
     public volatile Consumer<String> onReload = name -> {};
+    /**
+     * Page files that last failed to read as UTF-8, with their stamp then. One read so is taken for a
+     * file caught mid-write; read so again with the stamp unchanged, the file is what it is (Windows-1252,
+     * say) and is read leniently, as a browser would show it.
+     */
+    private final Map<Path, Long> undecodable = new ConcurrentHashMap<>();
+    /** How long a first load waits before reading a file that was not UTF-8 again. */
+    private static final long REREAD_MS = 1000;
 
     /** A loaded page and the modification times of the files it read; [retry]: the last reload failed, try again regardless. */
     private record Loaded(Page page, Map<Path, Long> stamps, boolean retry) {}
@@ -103,7 +112,15 @@ public final class PageStore {
                 try {
                     loaders.execute(() -> {
                         try {
-                            mine.complete(read(n));
+                            Loaded l = read(n);
+                            // Not UTF-8: maybe caught mid-write. One more look, as the next check would take.
+                            if (l == null && undecodable.containsKey(root.resolve(n + ".html"))) {
+                                Thread.sleep(REREAD_MS);
+                                l = read(n);
+                            }
+                            mine.complete(l);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
                         } finally {
                             if (!mine.isDone()) mine.complete(null);
                         }
@@ -122,12 +139,27 @@ public final class PageStore {
         Path file = root.resolve(n + ".html");
         if (!Files.isRegularFile(file)) return null;
         try {
-            Page page = Page.load(file, loader);
+            Page page = parse(file);
             for (String problem : page.problems) logger.warning("[" + n + "] " + problem);
             return new Loaded(page, stamps(page), false);
         } catch (IOException | RuntimeException | OutOfMemoryError | StackOverflowError e) {
             logger.warning("Could not load page '" + n + "': " + e);
             return null;
+        }
+    }
+
+    /** Page.load, strict about UTF-8 the first time a file's stamp fails it and lenient the second (see {@link #undecodable}). */
+    private Page parse(Path file) throws IOException {
+        try {
+            Page page = Page.load(file, loader);
+            undecodable.remove(file);
+            return page;
+        } catch (CharacterCodingException e) {
+            long stamp = modified(file);
+            Long seen = undecodable.put(file, stamp);
+            if (seen == null || seen != stamp) throw e;
+            undecodable.remove(file);
+            return Page.load(file, loader, true);
         }
     }
 

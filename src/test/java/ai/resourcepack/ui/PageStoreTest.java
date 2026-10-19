@@ -79,4 +79,33 @@ class PageStoreTest {
         assertEquals("two", pages.loaded("menu").title());
         pages.close();
     }
+
+    /** Windows-1252 "café": the é one byte that is never UTF-8, however long the file is left alone. */
+    private static void writeLatin1(Path file, long stamp) throws IOException {
+        Files.write(file, "<html><head><title>caf\u00e9</title></head><body></body></html>".getBytes(java.nio.charset.StandardCharsets.ISO_8859_1));
+        Files.setLastModifiedTime(file, FileTime.fromMillis(stamp));
+    }
+
+    @Test
+    void aReloadStillNotUtf8WhenReadAgainIsShownWithReplacementCharacters(@TempDir Path dir) throws Exception {
+        Path file = dir.resolve("menu.html");
+        write(file, "one", 1_000_000);
+        PageStore pages = store(dir);
+        Page first = pages.load("menu").get(30, TimeUnit.SECONDS);
+
+        writeLatin1(file, 2_000_000);
+        pages.checkForChanges();
+        assertSame(first, pages.loaded("menu"));
+        pages.checkForChanges();
+        assertEquals("caf\uFFFD", pages.loaded("menu").title());
+        pages.close();
+    }
+
+    @Test
+    void aPageNotUtf8FromTheStartStillLoads(@TempDir Path dir) throws Exception {
+        writeLatin1(dir.resolve("menu.html"), 1_000_000);
+        PageStore pages = store(dir);
+        assertEquals("caf\uFFFD", pages.load("menu").get(30, TimeUnit.SECONDS).title());
+        pages.close();
+    }
 }

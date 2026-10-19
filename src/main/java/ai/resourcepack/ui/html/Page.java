@@ -363,17 +363,28 @@ public final class Page implements Resources {
 
     /**
      * Loads [file] and everything it uses. Bytes that are not UTF-8 fail the load (a MalformedInputException)
-     * rather than reading as U+FFFD: PageStore takes that as a file caught mid-write and reads it again.
+     * rather than reading as U+FFFD: PageStore takes that as a file caught mid-write and reads it again,
+     * and only when it still is not, with its stamp unchanged, loads it [lenient]ly.
      */
     public static Page load(Path file, Loader loader) throws IOException {
-        return new Page(file, decode(Files.readAllBytes(file)), loader);
+        return load(file, loader, false);
     }
 
-    /** A page's text: UTF-8 unless a byte order mark says UTF-16, as browsers sniff it. */
-    static String decode(byte[] b) throws IOException {
+    /** {@link #load(Path, Loader)}, reading bytes that are not UTF-8 as U+FFFD when [lenient] (and noting it), as browsers do. */
+    public static Page load(Path file, Loader loader, boolean lenient) throws IOException {
+        byte[] bytes = Files.readAllBytes(file);
+        if (!lenient) return new Page(file, decode(bytes, false), loader);
+        Page page = new Page(file, decode(bytes, true), loader);
+        page.problems.add(0, "Not UTF-8: read with U+FFFD in place of the bytes that are not");
+        return page;
+    }
+
+    /** A page's text: UTF-8 unless a byte order mark says UTF-16, as browsers sniff it; strictly UTF-8 unless [lenient]. */
+    static String decode(byte[] b, boolean lenient) throws IOException {
         if (b.length >= 2 && (b[0] & 0xFF) == 0xFF && (b[1] & 0xFF) == 0xFE) return new String(b, 2, b.length - 2, StandardCharsets.UTF_16LE);
         if (b.length >= 2 && (b[0] & 0xFF) == 0xFE && (b[1] & 0xFF) == 0xFF) return new String(b, 2, b.length - 2, StandardCharsets.UTF_16BE);
         int skip = b.length >= 3 && (b[0] & 0xFF) == 0xEF && (b[1] & 0xFF) == 0xBB && (b[2] & 0xFF) == 0xBF ? 3 : 0;
+        if (lenient) return new String(b, skip, b.length - skip, StandardCharsets.UTF_8);
         return StandardCharsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(b, skip, b.length - skip)).toString();
     }
 
