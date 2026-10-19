@@ -54,8 +54,12 @@ final class TableLayout {
 
     private static int colspan(Box cell) {
         if (cell.element == null) return 1;
+        // Most cells have none: no exception for those. One costs a stack trace, which inside 500 nested
+        // tables is thousands of frames deep, for every cell on every layout pass.
+        String v = cell.element.attr("colspan").trim();
+        if (v.isEmpty()) return 1;
         try {
-            return Math.max(1, Math.min(100, Integer.parseInt(cell.element.attr("colspan").trim())));
+            return Math.max(1, Math.min(100, Integer.parseInt(v)));
         } catch (NumberFormatException e) {
             return 1;
         }
