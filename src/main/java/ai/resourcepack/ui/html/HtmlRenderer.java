@@ -109,6 +109,17 @@ public final class HtmlRenderer {
      */
     public static Frame render(Page page, org.jsoup.nodes.Document document, int width, int height, double scale, double scrollY,
                                Selector.State state, BufferedImage base, java.awt.geom.Rectangle2D clip, long timeoutMs) {
+        return render(page, document, width, height, scale, scrollY, state, base, clip, clip, timeoutMs);
+    }
+
+    /**
+     * As above, but only [keep] (a rectangle inside [clip]) keeps what was painted: the rest of [clip] is painted
+     * so that what is drawn inside [keep] (a backdrop-filter reads past its box) matches a whole picture's,
+     * and then put back as it was in [base].
+     */
+    public static Frame render(Page page, org.jsoup.nodes.Document document, int width, int height, double scale, double scrollY,
+                               Selector.State state, BufferedImage base, java.awt.geom.Rectangle2D clip, java.awt.geom.Rectangle2D keep,
+                               long timeoutMs) {
         RenderBudget budget = RenderBudget.of(timeoutMs);
         double vw = width / scale, vh = height / scale;
         Element html = document.selectFirst("html");
@@ -122,24 +133,75 @@ public final class HtmlRenderer {
         // Premultiplied: Java2D blends onto it directly, where a plain ARGB surface costs a conversion of
         // every pixel both ways on every fill. The page is painted on opaque white, so nothing reads alpha.
         BufferedImage img = base != null ? base : new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB_PRE);
+        int[] ring = null;
+        int rx0 = 0, ry0 = 0, rx1 = 0, ry1 = 0;
+        if (base != null && clip != null && keep != null && !keep.contains(clip)) {
+            // Out to a pixel past the clip, which Java2D may round outwards.
+            rx0 = Math.max(0, (int) Math.floor(clip.getX() * scale) - 1);
+            ry0 = Math.max(0, (int) Math.floor(clip.getY() * scale) - 1);
+            rx1 = Math.min(width, (int) Math.ceil(clip.getMaxX() * scale) + 1);
+            ry1 = Math.min(height, (int) Math.ceil(clip.getMaxY() * scale) + 1);
+            ring = new int[(rx1 - rx0) * (ry1 - ry0)];
+            int[] px = ((DataBufferInt) img.getRaster().getDataBuffer()).getData();
+            for (int y = ry0; y < ry1; y++) System.arraycopy(px, y * width + rx0, ring, (y - ry0) * (rx1 - rx0), rx1 - rx0);
+        }
         List<Painter.Hit> hits;
-        int bands = base == null && clip == null ? Math.min(MAX_BANDS, height / MIN_BAND_ROWS) : 1;
-        if (bands > 1) {
-            hits = paintBands(page, root, img, bands, Painter.blurReach(styler.styles.values(), scale), scale, vw, vh, scroll, budget);
-        } else {
-            Graphics2D g = img.createGraphics();
-            g.scale(scale, scale);
-            if (clip != null) g.clip(clip);
-            Painter painter = new Painter(page.shaper, page, vw, vh, scroll, budget);
-            painter.paint(g, root, img, scale);
-            g.dispose();
-            hits = painter.hits;
+        boolean full = base == null && clip == null;
+        // A full picture counts itself while it paints, so the ones painting at once share the painter threads.
+        int painting = full ? PAINTING.incrementAndGet() : 0;
+        try {
+            int bands = full ? bandsFor(height, painting) : 1;
+            if (bands > 1) {
+                hits = paintBands(page, root, img, bands, Painter.blurReach(styler.styles.values(), scale), scale, vw, vh, scroll, budget);
+            } else {
+                Graphics2D g = img.createGraphics();
+                g.scale(scale, scale);
+                if (clip != null) g.clip(clip);
+                Painter painter = new Painter(page.shaper, page, vw, vh, scroll, budget);
+                painter.paint(g, root, img, scale);
+                g.dispose();
+                hits = painter.hits;
+            }
+        } finally {
+            if (full) PAINTING.decrementAndGet();
+            // Everything in the clip but [keep] goes back as it was, also when the render was given up: then
+            // only [keep] of [base] holds what it had got to, as for a repaint without a margin.
+            if (ring != null) {
+                int kx0 = Math.max(0, (int) Math.floor(keep.getX() * scale)), ky0 = Math.max(0, (int) Math.floor(keep.getY() * scale));
+                int kx1 = Math.min(width, (int) Math.ceil(keep.getMaxX() * scale)), ky1 = Math.min(height, (int) Math.ceil(keep.getMaxY() * scale));
+                int[] px = ((DataBufferInt) img.getRaster().getDataBuffer()).getData();
+                for (int y = ry0; y < ry1; y++) {
+                    boolean rowKept = y >= ky0 && y < ky1;
+                    for (int x = rx0; x < rx1; x++) {
+                        if (rowKept && x >= kx0 && x < kx1) continue;
+                        px[y * width + x] = ring[(y - ry0) * (rx1 - rx0) + x - rx0];
+                    }
+                }
+            }
         }
         return new Frame(img, scale, vw, vh, pageHeight, scroll, hits, new IdentityHashMap<>(styler.styles), document, page);
     }
 
-    /** Full pictures are painted as up to this many horizontal bands at once, none under this many rows. */
-    private static final int MAX_BANDS = 4, MIN_BAND_ROWS = 192;
+    /** Full pictures are painted as up to this many horizontal bands at once (1: one painter), none under MIN_BAND_ROWS rows. LoadBench changes it. */
+    static volatile int maxBands = 4;
+    private static final int MIN_BAND_ROWS = 192;
+    /**
+     * Whether the painter threads are shared out between the full pictures painting at once (else each takes maxBands).
+     * Every band repaints its own margin and walks the whole page, so four bands cost up to 70% more CPU than one
+     * painter on a page with a backdrop blur: worth it while the painters are idle, a waste once render threads
+     * compete for them (LoadBench, with 16 sessions on 2 render threads: 30% less CPU a frame, and the median hover
+     * 40% sooner than either four bands or none). LoadBench changes it to compare.
+     */
+    static volatile boolean adaptiveBands = true;
+    private static final java.util.concurrent.atomic.AtomicInteger PAINTING = new java.util.concurrent.atomic.AtomicInteger();
+
+    /** Bands for a full picture, [painting] pictures (this one included) being painted: each gets its share of the painter threads. */
+    private static int bandsFor(int height, int painting) {
+        int bands = Math.min(maxBands, height / MIN_BAND_ROWS);
+        if (!adaptiveBands || bands <= 1) return bands;
+        return Math.max(1, Math.min(bands, PAINTERS.getParallelism() / painting));
+    }
+
     /** Shared by every session's full repaints; leaves a core for the game. */
     private static final ForkJoinPool PAINTERS = new ForkJoinPool(Math.max(1, Runtime.getRuntime().availableProcessors() - 1));
 
@@ -172,7 +234,7 @@ public final class HtmlRenderer {
                 g.scale(scale, scale);
                 // No clip: the band's own edges stop the drawing, so the painter sees exactly what a whole
                 // picture's would (a clip changes how Java2D intersects overflow clips, by a pixel).
-                Painter painter = new Painter(page.shaper, page, vw, vh, scroll, budget);
+                Painter painter = new Painter(page.shaper, page, vw, vh, scroll, budget).origin(0, top);
                 if (!first) painter.withoutHits();
                 if (!backdrops) painter.keeping(new java.awt.Rectangle(0, y0 - top, width, y1 - y0));
                 try {

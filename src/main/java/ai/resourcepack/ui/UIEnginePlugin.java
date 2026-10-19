@@ -53,7 +53,6 @@ public final class UIEnginePlugin extends JavaPlugin {
         renderers = Executors.newFixedThreadPool(renderThreads, r -> {
             Thread t = new Thread(r, "UIEngine-render-" + n.incrementAndGet());
             t.setDaemon(true);
-            t.setPriority(Thread.NORM_PRIORITY - 1);
             return t;
         });
         pages = newPageStore();
@@ -90,7 +89,9 @@ public final class UIEnginePlugin extends JavaPlugin {
     }
 
     private int renderThreadsSetting() {
-        return Math.max(1, cfg.getInt("render-threads", Math.max(1, Runtime.getRuntime().availableProcessors() / 2)));
+        int cores = Runtime.getRuntime().availableProcessors();
+        // Never more than the cores the game leaves free: past that threads only queue behind each other (LoadBench).
+        return Math.max(1, Math.min(cores - 1, cfg.getInt("render-threads", Math.max(1, cores / 2))));
     }
 
     /** The pages folder the config names (made, with the examples, if it is not there), with a loader as the config says. */

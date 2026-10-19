@@ -109,3 +109,19 @@ tasks.register('torture', JavaExec) {
     ['timeout', 'heap', 'only', 'out'].each { if (project.findProperty(it)) systemProperty it, project.findProperty(it) }
     maxHeapSize = '1g'
 }
+
+// Many players at once: N sessions sharing R render threads, input to frame latency, throughput, CPU, heap and the
+// bytes a viewer would be sent (LoadBench). Knobs, all optional: -Ppages=menu,landing,shop -Psessions=1,2,4 -Prender=1,2,4
+// -Pmodes=walk,flick,stress -Pbands=4 -Psecs=12 -Pwarm=2 -Psend=true -Pout=<csv> -Ptag=<label> -Pjvm=<extra jvm flags>.
+tasks.register('loadBench', JavaExec) {
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'ai.resourcepack.ui.html.LoadBench'
+    systemProperty 'java.awt.headless', 'true'
+    systemProperty 'samples', file('samples').absolutePath
+    systemProperty 'shipped', file('src/main/resources/pages').absolutePath
+    ['pages', 'sessions', 'render', 'modes', 'bands', 'secs', 'warm', 'send', 'out', 'tag', 'nowarmcell', 'adaptive'].each { k ->
+        if (project.hasProperty(k)) systemProperty k, project.property(k)
+    }
+    maxHeapSize = '3g'
+    if (project.hasProperty('jvm')) jvmArgs project.property('jvm').split(' ')
+}

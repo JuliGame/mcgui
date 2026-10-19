@@ -46,14 +46,26 @@ final class Blur {
         return sigma > 6 ? Math.min(16, sigma / 3) : 1;
     }
 
-    /** [src] blurred by [sigma]: [src] itself (blurred in place) or a smaller blurred copy to draw at [src]'s size. */
-    static BufferedImage blurredCopy(BufferedImage src, double sigma, RenderBudget budget) {
-        double k = shrink(sigma);
+    /**
+     * The whole-pixel factor a backdrop's blur of [sigma] pixels is worked out smaller by (1: not at all). Whole, so that
+     * pictures painted apart (a band, a repaint of a rectangle, the whole thing) can share one sampling grid.
+     */
+    static int step(double sigma) {
+        return sigma > 6 ? (int) Math.min(16, Math.floor(sigma / 3)) : 1;
+    }
+
+    /**
+     * [src], whose width and height are multiples of [k] (from {@link #step}), blurred by [sigma]: [src] itself, blurred
+     * in place, if [k] is 1, else a copy [k] times smaller, blurred, to draw at [src]'s size. Each pixel of the small
+     * picture is the one at its own multiple of [k] in [src], so a caller that starts [src] at a multiple of [k] of
+     * a bigger picture gets what any other start gives.
+     */
+    static BufferedImage blurredCopy(BufferedImage src, double sigma, int k, RenderBudget budget) {
         if (k <= 1) {
             blur(src, sigma, budget);
             return src;
         }
-        int w = Math.max(1, (int) Math.ceil(src.getWidth() / k)), h = Math.max(1, (int) Math.ceil(src.getHeight() / k));
+        int w = src.getWidth() / k, h = src.getHeight() / k;
         BufferedImage small = new BufferedImage(w, h, src.getType());
         java.awt.Graphics2D g = small.createGraphics();
         g.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION, java.awt.RenderingHints.VALUE_INTERPOLATION_BILINEAR);
