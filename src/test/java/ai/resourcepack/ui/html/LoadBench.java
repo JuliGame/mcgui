@@ -225,9 +225,12 @@ public final class LoadBench {
         long sender0 = sender == null ? 0 : sender.reset();
         for (AtomicInteger w : WHY) w.set(0);
         long t0 = System.nanoTime();
+        long wallStart = System.currentTimeMillis();
         long tEnd = t0 + (long) (cfg.secs * 1e9);
         Ticker tick = new Ticker();
         tick.start();
+        RunQueue runq = new RunQueue();
+        runq.start();
         // How many threads the pool holds, runs and has jobs in flight for at the most.
         int[] poolPeak = new int[3];
         Thread sampler = new Thread(() -> {
@@ -243,6 +246,8 @@ public final class LoadBench {
         sampler.start();
         sleepUntil(tEnd);
         long tickEnd = System.nanoTime();
+        // For a ticker outside the JVM (a script that logs wall-clock times) to cut out the measured window.
+        System.out.printf("window %d %d%n", wallStart, System.currentTimeMillis());
         sampler.interrupt();
         long cpu1 = OS.getProcessCpuTime();
         long[] th1 = threadCpu();
@@ -289,6 +294,7 @@ public final class LoadBench {
         r.firstMs = sims.stream().mapToDouble(s -> s.firstFrameNs > 0 ? (s.firstFrameNs - open) / 1e6 : Double.NaN).toArray();
         r.secs = wall;
         r.tick = tick.report(t0, tickEnd);
+        r.runq = runq.report(t0, tickEnd, Math.max(1, CORES - 1));
         r.peak = poolPeak;
         sims.clear();
         return r;
@@ -811,6 +817,8 @@ public final class LoadBench {
         double tilesFull, tilesPartial;
         /** Ticker lateness in ms: wake p50/p99/max, finish p50/p99/max, ticks. */
         double[] tick = new double[8];
+        /** Runnable pool threads: mean, p99, max, % of samples over cores - 1. */
+        double[] runq = new double[4];
         /** Most threads in the pool, most running, most render jobs in flight. */
         int[] peak = new int[3];
 
@@ -901,7 +909,7 @@ public final class LoadBench {
             b.append(String.format(" alloc %.1f MB/frame", allocMb / fr));
             b.append(String.format(" | cpu %.0f%% other %.0f%% steal %.0f%% | live %.0f MB peak %.0f MB gc %d ms/%d | open %.0f/%.0f ms", cpu, otherCpu, stealPct, liveMb,
                     peakMb, gcMs, gcN, f.length == 0 ? Double.NaN : f[f.length / 2], f.length == 0 ? Double.NaN : f[f.length - 1]));
-            b.append(String.format(" | tick late wake %.2f/%.2f/%.2f finish %.2f/%.2f/%.2f ms (n=%.0f, %.1f%% over 5 ms) | pool threads/running/jobs max %d/%d/%d", tick[0], tick[1], tick[2], tick[3], tick[4], tick[5], tick[6], tick[7], peak[0], peak[1], peak[2]));
+            b.append(String.format(" | tick late wake %.2f/%.2f/%.2f finish %.2f/%.2f/%.2f ms (n=%.0f, %.1f%% over 5 ms) | runnable pool threads mean %.2f p99 %.0f max %.0f, over cores-1 %.1f%% of samples | pool threads/running/jobs max %d/%d/%d", tick[0], tick[1], tick[2], tick[3], tick[4], tick[5], tick[6], tick[7], runq[0], runq[1], runq[2], runq[3], peak[0], peak[1], peak[2]));
             if (cfg.mode.equals("stress")) b.append(String.format(" | tiles/frame full %.0f", tilesFull));
             else b.append(String.format(" | why-full first/doc/scroll/nop/sib/nodirty/big/grew/moved %s", Arrays.toString(why)));
             if (wire != null && wire.batches() > 0) {
@@ -919,7 +927,7 @@ public final class LoadBench {
                     "fps", "render_full_p50", "render_full_p90", "render_part_p50", "render_part_p90", "draw_full_p50", "draw_full_p90", "draw_part_p50", "queue_p50",
                     "queue_p90", "tiles_full", "tiles_part", "cpu", "other_cpu", "steal", "live_mb", "peak_mb", "gc_ms", "gc_n", "open_p50", "open_max",
                     "w_batches", "w_tiles", "w_patches", "w_raw", "w_defl", "w_full", "w_deflate_ms", "w_diff_ms", "sender_cpu", "cpu_render_ms", "cpu_painters_ms", "cpu_encoders_ms", "cpu_send_ms", "cpu_server_ms", "cpu_process_ms", "alloc_mb",
-                    "tick_wake_p50", "tick_wake_p99", "tick_wake_max", "tick_fin_p50", "tick_fin_p99", "tick_fin_max", "tick_n", "tick_late5_pct");
+                    "tick_wake_p50", "tick_wake_p99", "tick_wake_max", "tick_fin_p50", "tick_fin_p99", "tick_fin_max", "tick_n", "tick_late5_pct", "runq_mean", "runq_p99", "runq_max", "runq_over_pct");
         }
 
         String csv(String page) {
@@ -978,6 +986,7 @@ public final class LoadBench {
             v.add(f(processCpuMs));
             v.add(f(allocMb));
             for (double d : tick) v.add(f(d));
+            for (double d : runq) v.add(f(d));
             return String.join(",", v);
         }
 
