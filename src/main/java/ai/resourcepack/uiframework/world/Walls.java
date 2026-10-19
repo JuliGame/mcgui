@@ -48,6 +48,11 @@ public final class Walls implements Listener {
     private final double reach;
     private final Predicate<Player> seated;
     private final List<Wall> walls = new CopyOnWriteArrayList<>();
+    /** This tick's viewers of each wall, and the tick they are from (see {@link #viewers}). */
+    private final Map<Wall, List<Player>> viewersNow = new HashMap<>();
+    private int viewersTick = -1;
+    /** Read into by {@link #viewersOf}, on the server thread only. */
+    private final Location scratch = new Location(null, 0, 0, 0);
     private int nextMapId;
 
     /** A player's crosshair on a wall. */
@@ -120,17 +125,43 @@ public final class Walls implements Listener {
         return null;
     }
 
-    /** Players in range of [wall], seated players included (their own view may be beside it). */
+    /**
+     * Players in range of [wall], seated players included (their own view may be beside it), as of this tick:
+     * worked out for every wall at once, the first time any is asked about in a tick (see {@link #collectViewers}).
+     */
     public List<Player> viewers(Wall wall) {
+        if (viewersTick != Bukkit.getCurrentTick()) collectViewers();
+        List<Player> out = viewersNow.get(wall);
+        return out != null ? out : viewersOf(wall, Bukkit.getOnlinePlayers().toArray(new Player[0]));
+    }
+
+    /**
+     * Every wall's viewers in one go, each player's position read once: this runs every tick for every wall in
+     * reach of every player, and the screens' tick and the sender both want the answer.
+     */
+    private void collectViewers() {
+        viewersTick = Bukkit.getCurrentTick();
+        viewersNow.clear();
+        Player[] players = Bukkit.getOnlinePlayers().toArray(new Player[0]);
+        for (Wall wall : walls) viewersNow.put(wall, viewersOf(wall, players));
+    }
+
+    private List<Player> viewersOf(Wall wall, Player[] players) {
         Location c = wall.map.centre();
         double max = viewDistance * viewDistance;
         List<Player> out = new ArrayList<>();
-        for (Player p : wall.map.world.getPlayers()) if (p.getLocation().distanceSquared(c) <= max) out.add(p);
+        for (Player p : players) {
+            if (p.getWorld() != wall.map.world) continue;
+            Location at = p.getLocation(scratch);
+            double dx = at.getX() - c.getX(), dy = at.getY() - c.getY(), dz = at.getZ() - c.getZ();
+            if (dx * dx + dy * dy + dz * dz <= max) out.add(p);
+        }
         return out;
     }
 
     /** Every tick: who is in range of what, and where each player's crosshair is. */
     public void tick() {
+        collectViewers();
         for (Wall wall : walls) {
             // A frame can vanish (a /kill, another plugin); put it back.
             if (!wall.map.spawned() && wall.map.placeable()) wall.map.spawn(plugin);
