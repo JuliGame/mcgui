@@ -316,9 +316,13 @@ public final class MapSender implements AutoCloseable {
     }
 
     /** Patches written (or given up on): no longer in flight. */
-    private static void landed(Viewer v, List<Patch> patches, long cost) {
+    private void landed(Viewer v, List<Patch> patches, long cost) {
         v.inFlight.addAndGet(-cost);
         for (Patch p : patches) p.wallInFlight.addAndGet(-p.cost);
+        // Room in flight again: send the rest of a picture now, not at the next 8 ms run. A 16x9 picture is
+        // several times the in-flight limit, so without this each remaining slice waited out a timer
+        // (measured: whole picture on screen 83.6 -> 66.6 ms median).
+        wake();
     }
 
     /** The smallest rectangle {x, y, w, h} covering every byte that differs, or null if none does. */
