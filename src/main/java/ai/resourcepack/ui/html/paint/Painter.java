@@ -45,6 +45,8 @@ public final class Painter {
     /** The surface being painted on, for backdrop-filter. */
     private BufferedImage surface;
     private double deviceScale = 1;
+    /** Where the surface's top-left is in the whole picture it is a piece of (device px): a band starts part way down. */
+    private int originX, originY;
 
     /**
      * Where something was drawn, in page coordinates, and which element it belongs to. [pointer] is false
@@ -607,7 +609,7 @@ public final class Painter {
                 Shadows.Shadow sh = shadows.get(i);
                 if (!sh.inset()) Shadows.outer(g, x, y, b.w, b.h, radii, sh, deviceScale, surfaceBounds());
             }
-            if (!s.backdropFilter.equals("none") && surface != null) Filters.backdrop(g, surface, border, s, deviceScale);
+            if (!s.backdropFilter.equals("none") && surface != null) Filters.backdrop(g, surface, border, s, deviceScale, originX, originY);
             Shape clipBox = switch (Backgrounds.pick(s.backgroundClips, 0, "border-box")) {
                 case "padding-box" -> padding(b, x, y);
                 case "content-box" -> Shapes.rect(x + b.contentX(), y + b.contentY(), b.contentW(), b.contentH(),
@@ -786,6 +788,13 @@ public final class Painter {
                 yield l == null ? free / 2 : l.of(free);
             }
         };
+    }
+
+    /** The surface painted on is the piece of a bigger picture that starts at ([x], [y]) in it. */
+    public Painter origin(int x, int y) {
+        originX = x;
+        originY = y;
+        return this;
     }
 
     /**

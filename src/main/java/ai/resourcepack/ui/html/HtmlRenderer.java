@@ -216,7 +216,7 @@ public final class HtmlRenderer {
                 g.scale(scale, scale);
                 // No clip: the band's own edges stop the drawing, so the painter sees exactly what a whole
                 // picture's would (a clip changes how Java2D intersects overflow clips, by a pixel).
-                Painter painter = new Painter(page.shaper, page, vw, vh, scroll);
+                Painter painter = new Painter(page.shaper, page, vw, vh, scroll).origin(0, top);
                 painter.paint(g, root, band, scale);
                 g.dispose();
                 System.arraycopy(((DataBufferInt) band.getRaster().getDataBuffer()).getData(), (y0 - top) * width, out, y0 * width, (y1 - y0) * width);

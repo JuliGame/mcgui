@@ -133,18 +133,29 @@ final class Filters {
         return blur;
     }
 
-    /** How far (device px) past a backdrop's edge, and past the clip, its blur reads what is painted. */
+    /**
+     * How far (device px) past a backdrop's edge, and past the clip, its blur reads what is painted: three sigma, the boxes'
+     * rounding, and the grid cell its picture is made on.
+     */
     static int backdropPad(double blur, double scale) {
-        return (int) Math.ceil(blur * scale * 1.5);
+        double sigma = blur / 2 * scale;
+        return (int) Math.ceil(3 * sigma) + Blur.step(sigma) + 2;
     }
 
-    /** backdrop-filter: blur (and tint) what is already painted under [shape], then put it back inside the shape. */
-    static void backdrop(Graphics2D g, BufferedImage surface, Shape shape, Style s, double scale) {
+    /**
+     * backdrop-filter: blur (and tint) what is already painted under [shape], then put it back inside the shape.
+     * [originX] and [originY] are where [surface]'s top-left is in the picture it is a piece of (a band): the blur is worked
+     * out on a grid fixed to that picture, so every way of painting it (whole, in bands, a rectangle at a time) blurs alike.
+     */
+    static void backdrop(Graphics2D g, BufferedImage surface, Shape shape, Style s, double scale, int originX, int originY) {
         String filter = s.backdropFilter;
         AffineTransform dev = g.getTransform();
-        java.awt.Rectangle r = dev.createTransformedShape(shape).getBounds().intersection(new java.awt.Rectangle(0, 0, surface.getWidth(), surface.getHeight()));
+        java.awt.Rectangle bounds = new java.awt.Rectangle(0, 0, surface.getWidth(), surface.getHeight());
+        java.awt.Rectangle r = dev.createTransformedShape(shape).getBounds().intersection(bounds);
         if (r.isEmpty()) return;
         double blur = backdropBlur(s);
+        double sigma = blur / 2 * scale;
+        int k = Blur.step(sigma);
         int pad = backdropPad(blur, scale);
         java.awt.Rectangle grab = new java.awt.Rectangle(r);
         grab.grow(pad, pad);
@@ -155,15 +166,21 @@ final class Filters {
             grab = grab.intersection(clipDev);
             if (grab.isEmpty()) return;
         }
-        grab = grab.intersection(new java.awt.Rectangle(0, 0, surface.getWidth(), surface.getHeight()));
+        grab = grab.intersection(bounds);
+        if (grab.isEmpty()) return;
+        // Out to whole cells of the picture's grid, where the surface has nothing (its edge) the edge pixels carry on.
+        int gx = Math.floorDiv(grab.x + originX, k) * k - originX, gy = Math.floorDiv(grab.y + originY, k) * k - originY;
+        int gw = Math.floorDiv(grab.x + grab.width + originX + k - 1, k) * k - originX - gx;
+        int gh = Math.floorDiv(grab.y + grab.height + originY + k - 1, k) * k - originY - gy;
         // Drawn rather than copied raw, so a premultiplied surface arrives as straight colour for the filters below.
-        BufferedImage copy = new BufferedImage(grab.width, grab.height, BufferedImage.TYPE_INT_ARGB);
+        BufferedImage copy = new BufferedImage(gw, gh, BufferedImage.TYPE_INT_ARGB);
         java.awt.Graphics2D cg = copy.createGraphics();
         cg.setComposite(java.awt.AlphaComposite.Src);
-        cg.drawImage(surface.getSubimage(grab.x, grab.y, grab.width, grab.height), 0, 0, null);
+        cg.drawImage(surface.getSubimage(grab.x, grab.y, grab.width, grab.height), grab.x - gx, grab.y - gy, null);
         cg.dispose();
+        extend(Painter.pixels(copy), gw, gh, grab.x - gx, grab.y - gy, grab.width, grab.height);
         // A backdrop is opaque where something was drawn; blur it like a photo (small, for a wide blur).
-        copy = Blur.blurredCopy(copy, blur / 2 * scale);
+        copy = Blur.blurredCopy(copy, sigma, k);
         for (String fn : Values.splitSpaces(filter)) {
             String l = fn.toLowerCase(Locale.ROOT);
             int open = l.indexOf('(');
@@ -179,10 +196,22 @@ final class Filters {
         if (devClip != null) g.setClip(devClip);
         Object oldInterpolation = g.getRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION);
         g.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION, java.awt.RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-        g.drawImage(copy, grab.x, grab.y, grab.width, grab.height, null);
+        g.drawImage(copy, gx, gy, gw, gh, null);
         if (oldInterpolation != null) g.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION, oldInterpolation);
         g.setTransform(saved);
         g.setClip(old);
+    }
+
+    /** Fills what is round the [w] x [h] block at ([x], [y]) in a [width] x [height] picture with the block's nearest edge pixels. */
+    private static void extend(int[] px, int width, int height, int x, int y, int w, int h) {
+        if (x == 0 && y == 0 && w == width && h == height) return;
+        for (int row = y; row < y + h; row++) {
+            int base = row * width;
+            for (int col = 0; col < x; col++) px[base + col] = px[base + x];
+            for (int col = x + w; col < width; col++) px[base + col] = px[base + x + w - 1];
+        }
+        for (int row = 0; row < y; row++) System.arraycopy(px, y * width, px, row * width, width);
+        for (int row = y + h; row < height; row++) System.arraycopy(px, (y + h - 1) * width, px, row * width, width);
     }
 
 }

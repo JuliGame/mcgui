@@ -117,12 +117,12 @@ class RepaintTest {
     private static final String NESTED = "<html><head><style>body{margin:0;background:linear-gradient(90deg,#f06,#06f 50%,#0c6)}"
             + "div{position:absolute;box-sizing:border-box}"
             + ".under{left:60px;top:300px;width:300px;height:200px;background:#fc0}.under:hover{background:#00e}"
-            + ".far{left:20px;top:40px;width:120px;height:80px;background:#fff}.far:hover{background:#000}"
+            + ".far{left:21px;top:41px;width:120px;height:80px;background:#fff}.far:hover{background:#000}"
             + ".outer{left:300px;top:40px;width:640px;height:480px;background:rgba(255,255,255,.15);backdrop-filter:blur(14px);border-radius:20px}"
             + ".outer:hover{background:rgba(255,255,255,.35)}"
             + ".inner{left:340px;top:100px;width:360px;height:300px;background:rgba(0,0,0,.2);backdrop-filter:blur(10px)}"
-            + ".btn{left:380px;top:140px;width:140px;height:50px;background:#222;color:#fff;font-size:20px}.btn:hover{background:#e11;box-shadow:0 0 30px #ff0}"
-            + ".tag{left:720px;top:420px;width:180px;height:60px;background:#135;color:#fff;font-size:20px}.tag:hover{background:#fa0}"
+            + ".btn{left:381px;top:141px;width:140px;height:50px;background:#222;color:#fff;font-size:20px}.btn:hover{background:#e11;box-shadow:0 0 30px #ff0}"
+            + ".tag{left:721px;top:421px;width:180px;height:60px;background:#135;color:#fff;font-size:20px}.tag:hover{background:#fa0}"
             + "</style></head><body><div class=under></div><div class=far></div><div class=outer></div><div class=inner></div>"
             + "<div class=btn>Button</div><div class=tag>Outside</div></body></html>";
 
@@ -135,13 +135,26 @@ class RepaintTest {
     private static final String EDGES = "<html><head><style>body{margin:0;background:linear-gradient(135deg,#fa0,#08f 60%,#a0f)}"
             + "div{position:absolute;box-sizing:border-box;font-size:22px;color:#fff}"
             + ".tl{left:0;top:0;width:300px;height:180px;background:rgba(255,255,255,.2);backdrop-filter:blur(16px)}"
-            + ".tlb{left:12px;top:12px;width:120px;height:44px;background:#123}.tlb:hover{background:#c21}"
+            + ".tlb{left:13px;top:13px;width:120px;height:44px;background:#123}.tlb:hover{background:#c21}"
             + ".br{right:0;bottom:0;width:320px;height:200px;background:rgba(0,0,0,.25);backdrop-filter:blur(12px)}"
-            + ".brb{right:16px;bottom:16px;width:120px;height:44px;background:#321}.brb:hover{background:#1c2}"
-            + ".mid{left:420px;top:200px;width:200px;height:120px;background:#0a8}.mid:hover{background:#fd0}"
+            + ".brb{right:17px;bottom:17px;width:120px;height:44px;background:#321}.brb:hover{background:#1c2}"
+            + ".mid{left:421px;top:201px;width:200px;height:120px;background:#0a8}.mid:hover{background:#fd0}"
             + ".strip{left:0;top:200px;width:1024px;height:60px;background:rgba(255,255,255,.1);backdrop-filter:blur(8px)}"
             + "</style></head><body><div class=mid>Mid</div><div class=strip></div><div class=tl></div><div class=tlb>Top</div>"
             + "<div class=br></div><div class=brb>Bottom</div></body></html>";
+
+    /** A hard-edged orange bar across both pages, under everything. */
+    private static final String BAR = "<body><div style='position:absolute;left:0;top:301px;width:1024px;height:123px;background:#f80'></div>";
+
+    /** The same pages over a hard black/white edge (and an orange bar), where a blur's sampling grid shows if it moves. */
+    @Test
+    void hardEdgesUnderBackdropsMatchAFreshPicture() {
+        // Blurs of 15, 9 and 10 px have sampling cells of 5, 3 and 3 device px: no start is a multiple of all of them by luck.
+        check("nested backdrops on a hard edge", Page.of(NESTED.replace("background:linear-gradient(90deg,#f06,#06f 50%,#0c6)", "background:linear-gradient(90deg,#000 0 50%,#fff 50%)")
+                .replace("blur(14px)", "blur(15px)").replace("<body>", BAR), Path.of("nested-hard.html").toAbsolutePath(), OFFLINE), 3);
+        check("edge backdrops on a hard edge", Page.of(EDGES.replace("background:linear-gradient(135deg,#fa0,#08f 60%,#a0f)", "background:linear-gradient(90deg,#000 0 29%,#fff 29%)")
+                .replace("blur(8px)", "blur(9px)").replace("<body>", BAR), Path.of("edges-hard.html").toAbsolutePath(), OFFLINE), 3);
+    }
 
     @Test
     void backdropsOnTheCanvasEdgeMatchAFreshPicture() {
