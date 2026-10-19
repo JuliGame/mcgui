@@ -5,7 +5,11 @@ package ai.resourcepack.uiframework.api;
  * server thread. Pixel coordinates are canvas pixels from the top-left.
  */
 public interface ViewContent {
-    /** The view's picture. Asked every tick; the same canvas for the life of the view is usual. */
+    /**
+     * The view's picture. Asked every tick; the same canvas for the life of the view is usual. Must not be null
+     * when the view opens (its size is the view's); after that, null sends nothing new, and a view not switched to
+     * yet waits for its first picture (a few seconds at most) rather than switching to a blank one.
+     */
     Canvas canvas();
 
     /** The pointer moved to (x, y). */

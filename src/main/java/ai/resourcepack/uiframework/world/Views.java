@@ -917,9 +917,11 @@ public final class Views implements Listener {
             } catch (RuntimeException | LinkageError e) {
                 // One broken view must not stop the list, and with it every screen, from being sent.
                 failed("giving its canvas", e);
-                canvas = null;
+                canvas = v.canvas;
             }
-            if (canvas == null || canvas.cols() != v.wall.cols || canvas.rows() != v.wall.rows) canvas = v.canvas;
+            // Nothing to show yet (the content is still drawing it): nothing is sent, and the switch waits for it.
+            if (canvas == null) continue;
+            if (canvas.cols() != v.wall.cols || canvas.rows() != v.wall.rows) canvas = v.canvas;
             if (v.withPack) out.add(new MapSender.Assignment(p, v.wall, canvas, v.clientPointer ? Canvas.Encoding.HI_TILED : Canvas.Encoding.HI_OWN, null));
             else out.add(new MapSender.Assignment(p, v.wall, canvas, Canvas.Encoding.PLAIN,
                     v.revealed ? new MapSender.PointerSpot((int) v.cursorX, (int) v.cursorY, v.shape) : null));
