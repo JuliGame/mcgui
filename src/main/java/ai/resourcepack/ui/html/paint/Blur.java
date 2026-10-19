@@ -29,6 +29,14 @@ final class Blur {
         }
     }
 
+    /** How far (px) a blur of [sigma] reads round each pixel it makes: its three boxes' radii. 0 for none. */
+    static int support(double sigma) {
+        if (!(sigma >= 0.5)) return 0;
+        int sum = 0;
+        for (int s : boxes(Math.min(sigma, MAX_SIGMA))) sum += (s - 1) / 2;
+        return sum;
+    }
+
     /**
      * How much smaller to work for a blur of [sigma] pixels. A wide blur leaves nothing finer than a
      * few pixels, so it is computed on a picture shrunk to keep sigma about 3 and scaled back up:

@@ -157,6 +157,9 @@ public final class HtmlRenderer {
         int width = img.getWidth(), height = img.getHeight();
         int[] out = ((DataBufferInt) img.getRaster().getDataBuffer()).getData();
         List<ForkJoinTask<List<Painter.Hit>>> tasks = new ArrayList<>(bands);
+        // Without a backdrop-filter nothing reads the margins as painted, only filter blurs, which each
+        // layer reaches out for itself: then filtered layers are worked out only round the band's rows.
+        boolean backdrops = Painter.backdrops(root);
         for (int b = 0; b < bands; b++) {
             int y0 = height * b / bands, y1 = height * (b + 1) / bands;
             // Twice the reach: a blur in the margin itself reads up to one reach further out.
@@ -171,6 +174,7 @@ public final class HtmlRenderer {
                 // picture's would (a clip changes how Java2D intersects overflow clips, by a pixel).
                 Painter painter = new Painter(page.shaper, page, vw, vh, scroll, budget);
                 if (!first) painter.withoutHits();
+                if (!backdrops) painter.keeping(new java.awt.Rectangle(0, y0 - top, width, y1 - y0));
                 try {
                     painter.paint(g, root, band, scale);
                 } finally {

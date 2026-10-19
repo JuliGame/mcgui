@@ -83,6 +83,27 @@ public final class Painter {
         return this;
     }
 
+    /**
+     * Of the surface, only [keep] (device px) is kept: a band's own rows. A layer is then filtered and
+     * blended in only round those, as far as its filter's blur reads, not over the band's whole margin.
+     * Only for a page with no backdrop-filter ({@link #backdrops}), which reads the margin as painted.
+     */
+    public Painter keeping(java.awt.Rectangle keep) {
+        needed = keep;
+        return this;
+    }
+
+    /** Whether anything in [root]'s tree has a backdrop-filter. */
+    public static boolean backdrops(Box root) {
+        List<Box> todo = new ArrayList<>(List.of(root));
+        while (!todo.isEmpty()) {
+            Box b = todo.remove(todo.size() - 1);
+            if (!b.style.backdropFilter.equals("none")) return true;
+            todo.addAll(b.children);
+        }
+        return false;
+    }
+
     /** Paints the page into [g] (already scaled to CSS pixels) over [surface], the image [g] draws on. */
     public void paint(Graphics2D g, Box root, BufferedImage surface, double scale) {
         this.surface = surface;
@@ -208,6 +229,8 @@ public final class Painter {
     private static final int MAX_LAYERS = 8;
     /** Layers being painted into, round the box being painted. */
     private int layers;
+    /** The part of [surface] (device px) whose pixels matter, or null for all of it: see {@link #keeping}. */
+    private java.awt.Rectangle needed;
 
     /** Opacity and filters: the subtree painted on a layer of its own, then blended in. */
     private void layered(Graphics2D g, Box box, double x, double y) {
@@ -235,6 +258,22 @@ public final class Painter {
             if (recordHits) hitsOnly(g, box, x, y);
             return;
         }
+        // The part of the layer (its own pixels) worth filtering and blending in: what its filter reads to
+        // make the pixels needed (a blur reads its support round each; colour filters and opacity only the
+        // pixel itself). The layer is still painted whole: cut short, Java2D would round curved and slanted
+        // edges a level differently along the cut, and a band would differ from a whole picture.
+        java.awt.Rectangle part = null;
+        if (needed != null && !reach.backdrop) {
+            int support = Filters.blurSupport(box.style.filter, box.style, deviceScale);
+            part = new java.awt.Rectangle(needed.x - r.x, needed.y - r.y, needed.width, needed.height);
+            part.grow(support, support);
+            part = part.intersection(new java.awt.Rectangle(r.width, r.height));
+            if (part.isEmpty()) {
+                // Only in a band's margin, where nothing reads it: no need to paint it, only its hit regions.
+                if (recordHits) hitsOnly(g, box, x, y);
+                return;
+            }
+        }
         // Colour filters work on straight colour, so a filtered layer stays plain ARGB; opacity alone blends faster premultiplied.
         BufferedImage img = new BufferedImage(r.width, r.height, box.style.filter.equals("none") ? BufferedImage.TYPE_INT_ARGB_PRE : BufferedImage.TYPE_INT_ARGB);
         Graphics2D lg = img.createGraphics();
@@ -243,18 +282,36 @@ public final class Painter {
         lg.transform(dev);
         if (g.getClip() != null) lg.setClip(g.getClip());
         BufferedImage savedSurface = surface;
+        java.awt.Rectangle savedNeeded = needed;
         surface = img;
+        // Layers inside are needed exactly where this one's filter reads.
+        needed = part;
         contextBody(lg, box, x, y);
         surface = savedSurface;
+        needed = savedNeeded;
         lg.dispose();
+        int ox = r.x, oy = r.y;
+        if (part != null && (part.width < r.width || part.height < r.height)) {
+            img = copy(img, part);
+            ox += part.x;
+            oy += part.y;
+        }
         Filters.apply(img, box.style.filter, deviceScale, box.style, budget);
         AffineTransform saved = g.getTransform();
         g.setTransform(new AffineTransform());
         Composite old = g.getComposite();
         g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, (float) box.style.opacity));
-        g.drawImage(img, r.x, r.y, null);
+        g.drawImage(img, ox, oy, null);
         g.setComposite(old);
         g.setTransform(saved);
+    }
+
+    /** The [part] of [img], as an image of its own of the same type (Blur and Filters work on a whole pixel array). */
+    private static BufferedImage copy(BufferedImage img, java.awt.Rectangle part) {
+        BufferedImage out = new BufferedImage(part.width, part.height, img.getType());
+        int[] from = pixels(img), to = pixels(out);
+        for (int y = 0; y < part.height; y++) System.arraycopy(from, (part.y + y) * img.getWidth() + part.x, to, y * part.width, part.width);
+        return out;
     }
 
     /** Walks [box]'s subtree for its hit regions alone: under an empty clip nothing is drawn, and culling skips the work. */

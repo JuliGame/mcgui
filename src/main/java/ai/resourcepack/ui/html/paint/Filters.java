@@ -60,6 +60,19 @@ final class Filters {
         return sum;
     }
 
+    /** How far (device px) {@link #apply} reads round each pixel it makes: the supports of its blurs, one after another. */
+    static int blurSupport(String filter, Style s, double scale) {
+        if (filter == null || filter.equals("none")) return 0;
+        int sum = 0;
+        for (String fn : functions(filter)) {
+            if (!fn.toLowerCase(Locale.ROOT).startsWith("blur(") || !fn.endsWith(")")) continue;
+            String arg = fn.substring(5, fn.length() - 1).trim();
+            Len l = Len.parse(arg.isEmpty() ? "0" : arg, s.context);
+            if (l != null) sum += Blur.support(l.of(0) * scale);
+        }
+        return sum;
+    }
+
     private static double amount(String arg, String name) {
         if (arg.isEmpty()) return name.equals("hue-rotate") ? 0 : 1;
         if (name.equals("hue-rotate")) {
