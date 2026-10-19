@@ -572,7 +572,7 @@ public final class LoadBench {
                         }
                         Repaint.Prepared ready = ahead.take(before, drawnHover, List.of(), hoverKey, List.of());
                         if (ready != null && VERIFY) verify(ready, p, d, s, state, before, moved);
-                        Repaint.Result r = ready != null ? ready.apply() : Repaint.partial(p, d, W, H, SCALE, s, state, before, moved, HtmlRenderer.DEFAULT_TIMEOUT_MS);
+                        Repaint.Result r = ready != null ? ready.apply(before) : Repaint.partial(p, d, W, H, SCALE, s, state, before, moved, HtmlRenderer.DEFAULT_TIMEOUT_MS);
                         (ready != null ? aheadFrames : paintedFrames).incrementAndGet();
                         wasAhead = ready != null;
                         if (r.frame() != null) {
@@ -656,7 +656,7 @@ public final class LoadBench {
             if (!hoverKey.equals(drawnHover)) return;
             if (!HoverAhead.claim(lookAgain)) return;
             boolean resting = System.nanoTime() - pointerAt > 150_000_000L;
-            HoverAhead.Job j = ahead.job(page, doc, W, H, SCALE, f, false, drawnHover, List.of(), hoverKey, null, List.of(), x, y,
+            HoverAhead.Job j = ahead.job(page, doc, W, H, SCALE, f, drawnHover, List.of(), hoverKey, null, List.of(), x, y,
                     resting ? 0 : pointerVx / SCALE, resting ? 0 : pointerVy / SCALE, HtmlRenderer.DEFAULT_TIMEOUT_MS);
             job = j;
             rendering = true;
@@ -680,24 +680,24 @@ public final class LoadBench {
                     && HoverAhead.quiet();
         }
 
-        /** -Dverify=true: what was drawn ahead against the repaint itself, over a copy of the picture. */
+        /** -Dverify=true: what was drawn ahead, applied to a copy of the picture, against the repaint itself over another copy. */
         private void verify(Repaint.Prepared ready, Page p, Document d, double s, Selector.State state, HtmlRenderer.Frame before, Set<Element> moved) {
-            java.awt.image.BufferedImage from = before.image(), to = new java.awt.image.BufferedImage(from.getWidth(), from.getHeight(), from.getType());
-            int[] a = ((java.awt.image.DataBufferInt) from.getRaster().getDataBuffer()).getData(), b = ((java.awt.image.DataBufferInt) to.getRaster().getDataBuffer()).getData();
-            System.arraycopy(a, 0, b, 0, a.length);
-            HtmlRenderer.Frame copy = new HtmlRenderer.Frame(to, before.scale(), before.viewportWidth(), before.viewportHeight(), before.pageHeight(), before.scrollY(),
-                    before.hits(), before.styles(), before.document(), before.page());
-            Repaint.Result real = Repaint.partial(p, d, W, H, SCALE, s, state, copy, moved, 0);
-            // Applied to the copy of the picture as it is now, so the picture itself is left for the session to apply it to.
-            int[] mine = a.clone();
-            Repaint.Result r = ready.apply();
-            int[] applied = ((java.awt.image.DataBufferInt) r.frame().image().getRaster().getDataBuffer()).getData();
-            boolean same = real.frame() != null && java.util.Arrays.equals(applied, b) && real.changed().equals(r.changed());
-            System.arraycopy(mine, 0, applied, 0, mine.length);
+            Repaint.Result real = Repaint.partial(p, d, W, H, SCALE, s, state, copyOf(before), moved, 0);
+            Repaint.Result r = ready.apply(copyOf(before));
+            boolean same = real.frame() != null && real.changed().equals(r.changed())
+                    && java.util.Arrays.equals(((java.awt.image.DataBufferInt) r.frame().image().getRaster().getDataBuffer()).getData(),
+                    ((java.awt.image.DataBufferInt) real.frame().image().getRaster().getDataBuffer()).getData());
             if (!same) {
                 mismatches.incrementAndGet();
                 System.err.println("verify: drawn ahead differs from the repaint (session " + id + ")");
             }
+        }
+
+        private static HtmlRenderer.Frame copyOf(HtmlRenderer.Frame f) {
+            java.awt.image.BufferedImage from = f.image(), to = new java.awt.image.BufferedImage(from.getWidth(), from.getHeight(), from.getType());
+            System.arraycopy(((java.awt.image.DataBufferInt) from.getRaster().getDataBuffer()).getData(), 0,
+                    ((java.awt.image.DataBufferInt) to.getRaster().getDataBuffer()).getData(), 0, from.getWidth() * from.getHeight());
+            return new HtmlRenderer.Frame(to, f.scale(), f.viewportWidth(), f.viewportHeight(), f.pageHeight(), f.scrollY(), f.hits(), f.styles(), f.document(), f.page());
         }
 
         private void execute(Runnable r) {

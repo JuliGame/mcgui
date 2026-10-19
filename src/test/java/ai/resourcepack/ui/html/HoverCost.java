@@ -85,7 +85,7 @@ public final class HoverCost {
                         Repaint.Prepared ready = Repaint.prepare(page, d, LoadBench.W, LoadBench.H, LoadBench.SCALE, 0, state, other, moved, RenderBudget.cancellable(0));
                         long p1 = mx.getThreadCpuTime(me), pa1 = mx.getThreadAllocatedBytes(me);
                         long q0 = System.nanoTime();
-                        if (ready != null) ready.apply();
+                        if (ready != null) ready.apply(other);
                         long q1 = System.nanoTime();
                         // Style, layout and the walk of the painter with nothing to paint: what any repaint costs before pixels.
                         long l0 = mx.getThreadCpuTime(me);

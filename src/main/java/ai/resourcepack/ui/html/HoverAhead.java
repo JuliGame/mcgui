@@ -1,6 +1,7 @@
 package ai.resourcepack.ui.html;
 
 import ai.resourcepack.ui.html.paint.Painter;
+import ai.resourcepack.ui.html.paint.PixelPool;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 
@@ -20,10 +21,13 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * One session's hover repaints drawn before they are asked for. While the pointer rests (or heads somewhere) and
  * the render threads have nothing else to do, the repaints for the few hover targets nearest the pointer are worked
- * out over the picture on the screen ({@link Repaint#prepare}) and kept; when the pointer then lands on one of them,
- * the session takes it ({@link #take}) instead of painting, and has exactly what {@link Repaint#partial} would have
- * drawn. A prepared repaint is of one picture (by identity), one drawn hover and press state, and one wanted one:
- * any other picture finds nothing. All of them go when the picture changes.
+ * out ({@link Repaint#prepare}) over a copy of the picture on the screen, made for the drawing ahead in a
+ * {@link PixelPool} picture of the render thread's and handed back when it ends, and kept; when the pointer then lands
+ * on one of them, the session takes it ({@link #take}) instead of painting, and applies it to what it would have
+ * painted into ({@link Repaint.Prepared#apply}), which then holds exactly what {@link Repaint#partial} would have
+ * drawn. A drawing ahead never paints into a picture a frame shows, a session holds, or FirstPictures shares, not
+ * even for a moment. A prepared repaint is of one picture (by identity), one drawn hover and press state, and one
+ * wanted one: any other picture finds nothing. All of them go when the picture changes.
  *
  * <p>Drawing ahead never holds up real work: a session draws ahead only in place of a render of its own (one at a
  * time per session, as ever), only when the render threads are idle, and every drawing ahead stops at its next
@@ -74,8 +78,6 @@ public final class HoverAhead {
 
     // Guarded by this. Everything here is of the picture [of].
     private HtmlRenderer.Frame of;
-    /** A copy of [of] to draw over, when its picture is shared with other sessions and so may not be painted, even for a while. */
-    private HtmlRenderer.Frame copy;
     private final List<Entry> entries = new ArrayList<>();
     private long bytes;
     /** Where the last drawing ahead that finished was done from: nothing more to draw from there. */
@@ -159,7 +161,6 @@ public final class HoverAhead {
     /** Lets go of everything kept: the picture changed, or the session closed. */
     public synchronized void drop() {
         of = null;
-        copy = null;
         entries.clear();
         bytes = 0;
         doneOf = null;
@@ -190,33 +191,30 @@ public final class HoverAhead {
         entries.add(e);
     }
 
-    /** What to draw over for [before]: its own picture, or, when that is shared ([shared]), one copy of it, made once per picture. */
-    private synchronized HtmlRenderer.Frame base(HtmlRenderer.Frame before, boolean shared) {
-        if (!shared) return before;
-        if (of != before) {
-            drop();
-            of = before;
-        }
-        if (copy == null) {
-            BufferedImage from = before.image();
-            BufferedImage to = new BufferedImage(from.getWidth(), from.getHeight(), from.getType());
-            int[] src = ((DataBufferInt) from.getRaster().getDataBuffer()).getData();
-            System.arraycopy(src, 0, ((DataBufferInt) to.getRaster().getDataBuffer()).getData(), 0, src.length);
-            copy = new HtmlRenderer.Frame(to, before.scale(), before.viewportWidth(), before.viewportHeight(), before.pageHeight(), before.scrollY(),
-                    before.hits(), before.styles(), before.document(), before.page());
-        }
-        return copy;
+    /**
+     * A copy of [before] to draw over, in a {@link PixelPool} picture of this thread's: hand it back with
+     * {@link PixelPool#givePicture} once nothing reads it. Never [before]'s own picture, which its session shows and
+     * may share with others (FirstPictures).
+     */
+    private static HtmlRenderer.Frame scratch(HtmlRenderer.Frame before) {
+        BufferedImage from = before.image();
+        BufferedImage to = from.getType() == BufferedImage.TYPE_INT_ARGB_PRE ? PixelPool.picture(from.getWidth(), from.getHeight())
+                : new BufferedImage(from.getWidth(), from.getHeight(), from.getType());
+        int[] src = ((DataBufferInt) from.getRaster().getDataBuffer()).getData();
+        System.arraycopy(src, 0, ((DataBufferInt) to.getRaster().getDataBuffer()).getData(), 0, from.getWidth() * from.getHeight());
+        return new HtmlRenderer.Frame(to, before.scale(), before.viewportWidth(), before.viewportHeight(), before.pageHeight(), before.scrollY(),
+                before.hits(), before.styles(), before.document(), before.page());
     }
 
     /**
      * A drawing ahead over [before] (the picture on the screen, of [doc] at [width] x [height], [scale]), drawn with
-     * [drawnHover] and [drawnPress]; [shared] if its picture is shared with other sessions. The pointer is at (x, y),
-     * moving at (vx, vy), CSS pixels (a second); [pressed] is pressed, with [pressKey]; [hoverKey] is the hover now.
+     * [drawnHover] and [drawnPress]. The pointer is at (x, y), moving at (vx, vy), CSS pixels (a second); [pressed] is
+     * pressed, with [pressKey]; [hoverKey] is the hover now.
      */
-    public Job job(Page page, Document doc, int width, int height, double scale, HtmlRenderer.Frame before, boolean shared,
+    public Job job(Page page, Document doc, int width, int height, double scale, HtmlRenderer.Frame before,
                    List<Element> drawnHover, List<Element> drawnPress, List<Element> hoverKey, Element pressed, List<Element> pressKey,
                    double x, double y, double vx, double vy, long timeoutMs) {
-        return new Job(page, doc, width, height, scale, before, shared, drawnHover, drawnPress, hoverKey, pressed, pressKey, x, y, vx, vy,
+        return new Job(page, doc, width, height, scale, before, drawnHover, drawnPress, hoverKey, pressed, pressKey, x, y, vx, vy,
                 RenderBudget.cancellable(timeoutMs));
     }
 
@@ -226,7 +224,6 @@ public final class HoverAhead {
         final int width, height;
         final double scale, x, y, vx, vy;
         final HtmlRenderer.Frame before;
-        final boolean shared;
         final List<Element> drawnHover, drawnPress, hoverKey, pressKey;
         final Element pressed;
         final RenderBudget budget;
@@ -235,7 +232,7 @@ public final class HoverAhead {
         /** Stop after the one being drawn: its session wants it. */
         private volatile boolean last;
 
-        private Job(Page page, Document doc, int width, int height, double scale, HtmlRenderer.Frame before, boolean shared,
+        private Job(Page page, Document doc, int width, int height, double scale, HtmlRenderer.Frame before,
                     List<Element> drawnHover, List<Element> drawnPress, List<Element> hoverKey, Element pressed, List<Element> pressKey,
                     double x, double y, double vx, double vy, RenderBudget budget) {
             this.page = page;
@@ -244,7 +241,6 @@ public final class HoverAhead {
             this.height = height;
             this.scale = scale;
             this.before = before;
-            this.shared = shared;
             this.drawnHover = drawnHover;
             this.drawnPress = drawnPress;
             this.hoverKey = hoverKey;
@@ -282,6 +278,7 @@ public final class HoverAhead {
         RUNNING.add(job);
         boolean finished = false;
         long cpu0 = THREADS.getCurrentThreadCpuTime(), alloc0 = THREADS.getCurrentThreadAllocatedBytes();
+        HtmlRenderer.Frame base = null;
         try {
             List<Target> ranked = rank(job, targets(job.before));
             synchronized (this) {
@@ -289,13 +286,12 @@ public final class HoverAhead {
                 pickedOf = job.before;
                 for (Target t : ranked) if (!picked.contains(t.key)) picked.add(t.key);
             }
-            HtmlRenderer.Frame base = null;
             for (Target t : ranked) {
                 if (job.budget.cancelled() || job.last || !quiet()) return;
                 if (has(job.before, job.drawnHover, job.drawnPress, t.key, job.pressKey)) continue;
                 Set<Element> moved = changed(job.drawnHover, job.drawnPress, t.key, job.pressKey);
                 if (moved.isEmpty()) continue;
-                if (base == null) base = base(job.before, job.shared);
+                if (base == null) base = scratch(job.before);
                 job.drawing = t.key;
                 long c0 = THREADS.getCurrentThreadCpuTime();
                 Repaint.Prepared p;
@@ -314,6 +310,8 @@ public final class HoverAhead {
             finished = true;
         } finally {
             RUNNING.remove(job);
+            // Nothing kept reads it: a prepared repaint holds its own pixels, and is applied to the session's picture.
+            if (base != null && base.image().getType() == BufferedImage.TYPE_INT_ARGB_PRE) PixelPool.givePicture(base.image());
             cpuNs.addAndGet(THREADS.getCurrentThreadCpuTime() - cpu0);
             allocBytes.addAndGet(THREADS.getCurrentThreadAllocatedBytes() - alloc0);
             if (finished) {

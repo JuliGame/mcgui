@@ -404,7 +404,7 @@ public final class Session {
         // From here every way out releases the turn: one kept by mistake would stop drawing ahead for every session.
         try {
             boolean resting = System.nanoTime() - pointerAt > 150_000_000L;
-            HoverAhead.Job job = hoverAhead.job(page, doc, canvas.width(), canvas.height(), scale, f, f.image() == borrowed, drawnHover, drawnPress,
+            HoverAhead.Job job = hoverAhead.job(page, doc, canvas.width(), canvas.height(), scale, f, drawnHover, drawnPress,
                     hoverKey, pressed, pressKey, x, y, resting ? 0 : pointerVx / scale, resting ? 0 : pointerVy / scale, plugin.renderTimeout());
             ahead = job;
             rendering = true;
@@ -564,13 +564,13 @@ public final class Session {
                     partial = still;
                 } else if (still && !redraw) {
                     // Only the hover or press state moved: repaint just what it touches, unless that was drawn ahead
-                    // (HoverAhead: the same pixels, already painted). A picture shared with other sessions (FirstPictures)
-                    // is copied first, as the repaint paints into it.
+                    // (HoverAhead: the same pixels, worked out over a copy of this picture). A picture shared with other
+                    // sessions (FirstPictures) is copied first, as the repaint (or the pixels drawn ahead) go into it.
+                    HtmlRenderer.Frame base = before.image() == borrowed ? FirstPictures.own(before, pooled.take(canvas.width(), canvas.height())) : before;
                     Repaint.Prepared ready = hoverAhead.take(before, drawnHover, drawnPress, hoverKey, pressKey);
-                    drawnAhead = ready != null && ready.image() != borrowed;
-                    Repaint.Result r = drawnAhead ? ready.apply()
-                            : Repaint.partial(p, d, canvas.width(), canvas.height(), scale, before.scrollY(), state,
-                                    before.image() == borrowed ? FirstPictures.own(before, pooled.take(canvas.width(), canvas.height())) : before, moved, timeout);
+                    drawnAhead = ready != null;
+                    Repaint.Result r = drawnAhead ? ready.apply(base)
+                            : Repaint.partial(p, d, canvas.width(), canvas.height(), scale, before.scrollY(), state, base, moved, timeout);
                     if (r.frame() != null) {
                         f = r.frame();
                         changed = r.changed();

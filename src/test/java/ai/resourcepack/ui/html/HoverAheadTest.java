@@ -17,11 +17,13 @@ import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -97,7 +99,7 @@ class HoverAheadTest {
                 steps++;
                 HoverAhead ahead = new HoverAhead(64, Long.MAX_VALUE);
                 int[] shown = pixels(cur.image()).clone();
-                ahead.run(ahead.job(page, doc, W, H, SCALE, cur, false, drawn, List.of(), drawn, null, List.of(), px, py, 0, 0, 0));
+                ahead.run(ahead.job(page, doc, W, H, SCALE, cur, drawn, List.of(), drawn, null, List.of(), px, py, 0, 0, 0));
                 assertArrayEquals(shown, pixels(cur.image()), name + ": drawing ahead changed the picture on the screen");
 
                 Repaint.Result real = Repaint.partial(page, doc, W, H, SCALE, 0, HtmlRenderer.state(hover, null), copy(cur), moved, 0);
@@ -107,7 +109,7 @@ class HoverAheadTest {
                     cur = HtmlRenderer.render(page, doc, W, H, SCALE, 0, HtmlRenderer.state(hover, null));
                 } else {
                     assertNotNull(ready, name + ": " + (hover == null ? "leaving " : "entering ") + target.normalName() + "." + target.className() + " was not drawn ahead");
-                    Repaint.Result r = ready.apply();
+                    Repaint.Result r = ready.apply(cur);
                     taken++;
                     String step = name + ", " + (hover == null ? "leaving " : "entering ") + target.normalName() + "." + target.className();
                     assertEquals(real.changed(), r.changed(), step + ": another rectangle");
@@ -163,20 +165,50 @@ class HoverAheadTest {
         assertTrue(walk("edges", Page.of(RepaintTest.EDGES, Path.of("edges.html").toAbsolutePath(), OFFLINE)).taken >= 3);
     }
 
-    /** A picture shared with other sessions is never painted, even for a while: drawing ahead goes over a copy. */
+    /**
+     * The picture drawn ahead over is never painted, not even for a moment: it is the one its session shows, and may
+     * be shared with other sessions (FirstPictures), who read it meanwhile. Drawing ahead goes over a copy of its own.
+     * What it prepared, applied to another copy (as a session whose picture is shared does), is the session's repaint.
+     */
     @Test
-    void aSharedPictureIsLeftAlone() throws IOException {
+    void aSharedPictureIsLeftAlone() throws Exception {
         Page page = file("src/main/resources/pages/shop.html");
         Document doc = page.document.clone();
         HtmlRenderer.Frame cur = HtmlRenderer.render(page, doc, W, H, SCALE, 0, Selector.State.NONE);
         int[] shown = pixels(cur.image()).clone();
+        // Another session reading the picture all the while it is drawn ahead over.
+        AtomicBoolean drawing = new AtomicBoolean(true);
+        AtomicInteger looks = new AtomicInteger(), changed = new AtomicInteger();
+        Thread reader = new Thread(() -> {
+            while (drawing.get()) {
+                if (!Arrays.equals(shown, pixels(cur.image()))) changed.incrementAndGet();
+                looks.incrementAndGet();
+            }
+        });
+        reader.start();
         HoverAhead ahead = new HoverAhead(64, Long.MAX_VALUE);
-        ahead.run(ahead.job(page, doc, W, H, SCALE, cur, true, List.of(), List.of(), List.of(), null, List.of(), 1, 1, 0, 0, 0));
+        try {
+            ahead.run(ahead.job(page, doc, W, H, SCALE, cur, List.of(), List.of(), List.of(), null, List.of(), 1, 1, 0, 0, 0));
+        } finally {
+            drawing.set(false);
+            reader.join();
+        }
+        assertTrue(looks.get() > 1, "the picture was not watched");
+        assertEquals(0, changed.get(), "the picture was painted while drawn ahead over (" + changed.get() + " of " + looks.get() + " looks)");
         assertArrayEquals(shown, pixels(cur.image()));
         Element t = targets(page, cur).get(0);
-        Repaint.Prepared ready = ahead.take(cur, List.of(), List.of(), page.styles.stateKey(t, false), List.of());
+        List<Element> key = page.styles.stateKey(t, false);
+        Repaint.Prepared ready = ahead.take(cur, List.of(), List.of(), key, List.of());
         assertNotNull(ready);
-        assertNotSame(cur.image(), ready.image());
+        HtmlRenderer.Frame own = copy(cur);
+        Repaint.Result r = ready.apply(own);
+        assertSame(own.image(), r.frame().image(), "applied to the copy it was given");
+        Repaint.Result real = Repaint.partial(page, doc, W, H, SCALE, 0, HtmlRenderer.state(t, null), copy(cur),
+                HoverAhead.changed(List.of(), List.of(), key, List.of()), 0);
+        assertNotNull(real.frame());
+        assertEquals(real.changed(), r.changed());
+        assertArrayEquals(pixels(real.frame().image()), pixels(r.frame().image()), "differs from the session's repaint");
+        assertArrayEquals(shown, pixels(cur.image()), "the shared picture was painted");
     }
 
     /** Stopped part way through (real work came), the picture on the screen is as it was, and nothing half drawn is kept. */
@@ -190,7 +222,7 @@ class HoverAheadTest {
         for (int d = 1; d <= 40; d += 3) {
             int delayMs = d;
             HoverAhead ahead = new HoverAhead(64, Long.MAX_VALUE);
-            HoverAhead.Job job = ahead.job(page, doc, W, H, SCALE, cur, false, List.of(), List.of(), List.of(), null, List.of(), 1, 1, 0, 0, 0);
+            HoverAhead.Job job = ahead.job(page, doc, W, H, SCALE, cur, List.of(), List.of(), List.of(), null, List.of(), 1, 1, 0, 0, 0);
             Thread realWork = new Thread(() -> {
                 try {
                     Thread.sleep(delayMs);
@@ -210,7 +242,7 @@ class HoverAheadTest {
                 Repaint.Prepared ready = ahead.take(cur, List.of(), List.of(), key, List.of());
                 Repaint.Result real = Repaint.partial(page, doc, W, H, SCALE, 0, HtmlRenderer.state(key.get(0), null), copy(cur),
                         HoverAhead.changed(List.of(), List.of(), key, List.of()), 0);
-                ready.apply();
+                ready.apply(cur);
                 assertTrue(Arrays.equals(pixels(real.frame().image()), pixels(cur.image())), "a kept repaint differs after a stop at " + delayMs + " ms");
                 // The picture as it was, for the next round.
                 System.arraycopy(shown, 0, pixels(cur.image()), 0, shown.length);
