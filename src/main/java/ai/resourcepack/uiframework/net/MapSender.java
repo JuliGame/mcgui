@@ -112,6 +112,8 @@ public final class MapSender implements AutoCloseable {
     private long lastWarning;
     /** This pass: how many viewers each canvas has in each encoding, so a tile more than one is sent is made once. */
     private final Map<Watch, Integer> watching = new HashMap<>();
+    /** This pass: by tile, the last tile it was compared with and the rectangle that differs (null for none). */
+    private final IdentityHashMap<byte[], Object[]> diffs = new IdentityHashMap<>();
 
     private record Watch(Canvas canvas, Canvas.Encoding encoding) {}
 
@@ -221,6 +223,7 @@ public final class MapSender implements AutoCloseable {
         lastRun = now;
         Set<UUID> seen = new HashSet<>();
         watching.clear();
+        diffs.clear();
         for (Assignment a : assignments) watching.merge(new Watch(a.canvas, a.encoding), 1, Integer::sum);
         for (Assignment a : assignments) {
             Viewer v = viewers.computeIfAbsent(a.player.getUniqueId(), k -> fresh(k, now));
@@ -325,7 +328,7 @@ public final class MapSender implements AutoCloseable {
             if (t == null) return;
             int id = frame.maps[t];
             byte[] current = frame.tile[t];
-            int[] rect = diff(v.sent.get(id), current);
+            int[] rect = changed(v.sent.get(id), current);
             if (rect == null) {
                 v.sent.put(id, current);
                 frame.queue.pollFirst();
@@ -350,6 +353,19 @@ public final class MapSender implements AutoCloseable {
     private Object patch(Assignment a, int id, int[] rect, byte[] tile) {
         Integer viewers = watching.get(new Watch(a.canvas, a.encoding));
         return wire.patch(a.player, id, rect[0], rect[1], rect[2], rect[3], tile, viewers != null && viewers > 1);
+    }
+
+    /**
+     * {@link #diff}, worked out once a pass for each pair of tiles: viewers of one wall who are in step all
+     * compare the same two, and a 16x9 wall is 2.4 MB to compare for each of them.
+     */
+    private int[] changed(byte[] previous, byte[] current) {
+        if (previous == null) return diff(null, current);
+        Object[] last = diffs.get(current);
+        if (last != null && last[0] == previous) return (int[]) last[1];
+        int[] rect = diff(previous, current);
+        diffs.put(current, new Object[]{previous, rect});
+        return rect;
     }
 
     /**
@@ -413,7 +429,7 @@ public final class MapSender implements AutoCloseable {
         for (int t = 0; t < to.length; t++) {
             int id = to[t];
             byte[] current = frame.tile[t];
-            int[] rect = diff(v.sent.get(id), current);
+            int[] rect = changed(v.sent.get(id), current);
             if (rect == null) {
                 v.sent.put(id, current);
                 continue;
@@ -483,19 +499,24 @@ public final class MapSender implements AutoCloseable {
     }
 
     /** The smallest rectangle {x, y, w, h} covering every byte that differs, or null if none does. */
-    private static int[] diff(byte[] previous, byte[] current) {
+    static int[] diff(byte[] previous, byte[] current) {
         if (previous == null) return new int[]{0, 0, 128, 128};
         int minX = 128, minY = 128, maxX = -1, maxY = -1;
         for (int y = 0; y < 128; y++) {
             int row = y * 128;
-            for (int x = 0; x < 128; x++) {
+            // Whole rows at a time (the JIT compares these many bytes at once), then only the bytes that can widen it.
+            int first = Arrays.mismatch(previous, row, row + 128, current, row, row + 128);
+            if (first < 0) continue;
+            if (first < minX) minX = first;
+            for (int x = 127; x > maxX && x > first; x--) {
                 if (previous[row + x] != current[row + x]) {
-                    if (x < minX) minX = x;
-                    if (x > maxX) maxX = x;
-                    if (y < minY) minY = y;
-                    maxY = y;
+                    maxX = x;
+                    break;
                 }
             }
+            if (first > maxX) maxX = first;
+            if (minY == 128) minY = y;
+            maxY = y;
         }
         return maxX < 0 ? null : new int[]{minX, minY, maxX - minX + 1, maxY - minY + 1};
     }
