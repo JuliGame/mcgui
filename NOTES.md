@@ -110,6 +110,22 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
   except the one that reaches an end of the page. `TileScrollTest` rebuilds
   what the client shows from the packets and compares it with a fresh render;
   `sh gradlew tileBench` gives bytes, packets and CPU per notch.
+- **A session's first picture of a page is shared** (`FirstPictures`, in
+  `Session.submit`): keyed by the page revision (the `Page` object), the canvas
+  size, the scale and every placeholder value filled in (`Placeholders.Filled`),
+  and only for the first picture of a copy of the page (top, nothing hovered or
+  pressed or clicked, no fragment, no value of the viewer's own). A session that
+  finds it kept takes it on the server thread: `Canvas.show` hands its canvas
+  the same tile arrays, and the frame's hit regions and styles are put on the
+  session's own document by place in document order. One session draws a
+  missing picture and the others wanting it wait (`FirstPictures.claim`). The
+  frame's image is shared, so a repaint over it copies it first (`borrowed`).
+  Until its first picture is drawn a wall shows nothing (`Session.showing`, at
+  most `BLANK_AFTER_TICKS`) and a fullscreen view does not open
+  (`Screens.seat`), since a blank first is a second packet a map. The warm-up
+  draws every placed screen's page. `FirstPicturesTest` follows a taken and a
+  drawn picture through hovers, presses, scrolls and refreshes;
+  `sh gradlew firstPictureBench` gives the CPU per new session both ways.
 - **A partial repaint takes in every blurred layer its region meets**
   (`Repaint.region`): a `filter: blur()` layer that the clip cuts would blur
   with a cut edge. A backdrop is painted again with a margin instead (see

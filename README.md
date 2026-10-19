@@ -93,6 +93,14 @@ A picture that takes longer than `render-timeout` (2 s) to draw is given up and
 reported like a page that cannot be drawn, so one heavy page cannot hold a render
 thread for good. Raise it (or set 0) for very large pages.
 
+The first picture of each page at each screen size is kept (`first-pictures` in
+config.yml), so the next player to open that page there is sent the picture at
+once rather than waiting for it to be drawn: a private wall sends each map once,
+the page, and a fullscreen page opens already drawn. Every placed screen's page
+is drawn for it when the plugin starts. A page with a player's own values in it
+(`{player}`, `{x}`, PlaceholderAPI) is drawn for each player as before; its
+screens still show nothing until the page is drawn, rather than black first.
+
 ## What the renderer supports
 
 Selectors (all combinators, attribute selectors, structural pseudo-classes,
