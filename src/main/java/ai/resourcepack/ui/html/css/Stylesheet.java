@@ -37,11 +37,25 @@ public final class Stylesheet {
                 }
             }
             Selector.Compound key = s.subject();
-            if (key.id != null) byId.computeIfAbsent(key.id, k -> new ArrayList<>()).add(r);
-            else if (!key.classes.isEmpty()) byClass.computeIfAbsent(key.classes.get(0), k -> new ArrayList<>()).add(r);
+            // Keys in ASCII lower case, so quirks mode, where ids and classes ignore case, finds them too.
+            if (key.id != null) byId.computeIfAbsent(lower(key.id), k -> new ArrayList<>()).add(r);
+            else if (!key.classes.isEmpty()) byClass.computeIfAbsent(lower(key.classes.get(0)), k -> new ArrayList<>()).add(r);
             else if (key.tag != null) byTag.computeIfAbsent(key.tag, k -> new ArrayList<>()).add(r);
             else universal.add(r);
         }
+    }
+
+    /** [s] with A-Z as a-z: the same string when there are none. */
+    static String lower(String s) {
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c >= 'A' && c <= 'Z') {
+                char[] a = s.toCharArray();
+                for (int k = i; k < a.length; k++) if (a[k] >= 'A' && a[k] <= 'Z') a[k] += 32;
+                return new String(a);
+            }
+        }
+        return s;
     }
 
     public int size() {
@@ -56,11 +70,13 @@ public final class Stylesheet {
     public List<org.jsoup.nodes.Element> stateKey(org.jsoup.nodes.Element e, boolean active) {
         List<Selector.Compound> parts = active ? activeParts : hoverParts;
         if (e == null || parts.isEmpty()) return List.of();
+        org.jsoup.nodes.Document doc = e.ownerDocument();
+        boolean quirks = doc != null && doc.quirksMode() == org.jsoup.nodes.Document.QuirksMode.quirks;
         List<org.jsoup.nodes.Element> out = new ArrayList<>();
         for (org.jsoup.nodes.Element p = e; p != null; p = p.parent()) {
             Selector.State st = active ? new Selector.State(java.util.Set.of(), java.util.Set.of(p)) : new Selector.State(java.util.Set.of(p), java.util.Set.of());
             for (Selector.Compound c : parts) {
-                if (Selector.matchCompound(c, p, st)) {
+                if (Selector.matchCompound(c, p, st, quirks)) {
                     out.add(p);
                     break;
                 }
@@ -80,11 +96,11 @@ public final class Stylesheet {
         List<Rule> t = byTag.get(tag.toLowerCase(Locale.ROOT));
         if (t != null) out.addAll(t);
         if (id != null && !id.isEmpty()) {
-            List<Rule> i = byId.get(id);
+            List<Rule> i = byId.get(lower(id));
             if (i != null) out.addAll(i);
         }
         for (String c : classes) {
-            List<Rule> r = byClass.get(c);
+            List<Rule> r = byClass.get(lower(c));
             if (r != null) out.addAll(r);
         }
     }

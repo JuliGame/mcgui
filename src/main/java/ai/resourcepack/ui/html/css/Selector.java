@@ -314,8 +314,9 @@ public final class Selector {
 
     // ---------------------------------------------------------------- matching
 
-    public boolean matches(Element e, State state) {
-        return matchFrom(compounds.size() - 1, e, state) == MATCH;
+    /** Whether [e] matches, in hover state [state]; ids and classes ignore ASCII case if the document is in [quirks] mode. */
+    public boolean matches(Element e, State state, boolean quirks) {
+        return matchFrom(compounds.size() - 1, e, state, quirks) == MATCH;
     }
 
     /**
@@ -326,29 +327,29 @@ public final class Selector {
      */
     private static final int MATCH = 0, FAILS_HERE = 1, FAILS_ALL_SIBLINGS = 2, FAILS_COMPLETELY = 3;
 
-    private int matchFrom(int index, Element e, State state) {
-        if (!matchCompound(compounds.get(index), e, state)) return FAILS_HERE;
+    private int matchFrom(int index, Element e, State state, boolean quirks) {
+        if (!matchCompound(compounds.get(index), e, state, quirks)) return FAILS_HERE;
         if (index == 0) return MATCH;
         char comb = combinators.get(index - 1);
         switch (comb) {
             case '>' -> {
                 Element p = e.parent();
-                return p == null ? FAILS_COMPLETELY : matchFrom(index - 1, p, state);
+                return p == null ? FAILS_COMPLETELY : matchFrom(index - 1, p, state, quirks);
             }
             case '+' -> {
                 Element s = e.previousElementSibling();
-                return s == null ? FAILS_ALL_SIBLINGS : matchFrom(index - 1, s, state);
+                return s == null ? FAILS_ALL_SIBLINGS : matchFrom(index - 1, s, state, quirks);
             }
             case '~' -> {
                 for (Element s = e.previousElementSibling(); s != null; s = s.previousElementSibling()) {
-                    int r = matchFrom(index - 1, s, state);
+                    int r = matchFrom(index - 1, s, state, quirks);
                     if (r != FAILS_HERE) return r;
                 }
                 return FAILS_ALL_SIBLINGS;
             }
             default -> {
                 for (Element p = e.parent(); p != null; p = p.parent()) {
-                    int r = matchFrom(index - 1, p, state);
+                    int r = matchFrom(index - 1, p, state, quirks);
                     if (r == MATCH || r == FAILS_COMPLETELY) return r;
                 }
                 return FAILS_COMPLETELY;
@@ -356,13 +357,48 @@ public final class Selector {
         }
     }
 
-    static boolean matchCompound(Compound c, Element e, State state) {
+    static boolean matchCompound(Compound c, Element e, State state, boolean quirks) {
         if (c.never) return false;
         if (c.tag != null && !c.tag.equals(e.normalName())) return false;
-        if (c.id != null && !c.id.equals(e.id())) return false;
-        for (String cls : c.classes) if (!e.hasClass(cls)) return false;
+        if (c.id != null && !(quirks ? asciiEqualsIgnoreCase(c.id, e.id()) : c.id.equals(e.id()))) return false;
+        if (!c.classes.isEmpty()) {
+            String list = e.attr("class");
+            for (String cls : c.classes) if (!hasClass(list, cls, quirks)) return false;
+        }
         for (String[] a : c.attrs) if (!attr(e, a)) return false;
-        for (Pseudo p : c.pseudos) if (!pseudo(p, e, state)) return false;
+        for (Pseudo p : c.pseudos) if (!pseudo(p, e, state, quirks)) return false;
+        return true;
+    }
+
+    /** HTML's whitespace, what separates the names in a class attribute. */
+    static boolean space(char c) {
+        return c == ' ' || c == '\t' || c == '\n' || c == '\f' || c == '\r';
+    }
+
+    /** Whether the class attribute [list] has [cls], ignoring ASCII case in quirks mode, as browsers do. */
+    static boolean hasClass(String list, String cls, boolean quirks) {
+        int n = list.length(), len = cls.length();
+        for (int i = 0; i < n; ) {
+            while (i < n && space(list.charAt(i))) i++;
+            int start = i;
+            while (i < n && !space(list.charAt(i))) i++;
+            if (i - start == len && (quirks ? asciiRegionEqualsIgnoreCase(list, start, cls, len) : list.startsWith(cls, start))) return true;
+        }
+        return false;
+    }
+
+    static boolean asciiEqualsIgnoreCase(String a, String b) {
+        return a.length() == b.length() && asciiRegionEqualsIgnoreCase(b, 0, a, a.length());
+    }
+
+    private static boolean asciiRegionEqualsIgnoreCase(String s, int from, String t, int len) {
+        for (int k = 0; k < len; k++) {
+            char x = s.charAt(from + k), y = t.charAt(k);
+            if (x == y) continue;
+            if (x >= 'A' && x <= 'Z') x += 32;
+            if (y >= 'A' && y <= 'Z') y += 32;
+            if (x != y) return false;
+        }
         return true;
     }
 
@@ -386,7 +422,7 @@ public final class Selector {
         };
     }
 
-    private static boolean pseudo(Pseudo p, Element e, State state) {
+    private static boolean pseudo(Pseudo p, Element e, State state, boolean quirks) {
         switch (p.name) {
             case "always":
                 return true;
@@ -395,11 +431,11 @@ public final class Selector {
             case "active":
                 return state.active().contains(e);
             case "not":
-                for (Selector s : p.args) if (s.matches(e, state)) return false;
+                for (Selector s : p.args) if (s.matches(e, state, quirks)) return false;
                 return true;
             case "is":
             case "where":
-                for (Selector s : p.args) if (s.matches(e, state)) return true;
+                for (Selector s : p.args) if (s.matches(e, state, quirks)) return true;
                 return false;
             case "root":
                 return e.parent() == null || e.parent() instanceof org.jsoup.nodes.Document;

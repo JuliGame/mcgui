@@ -40,6 +40,8 @@ public final class Styler {
     private final Map<Element, Map<String, String>> declared = new IdentityHashMap<>();
     private final Map<Element, Map<String, String>> customs = new IdentityHashMap<>();
     private double rootFontSize = 16;
+    /** Whether the document is in quirks mode, where ids and classes ignore ASCII case. */
+    private boolean quirks;
 
     public Styler(Stylesheet ua, Stylesheet author, double vw, double vh, Selector.State state, URI base) {
         this.ua = ua;
@@ -54,6 +56,8 @@ public final class Styler {
 
     /** Styles [root] and everything under it. */
     public void run(Element root) {
+        org.jsoup.nodes.Document doc = root.ownerDocument();
+        quirks = doc != null && doc.quirksMode() == org.jsoup.nodes.Document.QuirksMode.quirks;
         walk(root, null);
     }
 
@@ -102,7 +106,7 @@ public final class Styler {
             for (Stylesheet.Rule r : candidates) {
                 if (!eqPseudo(r.selector().pseudoElement, pseudo)) continue;
                 if (r.media() != null && !r.media().matches(vw, vh)) continue;
-                if (!r.selector().matches(e, state)) continue;
+                if (!r.selector().matches(e, state, quirks)) continue;
                 for (Declaration d : r.declarations()) {
                     int tier = d.important() ? (origin == 0 ? 6 : 4) : (origin == 0 ? 0 : 2);
                     out.add(new Weighted(tier, r.selector().specificity, r.order(), d));
