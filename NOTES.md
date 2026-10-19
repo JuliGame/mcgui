@@ -46,6 +46,13 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
   the style walk pushes and pops). Both may only say "maybe": a selector feature that matches by
   something else than these names must not put its rule in a bucket, or contribute a hash. `MatcherTest`
   checks the index against trying every rule. Ids and classes ignore ASCII case only in quirks mode.
+- **Styles are reused between passes over one document.** `Styler` keeps what a pass found (per element
+  by place in document order, weakly by the root element, holding no elements) and the next pass with the
+  same sheets and size starts from it: only rules that depend on :hover/:active are tried again, and an
+  element whose rules came out the same under a parent that did keeps its `Style` object. Within a pass,
+  elements with the same rules under the same parent style share one `Style`. So a `Style` must never be
+  modified after `Style.compute`, and a document must never be edited once drawn (a click edits a fresh
+  copy, `Session.editable`).
 - **Measuring must not disturb a layout in progress**: `minContent`/
   `maxContent` resolve edges with an unknown containing block, so
   `intrinsicPair` saves and restores the box's margins, borders and paddings.

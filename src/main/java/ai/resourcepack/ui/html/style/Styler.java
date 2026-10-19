@@ -13,6 +13,7 @@ import org.jsoup.nodes.Element;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
@@ -20,12 +21,20 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.WeakHashMap;
 
 /**
  * The cascade: which declarations win for each element, with {@code var()} substituted and
  * shorthands expanded, then computed into a {@link Style}. Precedence, lowest first: the browser's
  * defaults, presentational attributes ({@code <img width>}), the page's rules, {@code style=""},
  * then the same again for {@code !important} in reverse order of origin.
+ *
+ * <p>A pass over a document that was styled before (same sheets, same size) starts from what that pass
+ * found, which is kept per document (see {@link Memo}): an element's rules that do not depend on hover
+ * state are not matched again, the ones that do are tried again, and an element whose rules came out
+ * the same, under a parent that came out the same, keeps its computed style. So a hover restyles only
+ * what the hover can change. A document is never edited once drawn (a click edits a fresh copy), which
+ * is what makes this safe.
  */
 public final class Styler {
     private final Stylesheet ua;
@@ -45,6 +54,10 @@ public final class Styler {
     private double rootFontSize = 16;
 
     private Matcher matcher;
+    /** What the last pass over this document found (null if none, or once the document stops fitting it), and this pass. */
+    private Memo previous, memo;
+    /** The place in document order of the element being styled, counting those under display: none too. */
+    private int next;
     private final List<Stylesheet.Rule> matched = new ArrayList<>(), dynamic = new ArrayList<>();
     private final Map<Shared, Shared> shared = new HashMap<>();
     private final List<Weighted> scratch = new ArrayList<>();
@@ -65,43 +78,81 @@ public final class Styler {
         Document doc = root.ownerDocument();
         matcher = new Matcher(state, doc != null && doc.quirksMode() == Document.QuirksMode.quirks, vw, vh);
         for (Element p = root.parent(); p != null; p = p.parent()) matcher.ancestors.push(p);
-        walk(root, null);
+        previous = Memo.take(root, this);
+        memo = new Memo(ua, author, vw, vh, previous == null ? 64 : previous.size);
+        boolean done = false;
+        try {
+            walk(root, null, true);
+            done = true;
+        } finally {
+            memo.size = next;
+            // An abandoned pass leaves the last whole one, which still fits the document.
+            Memo.keep(root, done ? memo : previous);
+        }
     }
 
-    private void walk(Element e, Element parent) {
-        Found found = found(e, Stylesheet.ELEMENT);
+    private void walk(Element e, Element parent, boolean parentKept) {
+        int at = next++;
+        Node old = previous == null ? null : previous.node(at);
+        if (old != null && !old.fits(e)) {
+            // Not the document the memo was made from after all: nothing further on can be trusted.
+            previous = null;
+            old = null;
+        }
+        Node node = new Node(e);
+        memo.put(at, node);
+        Found found = found(e, Stylesheet.ELEMENT, old);
+        node.found[Stylesheet.ELEMENT] = found;
+        boolean kept = parentKept && old != null && found == old.found[Stylesheet.ELEMENT];
         Style s;
         Customs own;
         Map<String, String> decl;
-        Style parentStyle = parent == null ? null : styles.get(parent);
-        Customs parentCustoms = parent == null ? Customs.NONE : customs.get(parent);
-        Shared key = parent == null || !plain(e) ? null : new Shared(Stylesheet.ELEMENT, found, parentStyle, parentCustoms, declared.get(parent));
-        Shared same = key == null ? null : shared.get(key);
-        if (same != null) {
-            s = same.style;
-            own = same.customs;
-            decl = same.declared;
+        if (kept) {
+            s = old.style;
+            own = old.customs;
+            decl = old.declared;
         } else {
-            List<Weighted> list = weighted(e, Stylesheet.ELEMENT, found);
-            own = customProps(list, parentCustoms);
-            Map<String, String> all = resolve(list, own, parent);
-            s = Style.compute(all, parentStyle, rootFontSize, vw, vh);
-            decl = notInherited(all);
-            if (key != null) shared.put(key, key.with(s, own, decl));
+            Style parentStyle = parent == null ? null : styles.get(parent);
+            Customs parentCustoms = parent == null ? Customs.NONE : customs.get(parent);
+            Shared key = parent == null || !plain(e) ? null : new Shared(Stylesheet.ELEMENT, found, parentStyle, parentCustoms, declared.get(parent));
+            Shared same = key == null ? null : shared.get(key);
+            if (same != null) {
+                s = same.style;
+                own = same.customs;
+                decl = same.declared;
+            } else {
+                List<Weighted> list = weighted(e, Stylesheet.ELEMENT, found);
+                own = customProps(list, parentCustoms);
+                Map<String, String> all = resolve(list, own, parent);
+                s = Style.compute(all, parentStyle, rootFontSize, vw, vh);
+                decl = notInherited(all);
+                if (key != null) shared.put(key, key.with(s, own, decl));
+            }
         }
+        node.style = s;
+        node.customs = own;
+        node.declared = decl;
         customs.put(e, own);
         declared.put(e, decl);
         if (parent == null) rootFontSize = s.fontSize;
         styles.put(e, s);
         if (!s.display.equals("none")) {
-            pseudo(e, Stylesheet.BEFORE, s, own, decl, before);
-            pseudo(e, Stylesheet.AFTER, s, own, decl, after);
-            if (e.hasAttr("placeholder")) pseudo(e, Stylesheet.PLACEHOLDER, s, own, decl, placeholder);
-            if (s.display.equals("list-item")) pseudo(e, Stylesheet.MARKER, s, own, decl, marker);
+            pseudo(e, Stylesheet.BEFORE, s, own, decl, before, old, node, kept);
+            pseudo(e, Stylesheet.AFTER, s, own, decl, after, old, node, kept);
+            if (e.hasAttr("placeholder")) pseudo(e, Stylesheet.PLACEHOLDER, s, own, decl, placeholder, old, node, kept);
+            if (s.display.equals("list-item")) pseudo(e, Stylesheet.MARKER, s, own, decl, marker, old, node, kept);
             matcher.ancestors.push(e);
-            for (Element child : e.children()) walk(child, e);
+            for (Element child : e.children()) walk(child, e, kept);
             matcher.ancestors.pop(e);
+        } else {
+            next += descendants(e);
         }
+    }
+
+    private static int descendants(Element e) {
+        int n = 0;
+        for (Element c = e.firstElementChild(); c != null; c = c.nextElementSibling()) n += 1 + descendants(c);
+        return n;
     }
 
     /** Whether only rules style [e]: no style="" and no presentational attributes, so another element with its rules styles the same. */
@@ -113,10 +164,13 @@ public final class Styler {
     }
 
     private void pseudo(Element e, int kind, Style parentStyle, Customs parentCustoms, Map<String, String> parentDeclared,
-                        Map<Element, Style> into) {
-        Found found = found(e, kind);
+                        Map<Element, Style> into, Node old, Node node, boolean kept) {
+        Found found = found(e, kind, old);
+        node.found[kind] = found;
         Style st;
-        if (found == Found.NONE && kind != Stylesheet.PLACEHOLDER) {
+        if (kept && found == old.found[kind]) {
+            st = old.pseudo[kind];
+        } else if (found == Found.NONE && kind != Stylesheet.PLACEHOLDER) {
             st = null;
         } else {
             Shared key = new Shared(kind, found, parentStyle, parentCustoms, parentDeclared);
@@ -137,6 +191,7 @@ public final class Styler {
                 shared.put(key, key.with(st, null, null));
             }
         }
+        node.pseudo[kind] = st;
         if (st != null) into.put(e, st);
     }
 
@@ -191,8 +246,19 @@ public final class Styler {
         }
     }
 
-    /** The rules that style [e] as [kind]. */
-    private Found found(Element e, int kind) {
+    /**
+     * The rules that style [e] as [kind]. With the [old] node of a pass over the same document, only the
+     * rules that depend on hover state are tried again, and [old]'s own answer comes back if they match
+     * as they did, so the caller can tell nothing changed.
+     */
+    private Found found(Element e, int kind, Node old) {
+        Found was = old == null ? null : old.found[kind];
+        if (was != null) {
+            if (was.dynamic.length == 0) return was;
+            boolean[] hits = new boolean[was.dynamic.length];
+            for (int i = 0; i < hits.length; i++) hits[i] = matcher.matches(was.dynamic[i], e);
+            return Arrays.equals(hits, was.hits) ? was : new Found(was.fixed, was.fixedUa, was.dynamic, was.dynamicUa, hits);
+        }
         matched.clear();
         dynamic.clear();
         matcher.collect(ua, e, kind, matched, dynamic);
@@ -262,6 +328,66 @@ public final class Styler {
                 }
             }
             return applied;
+        }
+    }
+
+    /** What a pass found for one element. */
+    private static final class Node {
+        final String tag;
+        final int children;
+        final Found[] found = new Found[Stylesheet.KINDS];
+        final Style[] pseudo = new Style[Stylesheet.KINDS];
+        Style style;
+        Customs customs;
+        /** Only the properties that are not inherited: all a descendant's 'inherit' reads. */
+        Map<String, String> declared;
+
+        Node(Element e) {
+            tag = e.normalName();
+            children = e.childrenSize();
+        }
+
+        boolean fits(Element e) {
+            return tag.equals(e.normalName()) && children == e.childrenSize();
+        }
+    }
+
+    /**
+     * One pass's nodes, by place in document order, kept for the next pass over the same document. Kept
+     * by the root element, weakly, and holding no element: it goes when the document does.
+     */
+    private static final class Memo {
+        private static final Map<Element, Memo> KEPT = Collections.synchronizedMap(new WeakHashMap<>());
+        final Stylesheet ua, author;
+        final double vw, vh;
+        Node[] nodes;
+        int size;
+
+        Memo(Stylesheet ua, Stylesheet author, double vw, double vh, int capacity) {
+            this.ua = ua;
+            this.author = author;
+            this.vw = vw;
+            this.vh = vh;
+            nodes = new Node[Math.max(16, capacity)];
+        }
+
+        /** The memo of [root]'s last pass if it is for the same sheets and size, taken so no other pass shares it. */
+        static Memo take(Element root, Styler s) {
+            Memo m = KEPT.remove(root);
+            return m != null && m.ua == s.ua && m.author == s.author && m.vw == s.vw && m.vh == s.vh ? m : null;
+        }
+
+        static void keep(Element root, Memo m) {
+            if (m != null) KEPT.put(root, m);
+        }
+
+        Node node(int at) {
+            return at < size ? nodes[at] : null;
+        }
+
+        void put(int at, Node n) {
+            if (at >= nodes.length) nodes = Arrays.copyOf(nodes, Math.max(at + 1, nodes.length * 2));
+            nodes[at] = n;
         }
     }
 
