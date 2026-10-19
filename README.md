@@ -88,6 +88,10 @@ stylesheets, fonts and images from the web, but not from the server's own
 machine or private network unless `allow-private-hosts` is on. Files are read
 from the pages folder only.
 
+A picture that takes longer than `render-timeout` (2 s) to draw is given up and
+reported like a page that cannot be drawn, so one heavy page cannot hold a render
+thread for good. Raise it (or set 0) for very large pages.
+
 ## What the renderer supports
 
 Selectors (all combinators, attribute selectors, structural pseudo-classes,
