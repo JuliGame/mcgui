@@ -71,11 +71,15 @@ if (paperServer != null) {
         options.release = 25
     }
     def paperJvmArgs = ['--enable-native-access=ALL-UNNAMED', '-Xmx2g']
+    // The game's bootstrap writes logs/ where it runs: keep that in build/, not in the checkout.
+    def paperDir = layout.buildDirectory.dir('paper').get().asFile
     tasks.register('paperTest', Test) {
         testClassesDirs = sourceSets.paperTest.output.classesDirs
         classpath = sourceSets.paperTest.runtimeClasspath
         javaLauncher = java25
         jvmArgs paperJvmArgs
+        workingDir = paperDir
+        doFirst { paperDir.mkdirs() }
         useJUnitPlatform()
         testLogging { showStandardStreams = true; events 'passed', 'failed'; exceptionFormat 'full' }
     }
@@ -83,7 +87,9 @@ if (paperServer != null) {
         classpath = sourceSets.paperTest.runtimeClasspath
         mainClass = 'ai.resourcepack.uiframework.net.SharedCompressionBench'
         javaLauncher = java25
-        jvmArgs paperJvmArgs + ['-Xlog:gc:file=build/paperBench-gc.log']
+        jvmArgs paperJvmArgs + ['-Xlog:gc:file=gc.log']
+        workingDir = paperDir
+        doFirst { paperDir.mkdirs() }
         args((findProperty('benchArgs') ?: '').toString().tokenize())
     }
 }
