@@ -61,6 +61,22 @@ public final class ScrollCache {
         return Math.floor(y * scale + 1e-6) / scale;
     }
 
+    /** Device pixels a map is tall. */
+    public static final int TILE = 128;
+
+    /**
+     * How many whole map rows a view [rows] maps tall moved when it scrolled from [from] to [to] (CSS px) at
+     * [scale]: positive when the page moved up, so a canvas showing it can be moved by that many rows and keep
+     * the maps its viewers already have. 0 when the move is not a whole number of rows, or is a whole view or more.
+     */
+    public static int tileRows(double from, double to, double scale, int rows) {
+        double px = (to - from) * scale;
+        long whole = Math.round(px);
+        if (Math.abs(px - whole) > 1e-3 || whole == 0 || whole % TILE != 0) return 0;
+        long k = whole / TILE;
+        return Math.abs(k) < rows ? (int) k : 0;
+    }
+
     /** Whether this is a picture of [document] of [page] for a [width] × [height] view at [scale]. */
     public boolean of(Page page, org.jsoup.nodes.Document document, int width, int height, double scale) {
         return strip.page() == page && strip.document() == document && this.width == width && this.height == height && strip.scale() == scale;

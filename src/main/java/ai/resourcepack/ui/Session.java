@@ -322,6 +322,7 @@ public final class Session {
         long timeout = plugin.renderTimeout();
         // A tall picture is worth painting only if its document lasts: not if a refresh replaces it within seconds.
         boolean lasting = refreshTicks == 0 || nextRefresh - Bukkit.getCurrentTick() > CACHE_MIN_TICKS;
+        boolean shift = plugin.tileShift();
         renderers.execute(() -> {
             try {
                 long t0 = System.nanoTime();
@@ -336,6 +337,8 @@ public final class Session {
                 double at = same ? Math.max(0, Math.min(s, before.maxScroll())) : s;
                 // A tall picture of another document or size, or one the view has left, is of no more use.
                 if (c != null && !(same && c.of(p, d, canvas.width(), canvas.height(), scale) && c.covers(at))) c = null;
+                // The canvas shows the last view as it was cut from this tall picture, if there is one.
+                ScrollCache kept = c;
                 boolean still = same && Math.abs(before.scrollY() - at) < 0.01;
                 Set<Element> moved = same ? changedState(hoverKey, pressKey) : Set.of();
                 if (still && moved.isEmpty()) {
@@ -406,7 +409,18 @@ public final class Session {
                     int y1 = Math.min(canvas.height(), (int) Math.ceil(changed.getMaxY() * scale));
                     if (x1 > x0 && y1 > y0) canvas.draw(f.image().getSubimage(x0, y0, x1 - x0, y1 - y0), x0, y0);
                 } else {
-                    canvas.draw(f.image(), 0, 0);
+                    // Moved by whole map rows on the same page: the canvas moves too, so its viewers' frames are pointed
+                    // at the maps their clients already have and only the rows that came in are sent.
+                    int rows = same && shift ? ScrollCache.tileRows(before.scrollY(), f.scrollY(), scale, canvas.rows()) : 0;
+                    if (rows != 0 && c != null && c == kept && changed == null) {
+                        // Both views cut from the same picture: what stayed in view is the same pixels, moved, so only
+                        // the rows that came in are drawn (converting the whole view is most of a notch's work).
+                        int band = Math.abs(rows) * ScrollCache.TILE, y0 = rows > 0 ? canvas.height() - band : 0;
+                        canvas.scroll(rows, f.image().getSubimage(0, y0, canvas.width(), band), 0, y0);
+                    } else {
+                        // Anything else may differ elsewhere too: the whole view, and only tiles that then differ are encoded.
+                        canvas.scroll(rows, f.image(), 0, 0);
+                    }
                 }
                 drawnHover = hoverKey;
                 drawnPress = pressKey;
@@ -566,10 +580,28 @@ public final class Session {
         HtmlRenderer.Frame f = frame;
         if (f == null) return;
         // Whole pixels of the canvas, so the view can be cut from a tall picture (ScrollCache) and matches one drawn on its own.
-        double to = ScrollCache.snap(Math.max(0, Math.min(f.maxScroll(), scrollY + notches * plugin.scrollStep())), scale());
+        double to = ScrollCache.snap(Math.max(0, Math.min(f.maxScroll(), scrollY + notches * scrollStep())), scale());
         if (to == scrollY) return;
         scrollY = to;
         render();
+    }
+
+    /**
+     * CSS pixels a notch of the wheel scrolls: the page's {@code <meta name="ui:scroll-step">}, else the config's.
+     * "tile" is one map row, so every notch but the one that reaches an end moves the canvas by whole maps
+     * ({@link Canvas#scroll}) and its viewers are sent only the row that comes in.
+     */
+    private double scrollStep() {
+        String v = page == null ? null : page.meta("ui:scroll-step");
+        if (v == null) v = plugin.scrollStep();
+        v = v.trim();
+        if (v.equalsIgnoreCase("tile")) return ScrollCache.TILE / scale();
+        try {
+            double step = Double.parseDouble(v);
+            return step > 0 && Double.isFinite(step) ? step : 80;
+        } catch (NumberFormatException e) {
+            return 80;
+        }
     }
 
     /** A click at (x, y) by the player this session belongs to. */
