@@ -229,7 +229,7 @@ public final class Torture {
         private static String painters() {
             StringBuilder b = new StringBuilder();
             for (var e : Thread.getAllStackTraces().entrySet()) {
-                if (!e.getKey().getName().startsWith("ForkJoinPool")) continue;
+                if (!e.getKey().getName().startsWith("UIFramework-cpu-")) continue;
                 StackTraceElement[] st = e.getValue();
                 if (java.util.Arrays.stream(st).noneMatch(f -> f.getClassName().startsWith("ai.resourcepack"))) continue;
                 b.append(" | band @ ").append(frames(st));

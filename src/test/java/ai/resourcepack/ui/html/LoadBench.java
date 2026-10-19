@@ -3,6 +3,7 @@ package ai.resourcepack.ui.html;
 import ai.resourcepack.ui.html.css.Selector;
 import ai.resourcepack.ui.html.paint.Painter;
 import ai.resourcepack.uiframework.api.Canvas;
+import ai.resourcepack.uiframework.api.Cpu;
 import ai.resourcepack.uiframework.render.Palette;
 import com.sun.management.OperatingSystemMXBean;
 import org.jsoup.nodes.Document;
@@ -26,8 +27,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Random;
 import java.util.Set;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -38,7 +38,7 @@ import java.util.zip.Deflater;
 /**
  * What many players at once cost: N sessions in one process, the way the plugin runs them. Each has its
  * own copy of the page's document and its own UI Framework {@link Canvas} (2048 x 1152, drawn at 2x),
- * renders go through one fixed pool of R threads (the plugin's {@code render-threads}), at most one in
+ * renders, their bands and the canvas's encoders run on {@link Cpu}'s one pool of R threads (the framework's {@code cpu-threads}), at most one in
  * flight per session with the newest request winning (as {@code Session.render} coalesces), and every
  * finished frame is handed to {@code Canvas.draw}. Inputs run on one "server thread".
  *
@@ -176,13 +176,19 @@ public final class LoadBench {
     static Result run(Prep prep, Cfg cfg, Palette palette) throws Exception {
         HtmlRenderer.maxBands = cfg.bands;
         System.gc();
-        AtomicInteger tn = new AtomicInteger();
-        ExecutorService renderers = Executors.newFixedThreadPool(cfg.renderThreads, r -> {
-            Thread t = new Thread(r, "LoadBench-render-" + tn.incrementAndGet());
-            t.setDaemon(true);
-            t.setPriority(Thread.NORM_PRIORITY - 1);
-            return t;
-        });
+        // The plugin's way: render jobs, bands and encoders all on the framework's one pool of cfg.renderThreads (its cpu-threads).
+        Cpu.configure(cfg.renderThreads);
+        AtomicInteger inFlight = new AtomicInteger();
+        Executor renderers = job -> {
+            inFlight.incrementAndGet();
+            Cpu.pool().execute(() -> {
+                try {
+                    job.run();
+                } finally {
+                    inFlight.decrementAndGet();
+                }
+            });
+        };
         ScheduledThreadPoolExecutor server = new ScheduledThreadPoolExecutor(1, r -> {
             Thread t = new Thread(r, "LoadBench-server");
             t.setDaemon(true);
@@ -220,7 +226,24 @@ public final class LoadBench {
         for (AtomicInteger w : WHY) w.set(0);
         long t0 = System.nanoTime();
         long tEnd = t0 + (long) (cfg.secs * 1e9);
+        Ticker tick = new Ticker();
+        tick.start();
+        // How many threads the pool holds, runs and has jobs in flight for at the most.
+        int[] poolPeak = new int[3];
+        Thread sampler = new Thread(() -> {
+            while (!Thread.currentThread().isInterrupted()) {
+                var p = Cpu.pool();
+                poolPeak[0] = Math.max(poolPeak[0], p.getPoolSize());
+                poolPeak[1] = Math.max(poolPeak[1], p.getRunningThreadCount());
+                poolPeak[2] = Math.max(poolPeak[2], inFlight.get());
+                LockSupport.parkNanos(2_000_000);
+            }
+        }, "LoadBench-sample");
+        sampler.setDaemon(true);
+        sampler.start();
         sleepUntil(tEnd);
+        long tickEnd = System.nanoTime();
+        sampler.interrupt();
         long cpu1 = OS.getProcessCpuTime();
         long[] th1 = threadCpu();
         long[] sys1 = procStat();
@@ -235,8 +258,7 @@ public final class LoadBench {
         long senderEnd = sender == null ? 0 : sender.cpuNs();
         server.shutdownNow();
         for (Sim s : sims) s.close();
-        renderers.shutdown();
-        renderers.awaitTermination(60, TimeUnit.SECONDS);
+        for (long end = System.nanoTime() + 60_000_000_000L; inFlight.get() > 0 && System.nanoTime() < end; ) Thread.sleep(5);
         if (sender != null) sender.stop();
         System.gc();
         Runtime rt = Runtime.getRuntime();
@@ -266,11 +288,13 @@ public final class LoadBench {
         r.senderCpu = sender == null ? 0 : (senderEnd - sender0) / 1e9 / wall * 100;
         r.firstMs = sims.stream().mapToDouble(s -> s.firstFrameNs > 0 ? (s.firstFrameNs - open) / 1e6 : Double.NaN).toArray();
         r.secs = wall;
+        r.tick = tick.report(t0, tickEnd);
+        r.peak = poolPeak;
         sims.clear();
         return r;
     }
 
-    /** CPU ns so far of {render threads, painter pool, encoder pool, sender, server thread}, then the bytes each group has allocated: what a frame costs whatever else the machine is doing. */
+    /** CPU ns so far of {the shared cpu pool (render, painters and encoders alike), 0, 0, sender, server thread}, then the bytes each group has allocated: what a frame costs whatever else the machine is doing. */
     private static long[] threadCpu() {
         var mx = ManagementFactory.getThreadMXBean();
         var sun = (com.sun.management.ThreadMXBean) mx;
@@ -279,7 +303,7 @@ public final class LoadBench {
             long c = mx.getThreadCpuTime(t.getId());
             if (c < 0) continue;
             String n = t.getName();
-            int g = n.startsWith("LoadBench-render") ? 0 : n.startsWith("ForkJoinPool-1-") ? 1 : n.startsWith("ForkJoinPool-2-") ? 2
+            int g = n.startsWith("UIFramework-cpu-") ? 0
                     : n.equals("LoadBench-send") ? 3 : n.equals("LoadBench-server") ? 4 : -1;
             if (g < 0) continue;
             out[g] += c;
@@ -337,7 +361,7 @@ public final class LoadBench {
         final Prep prep;
         final Page page;
         final Canvas canvas;
-        final ExecutorService renderers;
+        final Executor renderers;
         final ScheduledThreadPoolExecutor server;
         final String mode;
         final Random rnd;
@@ -360,7 +384,7 @@ public final class LoadBench {
         final List<Lat> lats = Collections.synchronizedList(new ArrayList<>());
         volatile long firstFrameNs;
 
-        Sim(int id, Prep prep, Canvas canvas, ExecutorService renderers, ScheduledThreadPoolExecutor server, String mode) {
+        Sim(int id, Prep prep, Canvas canvas, Executor renderers, ScheduledThreadPoolExecutor server, String mode) {
             this.id = id;
             this.prep = prep;
             this.page = prep.page;
@@ -785,6 +809,10 @@ public final class LoadBench {
         long requests, dropped, partialFrames, fullFrames, noops;
         long[] qWait = {}, rPartial = {}, rFull = {}, drawFull = {}, drawPartial = {};
         double tilesFull, tilesPartial;
+        /** Ticker lateness in ms: wake p50/p99/max, finish p50/p99/max, ticks. */
+        double[] tick = new double[8];
+        /** Most threads in the pool, most running, most render jobs in flight. */
+        int[] peak = new int[3];
 
         Result(Cfg cfg) {
             this.cfg = cfg;
@@ -873,6 +901,7 @@ public final class LoadBench {
             b.append(String.format(" alloc %.1f MB/frame", allocMb / fr));
             b.append(String.format(" | cpu %.0f%% other %.0f%% steal %.0f%% | live %.0f MB peak %.0f MB gc %d ms/%d | open %.0f/%.0f ms", cpu, otherCpu, stealPct, liveMb,
                     peakMb, gcMs, gcN, f.length == 0 ? Double.NaN : f[f.length / 2], f.length == 0 ? Double.NaN : f[f.length - 1]));
+            b.append(String.format(" | tick late wake %.2f/%.2f/%.2f finish %.2f/%.2f/%.2f ms (n=%.0f, %.1f%% over 5 ms) | pool threads/running/jobs max %d/%d/%d", tick[0], tick[1], tick[2], tick[3], tick[4], tick[5], tick[6], tick[7], peak[0], peak[1], peak[2]));
             if (cfg.mode.equals("stress")) b.append(String.format(" | tiles/frame full %.0f", tilesFull));
             else b.append(String.format(" | why-full first/doc/scroll/nop/sib/nodirty/big/grew/moved %s", Arrays.toString(why)));
             if (wire != null && wire.batches() > 0) {
@@ -889,7 +918,8 @@ public final class LoadBench {
                     "scroll_p50", "scroll_p90", "scroll_p99", "stress_n", "stress_p50", "stress_p90", "stress_p99", "requests", "dropped", "full_frames", "partial_frames",
                     "fps", "render_full_p50", "render_full_p90", "render_part_p50", "render_part_p90", "draw_full_p50", "draw_full_p90", "draw_part_p50", "queue_p50",
                     "queue_p90", "tiles_full", "tiles_part", "cpu", "other_cpu", "steal", "live_mb", "peak_mb", "gc_ms", "gc_n", "open_p50", "open_max",
-                    "w_batches", "w_tiles", "w_patches", "w_raw", "w_defl", "w_full", "w_deflate_ms", "w_diff_ms", "sender_cpu", "cpu_render_ms", "cpu_painters_ms", "cpu_encoders_ms", "cpu_send_ms", "cpu_server_ms", "cpu_process_ms", "alloc_mb");
+                    "w_batches", "w_tiles", "w_patches", "w_raw", "w_defl", "w_full", "w_deflate_ms", "w_diff_ms", "sender_cpu", "cpu_render_ms", "cpu_painters_ms", "cpu_encoders_ms", "cpu_send_ms", "cpu_server_ms", "cpu_process_ms", "alloc_mb",
+                    "tick_wake_p50", "tick_wake_p99", "tick_wake_max", "tick_fin_p50", "tick_fin_p99", "tick_fin_max", "tick_n", "tick_late5_pct");
         }
 
         String csv(String page) {
@@ -947,6 +977,7 @@ public final class LoadBench {
             for (double d : threadCpuMs) v.add(f(d));
             v.add(f(processCpuMs));
             v.add(f(allocMb));
+            for (double d : tick) v.add(f(d));
             return String.join(",", v);
         }
 
