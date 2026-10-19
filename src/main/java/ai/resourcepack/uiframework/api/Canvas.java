@@ -218,15 +218,21 @@ public final class Canvas {
         for (int t = 0; t < n; t++) next[t] = was[(t + by) % n];
     }
 
+    /** One row of converted colours, per thread: a whole picture converts 36 bands of 32 rows on the encoder threads. */
+    private static final ThreadLocal<byte[]> ROW = new ThreadLocal<>();
+
     /** Rows [from, to) of the canvas: convert, compare with what is there, store, and mark changed tiles. */
     private void convert(int[] rgb, int offset, int stride, int x, int y, int x0, int x1, int from, int to, boolean[] dirty) {
         int cw = x1 - x0;
-        byte[] row = new byte[cw * 3];
+        // Only this call uses it until it returns (nothing in here runs another task on this thread). It may be longer than a row.
+        int n = cw * 3;
+        byte[] row = ROW.get();
+        if (row == null || row.length < n) ROW.set(row = new byte[Math.max(n, 2048 * 3)]);
         for (int py = from; py < to; py++) {
             int s = offset + (py - y) * stride + (x0 - x);
             for (int i = 0; i < cw; i++) Palette.rgbToYcc(rgb[s + i], row, i * 3);
             int d = (py * width + x0) * 3;
-            if (Arrays.equals(row, 0, row.length, ycc, d, d + row.length)) continue;
+            if (Arrays.equals(row, 0, n, ycc, d, d + n)) continue;
             // Only the 128-pixel spans that differ mark their tiles dirty.
             int tileRow = (py / 128) * cols;
             int px = x0;
@@ -236,7 +242,7 @@ public final class Canvas {
                 if (!Arrays.equals(row, a, b, ycc, d + a, d + b)) dirty[tileRow + px / 128] = true;
                 px = end;
             }
-            System.arraycopy(row, 0, ycc, d, row.length);
+            System.arraycopy(row, 0, ycc, d, n);
         }
     }
 
