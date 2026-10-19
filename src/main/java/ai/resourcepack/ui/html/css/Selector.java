@@ -178,6 +178,9 @@ public final class Selector {
             } else if (Character.isLetter(ch) || ch == '_' || ch == '-' || ch == '\\') {
                 if (any) break;
                 int end = ident(t, i);
+                // Nothing an identifier can start with (a lone '-' or '\\'): unreadable, not a compound
+                // that reads nothing, which left parse() looping on the same character for ever.
+                if (end == i) return -1;
                 c.tag = t.substring(i, end).toLowerCase(Locale.ROOT);
                 i = end;
                 any = true;
