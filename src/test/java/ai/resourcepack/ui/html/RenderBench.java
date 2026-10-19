@@ -289,7 +289,7 @@ public final class RenderBench {
             6035741, 1474182, 3837580, 5647422, 1356933, 6579300, 14200723, 8365974};
     private static final int[] SHADE = {180, 220, 255, 135};
 
-    private static int mapColour(int packed) {
+    static int mapColour(int packed) {
         int base = packed >> 2;
         if (base <= 0 || base >= BASE.length) return 0;
         int c = BASE[base], m = SHADE[packed & 3];

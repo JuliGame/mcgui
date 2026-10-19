@@ -164,8 +164,14 @@ public final class UIEnginePlugin extends JavaPlugin {
         return cfg.getBoolean("click-sound", true);
     }
 
-    double scrollStep() {
-        return cfg.getDouble("scroll-step", 80);
+    /** CSS pixels a notch scrolls, or "tile" for one map row. */
+    String scrollStep() {
+        return cfg.getString("scroll-step", "80");
+    }
+
+    /** Whether a scroll by whole map rows moves the canvas, so viewers are sent only the rows that came in. */
+    boolean tileShift() {
+        return cfg.getBoolean("tile-shift", true);
     }
 
     boolean wallScroll() {

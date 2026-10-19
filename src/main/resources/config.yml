@@ -20,8 +20,15 @@ render-threads: 2
 # A click sound when a link or button does something.
 click-sound: true
 
-# How far one notch of the scroll wheel scrolls a page, in CSS pixels.
+# How far one notch of the scroll wheel scrolls a page, in CSS pixels, or "tile" for one map row (64 CSS
+# pixels on a 16x9 view 576 pixels tall). A page can set its own with <meta name="ui:scroll-step">.
+# With "tile", every notch moves the picture by whole maps, and players are sent only the row that came
+# in: their frames are pointed at the maps they already have (about a tenth of the bytes of a notch).
 scroll-step: 80
+
+# Whether a scroll by whole map rows is sent as frames pointed at maps players already have (on), or as
+# every changed map sent again (off, as before). Only for comparing the two.
+tile-shift: true
 
 views:
   # Size of a fullscreen page, in maps (128 pixels each). A page can set its own with

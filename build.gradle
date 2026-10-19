@@ -34,6 +34,8 @@ dependencies {
     testImplementation 'org.junit.jupiter:junit-jupiter:5.11.0'
     // The benchmark measures the canvas step too.
     testImplementation 'ai.resourcepack:ui-framework:0.1.0'
+    // TileScrollTest drives the framework's map sender, whose assignments name a Bukkit player and wall.
+    testImplementation 'io.papermc.paper:paper-api:1.21.8-R0.1-SNAPSHOT'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
@@ -89,5 +91,17 @@ tasks.register('renderBench', JavaExec) {
     systemProperty 'scroll', scroll
     systemProperty 'notches', project.findProperty('notches') ?: '12'
     systemProperty 'views', project.findProperty('views') ?: '4'
+    maxHeapSize = '2g'
+}
+
+// What a notch of the wheel costs in bytes, packets and CPU, with the canvas moved by whole map rows and drawn whole (TileBench).
+// -Pruns=<n>, -Pnotches=<n>, -Ppage=<file> (default the long test page).
+tasks.register('tileBench', JavaExec) {
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'ai.resourcepack.ui.html.TileBench'
+    args = [file(project.findProperty('page') ?: 'src/test/resources/scroll/long.html').absolutePath]
+    systemProperty 'java.awt.headless', 'true'
+    systemProperty 'runs', project.findProperty('runs') ?: '5'
+    systemProperty 'notches', project.findProperty('notches') ?: '12'
     maxHeapSize = '2g'
 }
