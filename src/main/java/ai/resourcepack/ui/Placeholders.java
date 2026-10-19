@@ -10,6 +10,7 @@ import org.jsoup.nodes.Node;
 import org.jsoup.nodes.TextNode;
 
 import java.lang.reflect.Method;
+import java.util.function.UnaryOperator;
 import java.util.logging.Logger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -44,32 +45,67 @@ public final class Placeholders {
         papi = null;
     }
 
+    /**
+     * A copy of a page's document filled in for a player. [key] is every value put in, in document order: two
+     * copies of the same page with the same key are the same document. [personal]: some value was the player's
+     * own (their name, where they are, anything PlaceholderAPI filled), so the copy is theirs alone.
+     */
+    public record Filled(Document doc, String key, boolean personal) {}
+
     /** [doc] with its placeholders filled for [player] (null: the server's own values only). */
-    public static Document fill(Document doc, Player player) {
-        Document copy = doc.clone();
-        walk(copy, player);
-        return copy;
+    public static Filled fill(Document doc, Player player) {
+        return fill(doc, text -> apply(text, player), player == null ? null : text -> apply(text, null));
     }
 
-    private static void walk(Node node, Player player) {
-        if (node instanceof TextNode t) {
-            String text = t.getWholeText();
-            if (text.indexOf('{') >= 0 || text.indexOf('%') >= 0) t.text(apply(text, player));
-            return;
+    /**
+     * [doc] with [fill] applied to every text and attribute that may hold a placeholder. Personal if [anyone]
+     * (what the text is filled with for nobody in particular; null when [fill] is that already) gives another value.
+     */
+    static Filled fill(Document doc, UnaryOperator<String> fill, UnaryOperator<String> anyone) {
+        Document copy = doc.clone();
+        Walk w = new Walk(fill, anyone);
+        w.walk(copy);
+        return new Filled(copy, w.key.toString(), w.personal);
+    }
+
+    private static final class Walk {
+        final UnaryOperator<String> fill, anyone;
+        final StringBuilder key = new StringBuilder();
+        boolean personal;
+
+        Walk(UnaryOperator<String> fill, UnaryOperator<String> anyone) {
+            this.fill = fill;
+            this.anyone = anyone;
         }
-        if (node instanceof Element e) {
-            // Scripts and styles are not text a player reads; leave CSS braces alone.
-            String tag = e.normalName();
-            if (tag.equals("style") || tag.equals("script")) return;
-            for (Attribute a : e.attributes()) {
-                String v = a.getValue();
-                if (v.indexOf('{') >= 0 || v.indexOf('%') >= 0) {
-                    if (a.getKey().equals("style")) continue;
-                    a.setValue(apply(v, player));
+
+        String apply(String text) {
+            String out = fill.apply(text);
+            // Separated by a character no value has, so "ab" + "c" never reads as "a" + "bc".
+            key.append(out).append('\0');
+            if (!personal && anyone != null && !out.equals(anyone.apply(text))) personal = true;
+            return out;
+        }
+
+        void walk(Node node) {
+            if (node instanceof TextNode t) {
+                String text = t.getWholeText();
+                if (text.indexOf('{') >= 0 || text.indexOf('%') >= 0) t.text(apply(text));
+                return;
+            }
+            if (node instanceof Element e) {
+                // Scripts and styles are not text a player reads; leave CSS braces alone.
+                String tag = e.normalName();
+                if (tag.equals("style") || tag.equals("script")) return;
+                for (Attribute a : e.attributes()) {
+                    String v = a.getValue();
+                    if (v.indexOf('{') >= 0 || v.indexOf('%') >= 0) {
+                        if (a.getKey().equals("style")) continue;
+                        a.setValue(apply(v));
+                    }
                 }
             }
+            for (Node child : node.childNodes()) walk(child);
         }
-        for (Node child : node.childNodes()) walk(child, player);
     }
 
     public static String apply(String text, Player player) {
