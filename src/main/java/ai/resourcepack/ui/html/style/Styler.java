@@ -2,10 +2,12 @@ package ai.resourcepack.ui.html.style;
 
 import ai.resourcepack.ui.html.css.CssParser;
 import ai.resourcepack.ui.html.css.Declaration;
+import ai.resourcepack.ui.html.css.Matcher;
 import ai.resourcepack.ui.html.css.Selector;
 import ai.resourcepack.ui.html.css.Shorthands;
 import ai.resourcepack.ui.html.css.Stylesheet;
 
+import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 
 import java.net.URI;
@@ -40,8 +42,9 @@ public final class Styler {
     private final Map<Element, Map<String, String>> declared = new IdentityHashMap<>();
     private final Map<Element, Map<String, String>> customs = new IdentityHashMap<>();
     private double rootFontSize = 16;
-    /** Whether the document is in quirks mode, where ids and classes ignore ASCII case. */
-    private boolean quirks;
+
+    private Matcher matcher;
+    private final List<Stylesheet.Rule> matched = new ArrayList<>(), dynamic = new ArrayList<>();
 
     public Styler(Stylesheet ua, Stylesheet author, double vw, double vh, Selector.State state, URI base) {
         this.ua = ua;
@@ -56,15 +59,16 @@ public final class Styler {
 
     /** Styles [root] and everything under it. */
     public void run(Element root) {
-        org.jsoup.nodes.Document doc = root.ownerDocument();
-        quirks = doc != null && doc.quirksMode() == org.jsoup.nodes.Document.QuirksMode.quirks;
+        Document doc = root.ownerDocument();
+        matcher = new Matcher(state, doc != null && doc.quirksMode() == Document.QuirksMode.quirks, vw, vh);
+        for (Element p = root.parent(); p != null; p = p.parent()) matcher.ancestors.push(p);
         walk(root, null);
     }
 
     private void walk(Element e, Element parent) {
         Style parentStyle = parent == null ? null : styles.get(parent);
         Map<String, String> parentCustoms = parent == null ? Map.of() : customs.get(parent);
-        List<Weighted> list = collect(e, null);
+        List<Weighted> list = weighted(e, Stylesheet.ELEMENT, found(e, Stylesheet.ELEMENT));
         Map<String, String> own = customProps(list, parentCustoms);
         customs.put(e, own);
         Map<String, String> decl = resolve(list, own, parent);
@@ -73,47 +77,48 @@ public final class Styler {
         if (parent == null) rootFontSize = s.fontSize;
         styles.put(e, s);
         if (!s.display.equals("none")) {
-            pseudo(e, "before", s, own, before);
-            pseudo(e, "after", s, own, after);
-            if (e.hasAttr("placeholder")) pseudo(e, "placeholder", s, own, placeholder);
-            if (s.display.equals("list-item")) pseudo(e, "marker", s, own, marker);
+            pseudo(e, Stylesheet.BEFORE, s, own, before);
+            pseudo(e, Stylesheet.AFTER, s, own, after);
+            if (e.hasAttr("placeholder")) pseudo(e, Stylesheet.PLACEHOLDER, s, own, placeholder);
+            if (s.display.equals("list-item")) pseudo(e, Stylesheet.MARKER, s, own, marker);
+            matcher.ancestors.push(e);
             for (Element child : e.children()) walk(child, e);
+            matcher.ancestors.pop(e);
         }
     }
 
-    private void pseudo(Element e, String name, Style parentStyle, Map<String, String> parentCustoms, Map<Element, Style> into) {
-        List<Weighted> list = collect(e, name);
-        if (list.isEmpty() && !name.equals("placeholder")) return;
-        if (name.equals("marker") && list.isEmpty()) return;
+    private void pseudo(Element e, int kind, Style parentStyle, Map<String, String> parentCustoms, Map<Element, Style> into) {
+        List<Weighted> list = weighted(e, kind, found(e, kind));
+        if (list.isEmpty() && kind != Stylesheet.PLACEHOLDER) return;
         Map<String, String> own = customProps(list, parentCustoms);
         Map<String, String> decl = resolve(list, own, e);
-        if (name.equals("before") || name.equals("after")) {
+        if (kind == Stylesheet.BEFORE || kind == Stylesheet.AFTER) {
             String content = decl.get("content");
             if (content == null || content.equals("none") || content.equals("normal")) return;
         }
         into.put(e, Style.compute(decl, parentStyle, rootFontSize, vw, vh));
     }
 
-    /** Every declaration that applies to [e] (or its [pseudo]-element), lowest precedence first. */
-    private List<Weighted> collect(Element e, String pseudo) {
+    /** The rules that style [e] as [kind]. */
+    private Found found(Element e, int kind) {
+        matched.clear();
+        dynamic.clear();
+        matcher.collect(ua, e, kind, matched, dynamic);
+        int fixedUa = matched.size(), dynamicUa = dynamic.size();
+        matcher.collect(author, e, kind, matched, dynamic);
+        if (matched.isEmpty() && dynamic.isEmpty()) return Found.NONE;
+        Stylesheet.Rule[] d = dynamic.toArray(Found.NO_RULES);
+        boolean[] hits = new boolean[d.length];
+        for (int i = 0; i < d.length; i++) hits[i] = matcher.matches(d[i], e);
+        return new Found(matched.toArray(Found.NO_RULES), fixedUa, d, dynamicUa, hits);
+    }
+
+    /** Every declaration that applies to [e] (or its [kind] of pseudo-element) with [found]'s rules, lowest precedence first. */
+    private List<Weighted> weighted(Element e, int kind, Found found) {
         List<Weighted> out = new ArrayList<>();
-        List<Stylesheet.Rule> candidates = new ArrayList<>();
-        String tag = e.normalName();
-        for (int origin = 0; origin < 2; origin++) {
-            Stylesheet sheet = origin == 0 ? ua : author;
-            candidates.clear();
-            sheet.candidates(tag, e.id(), e.classNames(), candidates);
-            for (Stylesheet.Rule r : candidates) {
-                if (!eqPseudo(r.selector().pseudoElement, pseudo)) continue;
-                if (r.media() != null && !r.media().matches(vw, vh)) continue;
-                if (!r.selector().matches(e, state, quirks)) continue;
-                for (Declaration d : r.declarations()) {
-                    int tier = d.important() ? (origin == 0 ? 6 : 4) : (origin == 0 ? 0 : 2);
-                    out.add(new Weighted(tier, r.selector().specificity, r.order(), d));
-                }
-            }
-        }
-        if (pseudo == null) {
+        for (int i = 0; i < found.fixed.length; i++) add(found.fixed[i], i < found.fixedUa, out);
+        for (int i = 0; i < found.dynamic.length; i++) if (found.hits[i]) add(found.dynamic[i], i < found.dynamicUa, out);
+        if (kind == Stylesheet.ELEMENT) {
             presentational(e, out);
             String inline = e.attr("style");
             if (!inline.isBlank()) {
@@ -126,8 +131,29 @@ public final class Styler {
         return out;
     }
 
-    private static boolean eqPseudo(String a, String b) {
-        return a == null ? b == null : a.equals(b);
+    private static void add(Stylesheet.Rule r, boolean ua, List<Weighted> out) {
+        for (Declaration d : r.declarations()) {
+            int tier = d.important() ? (ua ? 6 : 4) : (ua ? 0 : 2);
+            out.add(new Weighted(tier, r.selector().specificity, r.order(), d));
+        }
+    }
+
+    /** The rules one element matched for one kind: those that do not depend on hover state, and those that do with whether they did. */
+    private static final class Found {
+        static final Stylesheet.Rule[] NO_RULES = new Stylesheet.Rule[0];
+        static final Found NONE = new Found(NO_RULES, 0, NO_RULES, 0, new boolean[0]);
+        /** The first fixedUa of fixed (dynamicUa of dynamic) are the browser's. */
+        final Stylesheet.Rule[] fixed, dynamic;
+        final int fixedUa, dynamicUa;
+        final boolean[] hits;
+
+        Found(Stylesheet.Rule[] fixed, int fixedUa, Stylesheet.Rule[] dynamic, int dynamicUa, boolean[] hits) {
+            this.fixed = fixed;
+            this.fixedUa = fixedUa;
+            this.dynamic = dynamic;
+            this.dynamicUa = dynamicUa;
+            this.hits = hits;
+        }
     }
 
     /** HTML attributes that style: width and height on images, bgcolor, align, color on font. */
