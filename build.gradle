@@ -156,3 +156,17 @@ tasks.register('firstPictureBench', JavaExec) {
     systemProperty 'runs', project.findProperty('runs') ?: '20'
     maxHeapSize = '2g'
 }
+
+// What a new viewer costs the server thread (CPU and allocation, taking a kept first picture or drawing it) and the live
+// heap each watching session holds, with real Sessions and no server (SessionBench). -Ppages=shop,rules -Psizes=4x3,16x9
+// -Popens=<n> -Psessions=1,16,64 -Pmode=open|heap|both.
+tasks.register('sessionBench', JavaExec) {
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'ai.resourcepack.ui.SessionBench'
+    systemProperty 'java.awt.headless', 'true'
+    systemProperty 'shipped', file('src/main/resources/pages').absolutePath
+    ['pages', 'sizes', 'opens', 'warm', 'sessions', 'mode'].each { k ->
+        if (project.hasProperty(k)) systemProperty k, project.property(k)
+    }
+    maxHeapSize = '3g'
+}
