@@ -114,7 +114,7 @@ class RepaintTest {
     }
 
     /** Something under two nested backdrops changes on hover, as does a button inside the inner one and the outer panel itself. */
-    private static final String NESTED = "<html><head><style>body{margin:0;background:linear-gradient(90deg,#f06,#06f 50%,#0c6)}"
+    static final String NESTED = "<html><head><style>body{margin:0;background:linear-gradient(90deg,#f06,#06f 50%,#0c6)}"
             + "div{position:absolute;box-sizing:border-box}"
             + ".under{left:60px;top:300px;width:300px;height:200px;background:#fc0}.under:hover{background:#00e}"
             + ".far{left:21px;top:41px;width:120px;height:80px;background:#fff}.far:hover{background:#000}"
@@ -132,7 +132,7 @@ class RepaintTest {
     }
 
     /** Backdrops touching the canvas's top, left and bottom-right edges, with hover targets in and beside them. */
-    private static final String EDGES = "<html><head><style>body{margin:0;background:linear-gradient(135deg,#fa0,#08f 60%,#a0f)}"
+    static final String EDGES = "<html><head><style>body{margin:0;background:linear-gradient(135deg,#fa0,#08f 60%,#a0f)}"
             + "div{position:absolute;box-sizing:border-box;font-size:22px;color:#fff}"
             + ".tl{left:0;top:0;width:300px;height:180px;background:rgba(255,255,255,.2);backdrop-filter:blur(16px)}"
             + ".tlb{left:13px;top:13px;width:120px;height:44px;background:#123}.tlb:hover{background:#c21}"

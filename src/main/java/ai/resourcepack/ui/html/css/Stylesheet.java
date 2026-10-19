@@ -120,6 +120,11 @@ public final class Stylesheet {
         return all.size();
     }
 
+    /** Whether any rule says :hover, so that moving the pointer can change how the page looks. */
+    public boolean hovers() {
+        return !hoverParts.isEmpty();
+    }
+
     /**
      * The elements whose :hover (or :active) state would change how the page looks, of [e] and its
      * ancestors, innermost first. Two pointer positions with the same list draw the same picture, so

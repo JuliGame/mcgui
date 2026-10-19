@@ -66,6 +66,9 @@ public final class LoadBench {
     static final double STRESS_STEP = 37;
     /** Requests answered later than this are listed (-Dslow=<ms>). */
     static final long SLOW_NS = Long.getLong("slow", 10_000) * 1_000_000L;
+    /** -Dverify=true: every hover taken from what was drawn ahead is compared with the repaint itself (costs a repaint each). */
+    static final boolean VERIFY = Boolean.getBoolean("verify");
+    private static final java.lang.management.ThreadMXBean THREAD_MX = ManagementFactory.getThreadMXBean();
 
     // ------------------------------------------------------------------------------------ run
 
@@ -75,6 +78,9 @@ public final class LoadBench {
         List<Integer> threads = ints("render", "1,2,4");
         List<Integer> bands = ints("bands", "4");
         List<String> modes = list("modes", "walk");
+        // Hover targets drawn ahead per session (HoverAhead; 0 for none), and repetitions of the whole matrix.
+        List<Integer> aheads = ints("ahead", "0");
+        int reps = Integer.getInteger("reps", 1);
         double secs = Double.parseDouble(System.getProperty("secs", "12"));
         double warm = Double.parseDouble(System.getProperty("warm", "2"));
         boolean send = Boolean.getBoolean("send");
@@ -96,14 +102,19 @@ public final class LoadBench {
             Prep prep = new Prep(page);
             System.out.printf("%n== %s: page %.0f px tall (view %.0f), %d hover targets%n", spec, prep.pageHeight, prep.viewHeight, prep.targets.size());
             // JIT, fonts, pools: one throwaway cell per page.
-            if (!Boolean.getBoolean("nowarmcell")) run(prep, new Cfg("walk", 2, 2, 4, 3, 1, false, ""), palette);
-            for (String mode : modes) {
-                for (int b : bands) {
-                    for (int n : sessions) {
-                        for (int r : threads) {
-                            Result res = run(prep, new Cfg(mode, n, r, b, secs, warm, send, tag), palette);
-                            System.out.println(res.line(spec));
-                            if (!out.isEmpty()) Files.writeString(Path.of(out), res.csv(spec) + "\n", StandardCharsets.UTF_8, StandardOpenOption.APPEND);
+            if (!Boolean.getBoolean("nowarmcell")) run(prep, new Cfg("walk", 2, 2, 4, 3, 1, false, "", aheads.get(aheads.size() - 1)), palette);
+            for (int rep = 0; rep < reps; rep++) {
+                for (String mode : modes) {
+                    for (int b : bands) {
+                        for (int n : sessions) {
+                            for (int r : threads) {
+                                // A/B of drawing hovers ahead, interleaved cell by cell.
+                                for (int a : aheads) {
+                                    Result res = run(prep, new Cfg(mode, n, r, b, secs, warm, send, tag, a), palette);
+                                    System.out.println(res.line(spec));
+                                    if (!out.isEmpty()) Files.writeString(Path.of(out), res.csv(spec) + "\n", StandardCharsets.UTF_8, StandardOpenOption.APPEND);
+                                }
+                            }
                         }
                     }
                 }
@@ -128,7 +139,7 @@ public final class LoadBench {
         return Files.exists(p) ? p : shipped.resolve(spec + ".html");
     }
 
-    record Cfg(String mode, int sessions, int renderThreads, int bands, double secs, double warm, boolean send, String tag) {}
+    record Cfg(String mode, int sessions, int renderThreads, int bands, double secs, double warm, boolean send, String tag, int ahead) {}
 
     // ------------------------------------------------------------------------------------ page prep
 
@@ -163,7 +174,7 @@ public final class LoadBench {
                 double cx = a.getCenterX(), cy = a.getCenterY();
                 if (cy < 0 || cy >= f.viewportHeight() || cx < 0 || cx >= f.viewportWidth()) continue;
                 // Skip a target that sits entirely inside one already listed (a link inside a card is the same spot).
-                targets.add(new int[]{(int) Math.round(cx * SCALE), (int) Math.round(cy * SCALE)});
+                targets.add(new int[]{(int) Math.round(cx * SCALE), (int) Math.round(cy * SCALE), (int) Math.round(a.getWidth() * SCALE), (int) Math.round(a.getHeight() * SCALE)});
             }
         }
     }
@@ -199,7 +210,7 @@ public final class LoadBench {
         Sender sender = cfg.send ? new Sender() : null;
         List<Sim> sims = new ArrayList<>();
         for (int i = 0; i < cfg.sessions; i++) {
-            Sim s = new Sim(i, prep, new Canvas(palette, W / 128, H / 128, sender == null ? () -> {} : sender::wake), renderers, server, cfg.mode);
+            Sim s = new Sim(i, prep, new Canvas(palette, W / 128, H / 128, sender == null ? () -> {} : sender::wake), renderers, server, cfg.mode, cfg.ahead);
             sims.add(s);
             if (sender != null) sender.add(s.canvas);
         }
@@ -226,6 +237,7 @@ public final class LoadBench {
         long[] sys0 = procStat();
         long sender0 = sender == null ? 0 : sender.reset();
         for (AtomicInteger w : WHY) w.set(0);
+        long[] ah0 = aheadTotals(sims);
         long t0 = System.nanoTime();
         long wallStart = System.currentTimeMillis();
         long tEnd = t0 + (long) (cfg.secs * 1e9);
@@ -257,6 +269,7 @@ public final class LoadBench {
         long t1 = System.nanoTime();
         long up1 = ManagementFactory.getRuntimeMXBean().getUptime();
         Pauses.Window pauses = PAUSES.stop();
+        long[] ah1 = aheadTotals(sims);
         long gc1 = gcMs(), gcN1 = gcCount();
         long peak = 0;
         for (MemoryPoolMXBean p : ManagementFactory.getMemoryPoolMXBeans()) if (p.getType() == MemoryType.HEAP) peak += p.getPeakUsage().getUsed();
@@ -297,6 +310,7 @@ public final class LoadBench {
         r.pauses = pauses;
         r.uptime = new long[]{up0, up1};
         r.senderCpu = sender == null ? 0 : (senderEnd - sender0) / 1e9 / wall * 100;
+        for (int i = 0; i < ah1.length; i++) r.ahead[i] = ah1[i] - ah0[i];
         r.firstMs = sims.stream().mapToDouble(s -> s.firstFrameNs > 0 ? (s.firstFrameNs - open) / 1e6 : Double.NaN).toArray();
         r.secs = wall;
         r.tick = tick.report(t0, tickEnd);
@@ -304,6 +318,27 @@ public final class LoadBench {
         r.peak = poolPeak;
         sims.clear();
         return r;
+    }
+
+    /** Drawing ahead, summed over the sessions: prepared, abandoned, taken, cpu ns, cpu ns of those taken, bytes allocated, hover frames from it, hover frames painted, verify mismatches. */
+    private static long[] aheadTotals(List<Sim> sims) {
+        long[] t = new long[12];
+        for (Sim s : sims) {
+            HoverAhead a = s.ahead;
+            t[0] += a.prepared.get();
+            t[1] += a.abandoned.get();
+            t[2] += a.taken.get();
+            t[3] += a.cpuNs.get();
+            t[4] += a.usedNs.get();
+            t[5] += a.allocBytes.get();
+            t[6] += s.aheadFrames.get();
+            t[7] += s.paintedFrames.get();
+            t[8] += s.mismatches.get();
+            t[9] += a.missNoJob.get();
+            t[10] += a.missNotPicked.get();
+            t[11] += a.missUnfinished.get();
+        }
+        return t;
     }
 
     /** CPU ns so far of {the shared cpu pool (render, painters and encoders alike), 0, 0, sender, server thread}, then the bytes each group has allocated: what a frame costs whatever else the machine is doing. */
@@ -412,9 +447,11 @@ public final class LoadBench {
     private record Req(long t, int kind) {}
 
     /** One finished frame. */
-    private record Rec(long done, long queueNs, long renderNs, long drawNs, boolean partial, int tiles, int coalesced) {}
+    /** [cpuNs]: the render thread's CPU for the render part (not the draw); [ahead]: taken from what was drawn ahead. */
+    private record Rec(long done, long queueNs, long renderNs, long drawNs, boolean partial, int tiles, int coalesced, long cpuNs, boolean ahead) {}
 
-    private record Lat(long at, int kind, long ns) {}
+    /** [ahead]: answered by a frame taken from what was drawn ahead. */
+    private record Lat(long at, int kind, long ns, boolean ahead) {}
 
     /** Session's rendering flow with the Bukkit parts taken out. */
     static final class Sim {
@@ -446,8 +483,16 @@ public final class LoadBench {
         final List<Rec> recs = Collections.synchronizedList(new ArrayList<>());
         final List<Lat> lats = Collections.synchronizedList(new ArrayList<>());
         volatile long firstFrameNs;
+        // Drawing hovers ahead, as Session does (HoverAhead).
+        final HoverAhead ahead;
+        private HoverAhead.Job job;
+        private final Runnable lookAgain = () -> execute(this::lookAhead);
+        private long pointerAt;
+        private double pointerVx, pointerVy;
+        /** Hover frames taken from what was drawn ahead, and hover frames repainted; verify: taken ones that differed from a repaint. */
+        final AtomicInteger aheadFrames = new AtomicInteger(), paintedFrames = new AtomicInteger(), mismatches = new AtomicInteger();
 
-        Sim(int id, Prep prep, Canvas canvas, Executor renderers, ScheduledThreadPoolExecutor server, String mode) {
+        Sim(int id, Prep prep, Canvas canvas, Executor renderers, ScheduledThreadPoolExecutor server, String mode, int ahead) {
             this.id = id;
             this.prep = prep;
             this.page = prep.page;
@@ -456,13 +501,17 @@ public final class LoadBench {
             this.server = server;
             this.mode = mode;
             this.rnd = new Random(1000 + id);
+            // -Daheadevery=<n>: only every n-th session draws ahead; the others are the control group.
+            this.ahead = new HoverAhead(id % Integer.getInteger("aheadevery", 1) == 0 ? ahead : 0, 4L * W * H);
             for (int t = 0; t < TILES; t++) lastTiles[t] = canvas.tile(t, Canvas.Encoding.HI);
         }
 
         void close() {
             synchronized (this) {
                 closed = true;
+                if (job != null) job.cancel();
             }
+            ahead.drop();
         }
 
         // ---- the page opens (Session.show)
@@ -478,6 +527,7 @@ public final class LoadBench {
             reqs.add(new Req(System.nanoTime(), kind));
             if (rendering) {
                 dirty = true;
+                if (job != null) job.wanted(job.of(page, doc, scrollY), key(hover), List.of());
                 return;
             }
             rendering = true;
@@ -497,14 +547,15 @@ public final class LoadBench {
             List<Req> mine = reqs;
             reqs = new ArrayList<>();
             long submitted = System.nanoTime();
+            HoverAhead.makeRoom();
             renderers.execute(() -> {
                 try {
-                    long t0 = System.nanoTime();
+                    long t0 = System.nanoTime(), c0 = THREAD_MX.getCurrentThreadCpuTime();
                     HtmlRenderer.Frame before = frame;
                     pooled.start(before);
                     HtmlRenderer.Frame f = null;
                     Rectangle2D changed = null;
-                    boolean partial = false;
+                    boolean partial = false, wasAhead = false;
                     if (before == null) why(0);
                     else if (before.document() != d || before.page() != p) why(1);
                     else if (Math.abs(before.scrollY() - Math.max(0, Math.min(s, before.maxScroll()))) >= 0.01) why(2);
@@ -516,10 +567,14 @@ public final class LoadBench {
                             drawnHover = hoverKey;
                             // Nothing to draw: the requests are answered now.
                             long now = System.nanoTime();
-                            for (Req r : mine) lats.add(new Lat(r.t, r.kind, now - r.t));
+                            for (Req r : mine) lats.add(new Lat(r.t, r.kind, now - r.t, false));
                             return;
                         }
-                        Repaint.Result r = Repaint.partial(p, d, W, H, SCALE, s, state, before, moved, HtmlRenderer.DEFAULT_TIMEOUT_MS);
+                        Repaint.Prepared ready = ahead.take(before, drawnHover, List.of(), hoverKey, List.of());
+                        if (ready != null && VERIFY) verify(ready, p, d, s, state, before, moved);
+                        Repaint.Result r = ready != null ? ready.apply() : Repaint.partial(p, d, W, H, SCALE, s, state, before, moved, HtmlRenderer.DEFAULT_TIMEOUT_MS);
+                        (ready != null ? aheadFrames : paintedFrames).incrementAndGet();
+                        wasAhead = ready != null;
                         if (r.frame() != null) {
                             f = r.frame();
                             changed = r.changed();
@@ -531,7 +586,7 @@ public final class LoadBench {
                     if (f == null) {
                         f = HtmlRenderer.render(p, d, pooled.take(W, H), SCALE, s, state, HtmlRenderer.DEFAULT_TIMEOUT_MS);
                     }
-                    long t1 = System.nanoTime();
+                    long t1 = System.nanoTime(), c1 = THREAD_MX.getCurrentThreadCpuTime();
                     if (partial) {
                         int x0 = Math.max(0, (int) Math.floor(changed.getX() * SCALE)), y0 = Math.max(0, (int) Math.floor(changed.getY() * SCALE));
                         int x1 = Math.min(W, (int) Math.ceil(changed.getMaxX() * SCALE));
@@ -551,32 +606,98 @@ public final class LoadBench {
                     }
                     drawnHover = hoverKey;
                     frame = f;
+                    // As Session: what was drawn ahead goes before the picture shown before is handed back.
+                    ahead.drop();
                     pooled.shown(f);
                     if (firstFrameNs == 0) firstFrameNs = t2;
-                    recs.add(new Rec(t2, t0 - submitted, t1 - t0, t2 - t1, partial, tiles, mine.size() - 1));
-                    for (Req r : mine) lats.add(new Lat(r.t, r.kind, t2 - r.t));
+                    recs.add(new Rec(t2, t0 - submitted, t1 - t0, t2 - t1, partial, tiles, mine.size() - 1, c1 - c0, wasAhead));
+                    for (Req r : mine) lats.add(new Lat(r.t, r.kind, t2 - r.t, wasAhead));
                     if (!partial) execute(this::repoint);
                 } catch (RuntimeException | Error e) {
                     pooled.failed(frame);
                     System.err.println("render failed: " + e);
                     e.printStackTrace();
+                    ahead.drop();
                 } finally {
-                    synchronized (Sim.this) {
-                        if (dirty && !closed) {
-                            dirty = false;
-                            execute(() -> {
-                                synchronized (Sim.this) {
-                                    if (!closed) submit();
-                                    else rendering = false;
-                                }
-                            });
-                        } else {
-                            rendering = false;
-                            if (mode.equals("stress") && !closed) execute(Sim.this::advance);
-                        }
-                    }
+                    done();
                 }
             });
+        }
+
+        /** Session.done: this session's turn to draw is over. */
+        private void done() {
+            synchronized (Sim.this) {
+                job = null;
+                if (dirty && !closed) {
+                    dirty = false;
+                    execute(() -> {
+                        synchronized (Sim.this) {
+                            if (!closed) submit();
+                            else rendering = false;
+                        }
+                    });
+                    return;
+                }
+                rendering = false;
+                if (mode.equals("stress") && !closed) execute(Sim.this::advance);
+            }
+            if (ahead.on() && pointerX >= 0) execute(this::lookAhead);
+        }
+
+        /** Session.lookAhead. */
+        private synchronized void lookAhead() {
+            if (closed || rendering || !ahead.on() || doc == null || pointerX < 0 || !page.styles.hovers() || page.siblingStates() || !idle()) return;
+            HtmlRenderer.Frame f = frame;
+            if (f == null || f.page() != page || f.document() != doc) return;
+            if (Math.abs(f.scrollY() - Math.max(0, Math.min(scrollY, f.maxScroll()))) >= 0.01) return;
+            double x = pointerX / SCALE, y = pointerY / SCALE;
+            if (ahead.done(f, x, y)) return;
+            List<Element> hoverKey = key(hover);
+            if (!hoverKey.equals(drawnHover)) return;
+            if (!HoverAhead.claim(lookAgain)) return;
+            boolean resting = System.nanoTime() - pointerAt > 150_000_000L;
+            HoverAhead.Job j = ahead.job(page, doc, W, H, SCALE, f, false, drawnHover, List.of(), hoverKey, null, List.of(), x, y,
+                    resting ? 0 : pointerVx / SCALE, resting ? 0 : pointerVy / SCALE, HtmlRenderer.DEFAULT_TIMEOUT_MS);
+            job = j;
+            rendering = true;
+            renderers.execute(() -> {
+                try {
+                    ahead.run(j);
+                } catch (RuntimeException | Error e) {
+                    ahead.drop();
+                    e.printStackTrace();
+                } finally {
+                    HoverAhead.release();
+                    done();
+                }
+            });
+        }
+
+        /** Session.idle, with Renders.idle written out (Renders is the plugin's): a thread of the cpu pool is free and nothing waits for one. */
+        private boolean idle() {
+            var pool = Cpu.pool();
+            return pool.getRunningThreadCount() < pool.getParallelism() && pool.getQueuedSubmissionCount() == 0 && pool.getQueuedTaskCount() == 0
+                    && HoverAhead.quiet();
+        }
+
+        /** -Dverify=true: what was drawn ahead against the repaint itself, over a copy of the picture. */
+        private void verify(Repaint.Prepared ready, Page p, Document d, double s, Selector.State state, HtmlRenderer.Frame before, Set<Element> moved) {
+            java.awt.image.BufferedImage from = before.image(), to = new java.awt.image.BufferedImage(from.getWidth(), from.getHeight(), from.getType());
+            int[] a = ((java.awt.image.DataBufferInt) from.getRaster().getDataBuffer()).getData(), b = ((java.awt.image.DataBufferInt) to.getRaster().getDataBuffer()).getData();
+            System.arraycopy(a, 0, b, 0, a.length);
+            HtmlRenderer.Frame copy = new HtmlRenderer.Frame(to, before.scale(), before.viewportWidth(), before.viewportHeight(), before.pageHeight(), before.scrollY(),
+                    before.hits(), before.styles(), before.document(), before.page());
+            Repaint.Result real = Repaint.partial(p, d, W, H, SCALE, s, state, copy, moved, 0);
+            // Applied to the copy of the picture as it is now, so the picture itself is left for the session to apply it to.
+            int[] mine = a.clone();
+            Repaint.Result r = ready.apply();
+            int[] applied = ((java.awt.image.DataBufferInt) r.frame().image().getRaster().getDataBuffer()).getData();
+            boolean same = real.frame() != null && java.util.Arrays.equals(applied, b) && real.changed().equals(r.changed());
+            System.arraycopy(mine, 0, applied, 0, mine.length);
+            if (!same) {
+                mismatches.incrementAndGet();
+                System.err.println("verify: drawn ahead differs from the repaint (session " + id + ")");
+            }
         }
 
         private void execute(Runnable r) {
@@ -607,13 +728,22 @@ public final class LoadBench {
         }
 
         void pointer(int x, int y) {
+            long now = System.nanoTime();
+            if (pointerX >= 0 && now - pointerAt < 250_000_000L && now > pointerAt) {
+                double dt = (now - pointerAt) / 1e9;
+                pointerVx = (x - pointerX) / dt;
+                pointerVy = (y - pointerY) / dt;
+            } else {
+                pointerVx = pointerVy = 0;
+            }
+            pointerAt = now;
             pointerX = x;
             pointerY = y;
             Element e = counterpart(at(x, y), doc);
-            if (e == hover) return;
-            boolean differs = !key(hover).equals(key(e));
+            boolean differs = e != hover && !key(hover).equals(key(e));
             hover = e;
             if (differs) render(HOVER);
+            else lookAhead();
         }
 
         void repoint() {
@@ -651,6 +781,10 @@ public final class LoadBench {
                 pointer(t[0], t[1]);
                 return;
             }
+            if (mode.equals("hand")) {
+                handTick(ts);
+                return;
+            }
             if (goal == null) {
                 goal = ts.get(rnd.nextInt(ts.size()));
                 if (px == 0 && py == 0) {
@@ -676,6 +810,68 @@ public final class LoadBench {
                 py += dy / dist * step;
             }
             pointer((int) px, (int) py);
+        }
+
+        // ---- hand: a pointer moved the way a hand moves one
+        private int handAt = -1, moveTick, moveTicks;
+        private double fromX, fromY, toX, toY, viaX, viaY;
+
+        /**
+         * One 20 Hz sample of a hand: it rests on a target 0.3–1.5 s (the client reports nothing while the view is still,
+         * now and then a pixel of drift), then moves to the next, usually one of the three nearest (60%), else any. A move
+         * takes as long as Fitts' law says (0.15 s + 0.12 s per bit of distance over size), along a slightly bent path,
+         * fast in the middle and slow at both ends (minimum jerk), and ends somewhere inside the target, not at its centre.
+         */
+        void handTick(List<int[]> ts) {
+            if (handAt < 0) {
+                handAt = rnd.nextInt(ts.size());
+                int[] t = ts.get(handAt);
+                px = t[0];
+                py = t[1];
+                pointer((int) px, (int) py);
+                dwell = 6 + rnd.nextInt(25);
+                return;
+            }
+            if (dwell > 0) {
+                dwell--;
+                if (rnd.nextInt(10) < 3) pointer((int) px + rnd.nextInt(3) - 1, (int) py + rnd.nextInt(3) - 1);
+                if (dwell == 0) startMove(ts);
+                return;
+            }
+            moveTick++;
+            double tau = Math.min(1, moveTick / (double) moveTicks), sm = tau * tau * tau * (10 - 15 * tau + 6 * tau * tau);
+            // A quadratic Bezier through the bend point.
+            px = (1 - sm) * (1 - sm) * fromX + 2 * (1 - sm) * sm * viaX + sm * sm * toX;
+            py = (1 - sm) * (1 - sm) * fromY + 2 * (1 - sm) * sm * viaY + sm * sm * toY;
+            pointer((int) Math.round(px), (int) Math.round(py));
+            if (tau >= 1) dwell = 6 + rnd.nextInt(25);
+        }
+
+        private void startMove(List<int[]> ts) {
+            int next;
+            if (ts.size() > 1 && rnd.nextInt(10) < 6) {
+                // One of the three nearest others.
+                int[] at = ts.get(handAt);
+                List<Integer> order = new ArrayList<>();
+                for (int i = 0; i < ts.size(); i++) if (i != handAt) order.add(i);
+                order.sort((a, b) -> Double.compare(Math.hypot(ts.get(a)[0] - at[0], ts.get(a)[1] - at[1]), Math.hypot(ts.get(b)[0] - at[0], ts.get(b)[1] - at[1])));
+                next = order.get(rnd.nextInt(Math.min(3, order.size())));
+            } else {
+                next = ts.size() > 1 ? (handAt + 1 + rnd.nextInt(ts.size() - 1)) % ts.size() : handAt;
+            }
+            int[] t = ts.get(next);
+            handAt = next;
+            fromX = px;
+            fromY = py;
+            toX = t[0] + (rnd.nextDouble() - 0.5) * 0.6 * t[2];
+            toY = t[1] + (rnd.nextDouble() - 0.5) * 0.6 * t[3];
+            double dx = toX - fromX, dy = toY - fromY, dist = Math.hypot(dx, dy), size = Math.max(16, Math.min(t[2], t[3]));
+            double bend = (rnd.nextDouble() - 0.5) * 0.3;
+            viaX = (fromX + toX) / 2 - dy * bend;
+            viaY = (fromY + toY) / 2 + dx * bend;
+            double secs = 0.15 + 0.12 * Math.log(dist / size + 1) / Math.log(2);
+            moveTicks = Math.max(1, (int) Math.round(secs * 20));
+            moveTick = 0;
         }
 
         /** Stress: the next frame, as soon as the last landed. */
@@ -876,6 +1072,13 @@ public final class LoadBench {
         double processCpuMs, allocMb;
         long requests, dropped, partialFrames, fullFrames, noops;
         long[] qWait = {}, rPartial = {}, rFull = {}, drawFull = {}, drawPartial = {};
+        /** Hover latency of requests answered from what was drawn ahead, and of the others; and aheadTotals over the window. */
+        long[] hoverAhead = {}, hoverPainted = {};
+        /** Hover latency of the sessions that do not draw ahead (all of them with ahead=0; with -Daheadevery, the control group). */
+        long[] hoverControl = {};
+        /** Render-thread CPU of partial frames taken from what was drawn ahead, and of those repainted. */
+        long[] cpuAhead = {}, cpuPainted = {};
+        final long[] ahead = new long[12];
         double tilesFull, tilesPartial;
         /** Ticker lateness in ms: wake p50/p99/max, finish p50/p99/max, ticks. */
         double[] tick = new double[8];
@@ -892,7 +1095,9 @@ public final class LoadBench {
         }
 
         void collect(List<Sim> sims, long t0, long t1) {
-            List<Long> hv = new ArrayList<>(), sc = new ArrayList<>(), st = new ArrayList<>(), op = new ArrayList<>();
+            List<Long> hv = new ArrayList<>(), sc = new ArrayList<>(), st = new ArrayList<>(), op = new ArrayList<>(), ha = new ArrayList<>(), hp = new ArrayList<>(),
+                    hc = new ArrayList<>();
+            List<Long> ca = new ArrayList<>(), cp = new ArrayList<>();
             List<Long> qw = new ArrayList<>(), rp = new ArrayList<>(), rf = new ArrayList<>(), df = new ArrayList<>(), dp = new ArrayList<>();
             long tf = 0, tp = 0;
             for (Sim s : sims) {
@@ -902,7 +1107,11 @@ public final class LoadBench {
                         if (l.ns > SLOW_NS) System.out.printf("  slow request: session %d kind %d asked at %.0f ms into the window, answered after %.0f ms%n", s.id, l.kind, (l.at - t0) / 1e6, l.ns / 1e6);
                         requests++;
                         switch (l.kind) {
-                            case HOVER -> hv.add(l.ns);
+                            case HOVER -> {
+                                hv.add(l.ns);
+                                (l.ahead ? ha : hp).add(l.ns);
+                                if (!s.ahead.on()) hc.add(l.ns);
+                            }
                             case SCROLL -> sc.add(l.ns);
                             case STRESS -> st.add(l.ns);
                             default -> op.add(l.ns);
@@ -915,6 +1124,7 @@ public final class LoadBench {
                         dropped += r.coalesced;
                         qw.add(r.queueNs);
                         if (r.partial) {
+                            (r.ahead ? ca : cp).add(r.cpuNs);
                             partialFrames++;
                             rp.add(r.renderNs);
                             dp.add(r.drawNs);
@@ -929,6 +1139,11 @@ public final class LoadBench {
                 }
             }
             hover = sorted(hv);
+            hoverAhead = sorted(ha);
+            hoverControl = sorted(hc);
+            cpuAhead = sorted(ca);
+            cpuPainted = sorted(cp);
+            hoverPainted = sorted(hp);
             scroll = sorted(sc);
             stressLat = sorted(st);
             openLat = sorted(op);
@@ -972,6 +1187,16 @@ public final class LoadBench {
             long fr = Math.max(1, partialFrames + fullFrames);
             b.append(String.format(" | cpu ms/frame render %.0f painters %.0f encoders %.0f total %.0f", threadCpuMs[0] / fr, threadCpuMs[1] / fr, threadCpuMs[2] / fr, processCpuMs / fr));
             b.append(String.format(" alloc %.1f MB/frame", allocMb / fr));
+            if (cfg.ahead == 0) b.append(String.format(" | render cpu/partial frame %.1f ms", pct(cpuPainted, .5)));
+            if (cfg.ahead > 0 && hoverControl.length > 0) b.append(String.format(" | control sessions (not drawing ahead) hover %s (n=%d)", m3(hoverControl), hoverControl.length));
+            if (cfg.ahead > 0) {
+                long hoverFrames = ahead[6] + ahead[7];
+                b.append(String.format(" | ahead=%d: hover frames %d/%d drawn ahead (%.0f%%), hover from ahead %s (n=%d) painted %s (n=%d); render cpu/partial frame from ahead %.1f painted %.1f ms; prepared %d taken %d stopped %d; missed: no drawing ahead %d, not picked %d, not reached %d;"
+                                + " cpu ahead %.0f ms (used %.0f, wasted %.0f = %.1f%% of render cpu), alloc ahead %.0f MB%s",
+                        cfg.ahead, ahead[6], hoverFrames, 100.0 * ahead[6] / Math.max(1, hoverFrames), m3(hoverAhead), hoverAhead.length, m3(hoverPainted), hoverPainted.length,
+                        pct(cpuAhead, .5), pct(cpuPainted, .5), ahead[0], ahead[2], ahead[1], ahead[9], ahead[10], ahead[11], ahead[3] / 1e6, ahead[4] / 1e6, (ahead[3] - ahead[4]) / 1e6, 100 * (ahead[3] - ahead[4]) / 1e6 / Math.max(1, threadCpuMs[0]),
+                        ahead[5] / 1048576.0, VERIFY ? String.format(", verify mismatches %d", ahead[8]) : ""));
+            }
             b.append(String.format(" | cpu %.0f%% other %.0f%% steal %.0f%% | live %.0f MB peak %.0f MB gc %d ms/%d | open %.0f/%.0f ms", cpu, otherCpu, stealPct, liveMb,
                     peakMb, gcMs, gcN, f.length == 0 ? Double.NaN : f[f.length / 2], f.length == 0 ? Double.NaN : f[f.length - 1]));
             b.append(String.format(" | tick late wake %.2f/%.2f/%.2f finish %.2f/%.2f/%.2f ms (n=%.0f, %.1f%% over 5 ms) | runnable pool threads mean %.2f p99 %.0f max %.0f, over cores-1 %.1f%% of samples | pool threads/running/jobs max %d/%d/%d", tick[0], tick[1], tick[2], tick[3], tick[4], tick[5], tick[6], tick[7], runq[0], runq[1], runq[2], runq[3], peak[0], peak[1], peak[2]));
@@ -995,7 +1220,9 @@ public final class LoadBench {
                     "queue_p90", "tiles_full", "tiles_part", "cpu", "other_cpu", "steal", "live_mb", "peak_mb", "gc_ms", "gc_n", "open_p50", "open_max",
                     "w_batches", "w_tiles", "w_patches", "w_raw", "w_defl", "w_full", "w_deflate_ms", "w_diff_ms", "sender_cpu", "cpu_render_ms", "cpu_painters_ms", "cpu_encoders_ms", "cpu_send_ms", "cpu_server_ms", "cpu_process_ms", "alloc_mb",
                     "tick_wake_p50", "tick_wake_p99", "tick_wake_max", "tick_fin_p50", "tick_fin_p99", "tick_fin_max", "tick_n", "tick_late5_pct", "runq_mean", "runq_p99", "runq_max", "runq_over_pct",
-                    "gc_young", "gc_humongous", "gc_other", "gc_pause_ms", "gc_pause_max", "up0", "up1");
+                    "gc_young", "gc_humongous", "gc_other", "gc_pause_ms", "gc_pause_max", "up0", "up1",
+                    "ahead", "ah_prepared", "ah_stopped", "ah_taken", "ah_cpu_ms", "ah_used_ms", "ah_alloc_mb", "ah_frames", "painted_frames", "ah_mismatch",
+                    "hover_ahead_n", "hover_ahead_p50", "hover_ahead_p90", "hover_painted_n", "hover_painted_p50", "hover_painted_p90", "gc_live_after", "cpu_part_ahead_p50", "cpu_part_painted_p50", "cpu_part_painted_p90", "miss_nojob", "miss_notpicked", "miss_unfinished", "aheadevery", "control_n", "control_p50", "control_p90", "control_p99");
         }
 
         String csv(String page) {
@@ -1062,6 +1289,33 @@ public final class LoadBench {
             v.add(f(pauses.maxMs()));
             v.add(String.valueOf(uptime[0]));
             v.add(String.valueOf(uptime[1]));
+            v.add(String.valueOf(cfg.ahead));
+            v.add(String.valueOf(ahead[0]));
+            v.add(String.valueOf(ahead[1]));
+            v.add(String.valueOf(ahead[2]));
+            v.add(f(ahead[3] / 1e6));
+            v.add(f(ahead[4] / 1e6));
+            v.add(f(ahead[5] / 1048576.0));
+            v.add(String.valueOf(ahead[6]));
+            v.add(String.valueOf(ahead[7]));
+            v.add(String.valueOf(ahead[8]));
+            for (long[] h : new long[][]{hoverAhead, hoverPainted}) {
+                v.add(String.valueOf(h.length));
+                v.add(f(pct(h, .5)));
+                v.add(f(pct(h, .9)));
+            }
+            v.add(f(liveMb));
+            v.add(f(pct(cpuAhead, .5)));
+            v.add(f(pct(cpuPainted, .5)));
+            v.add(f(pct(cpuPainted, .9)));
+            v.add(String.valueOf(ahead[9]));
+            v.add(String.valueOf(ahead[10]));
+            v.add(String.valueOf(ahead[11]));
+            v.add(String.valueOf(Integer.getInteger("aheadevery", 1)));
+            v.add(String.valueOf(hoverControl.length));
+            v.add(f(pct(hoverControl, .5)));
+            v.add(f(pct(hoverControl, .9)));
+            v.add(f(pct(hoverControl, .99)));
             return String.join(",", v);
         }
 
