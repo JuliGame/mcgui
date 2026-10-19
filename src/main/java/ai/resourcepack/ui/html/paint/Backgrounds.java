@@ -278,6 +278,8 @@ final class Backgrounds {
         }
         double rad = Math.toRadians(angle);
         double dx = Math.sin(rad), dy = -Math.cos(rad);
+        // An angle too big to mean anything (1e400deg reads as Infinity): no direction, no gradient.
+        if (!Double.isFinite(dx) || !Double.isFinite(dy)) return null;
         double len = Math.abs(w * dx) + Math.abs(h * dy);
         double cx = r.getCenterX(), cy = r.getCenterY();
         List<Stop> stops = stops(args.subList(first, args.size()), s, len);
@@ -293,7 +295,8 @@ final class Backgrounds {
         }
         Point2D p0 = new Point2D.Double(cx - dx * len / 2 + dx * len * startPos, cy - dy * len / 2 + dy * len * startPos);
         Point2D p1 = new Point2D.Double(cx - dx * len / 2 + dx * len * endPos, cy - dy * len / 2 + dy * len * endPos);
-        if (p0.distance(p1) < 1e-6) return new Color(stops.get(stops.size() - 1).color, true);
+        // A gradient line of no length (or none that can be measured) is its last colour, as CSS says.
+        if (!(p0.distance(p1) >= 1e-6)) return new Color(stops.get(stops.size() - 1).color, true);
         return new LinearGradientPaint(p0, p1, fractions(stops), colors(stops),
                 repeating ? MultipleGradientPaint.CycleMethod.REPEAT : MultipleGradientPaint.CycleMethod.NO_CYCLE);
     }
