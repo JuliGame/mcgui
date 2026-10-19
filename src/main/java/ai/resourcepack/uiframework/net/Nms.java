@@ -110,6 +110,15 @@ public final class Nms {
     private final Object filledMap;                // Items.FILLED_MAP
     private final Object mapIdComponent;           // DataComponents.MAP_ID
     private final MethodHandle setComponent;       // ItemStack#set(DataComponentType, Object)
+    // Frames that exist only on one client (a view's wall): the packets the tracker would have sent for them.
+    private final MethodHandle newAddEntity;       // new ClientboundAddEntityPacket(id, uuid, x, y, z, xRot, yRot, type, data, movement, yHeadRot)
+    private final Object glowFrameType;            // EntityType glow_item_frame
+    private final Object noMovement;               // Vec3.ZERO
+    private final Object sharedFlags;              // Entity.DATA_SHARED_FLAGS_ID
+    private final Object silent;                   // Entity.DATA_SILENT
+    private final MethodHandle newRemoveEntities;  // new ClientboundRemoveEntitiesPacket(int...)
+    private final MethodHandle nextEntityId;       // UnsafeValues#nextEntityId(World) (26.x) or #nextEntityId() (1.21)
+    private final boolean nextEntityIdTakesWorld;
     /** A filled map item for each map id a frame has been pointed at; never changed once made. */
     private final Map<Integer, Object> mapItems = new ConcurrentHashMap<>();
 
@@ -205,6 +214,32 @@ public final class Nms {
         Class<?> componentType = Class.forName("net.minecraft.core.component.DataComponentType");
         mapIdComponent = Class.forName("net.minecraft.core.component.DataComponents").getField("MAP_ID").get(null);
         setComponent = L.unreflect(item.getMethod("set", componentType, Object.class));
+        Class<?> entityType = Class.forName("net.minecraft.world.entity.EntityType");
+        Class<?> types;
+        try {
+            types = Class.forName("net.minecraft.world.entity.EntityTypes"); // 26.x keeps the constants here
+        } catch (ClassNotFoundException e) {
+            types = entityType;
+        }
+        glowFrameType = types.getField("GLOW_ITEM_FRAME").get(null);
+        newAddEntity = L.findConstructor(addEntityPacket, MethodType.methodType(void.class, int.class, java.util.UUID.class,
+                double.class, double.class, double.class, float.class, float.class, entityType, int.class, vec3, double.class));
+        noMovement = vec3.getField("ZERO").get(null);
+        sharedFlags = open(nmsEntity, "DATA_SHARED_FLAGS_ID").get(null);
+        silent = open(nmsEntity, "DATA_SILENT").get(null);
+        newRemoveEntities = L.findConstructor(Class.forName(game + "ClientboundRemoveEntitiesPacket"), MethodType.methodType(void.class, int[].class)).asFixedArity();
+        Object unsafe = server.getUnsafe();
+        MethodHandle next;
+        boolean takesWorld;
+        try {
+            next = L.unreflect(unsafe.getClass().getMethod("nextEntityId", org.bukkit.World.class)).bindTo(unsafe);
+            takesWorld = true;
+        } catch (NoSuchMethodException e) {
+            next = L.unreflect(unsafe.getClass().getMethod("nextEntityId")).bindTo(unsafe);
+            takesWorld = false;
+        }
+        nextEntityId = next;
+        nextEntityIdTakesWorld = takesWorld;
         // Looked up leniently: a click type a version lacks (or renamed) only loses its exact timing.
         List<Class<?>> clicks = new java.util.ArrayList<>();
         for (String name : List.of("ServerboundSwingPacket", "ServerboundAttackPacket", "ServerboundInteractPacket",
@@ -385,6 +420,51 @@ public final class Nms {
     /** The packet that makes item frame [entityId] show map [mapId]. */
     public Object frameShows(int entityId, int mapId) {
         return make(newDataPacket, entityId, List.of(make(dataValue, frameItem, mapItem(mapId))));
+    }
+
+    /** A fresh entity id from the server's own counter, which no real entity will ever be given. */
+    public int nextEntityId(org.bukkit.World world) {
+        try {
+            return nextEntityIdTakesWorld ? (int) nextEntityId.invoke(world) : (int) nextEntityId.invoke();
+        } catch (Throwable t) {
+            throw rethrow(t);
+        }
+    }
+
+    /**
+     * The two packets that bring an invisible, silent glow item frame showing map [mapId] to one client, as
+     * the tracker sends a real one ({@code ItemFrame.getAddEntityPacket}, then its non-default data): the
+     * frame hangs in block (x, y, z) on [face]'s side.
+     */
+    public List<Object> frameAppears(int entityId, java.util.UUID uuid, int x, int y, int z, org.bukkit.block.BlockFace face, int mapId) {
+        Object add = make(newAddEntity, entityId, uuid, (double) x, (double) y, (double) z, 0f, 0f, glowFrameType, direction3d(face), noMovement, 0d);
+        Object data = make(newDataPacket, entityId, List.of(
+                make(dataValue, sharedFlags, (byte) (1 << 5)), // Entity.FLAG_INVISIBLE
+                make(dataValue, silent, true),
+                make(dataValue, frameItem, mapItem(mapId))));
+        return List.of(add, data);
+    }
+
+    /** Direction.get3DDataValue for a block face: down, up, north, south, west, east. */
+    private static int direction3d(org.bukkit.block.BlockFace face) {
+        return switch (face) {
+            case DOWN -> 0;
+            case UP -> 1;
+            case NORTH -> 2;
+            case SOUTH -> 3;
+            case WEST -> 4;
+            case EAST -> 5;
+            default -> throw new IllegalArgumentException("A frame hangs on a block's side, not " + face);
+        };
+    }
+
+    /** The packet that takes entities [ids] off a client. */
+    public Object removeEntities(int[] ids) {
+        try {
+            return newRemoveEntities.invoke(ids);
+        } catch (Throwable t) {
+            throw rethrow(t);
+        }
     }
 
     private Object mapItem(int mapId) {

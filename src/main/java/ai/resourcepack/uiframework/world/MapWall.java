@@ -1,5 +1,6 @@
 package ai.resourcepack.uiframework.world;
 
+import ai.resourcepack.uiframework.net.Nms;
 import ai.resourcepack.uiframework.pack.Shaders;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -20,12 +21,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * A wall of invisible glow item frames, each holding a map id the engine owns. (anchorX, anchorY,
  * anchorZ) is the block holding the TOP-LEFT frame as seen by somebody facing the wall; the pictures
  * face [facing]. Map ids the engine owns have no saved data on the server, so vanilla never sends
- * anything for them: every pixel the client sees comes from the engine's sender.
+ * anything for them: every pixel the client sees comes from the engine's sender. A shared wall's frames
+ * are real entities; a view's exist on its viewer's client only (see {@link #spawnFor}).
  */
 public final class MapWall {
     public static final Set<BlockFace> HORIZONTAL = Set.of(BlockFace.NORTH, BlockFace.SOUTH, BlockFace.EAST, BlockFace.WEST);
@@ -37,8 +40,17 @@ public final class MapWall {
     public final int firstMapId;
     /** Right, as seen by somebody facing the wall. */
     public final int rightX, rightZ;
+    /** A shared wall's frames: real entities, in the world for everybody. */
     private final List<GlowItemFrame> frames = new ArrayList<>();
     private final Set<UUID> frameIds = new HashSet<>();
+    /**
+     * A view's frames exist on its one viewer's client only (see {@link #spawnFor}): the server never holds an
+     * entity for them. Null for a shared wall.
+     */
+    private Nms nms;
+    private Player owner;
+    private int[] ownerStack;
+    private boolean shownToOwner;
     /** The frames' entity ids in tile order, empty while there are none; read by the sender and the netty threads. */
     private volatile int[] entityIds = new int[0];
     /** Tile of each frame's entity id. */
@@ -121,37 +133,52 @@ public final class MapWall {
         return new double[]{px, py, t};
     }
 
-    /** [viewer]: frames only they will see, shown to them now or, without [show], later with {@link #showTo}. */
-    public void spawn(Plugin plugin, Player viewer, boolean show) {
-        spawn(plugin, viewer, show, null);
+    /**
+     * Frames for [viewer] alone, which only their client ever holds: sent to them by {@link #showTo}, taken
+     * off by {@link #despawn}. Real frames, even hidden from everybody else, cost the server every tick for
+     * every player near them: the entity tracker checks each one against each nearby player, and Paper's
+     * activation range gathers them round each player. With a wall of up to a few hundred frames per seated
+     * player, that grew with the square of the players seated together: 50 seated side by side took the tick
+     * from 4 ms to 116 ms. These cost nothing per tick.
+     *
+     * With [stack] (a block) every frame lies in that one block, on its floor, rather than laid out as the
+     * wall: for a view whose maps the viewer's client places in the window by what each map carries (see
+     * Canvas.Encoding.HI_TILED). A frame lying at the camera's own block is inside the client's view frustum
+     * whichever way the camera looks, so it is never culled.
+     */
+    public void spawnFor(Nms nms, Player viewer, int[] stack) {
+        despawn();
+        this.nms = nms;
+        owner = viewer;
+        ownerStack = stack;
+        int[] ids = new int[tiles()];
+        Map<Integer, Integer> tiles = new HashMap<>();
+        for (int t = 0; t < ids.length; t++) {
+            ids[t] = nms.nextEntityId(world);
+            tiles.put(ids[t], t);
+        }
+        tileOf = Map.copyOf(tiles);
+        entityIds = ids;
     }
 
-    /**
-     * As {@link #spawn(Plugin, Player, boolean)}, but with [stack] (a block) every frame in that one block,
-     * lying on its floor, rather than laid out as the wall: for a view whose maps the viewer's client
-     * places in the window by what each map carries (see Canvas.Encoding.HI_TILED). A frame lying at the
-     * camera's own block is inside the client's view frustum whichever way the camera looks, so it is
-     * never culled.
-     */
-    public void spawn(Plugin plugin, Player viewer, boolean show, int[] stack) {
+    /** Shared frames everybody sees, in the world. */
+    public void spawn(Plugin plugin) {
         despawn();
-        BlockFace face = stack == null ? facing : BlockFace.UP;
         for (int r = 0; r < rows; r++) {
             for (int c = 0; c < cols; c++) {
-                int[] b = stack == null ? tileBlock(c, r) : stack;
+                int[] b = tileBlock(c, r);
                 ItemStack item = new ItemStack(Material.FILLED_MAP);
                 MapMeta meta = (MapMeta) item.getItemMeta();
                 meta.setMapId(mapId(r * cols + c));
                 item.setItemMeta(meta);
                 GlowItemFrame frame = world.spawn(new Location(world, b[0], b[1], b[2]), GlowItemFrame.class, f -> {
-                    f.setFacingDirection(face, true);
+                    f.setFacingDirection(facing, true);
                     f.setItem(item, false);
                     f.setFixed(true);
                     f.setVisible(false);
                     f.setInvulnerable(true);
                     f.setPersistent(false);
                     f.setSilent(true);
-                    if (viewer != null) f.setVisibleByDefault(false);
                 });
                 frames.add(frame);
                 frameIds.add(frame.getUniqueId());
@@ -165,21 +192,31 @@ public final class MapWall {
         }
         tileOf = Map.copyOf(tiles);
         entityIds = ids;
-        // Shown once their ids are known: a frame a client gets is told which map to show by the id (Pipeline).
-        if (viewer != null && show) for (GlowItemFrame f : frames) viewer.showEntity(plugin, f);
     }
 
-    public void spawn(Plugin plugin) {
-        spawn(plugin, null, true);
+    /**
+     * Brings a view's frames ({@link #spawnFor}) to its viewer, in bundles, each frame showing the map its
+     * tile owns (the viewer's pipeline points it elsewhere on the way when it shares another tile's map).
+     */
+    public void showTo(Player viewer) {
+        if (nms == null || viewer != owner) throw new IllegalStateException("Only a view's own viewer is shown its frames");
+        int[] ids = entityIds;
+        BlockFace face = ownerStack == null ? facing : BlockFace.UP;
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        List<Object> out = new ArrayList<>();
+        for (int t = 0; t < ids.length; t++) {
+            int[] b = ownerStack == null ? tileBlock(t % cols, t / cols) : ownerStack;
+            out.addAll(nms.frameAppears(ids[t], new UUID(random.nextLong(), random.nextLong()), b[0], b[1], b[2], face, mapId(t)));
+            // A client takes at most 4096 packets in one bundle.
+            if (out.size() >= BUNDLE_MAX || t == ids.length - 1) {
+                nms.send(viewer, nms.bundle(out));
+                out = new ArrayList<>();
+            }
+        }
+        shownToOwner = true;
     }
 
-    public void hideFrom(Plugin plugin, Player player) {
-        for (GlowItemFrame f : frames) player.hideEntity(plugin, f);
-    }
-
-    public void showTo(Plugin plugin, Player player) {
-        for (GlowItemFrame f : frames) player.showEntity(plugin, f);
-    }
+    private static final int BUNDLE_MAX = 4000;
 
     /** Whether every frame's block is inside the world's height and in a loaded chunk. */
     public boolean placeable() {
@@ -193,10 +230,16 @@ public final class MapWall {
         for (GlowItemFrame f : frames) f.remove();
         frames.clear();
         frameIds.clear();
+        if (shownToOwner && owner.isOnline()) nms.send(owner, nms.removeEntities(entityIds));
+        nms = null;
+        owner = null;
+        ownerStack = null;
+        shownToOwner = false;
         entityIds = new int[0];
         tileOf = Map.of();
     }
 
+    /** A shared wall's frames are all still in the world. */
     public boolean spawned() {
         if (frames.isEmpty()) return false;
         for (GlowItemFrame f : frames) if (!f.isValid()) return false;
