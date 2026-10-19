@@ -281,6 +281,11 @@ public final class Canvas {
             this.at = at;
         }
 
+        /** Whether [other] is of the same drawing: no tile has been published between the two. */
+        public boolean sameAs(Snapshot other) {
+            return other != null && other.at == at;
+        }
+
         /** Tile [index]'s map colour bytes in [encoding]. The array is never changed after it is returned. */
         public byte[] tile(int index, Encoding encoding) {
             Tile t = at[index];

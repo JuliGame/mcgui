@@ -28,6 +28,8 @@ dependencies {
     // The server ships netty; the map sender and the packet filters are netty handlers.
     compileOnly 'io.netty:netty-transport:4.2.7.Final'
 
+    // Tests that drive the sender need the API's types (a wall, a player) on the classpath, as the server provides them.
+    testImplementation 'io.papermc.paper:paper-api:1.21.8-R0.1-SNAPSHOT'
     testImplementation 'org.junit.jupiter:junit-jupiter:5.11.0'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
