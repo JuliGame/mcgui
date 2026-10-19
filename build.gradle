@@ -87,6 +87,17 @@ tasks.register('renderBench', JavaExec) {
     maxHeapSize = '2g'
 }
 
+// What styling costs per page, cold and on a hover, and a digest of every computed style to compare two builds (StyleBench).
+// -Pdir=<folder or .html> (default samples), -Pruns=<n>, -Ponly=<substring>, -Pout=<tsv>, -Pdump=<dir>, -Ppng=<dir>.
+tasks.register('styleBench', JavaExec) {
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'ai.resourcepack.ui.html.StyleBench'
+    args = [file(project.findProperty('dir') ?: 'samples').absolutePath]
+    systemProperty 'java.awt.headless', 'true'
+    ['runs', 'only', 'out', 'dump', 'png'].each { if (project.findProperty(it)) systemProperty it, project.findProperty(it) }
+    maxHeapSize = '2g'
+}
+
 // Hostile pages, each on its own thread with a timeout, in child JVMs replaced after a timeout or OOM (Torture).
 // -Psrc=cases (generated pathological pages, the default), a folder, or fuzz:<count>:<seed>; several separated by ','.
 // -Ptimeout=<s> -Pheap=<size> -Ponly=<substring> -Pout=<tsv>.
