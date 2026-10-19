@@ -8,7 +8,11 @@ import java.awt.image.SinglePixelPackedSampleModel;
 import java.awt.image.WritableRaster;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.WeakHashMap;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.atomic.AtomicReferenceArray;
 import java.util.stream.IntStream;
@@ -37,7 +41,14 @@ public final class Canvas {
 
     private final Palette palette;
     private final int cols, rows, width, height;
-    private final byte[] ycc;
+    /**
+     * The picture's colours, or null while it is all black (never drawn into). Shared with every canvas made by
+     * {@link #copy()} or shown by {@link #show(Canvas)} until one of them draws: the first drawing into a canvas that
+     * does not own its colours copies them first ({@link #detach()}), on the drawing thread. Never changed while shared.
+     */
+    private volatile byte[] ycc;
+    /** Whether [ycc] is this canvas's alone, made by its own {@link #detach()}: only then is it drawn into in place. */
+    private volatile boolean owned;
     /** The published tiles, never changed once published: a drawing publishes a new array. */
     private volatile Tile[] tiles;
     /** Odd while a drawing changes [ycc], so a PLAIN tile made from it meanwhile is not kept. */
@@ -65,21 +76,38 @@ public final class Canvas {
         this.rows = rows;
         this.width = cols * 128;
         this.height = rows * 128;
-        this.ycc = new byte[width * height * 3];
         int count = cols * rows;
         hiTiled = new AtomicReferenceArray<>(count);
-        // Black: Y 0, Cb and Cr 128. Filled by doubling copies, not pixel by pixel (a 16x9 canvas is 7 MB).
-        ycc[1] = (byte) 128;
-        ycc[2] = (byte) 128;
-        for (int n = 3; n < ycc.length; n *= 2) System.arraycopy(ycc, 0, ycc, n, Math.min(n, ycc.length - n));
-        // Every tile of a blank canvas encodes to the same bytes, and tiles are never changed once published,
-        // so they all share one Tile: what is made from it alone (HI_OWN, PLAIN) is the same for every place.
-        // HI_TILED carries the tile's place, so it is never kept on the Tile (see Snapshot.tile). This runs on the
-        // server thread when a viewer reaches a wall.
+        // Black, with no colours of its own until something is drawn (a 16x9 canvas's are 7 MB, and this runs on the
+        // server thread when a viewer reaches a wall). Every tile of a blank canvas encodes to the same bytes, and tiles
+        // are never changed once published, so they all share one Tile, as do all blank canvases of this size: what is
+        // made from it alone (HI_OWN, PLAIN) depends only on the size. HI_TILED carries the tile's place, so it is never
+        // kept on the Tile (see Snapshot.tile).
         Tile[] all = new Tile[count];
-        encode(0, all);
-        Arrays.fill(all, all[0]);
+        Arrays.fill(all, blank(palette, cols, rows));
         tiles = all;
+    }
+
+    /** All black, 3 bytes a pixel, one map wide and high: what a blank tile is encoded from. */
+    private static final byte[] BLACK = black(TILE * 3);
+    /** The blank Tile of each palette and size. */
+    private static final Map<Palette, Map<Integer, Tile>> BLANK = Collections.synchronizedMap(new WeakHashMap<>());
+
+    private static Tile blank(Palette palette, int cols, int rows) {
+        return BLANK.computeIfAbsent(palette, p -> new ConcurrentHashMap<>()).computeIfAbsent(cols << 16 | rows, k -> {
+            byte[] h = new byte[TILE];
+            palette.encodeHi(BLACK, 128, 0, 0, h);
+            return new Tile(h);
+        });
+    }
+
+    /** [n] bytes of black YCbCr: Y 0, Cb and Cr 128. Filled by doubling copies, not pixel by pixel. */
+    private static byte[] black(int n) {
+        byte[] b = new byte[n];
+        b[1] = (byte) 128;
+        b[2] = (byte) 128;
+        for (int i = 3; i < n; i *= 2) System.arraycopy(b, 0, b, i, Math.min(i, n - i));
+        return b;
     }
 
     /** A copy of [from] as it is now (see {@link #copy()}). */
@@ -90,7 +118,7 @@ public final class Canvas {
         this.rows = from.rows;
         this.width = from.width;
         this.height = from.height;
-        this.ycc = from.ycc.clone();
+        this.ycc = from.ycc;
         this.hiTiled = new AtomicReferenceArray<>(cols * rows);
         this.tiles = from.tiles;
         this.version = from.version;
@@ -98,30 +126,43 @@ public final class Canvas {
 
     /**
      * A new canvas showing this one's picture: the same published tiles (the same arrays, so nothing is encoded,
-     * and a viewer who already has them is sent nothing), its colours copied, telling the same sender. Call it
-     * from the thread that draws into this one, or on a canvas nothing draws into any more.
+     * and a viewer who already has them is sent nothing), the same colours, telling the same sender. Nothing is
+     * copied: the colours are shared until either canvas draws, which copies them first. Call it from the thread
+     * that draws into this one, or on a canvas nothing draws into any more.
      */
     public Canvas copy() {
+        owned = false;
         return new Canvas(this);
     }
 
     /**
      * Show [from]'s picture, as one published change like a drawing: its tiles (the same arrays, nothing is
-     * encoded or converted), its colours copied. [from] must be the same size, and nothing may draw into it
+     * encoded or converted) and its colours, shared until either canvas draws (nothing is copied here, so this
+     * is cheap enough for the server thread). [from] must be the same size, and nothing may draw into it
      * meanwhile (a {@link #copy()} kept aside, say). Draw into this canvas after it as after any drawing.
      */
     public void show(Canvas from) {
         if (from.cols != cols || from.rows != rows) throw new IllegalArgumentException("Not the same size: " + from.cols + "x" + from.rows);
         if (from == this) return;
+        from.owned = false;
         changing++;
         try {
-            System.arraycopy(from.ycc, 0, ycc, 0, ycc.length);
+            owned = false;
+            ycc = from.ycc;
         } finally {
             changing++;
         }
         tiles = from.tiles;
         version++;
         published.run();
+    }
+
+    /** Makes [ycc] this canvas's own before it is drawn into: a copy of the shared colours, or black. On the drawing thread. */
+    private void detach() {
+        if (owned) return;
+        byte[] shared = ycc;
+        ycc = shared == null ? black(width * height * 3) : shared.clone();
+        owned = true;
     }
 
     public int cols() { return cols; }
@@ -179,6 +220,8 @@ public final class Canvas {
         boolean moves = shift != 0 && Math.abs(shift) < rows;
         boolean draws = x0 < x1 && y0 < y1;
         if (!moves && !draws) return;
+        // Colours shared with another canvas (or none yet, all black) are copied before they are drawn into: here, on the drawing thread.
+        detach();
         Tile[] next = tiles.clone();
         changing++;
         try {
@@ -209,6 +252,7 @@ public final class Canvas {
     /** The picture's rows, and [next]'s tiles with them, moved up by [shift] map rows, round to the other edge. */
     private void rotate(int shift, Tile[] next) {
         int k = Math.floorMod(shift, rows);
+        byte[] ycc = this.ycc;
         int bytes = k * 128 * width * 3;
         byte[] top = Arrays.copyOf(ycc, bytes);
         System.arraycopy(ycc, bytes, ycc, 0, ycc.length - bytes);
@@ -221,6 +265,7 @@ public final class Canvas {
     /** Rows [from, to) of the canvas: convert, compare with what is there, store, and mark changed tiles. */
     private void convert(int[] rgb, int offset, int stride, int x, int y, int x0, int x1, int from, int to, boolean[] dirty) {
         int cw = x1 - x0;
+        byte[] ycc = this.ycc;
         byte[] row = new byte[cw * 3];
         for (int py = from; py < to; py++) {
             int s = offset + (py - y) * stride + (x0 - x);
@@ -243,6 +288,11 @@ public final class Canvas {
     /** The picture shrunk to [w] × [h] RGB pixels, each the average of the area it covers. */
     public int[] thumbnail(int w, int h) {
         int[] out = new int[w * h];
+        byte[] ycc = this.ycc;
+        if (ycc == null) {
+            Arrays.fill(out, Palette.yccToRgb(0, 128, 128));
+            return out;
+        }
         for (int oy = 0; oy < h; oy++) {
             int y0 = oy * height / h, y1 = Math.max(y0 + 1, (oy + 1) * height / h);
             for (int ox = 0; ox < w; ox++) {
@@ -327,7 +377,10 @@ public final class Canvas {
             }
             long before = canvas.changing;
             byte[] out = new byte[TILE];
-            canvas.palette.encodePlain(canvas.ycc, canvas.width, (index % canvas.cols) * 128, (index / canvas.cols) * 128, out);
+            byte[] ycc = canvas.ycc;
+            // No colours yet: the canvas is blank, and so is every tile of it.
+            if (ycc == null) canvas.palette.encodePlain(BLACK, 128, 0, 0, out);
+            else canvas.palette.encodePlain(ycc, canvas.width, (index % canvas.cols) * 128, (index / canvas.cols) * 128, out);
             // Kept only if the picture did not change under it and this tile is still where it was read from;
             // otherwise it may be of other pixels, and is made again next time.
             if ((before & 1) != 0 || canvas.changing != before || canvas.tiles != at) return out;
