@@ -119,14 +119,15 @@ tasks.register('torture', JavaExec) {
 
 // Many players at once: N sessions sharing R render threads, input to frame latency, throughput, CPU, heap and the
 // bytes a viewer would be sent (LoadBench). Knobs, all optional: -Ppages=menu,landing,shop -Psessions=1,2,4 -Prender=1,2,4
-// -Pmodes=walk,flick,stress -Pbands=4 -Psecs=12 -Pwarm=2 -Psend=true -Pout=<csv> -Ptag=<label> -Pjvm=<extra jvm flags>.
+// -Pmodes=walk,flick,stress,hand -Pbands=4 -Psecs=12 -Pwarm=2 -Psend=true -Pout=<csv> -Ptag=<label> -Pjvm=<extra jvm flags>
+// -Pahead=0,3 (hover targets drawn ahead, interleaved cell by cell) -Preps=<n> -Pverify=true (each hover drawn ahead checked against the repaint).
 tasks.register('loadBench', JavaExec) {
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'ai.resourcepack.ui.html.LoadBench'
     systemProperty 'java.awt.headless', 'true'
     systemProperty 'samples', file('samples').absolutePath
     systemProperty 'shipped', file('src/main/resources/pages').absolutePath
-    ['pages', 'sessions', 'render', 'modes', 'bands', 'secs', 'warm', 'send', 'out', 'tag', 'nowarmcell', 'adaptive'].each { k ->
+    ['pages', 'sessions', 'render', 'modes', 'bands', 'secs', 'warm', 'send', 'out', 'tag', 'nowarmcell', 'adaptive', 'ahead', 'reps', 'verify'].each { k ->
         if (project.hasProperty(k)) systemProperty k, project.property(k)
     }
     maxHeapSize = '3g'
@@ -154,5 +155,18 @@ tasks.register('firstPictureBench', JavaExec) {
     args = (project.findProperty('pages') ?: '').toString().split(',').findAll { it }.collect { file(it).absolutePath }
     systemProperty 'java.awt.headless', 'true'
     systemProperty 'runs', project.findProperty('runs') ?: '20'
+    maxHeapSize = '2g'
+}
+
+// What one hover costs on one thread: the repaint, which preparing hovers in advance takes away, and Canvas.draw,
+// which is left (HoverCost). -Pruns=<n>, -Ppages=<spec,spec> (default the shipped menu and shop and every sample).
+tasks.register('hoverCost', JavaExec) {
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'ai.resourcepack.ui.html.HoverCost'
+    args = (project.findProperty('pages') ?: '').toString().split(',').findAll { it }
+    systemProperty 'java.awt.headless', 'true'
+    systemProperty 'samples', file('samples').absolutePath
+    systemProperty 'shipped', file('src/main/resources/pages').absolutePath
+    systemProperty 'runs', project.findProperty('runs') ?: '5'
     maxHeapSize = '2g'
 }
