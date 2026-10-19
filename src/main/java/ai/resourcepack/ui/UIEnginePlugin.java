@@ -39,6 +39,7 @@ public final class UIEnginePlugin extends JavaPlugin {
     private final List<BukkitTask> tasks = new ArrayList<>();
     private BukkitTask watcher;
     private FileConfiguration cfg;
+    private volatile FirstPictures pictures;
 
     @Override
     public void onEnable() {
@@ -56,10 +57,12 @@ public final class UIEnginePlugin extends JavaPlugin {
             return t;
         });
         pages = newPageStore();
+        pictures = newFirstPictures();
         screens = new Screens(this, renderers);
         getServer().getPluginManager().registerEvents(screens, this);
         // Warm the renderer so the first page a player opens is quick: fonts, then a few pages loaded and drawn
-        // once, full screen, off screen. A cold JVM takes several times longer over its first pictures.
+        // once, full screen, off screen. A cold JVM takes several times longer over its first pictures. Then the
+        // first picture of every placed screen's page, kept so its first viewers are sent it without waiting.
         renderers.execute(() -> {
             ai.resourcepack.ui.html.text.Fonts.bundled();
             warmUp();
@@ -134,6 +137,8 @@ public final class UIEnginePlugin extends JavaPlugin {
         PageStore old = pages;
         pages = newPageStore();
         old.close();
+        // Every page is read again, as a new revision: no picture of the old ones is any use, and the bounds may have changed.
+        pictures = newFirstPictures();
         Placeholders.reset();
         watch();
         for (String name : pages.names()) screens.reloaded(name);
@@ -148,6 +153,15 @@ public final class UIEnginePlugin extends JavaPlugin {
 
     PageStore pages() {
         return pages;
+    }
+
+    /** The first pictures of pages, kept for the next session to show them (see {@link FirstPictures}). */
+    FirstPictures firstPictures() {
+        return pictures;
+    }
+
+    private FirstPictures newFirstPictures() {
+        return new FirstPictures(cfg.getInt("first-pictures.entries", 64), Math.round(cfg.getDouble("first-pictures.megabytes", 128) * 1048576));
     }
 
     /**
@@ -233,6 +247,61 @@ public final class UIEnginePlugin extends JavaPlugin {
             // Only ever a head start: a page that will not load or draw here fails for the player too, with a message.
             if (debug()) getLogger().info("Warm-up stopped: " + e);
         }
+        warmFirstPictures();
+    }
+
+    /**
+     * Draws the first picture of every placed screen's page at the screen's size and fullscreen, and of the pages
+     * {@link #warmUp} drew, fullscreen, and keeps each in {@link FirstPictures}: so the first viewer of each after a
+     * restart is sent the picture at once. Each is drawn exactly as a session would draw it, filled for nobody in
+     * particular, which is what any viewer's copy is unless the page is filled with their own values (then a session
+     * never takes a kept picture anyway). Runs on a render thread, after the screens are placed.
+     */
+    private void warmFirstPictures() {
+        FirstPictures kept = pictures;
+        if (!kept.enabled()) return;
+        long t0 = System.nanoTime();
+        record Target(String name, int cols, int rows, double height) {}
+        java.util.Set<Target> targets = new java.util.LinkedHashSet<>();
+        // Fullscreen ones are 0 x 0 here: their size is the page's own, known once it is loaded.
+        for (Screens.Wall w : screens.walls()) {
+            String name = pages.normalise(w.page);
+            if (name == null) continue;
+            targets.add(new Target(name, w.cols, w.rows, w.height > 0 ? w.height : wallHeight(w.rows)));
+            targets.add(new Target(name, 0, 0, viewHeight()));
+        }
+        List<String> names = pages.names();
+        for (int i = 0; i < Math.min(WARM_PAGES, names.size()); i++) targets.add(new Target(names.get(i), 0, 0, viewHeight()));
+        int drawn = 0;
+        for (Target t : targets) {
+            if (!isEnabled() || drawn >= cfg.getInt("first-pictures.entries", 64)) break;
+            try {
+                Page page = pages.load(t.name).get(30, TimeUnit.SECONDS);
+                if (page == null) continue;
+                int[] size = t.cols > 0 ? new int[]{t.cols, t.rows} : viewSize(page);
+                double scale = size[1] * 128 / Screens.designHeight(page, t.height);
+                // On the server thread, where placeholders are filled.
+                Placeholders.Filled filled = java.util.concurrent.CompletableFuture.supplyAsync(() -> Placeholders.fill(page.document, null), serverThread)
+                        .get(30, TimeUnit.SECONDS);
+                FirstPictures.Key key = new FirstPictures.Key(t.name, page, size[0], size[1], scale, filled.key());
+                if (!kept.claim(key, p -> {}).mine()) continue;
+                FirstPictures.Picture picture = null;
+                try {
+                    var frame = HtmlRenderer.render(page, filled.doc(), size[0] * 128, size[1] * 128, scale, 0, HtmlRenderer.state(null, null),
+                            null, null, renderTimeout());
+                    var canvas = UIFramework.get().canvas(size[0], size[1]);
+                    canvas.draw(frame.image(), 0, 0);
+                    picture = FirstPictures.Picture.of(key, frame, canvas);
+                } finally {
+                    kept.publish(key, picture);
+                }
+                drawn++;
+            } catch (Exception | LinkageError e) {
+                // That page's first viewer draws it, as without the warm-up, and hears why it cannot be drawn if it cannot.
+                if (debug()) getLogger().info("Could not keep the first picture of " + t.name + ": " + e);
+            }
+        }
+        if (debug()) getLogger().info("Kept " + drawn + " first pictures in " + (System.nanoTime() - t0) / 1_000_000 + " ms (" + kept.stats() + ")");
     }
 
     /** A view's size in maps: the page's {@code <meta name="ui:size" content="12x7">}, else the config's. */

@@ -59,6 +59,12 @@ public final class Session {
     private Page page;
     /** This session's copy of the page's document; [hover] and [pressed] are always elements of it. */
     private Document doc;
+    /**
+     * What [doc] was filled from, and whether it is still only that (nothing clicked has changed it): only such a
+     * document's first picture is shared with other sessions ({@link FirstPictures}).
+     */
+    private Placeholders.Filled filled;
+    private boolean pristine;
     private double scrollY;
     private Element hover, pressed;
     private final Deque<Entry> back = new ArrayDeque<>();
@@ -90,6 +96,24 @@ public final class Session {
     /** Re-fill placeholders every this many ticks (0: only when the page opens). */
     private int refreshTicks;
     private long nextRefresh;
+    /**
+     * The image of [frame] when it is shared with a {@link FirstPictures} picture (taken from one, or kept in one):
+     * copied before a repaint paints into it. Written when no picture is being drawn, read by the render thread.
+     */
+    private volatile java.awt.image.BufferedImage borrowed;
+    /** A picture another session drew for this one's state, handed over when it landed (server thread). */
+    private FirstPictures.Picture offered;
+    /** The next picture is drawn here, not waited for: the one waited for could not be drawn. */
+    private boolean drawOwn;
+    /** The tick this session was made. */
+    private final int born;
+    /**
+     * Ticks a wall or view waits for a session's first picture before showing its canvas, blank, all the same. A frame
+     * whose map the client has no colours for draws the map item, so a screen shows nothing new until its page is
+     * drawn, and then the page, one packet a map; a blank first only if drawing takes longer than this. (A view is
+     * not switched to before its picture has arrived, so there the wait is unseen.)
+     */
+    static final int BLANK_AFTER_TICKS = 10;
 
     /** [designHeight]: how many CSS pixels tall the canvas is, unless the first page shown sets its own ui:height. */
     Session(UIEnginePlugin plugin, ExecutorService renderers, Canvas canvas, UUID viewer, double designHeight) {
@@ -99,6 +123,7 @@ public final class Session {
         this.canvas = canvas;
         this.viewer = viewer;
         this.designHeight = designHeight;
+        this.born = Bukkit.getCurrentTick();
     }
 
     public String pageName() {
@@ -161,7 +186,9 @@ public final class Session {
         }
         pageName = n;
         page = p;
-        doc = Placeholders.fill(p.document, player());
+        filled = Placeholders.fill(p.document, player());
+        doc = filled.doc();
+        pristine = true;
         scrollY = scroll;
         hover = null;
         pressed = null;
@@ -204,7 +231,9 @@ public final class Session {
         plugin.pages().load(name).thenAcceptAsync(p -> {
             if (closed || navigation != nav || p == null || p == page || !name.equals(pageName)) return;
             page = p;
-            doc = Placeholders.fill(p.document, player());
+            filled = Placeholders.fill(p.document, player());
+            doc = filled.doc();
+            pristine = true;
             // The new file can be shaped differently: nothing carries over by position.
             hover = null;
             pressed = null;
@@ -247,12 +276,15 @@ public final class Session {
         if (c != null && c.idleNanos() > CACHE_IDLE_NANOS) cache = null;
         if (refreshTicks > 0 && page != null && now >= nextRefresh) {
             nextRefresh = now + refreshTicks;
-            Document fresh = Placeholders.fill(page.document, player());
+            Placeholders.Filled fresh = Placeholders.fill(page.document, player());
             // What clicks changed (an open <details>, a ticked box) and what the pointer is on carry over.
-            keepFormState(doc, fresh);
-            hover = counterpart(hover, fresh);
-            pressed = counterpart(pressed, fresh);
-            doc = fresh;
+            boolean untouched = pristine && doc == filled.doc();
+            keepFormState(doc, fresh.doc());
+            hover = counterpart(hover, fresh.doc());
+            pressed = counterpart(pressed, fresh.doc());
+            filled = fresh;
+            doc = fresh.doc();
+            pristine = untouched;
             render();
         }
     }
@@ -323,7 +355,30 @@ public final class Session {
         // A tall picture is worth painting only if its document lasts: not if a refresh replaces it within seconds.
         boolean lasting = refreshTicks == 0 || nextRefresh - Bukkit.getCurrentTick() > CACHE_MIN_TICKS;
         boolean shift = plugin.tileShift();
+        // The first picture of this copy of the page, as every session's is: taken from FirstPictures if it is kept
+        // there, waited for if another session is drawing it, else drawn here and kept for the next.
+        FirstPictures.Key first = drawOwn ? null : firstKey(p, d, s, fragment, scale);
+        FirstPictures.Picture take = offered;
+        offered = null;
+        drawOwn = false;
+        if (first != null) {
+            if (take == null || !take.key.equals(first)) {
+                FirstPictures.Claim claim = plugin.firstPictures().claim(first, landed -> serverThread.execute(() -> landed(landed)));
+                if (claim.picture() == null && !claim.mine()) return; // waiting for it: still drawing, as far as render() goes
+                take = claim.picture();
+                if (!claim.mine()) first = null;
+            } else {
+                first = null;
+            }
+            if (take != null && adopt(take, d, name, hoverKey, pressKey)) {
+                rendering = false;
+                return;
+            }
+        }
+        FirstPictures.Key publish = first;
+        FirstPictures pictures = plugin.firstPictures();
         renderers.execute(() -> {
+            boolean published = false;
             try {
                 long t0 = System.nanoTime();
                 HtmlRenderer.Frame before = frame;
@@ -367,8 +422,10 @@ public final class Session {
                     f = c.frame(at);
                     partial = still;
                 } else if (still && !redraw) {
-                    // Only the hover or press state moved: repaint just what it touches.
-                    Repaint.Result r = Repaint.partial(p, d, canvas.width(), canvas.height(), scale, before.scrollY(), state, before, moved, timeout);
+                    // Only the hover or press state moved: repaint just what it touches. A picture shared with other
+                    // sessions (FirstPictures) is copied first, as the repaint paints into it.
+                    HtmlRenderer.Frame base = before.image() == borrowed ? FirstPictures.own(before) : before;
+                    Repaint.Result r = Repaint.partial(p, d, canvas.width(), canvas.height(), scale, before.scrollY(), state, base, moved, timeout);
                     if (r.frame() != null) {
                         f = r.frame();
                         changed = r.changed();
@@ -426,6 +483,14 @@ public final class Session {
                 drawnPress = pressKey;
                 drawnName = name;
                 frame = f;
+                if (publish != null && !partial && c == null && f.document() == d && f.scrollY() == 0) {
+                    // This session's first picture of the page, drawn as any session's would be: kept for the next to
+                    // show it here, with the canvas as it is now. Its image is shared from now on.
+                    FirstPictures.Picture picture = FirstPictures.Picture.of(publish, f, canvas.copy());
+                    if (picture != null) borrowed = f.image();
+                    pictures.publish(publish, picture);
+                    published = true;
+                }
                 AtomicInteger failed = FAILURES.remove(p);
                 if (failed != null && failed.get() > 1) {
                     plugin.getLogger().info("Drew page " + name + " after " + failed.get() + " attempts that could not be drawn");
@@ -448,6 +513,7 @@ public final class Session {
                 HtmlRenderer.Frame shown = frame;
                 if (shown != null && shown.page() != p) serverThread.execute(() -> undrawable(p, nav));
             } finally {
+                if (publish != null && !published) pictures.abandon(publish);
                 synchronized (Session.this) {
                     if (closed) cache = null;
                     if (dirty && !closed) {
@@ -483,6 +549,67 @@ public final class Session {
         return changed;
     }
 
+
+    /**
+     * The key of [d]'s first picture if the picture to be drawn is one ({@link FirstPictures}): the first of this copy
+     * of the page, at its top, nothing hovered or pressed, nothing clicked changed, no #fragment, and filled with
+     * nobody's own values. Else null. [s], [fragment] and [scale] are what is to be drawn.
+     */
+    private FirstPictures.Key firstKey(Page p, Document d, double s, String fragment, double scale) {
+        HtmlRenderer.Frame f = frame;
+        if (!plugin.firstPictures().enabled() || fragment != null || s != 0 || hover != null || pressed != null) return null;
+        if (!pristine || filled == null || filled.doc() != d || filled.personal() || f != null && f.document() == d) return null;
+        return new FirstPictures.Key(pageName, p, canvas.cols(), canvas.rows(), scale, filled.key());
+    }
+
+    /**
+     * Takes [picture] as this session's picture of [d], as if it had drawn it: the canvas shows it (its tiles, nothing
+     * drawn), and the frame is it, on [d]'s elements. False, with nothing changed, if [d] is not shaped like it. On the
+     * server thread, in place of drawing ([rendering] is set).
+     */
+    private boolean adopt(FirstPictures.Picture picture, Document d, String name, List<Element> hoverKey, List<Element> pressKey) {
+        HtmlRenderer.Frame f = picture.frameFor(d);
+        if (f == null) return false;
+        long t0 = System.nanoTime();
+        canvas.show(picture.canvas);
+        borrowed = f.image();
+        drawnHover = hoverKey;
+        drawnPress = pressKey;
+        drawnName = name;
+        cache = null;
+        frame = f;
+        FAILURES.remove(f.page());
+        if (plugin.debug()) {
+            plugin.getLogger().info(String.format("Took the first picture of %s for %s in %.2f ms (%s)", name, viewer, (System.nanoTime() - t0) / 1e6,
+                    plugin.firstPictures().stats()));
+        }
+        // As after drawing a new page: what the pointer is over now.
+        serverThread.execute(this::repoint);
+        return true;
+    }
+
+    /** The first picture this session waited for was drawn by another session ([picture]), or could not be (null). */
+    private void landed(FirstPictures.Picture picture) {
+        synchronized (this) {
+            dirty = false;
+            if (closed) {
+                rendering = false;
+                return;
+            }
+            // Taken if the state is still the one it is of; else what is wanted now is drawn, here if that one was not.
+            offered = picture;
+            drawOwn = picture == null;
+            submit();
+        }
+    }
+
+    /**
+     * Whether its screen shows this session's canvas yet: once the first picture is on it, or, if that takes longer
+     * than {@link #BLANK_AFTER_TICKS}, blank until it is.
+     */
+    boolean showing() {
+        return frame != null || Bukkit.getCurrentTick() - born >= BLANK_AFTER_TICKS;
+    }
 
     public boolean ready() {
         return frame != null;

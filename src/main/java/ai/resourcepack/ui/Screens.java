@@ -115,7 +115,9 @@ public final class Screens implements Listener {
 
         @Override
         public Canvas canvas(Player viewer) {
-            return session(viewer).canvas;
+            // Nothing until the page is on it (see Session.BLANK_AFTER_TICKS): then the first thing sent is the page.
+            Session s = session(viewer);
+            return s.showing() ? s.canvas : null;
         }
 
         @Override
@@ -305,7 +307,16 @@ public final class Screens implements Listener {
             this.session = session;
         }
 
-        @Override public Canvas canvas() { return session.canvas; }
+        /**
+         * Nothing until the page is on it (see Session.BLANK_AFTER_TICKS), so the view is sent the page first, not
+         * a blank: the view opens at once, and its frames go up while the page is drawn. Asked at the open too,
+         * for the view's size, before [view] is set.
+         */
+        @Override
+        public Canvas canvas() {
+            return view == null || session.showing() ? session.canvas : null;
+        }
+
         @Override public void pointer(View v, int x, int y) { session.pointer(x, y); }
         @Override public void click(View v, int x, int y, Click click) { session.click(x, y); }
         @Override public void scroll(View v, int x, int y, int notches) { session.scroll(notches); }
@@ -399,6 +410,7 @@ public final class Screens implements Listener {
 
     /** Every session on a page, for a reload. */
     void reloaded(String page) {
+        plugin.firstPictures().invalidate(page, plugin.pages().loaded(page));
         for (Wall w : walls.values()) for (Session s : w.all()) s.reloaded(page);
         for (Seated s : views.values()) s.session.reloaded(page);
     }

@@ -144,3 +144,15 @@ tasks.register('tileBench', JavaExec) {
     systemProperty 'notches', project.findProperty('notches') ?: '12'
     maxHeapSize = '2g'
 }
+
+// CPU per new session of a page with and without a kept first picture, the style and layout share of a first
+// render, a viewer's own text repainted over another's picture, and the map packets a new viewer is sent
+// (FirstPictureBench). -Pruns=<n>; -Ppages=<file,file> (default the shipped pages and the long test page).
+tasks.register('firstPictureBench', JavaExec) {
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'ai.resourcepack.ui.FirstPictureBench'
+    args = (project.findProperty('pages') ?: '').toString().split(',').findAll { it }.collect { file(it).absolutePath }
+    systemProperty 'java.awt.headless', 'true'
+    systemProperty 'runs', project.findProperty('runs') ?: '20'
+    maxHeapSize = '2g'
+}
