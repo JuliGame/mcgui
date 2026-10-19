@@ -5,6 +5,7 @@ import ai.resourcepack.uiframework.api.Pointer;
 import ai.resourcepack.ui.html.HtmlRenderer;
 import ai.resourcepack.ui.html.Repaint;
 import ai.resourcepack.ui.html.Page;
+import ai.resourcepack.ui.html.PooledPicture;
 import ai.resourcepack.ui.html.RenderAbandoned;
 import ai.resourcepack.ui.html.ScrollCache;
 import ai.resourcepack.ui.html.style.Style;
@@ -101,6 +102,11 @@ public final class Session {
      * copied before a repaint paints into it. Written when no picture is being drawn, read by the render thread.
      */
     private volatile java.awt.image.BufferedImage borrowed;
+    /**
+     * Where whole pictures are painted, reused once no picture of this session shows them (never a {@link #borrowed}
+     * image: one kept in {@link FirstPictures} is shared for good). Render thread only, one render at a time.
+     */
+    private final PooledPicture pooled = new PooledPicture();
     /** A picture another session drew for this one's state, handed over when it landed (server thread). */
     private FirstPictures.Picture offered;
     /** The next picture is drawn here, not waited for: the one waited for could not be drawn. */
@@ -382,6 +388,7 @@ public final class Session {
             try {
                 long t0 = System.nanoTime();
                 HtmlRenderer.Frame before = frame;
+                pooled.start(before);
                 HtmlRenderer.Frame f = null;
                 Rectangle2D changed = null;
                 boolean partial = false;
@@ -390,8 +397,13 @@ public final class Session {
                 cache = null;
                 boolean same = fragment == null && before != null && before.document() == d && before.page() == p && before.scale() == scale;
                 double at = same ? Math.max(0, Math.min(s, before.maxScroll())) : s;
-                // A tall picture of another document or size, or one the view has left, is of no more use.
-                if (c != null && !(same && c.of(p, d, canvas.width(), canvas.height(), scale) && c.covers(at))) c = null;
+                // A tall picture of another document or size, or one the view has left, is of no more use: nothing reads it
+                // from now on, and a new one may be painted over it.
+                ScrollCache dropped = null;
+                if (c != null && !(same && c.of(p, d, canvas.width(), canvas.height(), scale) && c.covers(at))) {
+                    dropped = c;
+                    c = null;
+                }
                 // The canvas shows the last view as it was cut from this tall picture, if there is one.
                 ScrollCache kept = c;
                 boolean still = same && Math.abs(before.scrollY() - at) < 0.01;
@@ -424,7 +436,7 @@ public final class Session {
                 } else if (still && !redraw) {
                     // Only the hover or press state moved: repaint just what it touches. A picture shared with other
                     // sessions (FirstPictures) is copied first, as the repaint paints into it.
-                    HtmlRenderer.Frame base = before.image() == borrowed ? FirstPictures.own(before) : before;
+                    HtmlRenderer.Frame base = before.image() == borrowed ? FirstPictures.own(before, pooled.take(canvas.width(), canvas.height())) : before;
                     Repaint.Result r = Repaint.partial(p, d, canvas.width(), canvas.height(), scale, before.scrollY(), state, base, moved, timeout);
                     if (r.frame() != null) {
                         f = r.frame();
@@ -436,7 +448,8 @@ public final class Session {
                     // costs, and the next notches will want the rows round this view: paint a few views' worth of
                     // the page at once, and cut this view and the next ones from that.
                     try {
-                        c = ScrollCache.paint(p, d, canvas.width(), canvas.height(), scale, at, before.scrollY(), state, ScrollCache.VIEWS, timeout);
+                        c = ScrollCache.paint(p, d, canvas.width(), canvas.height(), scale, at, before.scrollY(), state, ScrollCache.VIEWS, timeout,
+                                dropped, pooled.take(canvas.width(), canvas.height()));
                     } catch (RenderAbandoned e) {
                         // Several views take several times one view's time: a page that fits render-timeout only a view
                         // at a time is still drawn, a view at a time, from now on.
@@ -445,12 +458,13 @@ public final class Session {
                     if (c != null) f = c.frame(at);
                 }
                 if (f == null) {
-                    f = HtmlRenderer.render(p, d, canvas.width(), canvas.height(), scale, s, state, null, null, timeout);
+                    f = HtmlRenderer.render(p, d, pooled.take(canvas.width(), canvas.height()), scale, s, state, timeout);
                     if (fragment != null && !fragment.isEmpty()) {
                         Element target = d.getElementById(fragment);
                         double top = target == null ? Double.NaN : f.topOf(target);
                         if (!Double.isNaN(top)) {
-                            f = HtmlRenderer.render(p, d, canvas.width(), canvas.height(), scale, ScrollCache.snap(top, scale), state, null, null, timeout);
+                            // The first was only for finding the target: drawn again over it, scrolled there.
+                            f = HtmlRenderer.render(p, d, pooled.take(canvas.width(), canvas.height()), scale, ScrollCache.snap(top, scale), state, timeout);
                             double scrolled = f.scrollY();
                             // Unless the player has moved on (another page, or scrolled) while this was drawn.
                             serverThread.execute(() -> {
@@ -485,12 +499,16 @@ public final class Session {
                 frame = f;
                 if (publish != null && !partial && c == null && f.document() == d && f.scrollY() == 0) {
                     // This session's first picture of the page, drawn as any session's would be: kept for the next to
-                    // show it here, with the canvas as it is now. Its image is shared from now on.
+                    // show it here, with the canvas as it is now. Its image is shared from now on, so never handed back.
                     FirstPictures.Picture picture = FirstPictures.Picture.of(publish, f, canvas.copy());
-                    if (picture != null) borrowed = f.image();
+                    if (picture != null) {
+                        borrowed = f.image();
+                        pooled.share(borrowed);
+                    }
                     pictures.publish(publish, picture);
                     published = true;
                 }
+                pooled.shown(f);
                 AtomicInteger failed = FAILURES.remove(p);
                 if (failed != null && failed.get() > 1) {
                     plugin.getLogger().info("Drew page " + name + " after " + failed.get() + " attempts that could not be drawn");
@@ -511,6 +529,7 @@ public final class Session {
                 // A page that cannot be drawn at all leaves the last picture, of another page, on the screen,
                 // where clicks would find nothing: go back to that page, so the screen still works.
                 HtmlRenderer.Frame shown = frame;
+                pooled.failed(shown);
                 if (shown != null && shown.page() != p) serverThread.execute(() -> undrawable(p, nav));
             } finally {
                 if (publish != null && !published) pictures.abandon(publish);

@@ -5,6 +5,7 @@ import ai.resourcepack.ui.html.layout.Box;
 import ai.resourcepack.ui.html.layout.BoxBuilder;
 import ai.resourcepack.ui.html.layout.Layout;
 import ai.resourcepack.ui.html.paint.Painter;
+import ai.resourcepack.ui.html.paint.PixelPool;
 import ai.resourcepack.ui.html.style.Style;
 import ai.resourcepack.ui.html.style.Styler;
 import org.jsoup.nodes.Element;
@@ -100,6 +101,23 @@ public final class HtmlRenderer {
     }
 
     /**
+     * A whole new picture, as {@link #render(Page, org.jsoup.nodes.Document, int, int, double, double, Selector.State, BufferedImage, java.awt.geom.Rectangle2D, long)}
+     * with no base, painted into [into] (a {@code TYPE_INT_ARGB_PRE} image of the view's size, a {@link PixelPool#picture} say)
+     * instead of a new image: every pixel of it is painted, whatever it held. On {@link RenderAbandoned} or any other
+     * failure nothing is still painting into it when this returns, so the caller may hand it back at once.
+     */
+    public static Frame render(Page page, org.jsoup.nodes.Document document, BufferedImage into, double scale, double scrollY, Selector.State state,
+                               long timeoutMs) {
+        if (into.getType() != BufferedImage.TYPE_INT_ARGB_PRE) throw new IllegalArgumentException("Not a premultiplied int image");
+        RenderBudget budget = RenderBudget.of(timeoutMs);
+        int width = into.getWidth(), height = into.getHeight();
+        double vw = width / scale, vh = height / scale;
+        Laid laid = lay(page, document, vw, vh, state, budget);
+        double scroll = Math.max(0, Math.min(scrollY, laid.pageHeight - height / scale));
+        return paint(page, laid, into, true, scale, vw, vh, scroll, true, null, document, budget);
+    }
+
+    /**
      * Repaints only [clip] (CSS pixels of the picture) of [base], the image of an earlier frame of the
      * same page at the same scroll: what a change of hover state needs. Everything is still styled
      * and laid out, so the frame's hit regions are whole; only the pixels outside the clip are skipped.
@@ -137,12 +155,12 @@ public final class HtmlRenderer {
             ry0 = Math.max(0, (int) Math.floor(clip.getY() * scale) - 1);
             rx1 = Math.min(width, (int) Math.ceil(clip.getMaxX() * scale) + 1);
             ry1 = Math.min(rows, (int) Math.ceil(clip.getMaxY() * scale) + 1);
-            ring = new int[(rx1 - rx0) * (ry1 - ry0)];
+            ring = PixelPool.ints((rx1 - rx0) * (ry1 - ry0));
             int[] px = ((DataBufferInt) img.getRaster().getDataBuffer()).getData();
             for (int y = ry0; y < ry1; y++) System.arraycopy(px, y * width + rx0, ring, (y - ry0) * (rx1 - rx0), rx1 - rx0);
         }
         try {
-            return paint(page, laid, img, scale, vw, vh, scroll, base == null && clip == null, clip, document, budget);
+            return paint(page, laid, img, false, scale, vw, vh, scroll, base == null && clip == null, clip, document, budget);
         } finally {
             // Everything in the clip but [keep] goes back as it was, also when the render was given up: then
             // only [keep] of [base] holds what it had got to, as for a repaint without a margin.
@@ -157,6 +175,7 @@ public final class HtmlRenderer {
                         px[y * width + x] = ring[(y - ry0) * (rx1 - rx0) + x - rx0];
                     }
                 }
+                PixelPool.give(ring);
             }
         }
     }
@@ -170,6 +189,15 @@ public final class HtmlRenderer {
      */
     public static Frame renderStrip(Page page, org.jsoup.nodes.Document document, int width, int height, double scale, double scrollY,
                                     boolean down, int maxRows, Selector.State state, long timeoutMs) {
+        return renderStrip(page, document, width, height, scale, scrollY, down, maxRows, state, timeoutMs, null);
+    }
+
+    /**
+     * As above, painted over [reuse] (a premultiplied image nothing reads any more, an earlier tall picture's) if it is
+     * the size the picture comes out at, else into a new image.
+     */
+    public static Frame renderStrip(Page page, org.jsoup.nodes.Document document, int width, int height, double scale, double scrollY,
+                                    boolean down, int maxRows, Selector.State state, long timeoutMs, BufferedImage reuse) {
         RenderBudget budget = RenderBudget.of(timeoutMs);
         double vw = width / scale, vh = height / scale;
         Laid laid = lay(page, document, vw, vh, state, budget);
@@ -177,7 +205,9 @@ public final class HtmlRenderer {
         int rows = Math.max(height, Math.min(maxRows, pageRows));
         int spare = rows - height, behind = down ? spare / 4 : spare - spare / 4;
         int topRow = Math.max(0, Math.min(pageRows - rows, (int) Math.round(scrollY * scale) - behind));
-        return paint(page, laid, new BufferedImage(width, rows, BufferedImage.TYPE_INT_ARGB_PRE), scale, vw, vh, topRow / scale, true, null, document, budget);
+        boolean fits = reuse != null && reuse.getWidth() == width && reuse.getHeight() == rows && reuse.getType() == BufferedImage.TYPE_INT_ARGB_PRE;
+        BufferedImage img = fits ? reuse : new BufferedImage(width, rows, BufferedImage.TYPE_INT_ARGB_PRE);
+        return paint(page, laid, img, fits, scale, vw, vh, topRow / scale, true, null, document, budget);
     }
 
     /** A document styled and laid out for a view, not painted yet. */
@@ -193,8 +223,11 @@ public final class HtmlRenderer {
         return new Laid(styler, root, pageHeight);
     }
 
-    /** Paints [laid] into [img] from [scroll] down: [whole], in bands at once; else, within [clip], over what is there. */
-    private static Frame paint(Page page, Laid laid, BufferedImage img, double scale, double vw, double vh, double scroll, boolean whole,
+    /**
+     * Paints [laid] into [img] from [scroll] down: [whole], in bands at once; else, within [clip], over what is there.
+     * [reused]: [img] holds an earlier picture's pixels, which a whole picture must not show through.
+     */
+    private static Frame paint(Page page, Laid laid, BufferedImage img, boolean reused, double scale, double vw, double vh, double scroll, boolean whole,
                                java.awt.geom.Rectangle2D clip, org.jsoup.nodes.Document document, RenderBudget budget) {
         List<Painter.Hit> hits;
         // A whole picture counts itself while it paints, so the ones painting at once share the painter threads.
@@ -204,8 +237,11 @@ public final class HtmlRenderer {
             int bands = whole ? Math.max(1, bandsFor(img.getHeight(), painting)) : 1;
             // One band too where a blur may read past the picture's edges, for the page there (see paintBands).
             if (bands > 1 || reach > 0) {
+                // Every row of [img] is copied from a band: what it held does not matter.
                 hits = paintBands(page, laid.root, img, bands, reach, scale, vw, vh, scroll, laid.pageHeight, budget);
             } else {
+                // Painted straight in, starting from nothing as on a new image.
+                if (reused) java.util.Arrays.fill(((DataBufferInt) img.getRaster().getDataBuffer()).getData(), 0);
                 Graphics2D g = img.createGraphics();
                 g.scale(scale, scale);
                 if (clip != null) g.clip(clip);
@@ -261,7 +297,9 @@ public final class HtmlRenderer {
      * wherever the view is, and a view cut from a taller picture ({@link ScrollCache}) matches one drawn on its own.
      * Returns the hit regions (the first band's painter finds them all; the others make none). Every band checks
      * [budget]; the first to fail cancels it, so the others stop at their next check rather than painting on for
-     * a picture nobody will see.
+     * a picture nobody will see, and this returns only once none of them is still painting: the caller may then
+     * hand [img] back ({@link PixelPool}) without a late band writing into whoever has it next.
+     * Each band is painted in a {@link PixelPool} image of the painting thread's, handed back when copied in.
      */
     private static List<Painter.Hit> paintBands(Page page, Box root, BufferedImage img, int bands, int reach, double scale,
                                                 double vw, double vh, double scroll, double pageHeight, RenderBudget budget) {
@@ -270,6 +308,7 @@ public final class HtmlRenderer {
         // Whole rows of page above and below the picture.
         int above = row(scroll, scale), below = Math.max(0, (int) Math.floor((pageHeight - scroll) * scale + 1e-6) - height);
         List<ForkJoinTask<List<Painter.Hit>>> tasks = new ArrayList<>(bands);
+        Gate gate = new Gate();
         // Without a backdrop-filter nothing reads the margins as painted, only filter blurs, which each
         // layer reaches out for itself: then filtered layers are worked out only round the band's rows.
         boolean backdrops = Painter.backdrops(root);
@@ -279,22 +318,29 @@ public final class HtmlRenderer {
             int top = Math.max(-above, y0 - 2 * reach), bottom = Math.min(height + below, y1 + 2 * reach);
             boolean first = b == 0;
             ForkJoinTask<List<Painter.Hit>> task = ForkJoinTask.adapt(() -> {
-                BufferedImage band = new BufferedImage(width, bottom - top, BufferedImage.TYPE_INT_ARGB_PRE);
-                Graphics2D g = band.createGraphics();
-                g.translate(0, -top);
-                g.scale(scale, scale);
-                // No clip: the band's own edges stop the drawing, so the painter sees exactly what a whole
-                // picture's would (a clip changes how Java2D intersects overflow clips, by a pixel).
-                Painter painter = new Painter(page.shaper, page, vw, vh, scroll, budget).origin(0, above + top);
-                if (!first) painter.withoutHits();
-                if (!backdrops) painter.keeping(new java.awt.Rectangle(0, y0 - top, width, y1 - y0));
+                if (!gate.enter()) return null;
+                BufferedImage band = null;
                 try {
-                    painter.paint(g, root, band, scale);
+                    band = PixelPool.image(width, bottom - top, BufferedImage.TYPE_INT_ARGB_PRE);
+                    Graphics2D g = band.createGraphics();
+                    g.translate(0, -top);
+                    g.scale(scale, scale);
+                    // No clip: the band's own edges stop the drawing, so the painter sees exactly what a whole
+                    // picture's would (a clip changes how Java2D intersects overflow clips, by a pixel).
+                    Painter painter = new Painter(page.shaper, page, vw, vh, scroll, budget).origin(0, above + top);
+                    if (!first) painter.withoutHits();
+                    if (!backdrops) painter.keeping(new java.awt.Rectangle(0, y0 - top, width, y1 - y0));
+                    try {
+                        painter.paint(g, root, band, scale);
+                    } finally {
+                        g.dispose();
+                    }
+                    System.arraycopy(((DataBufferInt) band.getRaster().getDataBuffer()).getData(), (y0 - top) * width, out, y0 * width, (y1 - y0) * width);
+                    return painter.hits;
                 } finally {
-                    g.dispose();
+                    PixelPool.give(band);
+                    gate.leave();
                 }
-                System.arraycopy(((DataBufferInt) band.getRaster().getDataBuffer()).getData(), (y0 - top) * width, out, y0 * width, (y1 - y0) * width);
-                return painter.hits;
             });
             tasks.add(bands > 1 ? PAINTERS.submit(task) : task);
         }
@@ -307,8 +353,41 @@ public final class HtmlRenderer {
         } catch (RuntimeException | Error e) {
             budget.cancel();
             for (ForkJoinTask<List<Painter.Hit>> t : tasks) t.cancel(false); // those not started yet never start
+            // A started one goes on (cancel does not stop it) until its next budget check: wait for it to stop writing.
+            gate.shut();
             throw e;
         }
         return hits;
+    }
+
+    /** The bands of one picture still painting, so that one given up is not let go while a band may still write into it. */
+    private static final class Gate {
+        private int painting;
+        private boolean shut;
+
+        /** Whether a band may start: not once the picture is given up. */
+        synchronized boolean enter() {
+            if (shut) return false;
+            painting++;
+            return true;
+        }
+
+        synchronized void leave() {
+            if (--painting == 0) notifyAll();
+        }
+
+        /** No band starts from now on; returns once none is painting. */
+        synchronized void shut() {
+            shut = true;
+            boolean interrupted = false;
+            while (painting > 0) {
+                try {
+                    wait();
+                } catch (InterruptedException e) {
+                    interrupted = true;
+                }
+            }
+            if (interrupted) Thread.currentThread().interrupt();
+        }
     }
 }

@@ -43,7 +43,9 @@ public final class AllocBench {
                 Seat seat = new Seat(page, new Canvas(palette, W / 128, H / 128));
                 long[] r = new long[runs], d = new long[runs];
                 int done = 0;
+                long made0 = 0;
                 for (int i = -4; i < runs; i++) {
+                    if (i == 0) made0 = ai.resourcepack.ui.html.paint.PixelPool.madeBytes();
                     long[] m = switch (op) {
                         case "full" -> seat.full(prep, i);
                         case "hover" -> seat.hover(prep, i);
@@ -67,7 +69,8 @@ public final class AllocBench {
                     t[i] = r[i] + d[i];
                     mean += t[i] / 1048576.0 / done;
                 }
-                System.out.printf("%-10s %-6s %5d %10.2f %10.2f %10.2f %10.2f%n", name, op, done, med(r, done), med(d, done), med(t, done), mean);
+                System.out.printf("%-10s %-6s %5d %10.2f %10.2f %10.2f %10.2f   (pool: made %.2f MB per op, %.0f MB kept)%n", name, op, done, med(r, done), med(d, done), med(t, done), mean,
+                        (ai.resourcepack.ui.html.paint.PixelPool.madeBytes() - made0) / 1048576.0 / done, ai.resourcepack.ui.html.paint.PixelPool.keptBytes() / 1048576.0);
             }
         }
         System.exit(0);
@@ -170,9 +173,13 @@ public final class AllocBench {
             double at = ScrollCache.snap(Math.min(prep.maxScroll, (k < per ? k + 1 : 2 * per - k - 1) * 80.0), SCALE);
             HtmlRenderer.Frame before = frame;
             long a0 = allocated();
-            ScrollCache c = cache;
-            if (c != null && !c.covers(at)) c = null;
-            if (c == null) c = ScrollCache.paint(page, doc, W, H, SCALE, at, before.scrollY(), Selector.State.NONE, ScrollCache.VIEWS, 0);
+            ScrollCache c = cache, dropped = null;
+            if (c != null && !c.covers(at)) {
+                dropped = c;
+                c = null;
+            }
+            pooled.start(before);
+            if (c == null) c = ScrollCache.paint(page, doc, W, H, SCALE, at, before.scrollY(), Selector.State.NONE, ScrollCache.VIEWS, 0, dropped, pooled.take(W, H));
             HtmlRenderer.Frame f = c.frame(at);
             long a1 = allocated();
             canvas.draw(f.image(), 0, 0);
@@ -189,12 +196,16 @@ public final class AllocBench {
 
         // ---- where a picture comes from and goes, as Session does it
 
+        final PooledPicture pooled = new PooledPicture();
+
         HtmlRenderer.Frame whole(Document d, double s, Selector.State state) {
-            return HtmlRenderer.render(page, d, W, H, SCALE, s, state, null, null, HtmlRenderer.DEFAULT_TIMEOUT_MS);
+            pooled.start(frame);
+            return HtmlRenderer.render(page, d, pooled.take(W, H), SCALE, s, state, HtmlRenderer.DEFAULT_TIMEOUT_MS);
         }
 
         void shown(HtmlRenderer.Frame f) {
             frame = f;
+            pooled.shown(f);
         }
     }
 }

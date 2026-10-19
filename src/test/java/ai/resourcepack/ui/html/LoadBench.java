@@ -459,6 +459,8 @@ public final class LoadBench {
         int[] goal;
 
         volatile HtmlRenderer.Frame frame;
+        /** As Session's: where whole pictures are painted (render thread only, one render at a time). */
+        private final PooledPicture pooled = new PooledPicture();
         private boolean rendering, dirty, closed;
         private List<Req> reqs = new ArrayList<>();
         private List<Element> drawnHover = List.of(), drawnPress = List.of();
@@ -521,6 +523,7 @@ public final class LoadBench {
                 try {
                     long t0 = System.nanoTime();
                     HtmlRenderer.Frame before = frame;
+                    pooled.start(before);
                     HtmlRenderer.Frame f = null;
                     Rectangle2D changed = null;
                     boolean partial = false;
@@ -547,7 +550,9 @@ public final class LoadBench {
                             why(4 + r.why().ordinal());
                         }
                     }
-                    if (f == null) f = HtmlRenderer.render(p, d, W, H, SCALE, s, state);
+                    if (f == null) {
+                        f = HtmlRenderer.render(p, d, pooled.take(W, H), SCALE, s, state, HtmlRenderer.DEFAULT_TIMEOUT_MS);
+                    }
                     long t1 = System.nanoTime();
                     if (partial) {
                         int x0 = Math.max(0, (int) Math.floor(changed.getX() * SCALE)), y0 = Math.max(0, (int) Math.floor(changed.getY() * SCALE));
@@ -568,11 +573,13 @@ public final class LoadBench {
                     }
                     drawnHover = hoverKey;
                     frame = f;
+                    pooled.shown(f);
                     if (firstFrameNs == 0) firstFrameNs = t2;
                     recs.add(new Rec(t2, t0 - submitted, t1 - t0, t2 - t1, partial, tiles, mine.size() - 1));
                     for (Req r : mine) lats.add(new Lat(r.t, r.kind, t2 - r.t));
                     if (!partial) execute(this::repoint);
                 } catch (RuntimeException | Error e) {
+                    pooled.failed(frame);
                     System.err.println("render failed: " + e);
                     e.printStackTrace();
                 } finally {
