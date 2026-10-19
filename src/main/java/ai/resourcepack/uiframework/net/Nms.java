@@ -10,11 +10,17 @@ import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
 import java.lang.reflect.Field;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.function.Consumer;
+import java.util.function.IntUnaryOperator;
 
 /**
  * Everything UI Framework needs that the Paper API cannot do, reached by reflection on the
@@ -72,6 +78,25 @@ public final class Nms {
     private final Field moveEntityId;
     private final Class<?> positionSyncPacket, teleportPacket;
     private final MethodHandle positionSyncId, teleportId;
+
+    // Frames pointed at other maps for one player: the item a frame shows, and the packets it travels in.
+    private final Class<?> bundlePacket;           // ClientboundBundlePacket
+    private final MethodHandle newBundle;          // new ClientboundBundlePacket(Iterable)
+    private final MethodHandle subPackets;         // BundlePacket#subPackets()
+    private final Class<?> addEntityPacket;        // ClientboundAddEntityPacket
+    private final MethodHandle addEntityId;
+    private final Class<?> dataPacket;             // ClientboundSetEntityDataPacket(int id, List<DataValue<?>>)
+    private final MethodHandle dataPacketId, dataPacketItems, newDataPacket;
+    private final MethodHandle dataValueId;        // SynchedEntityData.DataValue#id()
+    private final MethodHandle dataValue;          // DataValue.create(EntityDataAccessor, Object)
+    private final Object frameItem;                // ItemFrame.DATA_ITEM
+    private final int frameItemId;
+    private final MethodHandle newItemStack;       // new ItemStack(ItemLike)
+    private final Object filledMap;                // Items.FILLED_MAP
+    private final Object mapIdComponent;           // DataComponents.MAP_ID
+    private final MethodHandle setComponent;       // ItemStack#set(DataComponentType, Object)
+    /** A filled map item for each map id a frame has been pointed at; never changed once made. */
+    private final Map<Integer, Object> mapItems = new ConcurrentHashMap<>();
 
     public Nms(org.bukkit.Server server) throws ReflectiveOperationException {
         String craft = server.getClass().getPackageName();
@@ -144,6 +169,27 @@ public final class Nms {
         moveEntityId = open(moveEntityPacket, "entityId");
         newPlayerRotation = L.findConstructor(Class.forName(game + "ClientboundPlayerRotationPacket"),
                 MethodType.methodType(void.class, float.class, boolean.class, float.class, boolean.class));
+
+        bundlePacket = Class.forName(game + "ClientboundBundlePacket");
+        newBundle = L.findConstructor(bundlePacket, MethodType.methodType(void.class, Iterable.class));
+        subPackets = L.unreflect(Class.forName("net.minecraft.network.protocol.BundlePacket").getMethod("subPackets"));
+        addEntityPacket = Class.forName(game + "ClientboundAddEntityPacket");
+        addEntityId = L.unreflect(addEntityPacket.getMethod("getId"));
+        dataPacket = Class.forName(game + "ClientboundSetEntityDataPacket");
+        dataPacketId = L.unreflect(dataPacket.getMethod("id"));
+        dataPacketItems = L.unreflect(dataPacket.getMethod("packedItems"));
+        newDataPacket = L.findConstructor(dataPacket, MethodType.methodType(void.class, int.class, List.class));
+        Class<?> value = Class.forName("net.minecraft.network.syncher.SynchedEntityData$DataValue");
+        Class<?> accessor = Class.forName("net.minecraft.network.syncher.EntityDataAccessor");
+        dataValueId = L.unreflect(value.getMethod("id"));
+        dataValue = L.unreflect(value.getMethod("create", accessor, Object.class));
+        frameItem = open(Class.forName("net.minecraft.world.entity.decoration.ItemFrame"), "DATA_ITEM").get(null);
+        frameItemId = (int) accessor.getMethod("id").invoke(frameItem);
+        newItemStack = L.findConstructor(item, MethodType.methodType(void.class, Class.forName("net.minecraft.world.level.ItemLike")));
+        filledMap = Class.forName("net.minecraft.world.item.Items").getField("FILLED_MAP").get(null);
+        Class<?> componentType = Class.forName("net.minecraft.core.component.DataComponentType");
+        mapIdComponent = Class.forName("net.minecraft.core.component.DataComponents").getField("MAP_ID").get(null);
+        setComponent = L.unreflect(item.getMethod("set", componentType, Object.class));
     }
 
     private static Field open(Class<?> owner, String name) throws NoSuchFieldException {
@@ -269,6 +315,74 @@ public final class Nms {
         } catch (Throwable t) {
             throw rethrow(t);
         }
+    }
+
+    /** One bundle of [packets]: the client handles all of them in one go, between two frames. */
+    public Object bundle(List<?> packets) {
+        return make(newBundle, packets);
+    }
+
+    /** The packet that makes item frame [entityId] show map [mapId]. */
+    public Object frameShows(int entityId, int mapId) {
+        return make(newDataPacket, entityId, List.of(make(dataValue, frameItem, mapItem(mapId))));
+    }
+
+    private Object mapItem(int mapId) {
+        return mapItems.computeIfAbsent(mapId, id -> {
+            try {
+                Object stack = newItemStack.invoke(filledMap);
+                setComponent.invoke(stack, mapIdComponent, newMapId.invoke(id));
+                return stack;
+            } catch (Throwable t) {
+                throw rethrow(t);
+            }
+        });
+    }
+
+    /**
+     * [msg] with every item frame it brings to a client afresh showing the map [mapOf] gives for the frame's entity
+     * id (when that is not -1), or [msg] itself if none changes. A frame comes afresh in a bundle with the packet
+     * that adds it (spawned, shown again, resent by Paper after a cancelled click), or, never in practice for the
+     * engine's fixed frames, in a data packet of its own. A bundle with no new entity in it is left alone: that is
+     * how the sender's own re-pointing (never with a new entity) passes untouched.
+     */
+    public Object pointFrames(Object msg, IntUnaryOperator mapOf) {
+        try {
+            if (dataPacket.isInstance(msg)) return pointFrame(msg, mapOf);
+            if (!bundlePacket.isInstance(msg)) return msg;
+            Iterable<?> subs = (Iterable<?>) subPackets.invoke(msg);
+            Set<Integer> added = new HashSet<>();
+            for (Object p : subs) if (addEntityPacket.isInstance(p)) added.add((int) addEntityId.invoke(p));
+            if (added.isEmpty()) return msg;
+            List<Object> out = new ArrayList<>();
+            boolean changed = false;
+            for (Object p : subs) {
+                Object q = dataPacket.isInstance(p) && added.contains((int) dataPacketId.invoke(p)) ? pointFrame(p, mapOf) : p;
+                changed |= q != p;
+                out.add(q);
+            }
+            return changed ? newBundle.invoke(out) : msg;
+        } catch (Throwable t) {
+            throw rethrow(t);
+        }
+    }
+
+    private Object pointFrame(Object packet, IntUnaryOperator mapOf) throws Throwable {
+        int entity = (int) dataPacketId.invoke(packet);
+        int map = mapOf.applyAsInt(entity);
+        if (map < 0) return packet;
+        List<?> items = (List<?>) dataPacketItems.invoke(packet);
+        List<Object> out = new ArrayList<>(items.size());
+        boolean found = false;
+        for (Object v : items) {
+            if ((int) dataValueId.invoke(v) == frameItemId) {
+                out.add(dataValue.invoke(frameItem, mapItem(map)));
+                found = true;
+            } else {
+                out.add(v);
+            }
+        }
+        return found ? newDataPacket.invoke(entity, out) : packet;
     }
 
     /** Lock [player]'s view to [target]. The API only allows this in spectator mode. */

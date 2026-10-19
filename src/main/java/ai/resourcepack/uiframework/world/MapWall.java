@@ -14,8 +14,10 @@ import org.bukkit.plugin.Plugin;
 import org.bukkit.util.Vector;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -37,6 +39,10 @@ public final class MapWall {
     public final int rightX, rightZ;
     private final List<GlowItemFrame> frames = new ArrayList<>();
     private final Set<UUID> frameIds = new HashSet<>();
+    /** The frames' entity ids in tile order, empty while there are none; read by the sender and the netty threads. */
+    private volatile int[] entityIds = new int[0];
+    /** Tile of each frame's entity id. */
+    private volatile Map<Integer, Integer> tileOf = Map.of();
 
     public MapWall(World world, int anchorX, int anchorY, int anchorZ, BlockFace facing, int cols, int rows, int firstMapId) {
         if (!HORIZONTAL.contains(facing)) throw new IllegalArgumentException("A screen faces north, south, east or west");
@@ -55,6 +61,18 @@ public final class MapWall {
     public int tiles() { return cols * rows; }
 
     public int mapId(int tile) { return firstMapId + tile; }
+
+    /** The entity id of the frame showing [tile], or -1 while the frames are not in the world. */
+    public int entityId(int tile) {
+        int[] ids = entityIds;
+        return tile < ids.length ? ids[tile] : -1;
+    }
+
+    /** Which tile the frame with entity id [entityId] shows, or -1 if it is not one of this wall's. */
+    public int tileOfEntity(int entityId) {
+        Integer t = tileOf.get(entityId);
+        return t == null ? -1 : t;
+    }
 
     public int[] tileBlock(int c, int r) {
         return new int[]{anchorX + rightX * c, anchorY - r, anchorZ + rightZ * c};
@@ -123,11 +141,20 @@ public final class MapWall {
                     f.setSilent(true);
                     if (viewer != null) f.setVisibleByDefault(false);
                 });
-                if (viewer != null && show) viewer.showEntity(plugin, frame);
                 frames.add(frame);
                 frameIds.add(frame.getUniqueId());
             }
         }
+        int[] ids = new int[frames.size()];
+        Map<Integer, Integer> tiles = new HashMap<>();
+        for (int t = 0; t < ids.length; t++) {
+            ids[t] = frames.get(t).getEntityId();
+            tiles.put(ids[t], t);
+        }
+        tileOf = Map.copyOf(tiles);
+        entityIds = ids;
+        // Shown once their ids are known: a frame a client gets is told which map to show by the id (Pipeline).
+        if (viewer != null && show) for (GlowItemFrame f : frames) viewer.showEntity(plugin, f);
     }
 
     public void spawn(Plugin plugin) {
@@ -154,6 +181,8 @@ public final class MapWall {
         for (GlowItemFrame f : frames) f.remove();
         frames.clear();
         frameIds.clear();
+        entityIds = new int[0];
+        tileOf = Map.of();
     }
 
     public boolean spawned() {

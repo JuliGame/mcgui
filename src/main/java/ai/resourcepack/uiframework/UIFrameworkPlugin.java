@@ -11,6 +11,7 @@ import ai.resourcepack.uiframework.api.WallScreen;
 import ai.resourcepack.uiframework.net.MapSender;
 import ai.resourcepack.uiframework.net.Nms;
 import ai.resourcepack.uiframework.net.Pipeline;
+import ai.resourcepack.uiframework.net.ServerWire;
 import ai.resourcepack.uiframework.pack.ResourcePack;
 import ai.resourcepack.uiframework.render.Palette;
 import ai.resourcepack.uiframework.world.Views;
@@ -64,8 +65,8 @@ public final class UIFrameworkPlugin extends JavaPlugin implements UIFramework, 
         } catch (Exception e) {
             getLogger().log(Level.SEVERE, "Could not build or serve the resource pack", e);
         }
-        sender = new MapSender(nms, palette, settings.bytesPerSecond, getLogger());
         pipeline = new Pipeline(nms, getLogger());
+        sender = new MapSender(new ServerWire(nms, pipeline), palette, settings.bytesPerSecond, getLogger());
         views = new Views(this, settings, nms, pipeline, id -> pack != null && pack.has(id), sender, settings.mapIdBase);
         walls = new Walls(this, settings.mapIdBase + VIEW_ID_SPAN, settings.viewDistance, settings.reach, views::seated);
         var pm = getServer().getPluginManager();
