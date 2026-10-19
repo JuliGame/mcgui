@@ -199,6 +199,11 @@ public final class UIEnginePlugin extends JavaPlugin {
         return cfg.getBoolean("tile-shift", true);
     }
 
+    /** Hover targets near a resting pointer whose repaint is drawn in advance, while the render threads are idle; 0 for none. */
+    int hoverAhead() {
+        return Math.max(0, Math.min(8, cfg.getInt("hover-ahead", 3)));
+    }
+
     boolean wallScroll() {
         return cfg.getBoolean("walls.scroll-wheel", true);
     }

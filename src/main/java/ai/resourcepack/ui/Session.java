@@ -2,6 +2,7 @@ package ai.resourcepack.ui;
 
 import ai.resourcepack.uiframework.api.Canvas;
 import ai.resourcepack.uiframework.api.Pointer;
+import ai.resourcepack.ui.html.HoverAhead;
 import ai.resourcepack.ui.html.HtmlRenderer;
 import ai.resourcepack.ui.html.Repaint;
 import ai.resourcepack.ui.html.Page;
@@ -108,6 +109,15 @@ public final class Session {
     /** The tick this session was made. */
     private final int born;
     /**
+     * Hover repaints drawn before the pointer gets there (HoverAhead), while it rests and the render threads are idle;
+     * [ahead] is the drawing under way, which holds this session's turn to draw ([rendering]) as a picture would.
+     */
+    private final HoverAhead hoverAhead;
+    private HoverAhead.Job ahead;
+    /** When the pointer last moved (nanoTime), and how fast, canvas pixels a second. */
+    private long pointerAt;
+    private double pointerVx, pointerVy;
+    /**
      * Ticks a wall or view waits for a session's first picture before showing its canvas, blank, all the same. A frame
      * whose map the client has no colours for draws the map item, so a screen shows nothing new until its page is
      * drawn, and then the page, one packet a map; a blank first only if drawing takes longer than this. (A view is
@@ -124,6 +134,7 @@ public final class Session {
         this.viewer = viewer;
         this.designHeight = designHeight;
         this.born = Bukkit.getCurrentTick();
+        this.hoverAhead = new HoverAhead(plugin.hoverAhead(), 4L * canvas.width() * canvas.height());
     }
 
     public String pageName() {
@@ -327,10 +338,73 @@ public final class Session {
         if (closed || page == null) return;
         if (rendering) {
             dirty = true;
+            // A drawing ahead gives way at once, unless it is drawing just this.
+            if (ahead != null) ahead.wanted(ahead.of(page, doc, scrollY), key(hover, false), key(pressed, true));
             return;
         }
         rendering = true;
         submit();
+    }
+
+    /**
+     * Draws ahead the hovers the pointer may reach next (HoverAhead), if the render threads have nothing else to do and
+     * the picture on the screen is of the state now. Server thread; the drawing itself is on a render thread.
+     */
+    private synchronized void lookAhead() {
+        if (closed || rendering || !hoverAhead.on() || page == null || doc == null || pointerX < 0 || cache != null || pendingFragment != null) return;
+        if (!page.styles.hovers() || page.siblingStates() || !idle()) return;
+        HtmlRenderer.Frame f = frame;
+        double scale = scale();
+        if (f == null || f.page() != page || f.document() != doc || f.scale() != scale) return;
+        if (Math.abs(f.scrollY() - Math.max(0, Math.min(scrollY, f.maxScroll()))) >= 0.01) return;
+        double x = pointerX / scale, y = pointerY / scale;
+        if (hoverAhead.done(f, x, y)) return;
+        // The picture shows the state now (no picture is being drawn, so the render thread's fields are settled).
+        List<Element> hoverKey = key(hover, false), pressKey = key(pressed, true);
+        if (!hoverKey.equals(drawnHover) || !pressKey.equals(drawnPress)) return;
+        boolean resting = System.nanoTime() - pointerAt > 150_000_000L;
+        HoverAhead.Job job = hoverAhead.job(page, doc, canvas.width(), canvas.height(), scale, f, f.image() == borrowed, drawnHover, drawnPress,
+                hoverKey, pressed, pressKey, x, y, resting ? 0 : pointerVx / scale, resting ? 0 : pointerVy / scale, plugin.renderTimeout());
+        ahead = job;
+        rendering = true;
+        renderers.execute(() -> {
+            try {
+                hoverAhead.run(job);
+            } catch (RuntimeException | Error e) {
+                // It may have left nothing usable; real pictures draw as ever.
+                hoverAhead.drop();
+                if (plugin.debug()) e.printStackTrace();
+            } finally {
+                done();
+            }
+        });
+    }
+
+    /** Whether a render thread is free and nothing waits for one, and no whole picture is being painted. */
+    private boolean idle() {
+        return renderers instanceof java.util.concurrent.ThreadPoolExecutor pool && pool.getActiveCount() < pool.getMaximumPoolSize()
+                && pool.getQueue().isEmpty() && HoverAhead.quiet();
+    }
+
+    /** This session's turn to draw is over (render thread): another picture if the state moved on meanwhile, else perhaps a drawing ahead. */
+    private void done() {
+        synchronized (this) {
+            ahead = null;
+            if (closed) cache = null;
+            if (dirty && !closed) {
+                dirty = false;
+                // The state moved on while drawing: draw again, reading it on the server thread.
+                serverThread.execute(() -> {
+                    synchronized (Session.this) {
+                        if (!closed) submit();
+                        else rendering = false;
+                    }
+                });
+                return;
+            }
+            rendering = false;
+        }
+        if (hoverAhead.on() && pointerX >= 0) serverThread.execute(this::lookAhead);
     }
 
     /** The hover and press keys of the picture last drawn (render thread only). */
@@ -377,8 +451,10 @@ public final class Session {
         }
         FirstPictures.Key publish = first;
         FirstPictures pictures = plugin.firstPictures();
+        // Real work first: drawings ahead, of every session, give way.
+        HoverAhead.makeRoom();
         renderers.execute(() -> {
-            boolean published = false;
+            boolean published = false, drawnAhead = false;
             try {
                 long t0 = System.nanoTime();
                 HtmlRenderer.Frame before = frame;
@@ -422,10 +498,14 @@ public final class Session {
                     f = c.frame(at);
                     partial = still;
                 } else if (still && !redraw) {
-                    // Only the hover or press state moved: repaint just what it touches. A picture shared with other
-                    // sessions (FirstPictures) is copied first, as the repaint paints into it.
-                    HtmlRenderer.Frame base = before.image() == borrowed ? FirstPictures.own(before) : before;
-                    Repaint.Result r = Repaint.partial(p, d, canvas.width(), canvas.height(), scale, before.scrollY(), state, base, moved, timeout);
+                    // Only the hover or press state moved: repaint just what it touches, unless that was drawn ahead
+                    // (HoverAhead: the same pixels, already painted). A picture shared with other sessions (FirstPictures)
+                    // is copied first, as the repaint paints into it.
+                    Repaint.Prepared ready = hoverAhead.take(before, drawnHover, drawnPress, hoverKey, pressKey);
+                    drawnAhead = ready != null && ready.image() != borrowed;
+                    Repaint.Result r = drawnAhead ? ready.apply()
+                            : Repaint.partial(p, d, canvas.width(), canvas.height(), scale, before.scrollY(), state,
+                                    before.image() == borrowed ? FirstPictures.own(before) : before, moved, timeout);
                     if (r.frame() != null) {
                         f = r.frame();
                         changed = r.changed();
@@ -483,6 +563,7 @@ public final class Session {
                 drawnPress = pressKey;
                 drawnName = name;
                 frame = f;
+                hoverAhead.drop();
                 if (publish != null && !partial && c == null && f.document() == d && f.scrollY() == 0) {
                     // This session's first picture of the page, drawn as any session's would be: kept for the next to
                     // show it here, with the canvas as it is now. Its image is shared from now on.
@@ -497,9 +578,10 @@ public final class Session {
                 }
                 cache = c;
                 if (plugin.debug()) {
-                    plugin.getLogger().info(String.format("Drew %s for %s in %d ms%s%s", pageName, viewer, (System.nanoTime() - t0) / 1_000_000,
+                    plugin.getLogger().info(String.format("Drew %s for %s in %d ms%s%s%s", pageName, viewer, (System.nanoTime() - t0) / 1_000_000,
                             partial ? String.format(" (only %.0f x %.0f)", changed.getWidth(), changed.getHeight()) : "",
-                            c != null ? String.format(" (from a picture %d px tall)", c.strip().image().getHeight()) : ""));
+                            c != null ? String.format(" (from a picture %d px tall)", c.strip().image().getHeight()) : "",
+                            drawnAhead ? " (drawn ahead)" : ""));
                 }
                 // A new page under a still pointer: what it is over has changed.
                 if (!partial) serverThread.execute(this::repoint);
@@ -508,27 +590,15 @@ public final class Session {
                 int failures = FAILURES.computeIfAbsent(p, k -> new AtomicInteger()).incrementAndGet();
                 if (failures == 1) plugin.getLogger().warning("Could not draw page " + name + ": " + e + " (repeats are counted, not logged)");
                 if (plugin.debug()) e.printStackTrace();
+                // Its pixels may be half painted: nothing drawn ahead over them will do.
+                hoverAhead.drop();
                 // A page that cannot be drawn at all leaves the last picture, of another page, on the screen,
                 // where clicks would find nothing: go back to that page, so the screen still works.
                 HtmlRenderer.Frame shown = frame;
                 if (shown != null && shown.page() != p) serverThread.execute(() -> undrawable(p, nav));
             } finally {
                 if (publish != null && !published) pictures.abandon(publish);
-                synchronized (Session.this) {
-                    if (closed) cache = null;
-                    if (dirty && !closed) {
-                        dirty = false;
-                        // The state moved on while drawing: draw again, reading it on the server thread.
-                        serverThread.execute(() -> {
-                            synchronized (Session.this) {
-                                if (!closed) submit();
-                                else rendering = false;
-                            }
-                        });
-                    } else {
-                        rendering = false;
-                    }
-                }
+                done();
             }
         });
     }
@@ -619,7 +689,9 @@ public final class Session {
         synchronized (this) {
             closed = true;
             cache = null;
+            if (ahead != null) ahead.cancel();
         }
+        hoverAhead.drop();
     }
 
     // ---------------------------------------------------------------- input
@@ -645,20 +717,33 @@ public final class Session {
 
     /** The pointer is over pixel (x, y) of the canvas. */
     public void pointer(int x, int y) {
+        long now = System.nanoTime();
+        if (pointerX >= 0 && now - pointerAt < 250_000_000L && now > pointerAt) {
+            double dt = (now - pointerAt) / 1e9;
+            pointerVx = (x - pointerX) / dt;
+            pointerVy = (y - pointerY) / dt;
+        } else {
+            pointerVx = pointerVy = 0;
+        }
+        pointerAt = now;
         pointerX = x;
         pointerY = y;
         Element seen = at(x, y);
         pointerShape.accept(cursorFor(seen));
         Element e = counterpart(seen, doc);
-        if (e == hover) return;
         // Only a move that changes what :hover matches is worth a picture.
-        boolean differs = !key(hover, false).equals(key(e, false));
+        boolean differs = e != hover && !key(hover, false).equals(key(e, false));
         hover = e;
         if (differs) render();
+        else lookAhead();
     }
 
     public void pointerGone() {
         pointerX = pointerY = -1;
+        synchronized (this) {
+            if (ahead != null) ahead.cancel();
+        }
+        hoverAhead.drop();
         if (hover != null) {
             boolean differs = !key(hover, false).isEmpty();
             hover = null;

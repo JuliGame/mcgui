@@ -9,12 +9,17 @@ import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 
 import java.awt.geom.Rectangle2D;
+import java.awt.image.BufferedImage;
+import java.awt.image.DataBufferInt;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.IdentityHashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Supplier;
 
 /**
  * A change of hover or press state drawn as a repaint of part of the last picture instead of a whole new
@@ -58,22 +63,219 @@ public final class Repaint {
      */
     public static Result partial(Page page, Document doc, int width, int height, double scale, double scroll, Selector.State state,
                                  HtmlRenderer.Frame before, Set<Element> moved, long timeoutMs) {
+        return partial(page, doc, width, height, scale, scroll, state, before, moved, () -> RenderBudget.of(timeoutMs), null);
+    }
+
+    /** As above, each render within a budget from [budgets]; [undo], if not null, is told what each render may paint over first. */
+    private static Result partial(Page page, Document doc, int width, int height, double scale, double scroll, Selector.State state,
+                                  HtmlRenderer.Frame before, Set<Element> moved, Supplier<RenderBudget> budgets, Undo undo) {
         // A page where hovering one element restyles its siblings ('+', '~') is drawn whole.
         if (page.siblingStates()) return fail(Why.SIBLING_STATES);
         Region region = region(before, moved);
         if (region.commit == null) return fail(region.why);
         if (!small(region.paint, before)) return fail(Why.TOO_BIG);
-        HtmlRenderer.Frame f = HtmlRenderer.render(page, doc, width, height, scale, scroll, state, before.image(), region.paint, region.commit, timeoutMs);
+        if (undo != null) undo.save(region.paint);
+        HtmlRenderer.Frame f = HtmlRenderer.render(page, doc, width, height, scale, scroll, state, before.image(), region.paint, region.commit, budgets.get());
         // The new state may reach further than the old one did (a shadow only hovering adds): then paint both.
         Region after = region(f, moved);
         if (after.commit == null) return fail(after.why);
         if (!region.covers(after)) {
             region = region.union(after);
             if (!small(region.paint, before)) return fail(Why.GREW_TOO_BIG);
-            f = HtmlRenderer.render(page, doc, width, height, scale, scroll, state, before.image(), region.paint, region.commit, timeoutMs);
+            if (undo != null) undo.save(region.paint);
+            f = HtmlRenderer.render(page, doc, width, height, scale, scroll, state, before.image(), region.paint, region.commit, budgets.get());
         }
         if (!sameLayout(before, f, region.commit)) return fail(Why.LAYOUT_MOVED);
         return new Result(f, region.commit, Why.PARTIAL);
+    }
+
+    /**
+     * A partial repaint worked out in advance: the pixels it paints, kept apart, and the frame it makes. {@link #apply}
+     * puts the pixels into the picture it was drawn over, which then is what {@link #partial} would have left, and
+     * the result is what it would have returned. Only while that picture has not changed since.
+     */
+    public static final class Prepared {
+        private final HtmlRenderer.Frame frame;
+        private final Rectangle2D changed;
+        private final java.awt.Rectangle at;
+        private final int[] pixels;
+
+        private Prepared(HtmlRenderer.Frame frame, Rectangle2D changed, java.awt.Rectangle at, int[] pixels) {
+            this.frame = frame;
+            this.changed = changed;
+            this.at = at;
+            this.pixels = pixels;
+        }
+
+        /** What it holds on to, roughly: its pixels (the frame's styles and regions are shared in part with the picture's). */
+        public long bytes() {
+            return 4L * pixels.length + 64L * frame.hits().size();
+        }
+
+        /** The picture it is drawn over, which {@link #apply} paints into. */
+        public BufferedImage image() {
+            return frame.image();
+        }
+
+        public Result apply() {
+            int[] px = pixels(frame.image());
+            int stride = frame.image().getWidth();
+            for (int y = 0; y < at.height; y++) System.arraycopy(pixels, y * at.width, px, (at.y + y) * stride + at.x, at.width);
+            return new Result(frame, changed, Why.PARTIAL);
+        }
+    }
+
+    /**
+     * {@link #partial} worked out without changing [before]'s picture: painted over it, the pixels kept apart, and the
+     * picture put back as it was, also when it fails or [budget] gives up ({@link RenderAbandoned}). Null if the repaint
+     * would not be partial. [before]'s picture must not be read or painted by anything else meanwhile.
+     */
+    public static Prepared prepare(Page page, Document doc, int width, int height, double scale, double scroll, Selector.State state,
+                                   HtmlRenderer.Frame before, Set<Element> moved, RenderBudget budget) {
+        Undo undo = new Undo(before.image(), scale);
+        try {
+            Result r = partial(page, doc, width, height, scale, scroll, state, before, moved, () -> budget, undo);
+            if (r.frame() == null) return null;
+            // Only the rectangle kept changes (the rest of what was painted is put back by the render itself), give or
+            // take the pixel Java2D may round a clip edge out by; and of that, often only the middle (a card, not the
+            // margin round it for its shadow). Kept: the smallest rectangle round every pixel that differs.
+            java.awt.Rectangle tight = undo.differing(undo.device(r.changed()).intersection(undo.bounds));
+            return new Prepared(r.frame(), r.changed(), tight, undo.copy(tight, new int[tight.width * tight.height], 0));
+        } finally {
+            undo.restore();
+        }
+    }
+
+    /**
+     * Pixels saved by {@link Undo}s on this thread: kept from one to the next up to {@link #SCRATCH_MAX} ints, as a
+     * repaint drawn ahead would otherwise allocate a few MB only to put them back a moment later.
+     */
+    private static final ThreadLocal<int[]> SCRATCH = new ThreadLocal<>();
+    private static final int SCRATCH_MAX = 3 << 19;
+
+    /**
+     * A picture's pixels under the rectangles a repaint is about to paint, saved before each, to be put back in turn. A
+     * repaint paints only inside its clip, and Java2D may round a clip edge out by a pixel: one more all round is saved.
+     */
+    private static final class Undo {
+        private final BufferedImage img;
+        private final double scale;
+        private final ArrayDeque<java.awt.Rectangle> rects = new ArrayDeque<>();
+        private final ArrayDeque<int[]> saved = new ArrayDeque<>();
+        private final ArrayDeque<Integer> offsets = new ArrayDeque<>();
+        /** Where the next save goes in this thread's scratch. */
+        private int used;
+        java.awt.Rectangle bounds;
+
+        Undo(BufferedImage img, double scale) {
+            this.img = img;
+            this.scale = scale;
+        }
+
+        /** [r] (CSS pixels) in whole device pixels of the picture, with a pixel more all round. */
+        java.awt.Rectangle device(Rectangle2D r) {
+            int w = img.getWidth(), h = img.getHeight();
+            int x0 = Math.max(0, (int) Math.floor(r.getX() * scale) - 1), y0 = Math.max(0, (int) Math.floor(r.getY() * scale) - 1);
+            int x1 = Math.min(w, (int) Math.ceil(r.getMaxX() * scale) + 1), y1 = Math.min(h, (int) Math.ceil(r.getMaxY() * scale) + 1);
+            return new java.awt.Rectangle(x0, y0, Math.max(0, x1 - x0), Math.max(0, y1 - y0));
+        }
+
+        void save(Rectangle2D clip) {
+            java.awt.Rectangle r = device(clip);
+            int[] into = room(r.width * r.height);
+            boolean scratch = into == SCRATCH.get();
+            int at = scratch ? used : 0;
+            copy(r, into, at);
+            saved.push(into);
+            offsets.push(at);
+            if (scratch) used += r.width * r.height;
+            rects.push(r);
+            bounds = bounds == null ? r : bounds.union(r);
+        }
+
+        /** Where [n] more ints go: this thread's scratch from [used] on if there is room, else an array of their own. */
+        private int[] room(int n) {
+            int[] scratch = SCRATCH.get();
+            if (used + n > SCRATCH_MAX) return new int[n];
+            if (scratch == null || scratch.length < used + n) {
+                int[] grown = new int[Math.min(SCRATCH_MAX, Math.max(used + n, scratch == null ? 0 : scratch.length * 2))];
+                // What earlier saves of this repaint put in the old one comes along.
+                if (scratch != null && used > 0) System.arraycopy(scratch, 0, grown, 0, used);
+                SCRATCH.set(scratch = grown);
+            }
+            return scratch;
+        }
+
+        /**
+         * The smallest rectangle inside [r] where the picture now differs from what it was before the first save: each
+         * pixel against the first save that holds it (later ones hold what earlier renders painted).
+         */
+        java.awt.Rectangle differing(java.awt.Rectangle r) {
+            int[] now = pixels(img);
+            java.awt.Rectangle[] rs = new java.awt.Rectangle[rects.size()];
+            int[][] from = new int[rs.length][];
+            int[] off = new int[rs.length];
+            Iterator<java.awt.Rectangle> ri = rects.descendingIterator();
+            Iterator<int[]> si = saved.descendingIterator();
+            Iterator<Integer> oi = offsets.descendingIterator();
+            for (int i = 0; i < rs.length; i++) {
+                rs[i] = ri.next();
+                from[i] = si.next();
+                off[i] = oi.next();
+            }
+            int stride = img.getWidth(), x0 = Integer.MAX_VALUE, y0 = Integer.MAX_VALUE, x1 = -1, y1 = -1;
+            // Per row, the stretches each save holds first, each compared at once (Arrays.mismatch) from the left and,
+            // where it differs, back from the right.
+            List<int[]> spans = new ArrayList<>(), next = new ArrayList<>();
+            for (int y = r.y; y < r.y + r.height; y++) {
+                spans.clear();
+                spans.add(new int[]{r.x, r.x + r.width});
+                for (int i = 0; i < rs.length && !spans.isEmpty(); i++) {
+                    java.awt.Rectangle q = rs[i];
+                    if (y < q.y || y >= q.y + q.height) continue;
+                    next.clear();
+                    for (int[] sp : spans) {
+                        int a = Math.max(sp[0], q.x), b = Math.min(sp[1], q.x + q.width);
+                        if (a >= b) {
+                            next.add(sp);
+                            continue;
+                        }
+                        if (sp[0] < a) next.add(new int[]{sp[0], a});
+                        if (b < sp[1]) next.add(new int[]{b, sp[1]});
+                        int row = off[i] + (y - q.y) * q.width - q.x, at = y * stride;
+                        int m = java.util.Arrays.mismatch(from[i], row + a, row + b, now, at + a, at + b);
+                        if (m < 0) continue;
+                        int last = b - 1;
+                        while (from[i][row + last] == now[at + last]) last--;
+                        x0 = Math.min(x0, a + m);
+                        x1 = Math.max(x1, last);
+                        y0 = Math.min(y0, y);
+                        y1 = y;
+                    }
+                    List<int[]> t = spans;
+                    spans = next;
+                    next = t;
+                }
+            }
+            return x1 < 0 ? new java.awt.Rectangle(r.x, r.y, 0, 0) : new java.awt.Rectangle(x0, y0, x1 - x0 + 1, y1 - y0 + 1);
+        }
+
+        int[] copy(java.awt.Rectangle r, int[] out, int at) {
+            int[] px = pixels(img);
+            for (int y = 0; y < r.height; y++) System.arraycopy(px, (r.y + y) * img.getWidth() + r.x, out, at + y * r.width, r.width);
+            return out;
+        }
+
+        /** Last saved first: each puts back what was there before the render it was saved for. */
+        void restore() {
+            int[] px = pixels(img);
+            while (!rects.isEmpty()) {
+                java.awt.Rectangle r = rects.pop();
+                int[] from = saved.pop();
+                int at = offsets.pop();
+                for (int y = 0; y < r.height; y++) System.arraycopy(from, at + y * r.width, px, (r.y + y) * img.getWidth() + r.x, r.width);
+            }
+        }
     }
 
     private static Result fail(Why why) {
@@ -309,5 +511,9 @@ public final class Repaint {
             if (!region.contains(va) || !region.contains(vb)) return false;
         }
         return true;
+    }
+
+    private static int[] pixels(BufferedImage img) {
+        return ((DataBufferInt) img.getRaster().getDataBuffer()).getData();
     }
 }

@@ -121,7 +121,13 @@ public final class HtmlRenderer {
     public static Frame render(Page page, org.jsoup.nodes.Document document, int width, int height, double scale, double scrollY,
                                Selector.State state, BufferedImage base, java.awt.geom.Rectangle2D clip, java.awt.geom.Rectangle2D keep,
                                long timeoutMs) {
-        RenderBudget budget = RenderBudget.of(timeoutMs);
+        return render(page, document, width, height, scale, scrollY, state, base, clip, keep, RenderBudget.of(timeoutMs));
+    }
+
+    /** As above, within [budget], which may also be cancelled from another thread (a hover drawn in advance). */
+    static Frame render(Page page, org.jsoup.nodes.Document document, int width, int height, double scale, double scrollY,
+                        Selector.State state, BufferedImage base, java.awt.geom.Rectangle2D clip, java.awt.geom.Rectangle2D keep,
+                        RenderBudget budget) {
         double vw = width / scale, vh = height / scale;
         int rows = base != null ? base.getHeight() : height;
         Laid laid = lay(page, document, vw, vh, state, budget);
@@ -241,6 +247,11 @@ public final class HtmlRenderer {
      */
     static volatile boolean adaptiveBands = true;
     private static final java.util.concurrent.atomic.AtomicInteger PAINTING = new java.util.concurrent.atomic.AtomicInteger();
+
+    /** Whole pictures being painted now, by any session. */
+    static int painting() {
+        return PAINTING.get();
+    }
 
     /** Bands for a full picture, [painting] pictures (this one included) being painted: each gets its share of the painter threads. */
     private static int bandsFor(int height, int painting) {

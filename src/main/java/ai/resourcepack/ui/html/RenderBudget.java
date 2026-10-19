@@ -24,6 +24,15 @@ public final class RenderBudget {
         return millis > 0 ? new RenderBudget(millis) : NONE;
     }
 
+    /** As {@link #of}, but always one of its own, so it can be {@link #cancel}led even with no deadline. */
+    static RenderBudget cancellable(long millis) {
+        return new RenderBudget(Math.max(0, millis));
+    }
+
+    boolean cancelled() {
+        return cancelled;
+    }
+
     /** Throws {@link RenderAbandoned} once the deadline has passed or another part of the render failed. */
     public void check() {
         if (cancelled || System.nanoTime() - start > limitNs) throw abandoned();
