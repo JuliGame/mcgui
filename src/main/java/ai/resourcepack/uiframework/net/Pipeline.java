@@ -1,20 +1,24 @@
 package ai.resourcepack.uiframework.net;
 
+import ai.resourcepack.uiframework.world.MapWall;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.channel.ChannelOutboundHandlerAdapter;
 import io.netty.channel.ChannelPromise;
 import io.netty.channel.ChannelPipeline;
 import org.bukkit.entity.Player;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.WeakHashMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -22,12 +26,14 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * The two netty handlers the engine puts in a player's connection: ping answers, and one for a seated
- * player that hides their inventory, reads their mouse the moment it arrives, and moves their pointer.
+ * The netty handlers the engine puts in a player's connection: ping answers, one for a seated player that
+ * hides their inventory, reads their mouse the moment it arrives, and moves their pointer, and one that
+ * keeps which map each frame shows that player once the sender has pointed frames at other maps.
  */
 public final class Pipeline {
     private static final String PONGS = "uiframework_pong";
     private static final String FILTER = "uiframework_conceal";
+    private static final String FRAMES = "uiframework_frames";
     /** The player's own 36 slots, which every container other than the inventory itself ends with. */
     private static final int PLAYER_SLOTS = 36;
 
@@ -155,7 +161,9 @@ public final class Pipeline {
      * would swallow this one's pongs and never see its seated players.
      */
     private boolean ours(ChannelHandler handler) {
-        return handler instanceof Filter f ? f.owner() == this : handler instanceof Pongs g && g.owner() == this;
+        if (handler instanceof Filter f) return f.owner() == this;
+        if (handler instanceof FrameMaps m) return m.owner() == this;
+        return handler instanceof Pongs g && g.owner() == this;
     }
 
     /**
@@ -181,7 +189,7 @@ public final class Pipeline {
             try {
                 channel.eventLoop().execute(() -> {
                     ChannelPipeline p = channel.pipeline();
-                    for (String name : List.of(FILTER, PONGS)) if (ours(p.get(name))) p.remove(name);
+                    for (String name : List.of(FILTER, PONGS, FRAMES)) if (ours(p.get(name))) p.remove(name);
                 });
             } catch (RejectedExecutionException e) {
                 // The event loop is shutting down with the server, and the channel with it.
@@ -192,6 +200,90 @@ public final class Pipeline {
         mice.clear();
         pinned.clear();
         concealed.clear();
+    }
+
+    /**
+     * [player]'s frames on this connection, as {@link Wire#frames}: the handler that keeps them, once it is in
+     * their connection. Until then null, and it is put in: nothing is pointed elsewhere before it can tell a frame
+     * sent afresh which map to show.
+     */
+    public Wire.Frames frames(Player player) {
+        Channel channel = nms.channel(player);
+        if (channel == null) return null;
+        if (channel.pipeline().get(FRAMES) instanceof FrameMaps m && m.owner() == this) return m.added ? m : null;
+        try {
+            channel.eventLoop().execute(() -> {
+                ChannelPipeline p = channel.pipeline();
+                if (!ours(p.get(FRAMES))) install(p, FRAMES, new FrameMaps());
+            });
+        } catch (RejectedExecutionException e) {
+            // The event loop is shutting down with the server.
+        }
+        return null;
+    }
+
+    /**
+     * Which map each frame shows one player, where the sender has pointed it at another map of its wall: a
+     * scroll by whole map rows shows the maps the client already has in other frames. A frame the server sends
+     * this player afresh (spawned, shown again, resent after a cancelled click) would show its own map, so it is
+     * rewritten on its way out to show the one in [pointing]. Kept for as long as the connection lasts, which is
+     * as long as the client keeps its frames and maps.
+     */
+    private final class FrameMaps extends ChannelOutboundHandlerAdapter implements Wire.Frames {
+        /** By wall: the map each tile shows, for walls where any is not its own. Written by the sender thread. */
+        private final Map<MapWall, int[]> pointing = Collections.synchronizedMap(new WeakHashMap<>());
+        volatile boolean added;
+        private boolean warned;
+
+        @Override
+        public void handlerAdded(ChannelHandlerContext ctx) {
+            added = true;
+        }
+
+        Pipeline owner() {
+            return Pipeline.this;
+        }
+
+        @Override
+        public int[] pointing(MapWall wall) {
+            return pointing.get(wall);
+        }
+
+        @Override
+        public void point(MapWall wall, int[] to) {
+            for (int t = 0; t < to.length; t++) {
+                if (to[t] != wall.mapId(t)) {
+                    pointing.put(wall, to.clone());
+                    return;
+                }
+            }
+            pointing.remove(wall);
+        }
+
+        private int mapOf(int entityId) {
+            synchronized (pointing) {
+                for (Map.Entry<MapWall, int[]> e : pointing.entrySet()) {
+                    int t = e.getKey().tileOfEntity(entityId);
+                    if (t >= 0) return e.getValue()[t];
+                }
+            }
+            return -1;
+        }
+
+        @Override
+        public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) {
+            Object out = msg;
+            if (!pointing.isEmpty()) {
+                try {
+                    out = nms.pointFrames(msg, this::mapOf);
+                } catch (RuntimeException e) {
+                    // Never take the connection down with it: the frame then shows its own map until the next change.
+                    if (!warned) log.log(Level.WARNING, "Could not point a frame sent afresh at its map", e);
+                    warned = true;
+                }
+            }
+            ctx.write(out, promise);
+        }
     }
 
     /** Stays in the pipeline once added; it passes everything through untouched while its player is not seated. */

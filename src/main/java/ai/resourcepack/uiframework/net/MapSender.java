@@ -8,8 +8,10 @@ import org.bukkit.entity.Player;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -32,6 +34,12 @@ import java.util.logging.Logger;
  * and writes straight to each player's connection with one flush per pass, so a new picture goes out as
  * soon as it is drawn rather than with the next tick. The tile arrays it compares are immutable once a
  * {@link Canvas} publishes them.
+ *
+ * <p>When a tile a frame should show is one the client already holds in another of the wall's maps (the
+ * canvas scrolled by whole tiles, {@link Canvas#scroll}), the frame is pointed at that map instead of being
+ * sent the tile again: each frame's map is per player ({@link Wire.Frames}), the wall's maps are shuffled
+ * between its frames, and the maps nobody shows any more take the tiles that are new. The re-pointing and
+ * those tiles go in one bundle, so the client shows the whole new picture in one frame.
  */
 public final class MapSender implements AutoCloseable {
     /**
@@ -55,6 +63,8 @@ public final class MapSender implements AutoCloseable {
         final Map<MapWall, AtomicLong> wallInFlight = new ConcurrentHashMap<>();
         /** Plain tiles with the pointer drawn in, by map id, with what each was made from. */
         final Map<Integer, Pointed> pointed = new ConcurrentHashMap<>(); // also read by delivered(), on the main thread
+        /** Which map each frame shows on their client; null until the wire can keep it, and until then each shows its own. */
+        volatile Wire.Frames pointing;
         /** This pass's patches, written together with one flush. */
         final List<Object> packets = new ArrayList<>();
         final List<Patch> patches = new ArrayList<>();
@@ -70,6 +80,8 @@ public final class MapSender implements AutoCloseable {
     private static final class Frame {
         final Canvas canvas;
         final byte[][] tile;
+        /** The map each tile is sent to: what each frame showed when the snapshot was taken. */
+        int[] maps;
         final ArrayDeque<Integer> queue = new ArrayDeque<>();
 
         Frame(Canvas canvas, int tiles) {
@@ -78,7 +90,7 @@ public final class MapSender implements AutoCloseable {
         }
     }
 
-    private final Nms nms;
+    private final Wire wire;
     private final Palette palette;
     private final int bytesPerSecond;
     /** Bytes a player may have queued but unwritten: about 50 ms at the full rate. */
@@ -92,8 +104,8 @@ public final class MapSender implements AutoCloseable {
     private long lastRun = System.nanoTime();
     private long lastWarning;
 
-    public MapSender(Nms nms, Palette palette, int bytesPerSecond, Logger log) {
-        this.nms = nms;
+    public MapSender(Wire wire, Palette palette, int bytesPerSecond, Logger log) {
+        this.wire = wire;
         this.palette = palette;
         this.bytesPerSecond = bytesPerSecond;
         this.maxInFlight = Math.max(512 * 1024L, bytesPerSecond / 20L);
@@ -128,8 +140,10 @@ public final class MapSender implements AutoCloseable {
         if (a == null || v == null) return false;
         AtomicLong flying = v.wallInFlight.get(wall);
         if (flying != null && flying.get() > 0) return false;
+        int[] maps = maps(v, wall);
+        Canvas.Snapshot snap = a.canvas.snapshot();
         for (int t = 0; t < wall.tiles(); t++) {
-            if (v.sent.get(wall.mapId(t)) != tileFor(a, v, t)) return false;
+            if (v.sent.get(maps[t]) != tileFor(a, v, snap, t)) return false;
         }
         return true;
     }
@@ -146,7 +160,7 @@ public final class MapSender implements AutoCloseable {
     private void run() {
         while (!closed) {
             try {
-                tick();
+                pass();
             } catch (Throwable e) {
                 // Errors too (out of memory, a broken reflective call): this thread is all that sends pictures,
                 // so it must never die, and an exception that ended it would be lost without a word.
@@ -172,7 +186,11 @@ public final class MapSender implements AutoCloseable {
         }
     }
 
-    private void tick() {
+    /**
+     * One pass of the send loop: what {@link #start} runs on its own thread every few milliseconds. Call it
+     * yourself only where that thread is not started (a test or a benchmark driving the sender by hand).
+     */
+    public void pass() {
         List<Assignment> assignments = latest.get();
         long now = System.nanoTime();
         long refill = bytesPerSecond * (now - lastRun) / 1_000_000_000L;
@@ -180,8 +198,11 @@ public final class MapSender implements AutoCloseable {
         Set<UUID> seen = new HashSet<>();
         for (Assignment a : assignments) {
             Viewer v = viewers.computeIfAbsent(a.player.getUniqueId(), k -> new Viewer());
-            // A quarter of a second of budget can build up, so a burst after a quiet moment goes out at once.
-            if (seen.add(a.player.getUniqueId())) v.budget = Math.min(v.budget + refill, bytesPerSecond / 4L);
+            if (seen.add(a.player.getUniqueId())) {
+                // A quarter of a second of budget can build up, so a burst after a quiet moment goes out at once.
+                v.budget = Math.min(v.budget + refill, bytesPerSecond / 4L);
+                if (v.pointing == null) v.pointing = wire.frames(a.player);
+            }
             v.walls.add(a.wall);
             // Each on its own: one that fails must not hold up every assignment after it.
             try {
@@ -207,9 +228,19 @@ public final class MapSender implements AutoCloseable {
         }
     }
 
+    /** The map each of [wall]'s frames shows [v]'s client. Never changed: a new pointing is a new array. */
+    private static int[] maps(Viewer v, MapWall wall) {
+        Wire.Frames f = v.pointing;
+        int[] p = f == null ? null : f.pointing(wall);
+        if (p != null && p.length == wall.tiles()) return p;
+        int[] own = new int[wall.tiles()];
+        for (int t = 0; t < own.length; t++) own[t] = wall.mapId(t);
+        return own;
+    }
+
     /** The tile [a]'s viewer should have: the canvas's, with the pointer drawn in for plain viewers. */
-    private byte[] tileFor(Assignment a, Viewer v, int t) {
-        byte[] base = a.canvas.tile(t, a.encoding);
+    private byte[] tileFor(Assignment a, Viewer v, Canvas.Snapshot snap, int t) {
+        byte[] base = snap.tile(t, a.encoding);
         PointerSpot spot = a.pointer;
         if (spot == null || a.encoding != Canvas.Encoding.PLAIN || spot.shape == Pointer.HIDDEN) return base;
         int tx = (t % a.wall.cols) * 128, ty = (t / a.wall.cols) * 128;
@@ -244,18 +275,24 @@ public final class MapSender implements AutoCloseable {
         }
         if (frame.queue.isEmpty()) {
             // Snapshot every tile that differs from what the client has; this set is what goes next.
+            Canvas.Snapshot snap = a.canvas.snapshot();
+            int[] maps = maps(v, a.wall);
+            boolean changed = false;
             for (int t = 0; t < tiles; t++) {
-                byte[] current = tileFor(a, v, t);
-                if (current != v.sent.get(a.wall.mapId(t))) {
-                    frame.tile[t] = current;
-                    frame.queue.add(t);
-                }
+                frame.tile[t] = tileFor(a, v, snap, t);
+                changed |= frame.tile[t] != v.sent.get(maps[t]);
             }
+            if (!changed) return;
+            int[] to = v.pointing == null ? null : repointed(maps, frame.tile, v.sent);
+            // Pointing never changes while a snapshot is part sent, so its tiles all go where it was taken.
+            if (to != null && shift(a, v, frame, maps, to)) return;
+            frame.maps = maps;
+            for (int t = 0; t < tiles; t++) if (frame.tile[t] != v.sent.get(maps[t])) frame.queue.add(t);
         }
         while (true) {
             Integer t = frame.queue.peekFirst();
             if (t == null) return;
-            int id = a.wall.mapId(t);
+            int id = frame.maps[t];
             byte[] current = frame.tile[t];
             int[] rect = diff(v.sent.get(id), current);
             if (rect == null) {
@@ -265,20 +302,104 @@ public final class MapSender implements AutoCloseable {
             }
             int cost = rect[2] * rect[3];
             if (v.budget <= 0 || v.inFlight.get() >= maxInFlight) return; // carry on from here next run
-            byte[] data = new byte[cost];
-            for (int y = 0; y < rect[3]; y++) System.arraycopy(current, (rect[1] + y) * 128 + rect[0], data, y * rect[2], rect[2]);
-            Object packet = nms.mapPatch(id, rect[0], rect[1], rect[2], rect[3], data);
             AtomicLong wallInFlight = v.wallInFlight.computeIfAbsent(a.wall, w -> new AtomicLong());
             // Counted in flight from now, so delivered() never sees the tile as sent before it is written.
             v.inFlight.addAndGet(cost);
             wallInFlight.addAndGet(cost);
-            v.packets.add(packet);
+            v.packets.add(patch(id, rect, current));
             v.patches.add(new Patch(id, current, cost, wallInFlight));
             v.batchCost += cost;
             v.budget -= cost;
             v.sent.put(id, current);
             frame.queue.pollFirst();
         }
+    }
+
+    private Object patch(int id, int[] rect, byte[] tile) {
+        byte[] data = new byte[rect[2] * rect[3]];
+        for (int y = 0; y < rect[3]; y++) System.arraycopy(tile, (rect[1] + y) * 128 + rect[0], data, y * rect[2], rect[2]);
+        return wire.patch(id, rect[0], rect[1], rect[2], rect[3], data);
+    }
+
+    /**
+     * Where to point each frame so that as many as possible show a tile the client already has: [maps] is what
+     * each shows now, [want] what each should, [sent] what each map holds. A frame that already shows its tile
+     * keeps its map; one whose tile is in another map of the wall that no frame keeps is pointed at that map; the
+     * rest take the maps left over (their own first) and are sent their tile. Null if no frame would move.
+     */
+    static int[] repointed(int[] maps, byte[][] want, Map<Integer, byte[]> sent) {
+        int n = maps.length;
+        Map<byte[], Integer> holder = new IdentityHashMap<>();
+        for (int id : maps) {
+            byte[] s = sent.get(id);
+            if (s != null) holder.put(s, id);
+        }
+        int[] to = new int[n];
+        Arrays.fill(to, -1);
+        Set<Integer> used = new HashSet<>();
+        for (int t = 0; t < n; t++) {
+            if (sent.get(maps[t]) == want[t]) {
+                to[t] = maps[t];
+                used.add(maps[t]);
+            }
+        }
+        boolean moved = false;
+        for (int t = 0; t < n; t++) {
+            if (to[t] >= 0) continue;
+            Integer id = holder.get(want[t]);
+            if (id != null && used.add(id)) {
+                to[t] = id;
+                moved = true;
+            }
+        }
+        if (!moved) return null;
+        for (int t = 0; t < n; t++) {
+            if (to[t] < 0 && used.add(maps[t])) to[t] = maps[t];
+        }
+        ArrayDeque<Integer> free = new ArrayDeque<>();
+        for (int id : maps) if (!used.contains(id)) free.add(id);
+        for (int t = 0; t < n; t++) if (to[t] < 0) to[t] = free.poll();
+        return to;
+    }
+
+    /**
+     * Points [a]'s frames at [to] (they show [maps] now) and sends the tiles the maps they then show lack, all in
+     * one bundle, so the client never draws a frame with some moved and some not. Goes whole or not at all: false
+     * if a frame is not in the world (then send as usual); true once written, or when it must wait for room.
+     */
+    private boolean shift(Assignment a, Viewer v, Frame frame, int[] maps, int[] to) {
+        List<Object> packets = new ArrayList<>();
+        for (int t = 0; t < to.length; t++) {
+            if (to[t] == maps[t]) continue;
+            Object p = wire.repoint(a.wall, t, to[t]);
+            if (p == null) return false;
+            packets.add(p);
+        }
+        if (v.budget <= 0 || v.inFlight.get() >= maxInFlight) return true; // all of it next run, from a fresh snapshot
+        AtomicLong wallInFlight = v.wallInFlight.computeIfAbsent(a.wall, w -> new AtomicLong());
+        List<Patch> patches = new ArrayList<>();
+        long cost = 0;
+        for (int t = 0; t < to.length; t++) {
+            int id = to[t];
+            byte[] current = frame.tile[t];
+            int[] rect = diff(v.sent.get(id), current);
+            if (rect == null) {
+                v.sent.put(id, current);
+                continue;
+            }
+            int c = rect[2] * rect[3];
+            packets.add(patch(id, rect, current));
+            patches.add(new Patch(id, current, c, wallInFlight));
+            cost += c;
+        }
+        // Before the write: a frame the client is sent afresh from now on must show where these point it.
+        v.pointing.point(a.wall, to);
+        v.inFlight.addAndGet(cost);
+        wallInFlight.addAndGet(cost);
+        v.budget -= cost;
+        for (Patch p : patches) v.sent.put(p.id, p.tile);
+        write(a.player, v, packets, patches, cost, true);
+        return true;
     }
 
     /** Writes [v]'s patches from this pass to [player] together, with one flush. */
@@ -290,10 +411,15 @@ public final class MapSender implements AutoCloseable {
         v.packets.clear();
         v.patches.clear();
         v.batchCost = 0;
+        write(player, v, packets, patches, cost, false);
+    }
+
+    /** Writes [packets], which carry [patches] costing [cost], to [player]; [together]: as one bundle. */
+    private void write(Player player, Viewer v, List<Object> packets, List<Patch> patches, long cost, boolean together) {
         boolean queued = false;
         try {
             // Completes once netty has compressed the last packet and the socket took it.
-            queued = nms.writeNow(player, packets, ok -> {
+            queued = wire.write(player, packets, together, ok -> {
                 if (ok) bytesSent.addAndGet(cost);
                 else forget(v, patches);
                 landed(v, patches, cost);
