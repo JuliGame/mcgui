@@ -118,6 +118,13 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
 - **Backdrops blur on a grid fixed to the page** (`Painter.origin`, in device
   pixels from the page's top-left), so a band, a rectangle repaint, a whole
   view and a view cut from a taller picture all blur alike.
+- **A steep gradient is not Java2D's** (`Backgrounds.StopPaint`): Java2D
+  samples pixel corners in float, so a hard stop on a whole device pixel
+  landed on a sample and a stripe's edge came out differently in a strip, a
+  band and a repaint. Anything steeper than 8 levels a device pixel is worked
+  out at each pixel's centre in double; gentler ones stay Java2D's, which is
+  cheaper and within a level. `ScrollCacheTest`, `BandsTest` and `RepaintTest`
+  each have a page of hard-edged stripes.
 - **Gradient text is a mask**, not a clip: Java2D clips are not antialiased,
   and clipping a gradient to glyph outlines gave jagged letters.
 - **Map pixels are not screen pixels.** A view is 16×9 maps (2048×1152) by
