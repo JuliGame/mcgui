@@ -287,7 +287,7 @@ public final class UIEnginePlugin extends JavaPlugin {
                 if (!kept.claim(key, p -> {}).mine()) continue;
                 FirstPictures.Picture picture = null;
                 try {
-                    var frame = HtmlRenderer.render(page, filled.doc(), size[0] * 128, size[1] * 128, scale, 0, HtmlRenderer.state(null, null),
+                    var frame = HtmlRenderer.render(page, filled.copy(), size[0] * 128, size[1] * 128, scale, 0, HtmlRenderer.state(null, null),
                             null, null, renderTimeout());
                     var canvas = UIFramework.get().canvas(size[0], size[1]);
                     canvas.draw(frame.image(), 0, 0);

@@ -105,22 +105,18 @@ class FirstPicturesTest {
             this.page = page;
         }
 
-        /** Session.show and then refresh: a new copy of the page, its first picture taken if it can be. */
+        /** Session.show and then refresh: a new copy of the page, its first picture taken (shared, whole) if it can be. */
         void show(Placeholders.Filled f) {
             Document old = doc;
             filled = f;
-            doc = f.doc();
-            hover = counterpart(hover, old, doc);
-            pressed = counterpart(pressed, old, doc);
             if (hover == null && pressed == null && scroll == 0) {
                 FirstPictures.Key k = key(page, f);
                 FirstPictures.Claim c = pictures.claim(k, p -> {});
                 if (c.picture() != null) {
-                    HtmlRenderer.Frame taken = c.picture().frameFor(doc);
-                    assertNotNull(taken, "a copy of the same page fits the picture");
+                    doc = c.picture().document();
                     canvas.show(c.picture().canvas);
-                    borrowed = taken.image();
-                    frame = taken;
+                    borrowed = c.picture().image();
+                    frame = c.picture().frame;
                     strip = null;
                     drawnHover = drawnPress = List.of();
                     took = true;
@@ -128,13 +124,16 @@ class FirstPicturesTest {
                 }
                 assertTrue(c.mine());
                 took = false;
+                doc = f.copy();
                 draw();
                 FirstPictures.Picture p = FirstPictures.Picture.of(k, frame, canvas.copy());
-                assertNotNull(p);
                 borrowed = frame.image();
                 pictures.publish(k, p);
                 return;
             }
+            doc = f.copy();
+            hover = counterpart(hover, old, doc);
+            pressed = counterpart(pressed, old, doc);
             draw();
         }
 

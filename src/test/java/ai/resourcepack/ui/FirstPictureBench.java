@@ -25,6 +25,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
@@ -76,43 +77,44 @@ public final class FirstPictureBench {
         double draw = cpu(runs, () -> {
             Canvas canvas = new Canvas(PALETTE, size.cols, size.rows);
             Placeholders.Filled f = fill.get();
-            canvas.draw(HtmlRenderer.render(page, f.doc(), w, h, scale, 0, none, null, null, 0).image(), 0, 0);
+            canvas.draw(HtmlRenderer.render(page, f.copy(), w, h, scale, 0, none, null, null, 0).image(), 0, 0);
         });
         // After: the same blank canvas and fill, and the kept picture taken.
         Placeholders.Filled first = fill.get();
-        HtmlRenderer.Frame frame = HtmlRenderer.render(page, first.doc(), w, h, scale, 0, none, null, null, 0);
+        Document firstDoc = first.copy();
+        HtmlRenderer.Frame frame = HtmlRenderer.render(page, firstDoc, w, h, scale, 0, none, null, null, 0);
         Canvas drawn = new Canvas(PALETTE, size.cols, size.rows);
         drawn.draw(frame.image(), 0, 0);
         FirstPictures.Key key = new FirstPictures.Key(name, page, size.cols, size.rows, scale, first.key());
         FirstPictures.Picture picture = FirstPictures.Picture.of(key, frame, drawn.copy());
         double take = cpu(runs, () -> {
             Canvas canvas = new Canvas(PALETTE, size.cols, size.rows);
-            Placeholders.Filled f = fill.get();
-            if (picture.frameFor(f.doc()) == null) throw new IllegalStateException("not shaped alike");
+            fill.get();
             canvas.show(picture.canvas);
         });
         double fillMs = cpu(runs, fill::get);
         // Style and layout alone: a render that paints one pixel.
         BufferedImage scratch = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB_PRE);
-        double lay = cpu(runs, () -> HtmlRenderer.render(page, fill.get().doc(), w, h, scale, 0, none, scratch, new Rectangle2D.Double(0, 0, 1 / scale, 1 / scale), 0));
-        double render = cpu(runs, () -> HtmlRenderer.render(page, fill.get().doc(), w, h, scale, 0, none, null, null, 0));
+        double lay = cpu(runs, () -> HtmlRenderer.render(page, fill.get().copy(), w, h, scale, 0, none, scratch, new Rectangle2D.Double(0, 0, 1 / scale, 1 / scale), 0));
+        double render = cpu(runs, () -> HtmlRenderer.render(page, fill.get().copy(), w, h, scale, 0, none, null, null, 0));
         // A viewer's own values repainted over another's picture: what personal pages could share.
         Placeholders.Filled other = fill(page, "Steve_the_Builder");
-        HtmlRenderer.Frame mine = picture.frameFor(other.doc());
-        Set<Element> moved = differing(first.doc(), other.doc());
+        Document otherDoc = other.copy();
+        HtmlRenderer.Frame mine = frameOn(picture.frame, otherDoc);
+        Set<Element> moved = differing(firstDoc, otherDoc);
         String own = "-", ownWorst = "-";
         if (!moved.isEmpty() && mine != null) {
             double[] worst = {0};
             boolean[] partial = {true};
             double t = cpu(runs, () -> {
                 HtmlRenderer.Frame base = FirstPictures.own(mine);
-                Repaint.Result r = Repaint.partial(page, other.doc(), w, h, scale, 0, none, base, moved, 0);
+                Repaint.Result r = Repaint.partial(page, otherDoc, w, h, scale, 0, none, base, moved, 0);
                 if (r.frame() == null) partial[0] = false;
             });
             HtmlRenderer.Frame base = FirstPictures.own(mine);
-            Repaint.Result r = Repaint.partial(page, other.doc(), w, h, scale, 0, none, base, moved, 0);
+            Repaint.Result r = Repaint.partial(page, otherDoc, w, h, scale, 0, none, base, moved, 0);
             if (r.frame() != null) {
-                worst[0] = worst(r.frame(), HtmlRenderer.render(page, other.doc(), w, h, scale, 0, none, null, null, 0));
+                worst[0] = worst(r.frame(), HtmlRenderer.render(page, otherDoc, w, h, scale, 0, none, null, null, 0));
                 own = String.format("%.2f", t);
                 ownWorst = String.valueOf((int) worst[0]);
             } else {
@@ -124,6 +126,19 @@ public final class FirstPictureBench {
         int before = packets(blank, frame.image()), after = packets(adopted, null);
         System.out.printf("%-10s %-16s %9.2f %9.3f %9.3f %9.2f %7.0f%% %9s %9s %7d %5d%n", name, size.name, draw, take, fillMs, lay,
                 100 * lay / render, own, ownWorst, before, after);
+    }
+
+    /** [f] on another copy of its page, [doc]: its hit regions and styles moved onto [doc]'s elements by place in document order. */
+    private static HtmlRenderer.Frame frameOn(HtmlRenderer.Frame f, Document doc) {
+        List<Element> from = f.document().getAllElements(), to = doc.getAllElements();
+        if (from.size() != to.size()) return null;
+        Map<Element, Element> at = new IdentityHashMap<>();
+        for (int i = 0; i < from.size(); i++) at.put(from.get(i), to.get(i));
+        List<ai.resourcepack.ui.html.paint.Painter.Hit> hits = new ArrayList<>();
+        for (var h : f.hits()) hits.add(new ai.resourcepack.ui.html.paint.Painter.Hit(h.shape(), h.clip(), at.get(h.element()), h.pointer()));
+        Map<Element, ai.resourcepack.ui.html.style.Style> styles = new IdentityHashMap<>();
+        f.styles().forEach((e, st) -> styles.put(at.get(e), st));
+        return new HtmlRenderer.Frame(f.image(), f.scale(), f.viewportWidth(), f.viewportHeight(), f.pageHeight(), f.scrollY(), hits, styles, doc, f.page());
     }
 
     /** Fills as a server with 3 players would for [player]. */
