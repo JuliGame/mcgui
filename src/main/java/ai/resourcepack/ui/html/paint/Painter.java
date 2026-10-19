@@ -141,6 +141,11 @@ public final class Painter {
         AffineTransform t = transform(box, x, y);
         if (t != null) {
             g.transform(t);
+            // Scaled to nothing (or past what a double holds): not rendered, as in browsers, and no hit region.
+            if (!drawable(g.getTransform())) {
+                g.setTransform(savedTx);
+                return;
+            }
             pageTx = new AffineTransform(pageTx);
             pageTx.concatenate(t);
         }
@@ -320,9 +325,10 @@ public final class Painter {
                 continue;
             }
             double cx = x + c.x, cy = y + c.y + (c.fixed ? scrollY : 0);
+            AffineTransform t = transform(c, cx, cy);
+            if (t != null && !drawable(t)) continue; // not rendered (see context)
             Reach inner = new Reach();
             reach(c, cx, cy, inner);
-            AffineTransform t = transform(c, cx, cy);
             reach.add(t == null ? inner.area : t.createTransformedShape(inner.area).getBounds2D(), 0);
             reach.backdrop |= inner.backdrop;
             reach.blur = Math.max(reach.blur, inner.blur);
@@ -340,6 +346,13 @@ public final class Painter {
         full.concatenate(a);
         full.translate(-(x + origin[0]), -(y + origin[1]));
         return full;
+    }
+
+    /** Whether drawing through [t] makes sense: every entry finite, and invertible (nothing is scaled to nothing). */
+    private static boolean drawable(AffineTransform t) {
+        double det = t.getDeterminant();
+        return Double.isFinite(det) && Math.abs(det) > Double.MIN_VALUE && Double.isFinite(t.getScaleX()) && Double.isFinite(t.getScaleY())
+                && Double.isFinite(t.getShearX()) && Double.isFinite(t.getShearY()) && Double.isFinite(t.getTranslateX()) && Double.isFinite(t.getTranslateY());
     }
 
     /** True for a box painted later, in its stacking context's positioned pass. */
