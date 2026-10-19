@@ -29,7 +29,20 @@ public final class Media {
         return new Media(inner.queries, outer);
     }
 
+    /** The last answer, for the size it was for: rules share a Media per block, and are tried on every element. */
+    private volatile Answer last;
+
+    private record Answer(double width, double height, boolean matches) {}
+
     public boolean matches(double width, double height) {
+        Answer a = last;
+        if (a != null && a.width == width && a.height == height) return a.matches;
+        boolean m = evaluate(width, height);
+        last = new Answer(width, height, m);
+        return m;
+    }
+
+    private boolean evaluate(double width, double height) {
         if (and != null && !and.matches(width, height)) return false;
         if (queries.isEmpty()) return true;
         for (String q : queries) if (query(q, width, height)) return true;
