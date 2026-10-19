@@ -53,4 +53,10 @@ class BandsTest {
                 + ".b{left:330px;top:150px;width:300px;height:280px;background:rgba(0,0,0,.2);backdrop-filter:blur(7px)}"
                 + "</style></head><body><div class=bar></div><div class=a></div><div class=b></div></body></html>");
     }
+
+    /** Hard-edged repeating stripes and tiles: a band's own origin must not move a stripe's edge by a row. */
+    @Test
+    void hardEdgedStripesTheSameInEveryBand() {
+        assertBandsAgree("<html><head><style>" + ScrollCacheTest.STRIPES_CSS + "</style></head><body>" + ScrollCacheTest.STRIPES_BODY + "</body></html>");
+    }
 }

@@ -31,15 +31,37 @@ class ScrollCacheTest {
 
     @Test
     void viewsCutFromATallPictureMatchViewsDrawnOnTheirOwn() {
-        HtmlRenderer.Frame open = HtmlRenderer.render(LONG, W, H, 1, 0, Selector.State.NONE);
+        assertCutsMatch(LONG, 1);
+    }
+
+    /** Hard-edged stripes, level, slanted, in rings and tiled, whose edges fall on whole device pixels: one row out shows as 255 levels. */
+    static final String STRIPES_CSS = """
+            body { margin: 0; height: 2400px; background: repeating-linear-gradient(0deg, #000 0 37px, #fff 37px 74px); }
+            .slant { margin: 100px 40px; height: 200px; background: repeating-linear-gradient(30deg, #c00 0 13px, #fff 13px 26px); }
+            .ring { margin: 0 60px; height: 300px; background: repeating-radial-gradient(ellipse at 40% 30%, #c00 0 13px, #fff 13px 26px); }
+            .tiles { margin: 0 80px; height: 600px; background: linear-gradient(#000 50%, #0c0 50%) 0 0 / 40px 37px; }
+            .tiles:hover, .slant:hover, .ring:hover { outline: 3px solid #00f; }
+            .out { margin: 20px 101px; width: 150px; height: 77px; background: #3b82f6; }
+            .out:hover { background: #ef4444; }
+            """;
+    static final String STRIPES_BODY = "<div class=slant><div class=out></div></div><div class=ring><div class=out></div></div><div class=tiles><div class=out></div></div>";
+
+    @Test
+    void hardEdgedStripesCutFromATallPictureMatchViewsDrawnOnTheirOwn() {
+        assertCutsMatch(page(STRIPES_CSS, STRIPES_BODY), 2);
+    }
+
+    /** Every 37 CSS px down the page, so whatever the page has crosses the view's edges at many places. */
+    private static void assertCutsMatch(Page page, double scale) {
+        int w = (int) (W * scale), h = (int) (H * scale);
+        HtmlRenderer.Frame open = HtmlRenderer.render(page, w, h, scale, 0, Selector.State.NONE);
         assertTrue(open.maxScroll() > 3 * H, "the page scrolls several views");
-        ScrollCache cache = ScrollCache.paint(LONG, LONG.document, W, H, 1, 0, 0, Selector.State.NONE, ScrollCache.VIEWS, 0);
+        ScrollCache cache = ScrollCache.paint(page, page.document, w, h, scale, 0, 0, Selector.State.NONE, ScrollCache.VIEWS, 0);
         int checked = 0;
-        // Every 37 px, so the blurs and the backdrop cross the view's edges at many places.
         for (double y = 0; y <= open.maxScroll(); y += 37) {
-            if (!cache.covers(y)) cache = ScrollCache.paint(LONG, LONG.document, W, H, 1, y, y - 37, Selector.State.NONE, ScrollCache.VIEWS, 0);
+            if (!cache.covers(y)) cache = ScrollCache.paint(page, page.document, w, h, scale, y, y - 37, Selector.State.NONE, ScrollCache.VIEWS, 0);
             HtmlRenderer.Frame cut = cache.frame(y);
-            HtmlRenderer.Frame fresh = HtmlRenderer.render(LONG, W, H, 1, y, Selector.State.NONE);
+            HtmlRenderer.Frame fresh = HtmlRenderer.render(page, w, h, scale, y, Selector.State.NONE);
             assertEquals(fresh.scrollY(), cut.scrollY());
             int diff = diff(cut.image(), fresh.image());
             assertTrue(diff <= 1, "view at " + y + " differs by " + diff);

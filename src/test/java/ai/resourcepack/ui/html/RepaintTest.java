@@ -160,4 +160,11 @@ class RepaintTest {
     void backdropsOnTheCanvasEdgeMatchAFreshPicture() {
         check("backdrops on the edge", Page.of(EDGES, Path.of("edges.html").toAbsolutePath(), OFFLINE), 3);
     }
+
+    /** Hovers over hard-edged stripes, level, slanted and tiled: a repaint's rectangle must place every edge where a fresh picture does. */
+    @Test
+    void hardEdgedStripesMatchAFreshPicture() {
+        check("stripes", Page.of("<html><head><style>" + ScrollCacheTest.STRIPES_CSS + "</style></head><body>" + ScrollCacheTest.STRIPES_BODY + "</body></html>",
+                Path.of("stripes.html").toAbsolutePath(), OFFLINE), 3);
+    }
 }

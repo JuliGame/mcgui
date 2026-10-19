@@ -130,18 +130,14 @@ final class Backgrounds {
 
     /** Where [paint] can show any colour within [r]: all of [r], except for a radial gradient that ends transparent. */
     static Rectangle2D coloured(Paint paint, Rectangle2D r) {
-        if (!(paint instanceof RadialGradientPaint g) || g.getCycleMethod() != MultipleGradientPaint.CycleMethod.NO_CYCLE) return r;
-        Color[] colors = g.getColors();
-        float[] fractions = g.getFractions();
-        int last = colors.length - 1;
-        while (last >= 0 && colors[last].getAlpha() == 0) last--;
-        if (last == colors.length - 1) return r; // the last colour runs on to the edges
+        if (!(paint instanceof RadialPaint g) || g.repeating) return r;
+        int last = g.color.length - 1;
+        while (last >= 0 && g.color[last] >>> 24 == 0) last--;
+        if (last == g.color.length - 1) return r; // the last colour runs on to the edges
         if (last < 0) return new Rectangle2D.Double(); // transparent throughout
         // The colour fades to nothing between stop [last] and the next one; beyond that every pixel is transparent.
-        double reach = g.getRadius() * fractions[last + 1] + 1;
-        Point2D c = g.getCenterPoint();
-        Rectangle2D circle = new Rectangle2D.Double(c.getX() - reach, c.getY() - reach, 2 * reach, 2 * reach);
-        return g.getTransform().createTransformedShape(circle).getBounds2D();
+        double reach = g.radius * g.pos[last + 1] + 1;
+        return new Rectangle2D.Double(g.cx - reach, g.cy - reach * g.squash, 2 * reach, 2 * reach * g.squash);
     }
 
     static String url(String layer) {
@@ -281,6 +277,9 @@ final class Backgrounds {
         }
         double rad = Math.toRadians(angle);
         double dx = Math.sin(rad), dy = -Math.cos(rad);
+        // A level or upright line exactly so (sin 180deg is 1e-16, not 0): every pixel of a row is then the same colour.
+        if (Math.abs(dx) < 1e-12) dx = 0;
+        if (Math.abs(dy) < 1e-12) dy = 0;
         // An angle too big to mean anything (1e400deg reads as Infinity): no direction, no gradient.
         if (!Double.isFinite(dx) || !Double.isFinite(dy)) return null;
         double len = Math.abs(w * dx) + Math.abs(h * dy);
@@ -300,8 +299,7 @@ final class Backgrounds {
         Point2D p1 = new Point2D.Double(cx - dx * len / 2 + dx * len * endPos, cy - dy * len / 2 + dy * len * endPos);
         // A gradient line of no length (or none that can be measured) is its last colour, as CSS says.
         if (!(p0.distance(p1) >= 1e-6)) return new Color(stops.get(stops.size() - 1).color, true);
-        return new LinearGradientPaint(p0, p1, fractions(stops), colors(stops),
-                repeating ? MultipleGradientPaint.CycleMethod.REPEAT : MultipleGradientPaint.CycleMethod.NO_CYCLE);
+        return new LinearPaint(p0, p1, stops, repeating);
     }
 
     private static Paint radial(List<String> args, Style s, Rectangle2D r, boolean repeating) {
@@ -367,13 +365,7 @@ final class Backgrounds {
         stops = repeating ? rescale(stops, 0, Math.max(1e-3, stops.get(stops.size() - 1).pos)) : clampStops(stops);
         double radius = rx;
         if (repeating) radius = rx * Math.max(1e-3, stopsEnd(args.subList(first, args.size()), s, rx));
-        AffineTransform t = new AffineTransform();
-        t.translate(cx, cy);
-        t.scale(1, ry / rx);
-        t.translate(-cx, -cy);
-        return new RadialGradientPaint(new Point2D.Double(cx, cy), (float) radius, new Point2D.Double(cx, cy), fractions(stops), colors(stops),
-                repeating ? MultipleGradientPaint.CycleMethod.REPEAT : MultipleGradientPaint.CycleMethod.NO_CYCLE,
-                MultipleGradientPaint.ColorSpaceType.SRGB, t);
+        return new RadialPaint(cx, cy, radius, ry / rx, stops, repeating);
     }
 
     private static double stopsEnd(List<String> args, Style s, double len) {
@@ -508,12 +500,275 @@ final class Backgrounds {
         return clampStops(out);
     }
 
-    private static float[] fractions(List<Stop> stops) {
-        float[] f = new float[stops.size()];
+    /**
+     * A linear or radial gradient. Java2D's gradient Paints sample pixel corners and work in float from the
+     * device origin, adding a step per pixel along a row, so where a gradient puts a colour moves by up to a
+     * few hundredths of a pixel with where the picture starts (a tall strip, a band, a repaint's rectangle,
+     * Java2D's own raster chunks). That is under a level for a gentle gradient, and Java2D's is used for those
+     * (it is two to three times cheaper). But a hard stop on a whole device pixel (any whole CSS px at 1x or
+     * 2x) falls exactly on a sample, where that rounding picks the colour: a stripe's edge came out up to 255
+     * levels apart. A gradient steeper than [STEEP] levels a device pixel anywhere is worked out here at each
+     * pixel's centre, in double precision: half a pixel from such an edge, and the same to 1e-12 wherever the
+     * picture starts.
+     */
+    private abstract static class StopPaint implements Paint {
+        /** Cells of the colour table, over the whole gradient (one cycle of a repeating one). */
+        private static final int CELLS = 4096;
+        /** Levels a device pixel past which Java2D's rounding could show: a few hundredths of a pixel would be a level. */
+        private static final double STEEP = 8;
+        final boolean repeating, opaque;
+        final double[] pos;
+        final int[] color;
+        /** The most any channel changes over the whole gradient's length at its steepest: infinite at a hard stop. */
+        private final double steepest;
+        /** The colour at each cell's middle, except in cells marked in [exact], whose pixels are worked out one by one. */
+        private int[] table;
+        private boolean[] exact;
+
+        /** [stops] run from 0 to 1, in order. */
+        StopPaint(List<Stop> stops, boolean repeating) {
+            this.repeating = repeating;
+            pos = new double[stops.size()];
+            color = new int[stops.size()];
+            boolean o = true;
+            for (int i = 0; i < pos.length; i++) {
+                pos[i] = stops.get(i).pos;
+                color[i] = stops.get(i).color;
+                o &= color[i] >>> 24 == 255;
+            }
+            opaque = o;
+            double s = 0;
+            for (int i = 1; i < pos.length; i++) s = Math.max(s, slope(color[i - 1], color[i], pos[i] - pos[i - 1]));
+            // A repeating gradient goes straight from its last colour back to its first.
+            if (repeating) s = Math.max(s, slope(color[pos.length - 1], color[0], 0));
+            steepest = s;
+        }
+
+        private static double slope(int a, int b, double over) {
+            int d = 0;
+            for (int shift = 0; shift < 32; shift += 8) d = Math.max(d, Math.abs((a >>> shift & 255) - (b >>> shift & 255)));
+            return d == 0 ? 0 : over > 0 ? d / over : Double.POSITIVE_INFINITY;
+        }
+
+        /** Colours [w] pixels of device row [y] from [x] into [out] at [off]. */
+        interface Row {
+            void fill(int[] out, int off, int x, int y, int w);
+        }
+
+        /** The rows of this gradient, with [inv] taking device space to user space. */
+        abstract Row rows(AffineTransform inv);
+
+        /** User space the whole gradient spans, along its shortest axis. */
+        abstract double length();
+
+        /** The same gradient as Java2D paints it, or null if Java2D cannot. */
+        abstract Paint java2d();
+
+        @Override
+        public int getTransparency() {
+            return opaque ? OPAQUE : TRANSLUCENT;
+        }
+
+        @Override
+        public java.awt.PaintContext createContext(java.awt.image.ColorModel cm, java.awt.Rectangle deviceBounds, Rectangle2D userBounds,
+                                                   AffineTransform xform, java.awt.RenderingHints hints) {
+            // The least a user unit becomes in device pixels, whichever way it points.
+            double a = xform.getScaleX(), b = xform.getShearX(), c = xform.getShearY(), d = xform.getScaleY();
+            double sum = a * a + b * b + c * c + d * d, det = a * d - b * c;
+            double least = Math.sqrt(Math.max(0, (sum - Math.sqrt(Math.max(0, sum * sum - 4 * det * det))) / 2));
+            if (steepest / (length() * least) <= STEEP) {
+                Paint p = java2d();
+                if (p != null) return p.createContext(cm, deviceBounds, userBounds, xform, hints);
+            }
+            AffineTransform inv;
+            try {
+                inv = xform.createInverse();
+            } catch (java.awt.geom.NoninvertibleTransformException e) {
+                inv = new AffineTransform();
+            }
+            if (table == null) tabulate();
+            Row row = rows(inv);
+            return new java.awt.PaintContext() {
+                private java.awt.image.WritableRaster raster;
+
+                @Override public void dispose() {}
+
+                @Override public java.awt.image.ColorModel getColorModel() {
+                    return java.awt.image.ColorModel.getRGBdefault();
+                }
+
+                @Override
+                public java.awt.image.Raster getRaster(int x, int y, int w, int h) {
+                    if (raster == null || raster.getWidth() < w || raster.getHeight() < h) {
+                        raster = getColorModel().createCompatibleWritableRaster(Math.max(w, raster == null ? 0 : raster.getWidth()),
+                                Math.max(h, raster == null ? 0 : raster.getHeight()));
+                    }
+                    int[] data = ((java.awt.image.DataBufferInt) raster.getDataBuffer()).getData();
+                    int stride = ((java.awt.image.SinglePixelPackedSampleModel) raster.getSampleModel()).getScanlineStride();
+                    for (int j = 0; j < h; j++) row.fill(data, j * stride, x, y + j, w);
+                    return raster;
+                }
+            };
+        }
+
+        /**
+         * A cell is a 4096th of the gradient: between stops its middle's colour is within a level of every pixel's
+         * in it unless two stops a sixteenth apart or less are 255 levels apart. A cell a stop falls in (or on the
+         * edge of) may hold a hard edge, so its pixels are worked out one by one.
+         */
+        private void tabulate() {
+            int[] t = new int[CELLS];
+            boolean[] e = new boolean[CELLS];
+            for (int i = 0; i < CELLS; i++) t[i] = colorAt((i + 0.5) / CELLS);
+            for (double p : pos) {
+                double q = p * CELLS;
+                int i = (int) Math.floor(q);
+                if (i >= 0 && i < CELLS) e[i] = true;
+                if (q == i && i > 0 && i <= CELLS) e[i - 1] = true;
+            }
+            exact = e;
+            table = t;
+        }
+
+        /**
+         * The colour at [t] (0 at the first stop, 1 at the last), from the table where that is exact enough. [t] is
+         * moved on by a billionth first: a pixel's centre can fall exactly on a cell's edge or a stop (both are round
+         * numbers), where an error of 1e-15 would pick either side and two pictures could disagree. A billionth is
+         * far more than that error and far less than any pixel.
+         */
+        final int at(double t) {
+            t += 1e-9;
+            if (repeating) {
+                t -= Math.floor(t);
+            } else if (!(t > 0) || t >= 1) {
+                return colorAt(t);
+            }
+            int i = (int) (t * CELLS);
+            if (i >= CELLS) i = CELLS - 1;
+            return exact[i] ? colorAt(t) : table[i];
+        }
+
+        /** The colour at [t] worked out; where two stops share a place, the later one's starts there. */
+        final int colorAt(double t) {
+            if (repeating) t -= Math.floor(t);
+            // The last stop at or before t (a page may have thousands of stops).
+            int lo = 0, hi = pos.length - 1;
+            if (!(t >= pos[0])) return color[0];
+            if (t >= pos[hi]) return color[hi];
+            while (hi - lo > 1) {
+                int mid = (lo + hi) >>> 1;
+                if (pos[mid] <= t) lo = mid;
+                else hi = mid;
+            }
+            double f = (t - pos[lo]) / (pos[hi] - pos[lo]);
+            int k = (int) (f * 256 + 0.5), p = color[lo], q = color[hi];
+            if (k <= 0) return p;
+            if (k >= 256) return q;
+            return channel(p, q, 24, k) | channel(p, q, 16, k) | channel(p, q, 8, k) | channel(p, q, 0, k);
+        }
+
+        private static int channel(int p, int q, int shift, int k) {
+            int a = p >>> shift & 255, b = q >>> shift & 255;
+            return (a + ((b - a) * k + 128 >> 8)) << shift;
+        }
+    }
+
+    /** A linear gradient from [p0] (stop 0) to [p1] (stop 1). */
+    private static final class LinearPaint extends StopPaint {
+        private final Point2D p0, p1;
+        private final double x0, y0, vx, vy;
+
+        LinearPaint(Point2D p0, Point2D p1, List<Stop> stops, boolean repeating) {
+            super(stops, repeating);
+            this.p0 = p0;
+            this.p1 = p1;
+            double dx = p1.getX() - p0.getX(), dy = p1.getY() - p0.getY(), sq = dx * dx + dy * dy;
+            x0 = p0.getX();
+            y0 = p0.getY();
+            vx = dx / sq;
+            vy = dy / sq;
+        }
+
+        @Override
+        double length() {
+            return p0.distance(p1);
+        }
+
+        @Override
+        Paint java2d() {
+            return new LinearGradientPaint(p0, p1, fractions(pos), colors(color),
+                    repeating ? MultipleGradientPaint.CycleMethod.REPEAT : MultipleGradientPaint.CycleMethod.NO_CYCLE);
+        }
+
+        @Override
+        Row rows(AffineTransform inv) {
+            // Place along the line of device pixel (x, y)'s centre: a * (x + .5) + b * (y + .5) + c.
+            double a = inv.getScaleX() * vx + inv.getShearY() * vy;
+            double b = inv.getShearX() * vx + inv.getScaleY() * vy;
+            double c = (inv.getTranslateX() - x0) * vx + (inv.getTranslateY() - y0) * vy;
+            return (out, off, x, y, w) -> {
+                double rowT = b * (y + 0.5) + c;
+                if (a == 0) {
+                    java.util.Arrays.fill(out, off, off + w, at(rowT));
+                } else {
+                    // Each pixel from its own place, never by adding a step: the sum would depend on where the row starts.
+                    for (int i = 0; i < w; i++) out[off + i] = at(a * (x + i + 0.5) + rowT);
+                }
+            };
+        }
+    }
+
+    /** A radial gradient about ([cx], [cy]): stop 1 at [radius] across, and [squash] times that up and down. */
+    private static final class RadialPaint extends StopPaint {
+        final double cx, cy, radius, squash;
+
+        RadialPaint(double cx, double cy, double radius, double squash, List<Stop> stops, boolean repeating) {
+            super(stops, repeating);
+            this.cx = cx;
+            this.cy = cy;
+            this.radius = radius;
+            this.squash = squash;
+        }
+
+        @Override
+        double length() {
+            return radius * Math.min(1, squash);
+        }
+
+        @Override
+        Paint java2d() {
+            if (!((float) radius > 0)) return null;
+            AffineTransform t = new AffineTransform();
+            t.translate(cx, cy);
+            t.scale(1, squash);
+            t.translate(-cx, -cy);
+            return new RadialGradientPaint(new Point2D.Double(cx, cy), (float) radius, new Point2D.Double(cx, cy), fractions(pos), colors(color),
+                    repeating ? MultipleGradientPaint.CycleMethod.REPEAT : MultipleGradientPaint.CycleMethod.NO_CYCLE,
+                    MultipleGradientPaint.ColorSpaceType.SRGB, t);
+        }
+
+        @Override
+        Row rows(AffineTransform inv) {
+            // In units of the radius, with the ellipse made round: multiplications only, for each pixel.
+            double kx = 1 / radius, ky = 1 / (radius * squash);
+            double m00 = inv.getScaleX() * kx, m01 = inv.getShearX() * kx, m02 = (inv.getTranslateX() - cx) * kx;
+            double m10 = inv.getShearY() * ky, m11 = inv.getScaleY() * ky, m12 = (inv.getTranslateY() - cy) * ky;
+            return (out, off, x, y, w) -> {
+                double py = y + 0.5, bx = m01 * py + m02, by = m11 * py + m12;
+                for (int i = 0; i < w; i++) {
+                    double px = x + i + 0.5, dx = m00 * px + bx, dy = m10 * px + by;
+                    out[off + i] = at(Math.sqrt(dx * dx + dy * dy));
+                }
+            };
+        }
+    }
+
+    /** Stop places as Java2D takes them: strictly increasing, so a hard stop becomes a very short blend. */
+    private static float[] fractions(double[] pos) {
+        float[] f = new float[pos.length];
         float last = -1;
         for (int i = 0; i < f.length; i++) {
-            float v = (float) Math.max(0, Math.min(1, stops.get(i).pos));
-            // Java needs strictly increasing fractions; a hard stop becomes a very short blend.
+            float v = (float) Math.max(0, Math.min(1, pos[i]));
             if (v <= last) v = Math.min(1f, last + 1e-5f);
             if (v <= last) v = last;
             f[i] = v;
@@ -524,9 +779,9 @@ final class Backgrounds {
         return f;
     }
 
-    private static Color[] colors(List<Stop> stops) {
-        Color[] c = new Color[stops.size()];
-        for (int i = 0; i < c.length; i++) c[i] = new Color(stops.get(i).color, true);
+    private static Color[] colors(int[] argb) {
+        Color[] c = new Color[argb.length];
+        for (int i = 0; i < c.length; i++) c[i] = new Color(argb[i], true);
         return c;
     }
 
