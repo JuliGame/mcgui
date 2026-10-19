@@ -87,7 +87,7 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
 - **A scroll by whole map rows moves the canvas** (`Canvas.scroll`, in
   `Session.submit`): the framework then points each viewer's frames at the
   maps their client already has and sends only the rows that came in, in one
-  bundle (about 1/9 of the bytes of a notch on a 16x9 view). Only the rows that
+  bundle (about an eighth of the bytes of a notch on a 16x9 view). Only the rows that
   came in are drawn when the last view was cut from the same tall picture;
   otherwise the whole view is drawn over the moved canvas. A notch is whole rows
   only with `scroll-step: tile` (config or `<meta name="ui:scroll-step">`),
