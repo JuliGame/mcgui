@@ -29,7 +29,12 @@ import java.util.concurrent.TimeUnit;
  */
 public final class UIEnginePlugin extends JavaPlugin {
     /** The example pages copied into a new pages folder. */
-    private static final String[] EXAMPLES = {"menu.html", "rules.html", "shop.html", "style.css"};
+    private static final String[] EXAMPLES = {"menu.html", "rules.html", "shop.html", "style.css", "market.html",
+            "market/awning_cloth.png", "market/coin_pouch.png", "market/dawn_apple.png", "market/echo_tome.png", "market/ember_blade.png",
+            "market/ember_blade_3d.png", "market/emerald_chest.png", "market/emerald_coin.png", "market/frost_bow.png",
+            "market/geode_heart.png", "market/glow_lantern.png", "market/glow_lantern_3d.png", "market/market_stall.png",
+            "market/night_planks.png", "market/phoenix_feather.png", "market/sky_boots.png", "market/starlight_potion.png",
+            "market/starlight_potion_3d.png", "market/void_pearl.png", "market/warden_aegis.png"};
 
     private Framework framework;
     private volatile PageStore pages;
@@ -144,7 +149,10 @@ public final class UIEnginePlugin extends JavaPlugin {
 
     private void copyExample(String name, Path folder) throws IOException {
         try (InputStream in = getResource("pages/" + name)) {
-            if (in != null) Files.copy(in, folder.resolve(name));
+            if (in == null) return;
+            Path to = folder.resolve(name);
+            Files.createDirectories(to.getParent());
+            Files.copy(in, to);
         }
     }
 

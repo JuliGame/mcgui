@@ -38,6 +38,12 @@ it. See [For plugin developers](#for-plugin-developers).
   `uiengine:menu/open`, from a page, `/playsound` or any plugin. Names are lower
   case. Restart after adding one, so the pack is built again.
 
+A new `pages/` folder starts with examples: `menu`, `rules`, `shop`, and
+`market`, a night-market trader's stall that shows off hover tooltips, a
+click-to-showcase item stand (radio inputs, no JavaScript), pixel-art item
+sprites and pre-rendered 3D models, and a Trade button that runs a console
+`give` with item components. Try `/ui open market`.
+
 ## Commands
 
 | Command | Does |
