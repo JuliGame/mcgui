@@ -1,0 +1,151 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Servers</title>
+<meta name="ui:refresh" content="5">
+<!--
+  The game's Multiplayer screen, as a network's server selector: click a server to select it (a radio
+  button behind each row, so the selection needs no script), hover it to see who is on, Join to go.
+  Swap each Join button's data-message for data-command="server survival" (BungeeCord, Velocity).
+-->
+<link rel="stylesheet" href="vanilla.css">
+<style>
+  .title { position: absolute; top: 22px; left: 0; right: 0; text-align: center; }
+  .sep { position: absolute; left: 0; right: 0; height: 4px; background-size: 64px 4px; background-repeat: repeat-x; }
+  .sep.head { top: 62px; background-image: url(vanilla/header_separator.png); }
+  .sep.foot { top: 446px; background-image: url(vanilla/footer_separator.png); }
+  .listbg { position: absolute; top: 66px; left: 0; right: 0; height: 380px; background: rgba(0, 0, 0, .44); }
+  .list { position: absolute; top: 72px; left: 0; right: 0; height: 368px; display: flex; flex-direction: column; align-items: center; gap: 0; }
+
+  .entry { position: relative; display: flex; width: 610px; height: 72px; padding: 4px; gap: 6px; cursor: pointer; }
+  .icon { position: relative; width: 64px; height: 64px; flex: none; }
+  .icon img { width: 64px; height: 64px; }
+  .icon .join { position: absolute; inset: 0; display: none; background: url(vanilla/join.png) 0 0 / 64px 64px, rgba(160, 160, 160, .5); }
+  .entry:hover .icon .join { display: block; }
+  .info { flex: 1; min-width: 0; padding-top: 2px; }
+  .info .name { display: block; margin-bottom: 4px; }
+  .info .motd { display: block; white-space: nowrap; overflow: hidden; }
+  .right { display: flex; align-items: flex-start; gap: 8px; padding-top: 2px; }
+  .ping { width: 20px; height: 16px; }
+  .entry .tooltip { left: 624px; top: 0; }
+  .entry:hover .tooltip { display: block; }
+
+  /* The selection: a white frame round a black row, as the game draws it. */
+  #s1:checked ~ .screen .e1, #s2:checked ~ .screen .e2, #s3:checked ~ .screen .e3,
+  #s4:checked ~ .screen .e4, #s5:checked ~ .screen .e5 { background: #000; box-shadow: 0 0 0 2px #fff; }
+
+  .buttons { position: absolute; top: 458px; left: 0; right: 0; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .row { display: flex; gap: 8px; }
+  .row .btn.wide { width: 200px; }
+  .row .btn.small { width: 148px; }
+  .go { display: none; }
+  #s1:checked ~ .screen .g1, #s2:checked ~ .screen .g2, #s3:checked ~ .screen .g3,
+  #s4:checked ~ .screen .g4, #s5:checked ~ .screen .g5 { display: flex; }
+</style>
+</head>
+<body>
+  <input class="pick" type="radio" name="server" id="s1" checked>
+  <input class="pick" type="radio" name="server" id="s2">
+  <input class="pick" type="radio" name="server" id="s3">
+  <input class="pick" type="radio" name="server" id="s4">
+  <input class="pick" type="radio" name="server" id="s5">
+  <div class="screen">
+    <div class="panorama"></div><div class="dim"></div>
+    <div class="title t">Play Multiplayer</div>
+    <div class="listbg"></div>
+    <div class="sep head"></div>
+
+    <div class="list">
+      <label class="entry e1" for="s1">
+        <span class="icon"><img src="vanilla/grass_block_side.png"><span class="join"></span></span>
+        <span class="info">
+          <span class="name cf">Survival</span>
+          <span class="motd ca">Vanilla+ survival <span class="c7">· claims, jobs</span></span>
+          <span class="motd c7">Season 4 started 12 days ago</span>
+        </span>
+        <span class="right"><span class="c7">38<span class="c8">/</span>120</span><img class="ping" src="vanilla/ping_5.png"></span>
+        <span class="tooltip"><div>
+          <div class="ca">Survival</div><div class="c7">Season 4 · 12 days in</div><div class="gap"></div>
+          <div class="cf">{player}</div><div class="c7">Notch</div><div class="c7">jeb_</div><div class="c7">Dinnerbone</div>
+          <div class="c8">... and 34 more</div>
+        </div></span>
+      </label>
+
+      <label class="entry e2" for="s2">
+        <span class="icon"><img src="vanilla/crafting_table_front.png"><span class="join"></span></span>
+        <span class="info">
+          <span class="name cf">Creative Plots</span>
+          <span class="motd ce">Build anything <span class="c7">· 100x100 plots, WorldEdit</span></span>
+          <span class="motd c7">Theme of the week: <span class="cb">Underwater</span></span>
+        </span>
+        <span class="right"><span class="c7">12<span class="c8">/</span>80</span><img class="ping" src="vanilla/ping_4.png"></span>
+        <span class="tooltip"><div>
+          <div class="ce">Creative Plots</div><div class="c7">Your plot: <span class="cf">#214</span></div><div class="gap"></div>
+          <div class="c7">Grumm</div><div class="c7">Searge</div><div class="c8">... and 10 more</div>
+        </div></span>
+      </label>
+
+      <label class="entry e3" for="s3">
+        <span class="icon"><img src="vanilla/end_stone_bricks.png"><span class="join"></span></span>
+        <span class="info">
+          <span class="name cf">SkyBlock</span>
+          <span class="motd cb">One island. Infinite grind.</span>
+          <span class="motd c7">Islands, minions, auction house</span>
+        </span>
+        <span class="right"><span class="c7">64<span class="c8">/</span>200</span><img class="ping" src="vanilla/ping_5.png"></span>
+        <span class="tooltip"><div>
+          <div class="cb">SkyBlock</div><div class="c7">Top island: <span class="c6">Floatopia</span></div><div class="gap"></div>
+          <div class="c8">64 players on 41 islands</div>
+        </div></span>
+      </label>
+
+      <label class="entry e4" for="s4">
+        <span class="icon"><img src="vanilla/tnt_side.png"><span class="join"></span></span>
+        <span class="info">
+          <span class="name cf">Minigames</span>
+          <span class="motd cc">BedWars · SkyWars · Spleef</span>
+          <span class="motd c7">Next BedWars game in <span class="cf">14s</span></span>
+        </span>
+        <span class="right"><span class="c7">103<span class="c8">/</span>300</span><img class="ping" src="vanilla/ping_3.png"></span>
+        <span class="tooltip"><div>
+          <div class="cc">Minigames</div><div class="gap"></div>
+          <div class="c7">BedWars <span class="cf">58</span></div><div class="c7">SkyWars <span class="cf">31</span></div><div class="c7">Spleef <span class="cf">14</span></div>
+        </div></span>
+      </label>
+
+      <label class="entry e5" for="s5">
+        <span class="icon"><img src="vanilla/bookshelf.png"><span class="join"></span></span>
+        <span class="info">
+          <span class="name cf">Lobby</span>
+          <span class="motd cd">You are here</span>
+          <span class="motd c7">{online} online right now</span>
+        </span>
+        <span class="right"><span class="c7">{online}<span class="c8">/</span>{max}</span><img class="ping" src="vanilla/ping_5.png"></span>
+        <span class="tooltip"><div>
+          <div class="cd">Lobby</div><div class="c7">You: <span class="cf">{player}</span></div><div class="c7">At <span class="cf">{x}, {y}, {z}</span></div>
+        </div></span>
+      </label>
+    </div>
+
+    <div class="sep foot"></div>
+    <div class="buttons">
+      <div class="row">
+        <div class="btn wide go g1" data-message="<gray>Connecting to <green>Survival</green>..." data-close>Join Server</div>
+        <div class="btn wide go g2" data-message="<gray>Connecting to <yellow>Creative Plots</yellow>..." data-close>Join Server</div>
+        <div class="btn wide go g3" data-message="<gray>Connecting to <aqua>SkyBlock</aqua>..." data-close>Join Server</div>
+        <div class="btn wide go g4" data-message="<gray>Connecting to <red>Minigames</red>..." data-close>Join Server</div>
+        <div class="btn wide go g5" data-message="<gray>You are already in the <light_purple>Lobby</light_purple>.">Join Server</div>
+        <div class="btn wide off">Direct Connect</div>
+        <a class="btn wide" href="quests.html">Quest Log</a>
+      </div>
+      <div class="row">
+        <div class="btn small off">Edit</div>
+        <div class="btn small off">Delete</div>
+        <div class="btn small" data-action="reload">Refresh</div>
+        <div class="btn small" data-action="close">Back</div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

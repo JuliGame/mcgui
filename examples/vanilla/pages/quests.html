@@ -1,0 +1,217 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Quests</title>
+<meta name="ui:refresh" content="5">
+<!--
+  A quest log in the game's own book. Click a quest on the left page to read it on the right, turn the
+  page with the arrows (radio buttons behind the labels: no script), hover a reward to see it.
+  "Getting Experienced" is live: {level} is the reader's level, refilled every 5 seconds.
+-->
+<link rel="stylesheet" href="vanilla.css">
+<style>
+  body { color: #000; }
+  .dim { background: rgba(0, 0, 0, .45); }
+  .book { position: absolute; left: 234px; top: 108px; width: 556px; height: 360px; }
+  .page { position: absolute; top: 0; width: 292px; height: 360px; background-size: 292px 360px; }
+  .page.l { left: 0; z-index: 1; background-image: url(vanilla/book_left.png); }
+  .page.r { left: 264px; background-image: url(vanilla/book_right.png); }
+  .text { position: absolute; left: 32px; top: 30px; width: 228px; }
+  .page.l .text { width: 220px; }
+  .num { text-align: right; margin-bottom: 14px; color: #000; }
+  h2 { margin: 0 0 8px; font-size: 16px; font-weight: bold; }
+
+  /* The left page: one chapter's quests. */
+  .chapter { display: none; }
+  #c1:checked ~ .book .ch1, #c2:checked ~ .book .ch2 { display: block; }
+  .quest { display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 4px; margin: 0 -4px; cursor: pointer; }
+  .quest:hover { background: rgba(110, 70, 20, .12); }
+  .quest img { width: 32px; height: 32px; flex: none; }
+  .quest .name { flex: 1; }
+  .quest .tick { width: 18px; height: 16px; }
+  .quest.locked { color: #8a8174; cursor: default; }
+  .quest.locked img { filter: grayscale(1); opacity: .45; }
+  #q1:checked ~ .book .k1, #q2:checked ~ .book .k2, #q3:checked ~ .book .k3, #q4:checked ~ .book .k4,
+  #q5:checked ~ .book .k5, #q6:checked ~ .book .k6, #q7:checked ~ .book .k7, #q8:checked ~ .book .k8 {
+    background: rgba(110, 70, 20, .2); box-shadow: inset 4px 0 0 #7a4a1c; }
+
+  /* The right page: the chosen quest. */
+  .detail { display: none; }
+  #q1:checked ~ .book .d1, #q2:checked ~ .book .d2, #q3:checked ~ .book .d3, #q4:checked ~ .book .d4,
+  #q5:checked ~ .book .d5, #q6:checked ~ .book .d6, #q7:checked ~ .book .d7, #q8:checked ~ .book .d8 { display: block; }
+  .desc { color: #3a3a3a; margin-bottom: 10px; }
+  .obj { display: flex; align-items: center; gap: 6px; margin-bottom: 2px; }
+  .obj img { width: 18px; height: 18px; }
+  .obj .of { margin-left: auto; color: #5a4a3a; }
+  .xp { position: relative; width: 228px; height: 10px; margin: 8px 0 12px; background: url(vanilla/xp_background.png) 0 0 / 228px 10px; }
+  .xp i { position: absolute; left: 0; top: 0; height: 10px; background: url(vanilla/xp_progress.png) 0 0 / 228px 10px; }
+  .label { color: #5a4a3a; margin-bottom: 4px; }
+  .rewards { display: flex; gap: 4px; margin-bottom: 12px; }
+  .slot .tooltip { left: -4px; bottom: 42px; }
+  .slot:hover .tooltip { display: block; }
+  .detail .btn { width: 228px; }
+
+  /* Turning the page. */
+  .turn { position: absolute; z-index: 2; top: 316px; width: 46px; height: 26px; cursor: pointer; display: none; background-size: 46px 26px; }
+  .turn.fwd { left: 456px; background-image: url(vanilla/page_forward.png); }
+  .turn.fwd:hover { background-image: url(vanilla/page_forward_highlighted.png); }
+  .turn.back { left: 54px; background-image: url(vanilla/page_backward.png); }
+  .turn.back:hover { background-image: url(vanilla/page_backward_highlighted.png); }
+  #c1:checked ~ .book .fwd, #c2:checked ~ .book .back { display: block; }
+  .done { position: absolute; left: 0; right: 0; top: 492px; display: flex; justify-content: center; }
+</style>
+</head>
+<body>
+  <input class="pick" type="radio" name="chapter" id="c1" checked>
+  <input class="pick" type="radio" name="chapter" id="c2">
+  <input class="pick" type="radio" name="quest" id="q1">
+  <input class="pick" type="radio" name="quest" id="q2">
+  <input class="pick" type="radio" name="quest" id="q3" checked>
+  <input class="pick" type="radio" name="quest" id="q4">
+  <input class="pick" type="radio" name="quest" id="q5">
+  <input class="pick" type="radio" name="quest" id="q6">
+  <input class="pick" type="radio" name="quest" id="q7">
+  <input class="pick" type="radio" name="quest" id="q8">
+  <div class="panorama"></div><div class="dim"></div>
+
+  <div class="book">
+    <div class="page l"><div class="text">
+      <div class="chapter ch1">
+        <div class="num">Chapter 1 of 2</div>
+        <h2>Settling In</h2>
+        <label class="quest k1" for="q1"><img src="vanilla/oak_log.png"><span class="name">Getting Wood</span><img class="tick" src="vanilla/checkmark.png"></label>
+        <label class="quest k2" for="q2"><img src="vanilla/wooden_pickaxe.png"><span class="name">Stone Age</span><img class="tick" src="vanilla/checkmark.png"></label>
+        <label class="quest k3" for="q3"><img src="vanilla/cooked_beef.png"><span class="name">Full Belly</span></label>
+        <label class="quest k4" for="q4"><img src="vanilla/experience_bottle.png"><span class="name">Experienced</span></label>
+        <label class="quest k5" for="q5"><img src="vanilla/diamond.png"><span class="name">Diamonds!</span></label>
+      </div>
+      <div class="chapter ch2">
+        <div class="num">Chapter 2 of 2</div>
+        <h2>Further Afield</h2>
+        <label class="quest k6" for="q6"><img src="vanilla/wheat.png"><span class="name">Bread Winner</span></label>
+        <label class="quest k7" for="q7"><img src="vanilla/ender_pearl.png"><span class="name">Into the End</span></label>
+        <label class="quest k8" for="q8"><img src="vanilla/elytra.png"><span class="name">Wings</span></label>
+        <div class="quest locked"><img src="vanilla/totem_of_undying.png"><span class="name">???</span></div>
+        <div class="quest locked"><img src="vanilla/nether_star.png"><span class="name">???</span></div>
+      </div>
+    </div></div>
+
+    <div class="page r"><div class="text">
+      <div class="num">{player}'s Quests</div>
+
+      <div class="detail d1">
+        <h2>Getting Wood</h2>
+        <div class="desc">Punch a tree. Everyone starts somewhere.</div>
+        <div class="obj"><img src="vanilla/checkbox_selected.png">Collect logs<span class="of">16/16</span></div>
+        <div class="xp"><i style="width: 228px"></i></div>
+        <div class="label">Rewards</div>
+        <div class="rewards">
+          <div class="slot"><img src="vanilla/wooden_pickaxe.png"><span class="tooltip"><div><div class="cf">Wooden Pickaxe</div></div></span></div>
+          <div class="slot"><img src="vanilla/bread.png"><span class="n">4</span><span class="tooltip"><div><div class="cf">Bread</div></div></span></div>
+        </div>
+        <div class="btn off">Claimed</div>
+      </div>
+
+      <div class="detail d2">
+        <h2>Stone Age</h2>
+        <div class="desc">Wood breaks. Stone lasts. Mine some.</div>
+        <div class="obj"><img src="vanilla/checkbox_selected.png">Mine cobblestone<span class="of">64/64</span></div>
+        <div class="xp"><i style="width: 228px"></i></div>
+        <div class="label">Rewards</div>
+        <div class="rewards">
+          <div class="slot"><img src="vanilla/iron_pickaxe.png"><span class="tooltip"><div><div class="cf">Iron Pickaxe</div></div></span></div>
+          <div class="slot"><img src="vanilla/iron_ingot.png"><span class="n">8</span><span class="tooltip"><div><div class="cf">Iron Ingot</div></div></span></div>
+        </div>
+        <div class="btn off">Claimed</div>
+      </div>
+
+      <div class="detail d3">
+        <h2>Full Belly</h2>
+        <div class="desc">A hungry miner is a slow miner.</div>
+        <div class="obj"><img src="vanilla/checkbox.png">Cook beef<span class="of">6/10</span></div>
+        <div class="obj"><img src="vanilla/checkbox_selected.png">Eat a cake<span class="of">1/1</span></div>
+        <div class="xp"><i style="width: 160px"></i></div>
+        <div class="label">Rewards</div>
+        <div class="rewards">
+          <div class="slot"><img src="vanilla/golden_apple.png"><span class="n">2</span><span class="tooltip"><div><div class="cb">Golden Apple</div><div class="c9">Regeneration II (0:05)</div><div class="c9">Absorption (2:00)</div></div></span></div>
+          <div class="slot"><img src="vanilla/emerald.png"><span class="n">8</span><span class="tooltip"><div><div class="cf">Emerald</div></div></span></div>
+          <div class="slot"><img src="vanilla/cake.png"><span class="tooltip"><div><div class="cf">Cake</div><div class="c7">It's not a lie.</div></div></span></div>
+        </div>
+        <div class="btn off">4 beef to go</div>
+      </div>
+
+      <div class="detail d4">
+        <h2>Experienced</h2>
+        <div class="desc">Reach level 10. Your level, right now:</div>
+        <div class="obj"><img src="vanilla/checkbox.png">Reach level 10<span class="of">{level}/10</span></div>
+        <div class="xp"><i style="width: 57px"></i></div>
+        <div class="label">Rewards</div>
+        <div class="rewards">
+          <div class="slot"><img src="vanilla/experience_bottle.png"><span class="n">16</span><span class="tooltip"><div><div class="ce">Bottle o' Enchanting</div></div></span></div>
+          <div class="slot"><img src="vanilla/name_tag.png"><span class="tooltip"><div><div class="cf">Name Tag</div><div class="c7">Name your best friend.</div></div></span></div>
+        </div>
+        <div class="btn" data-console="xp add {player} 10 levels" data-message="<green>+10 levels.</green> <gray>(A demo: the button gives them, a real quest plugin would check.)">Cheat: +10 levels</div>
+      </div>
+
+      <div class="detail d5">
+        <h2>Diamonds!</h2>
+        <div class="desc">Dig down, carefully. Below Y -50 is best.</div>
+        <div class="obj"><img src="vanilla/checkbox.png">Find diamond ore<span class="of">0/1</span></div>
+        <div class="obj"><img src="vanilla/checkbox.png">Mine diamonds<span class="of">0/5</span></div>
+        <div class="xp"><i style="width: 0"></i></div>
+        <div class="label">Rewards</div>
+        <div class="rewards">
+          <div class="slot"><img src="vanilla/diamond_pickaxe.png"><span class="tooltip"><div><div class="cb">Diamond Pickaxe</div><div class="c7">Efficiency III</div><div class="c7">Unbreaking II</div></div></span></div>
+          <div class="slot"><img src="vanilla/emerald.png"><span class="n">16</span><span class="tooltip"><div><div class="cf">Emerald</div></div></span></div>
+        </div>
+        <div class="btn off">Not started</div>
+      </div>
+
+      <div class="detail d6">
+        <h2>Bread Winner</h2>
+        <div class="desc">Farm wheat for the village bakery.</div>
+        <div class="obj"><img src="vanilla/checkbox_selected.png">Harvest wheat<span class="of">64/64</span></div>
+        <div class="xp"><i style="width: 228px"></i></div>
+        <div class="label">Rewards</div>
+        <div class="rewards">
+          <div class="slot"><img src="vanilla/bread.png"><span class="n">16</span><span class="tooltip"><div><div class="cf">Bread</div></div></span></div>
+          <div class="slot"><img src="vanilla/emerald.png"><span class="n">12</span><span class="tooltip"><div><div class="cf">Emerald</div></div></span></div>
+        </div>
+        <div class="btn" data-console="give {player} bread 16" data-message="<green>Quest complete:</green> <white>Bread Winner</white>" data-close>Claim Rewards</div>
+      </div>
+
+      <div class="detail d7">
+        <h2>Into the End</h2>
+        <div class="desc">Trade with endermen, the hard way.</div>
+        <div class="obj"><img src="vanilla/checkbox.png">Collect ender pearls<span class="of">3/12</span></div>
+        <div class="xp"><i style="width: 57px"></i></div>
+        <div class="label">Rewards</div>
+        <div class="rewards">
+          <div class="slot"><img src="vanilla/spyglass.png"><span class="tooltip"><div><div class="cf">Spyglass</div></div></span></div>
+          <div class="slot"><img src="vanilla/firework_rocket.png"><span class="n">32</span><span class="tooltip"><div><div class="cf">Firework Rocket</div><div class="c7">Flight Duration: 3</div></div></span></div>
+        </div>
+        <div class="btn off">9 pearls to go</div>
+      </div>
+
+      <div class="detail d8">
+        <h2>Wings</h2>
+        <div class="desc">Find an end city ship and take what's inside.</div>
+        <div class="obj"><img src="vanilla/checkbox.png">Find an elytra<span class="of">0/1</span></div>
+        <div class="xp"><i style="width: 0"></i></div>
+        <div class="label">Rewards</div>
+        <div class="rewards">
+          <div class="slot"><img src="vanilla/firework_rocket.png"><span class="n">64</span><span class="tooltip"><div><div class="cf">Firework Rocket</div><div class="c7">Flight Duration: 3</div></div></span></div>
+          <div class="slot"><img src="vanilla/totem_of_undying.png"><span class="tooltip"><div><div class="ce">Totem of Undying</div></div></span></div>
+        </div>
+        <div class="btn off">Not started</div>
+      </div>
+    </div></div>
+
+    <label class="turn fwd" for="c2"></label>
+    <label class="turn back" for="c1"></label>
+  </div>
+
+  <div class="done"><div class="btn" data-action="close">Done</div></div>
+</body>
+</html>

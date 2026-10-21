@@ -1,0 +1,59 @@
+/*
+  The game's own look, in CSS: its buttons, slots, panels and tooltips, measured off its textures.
+  One game pixel is 2 CSS pixels here (a fullscreen page is 1024 x 576 CSS pixels).
+  Font: Monocraft, which UI Engine bundles as "Minecraft".
+*/
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; }
+body { font-family: Minecraft; font-size: 16px; line-height: 18px; color: #fff; background: #000; }
+
+/* The menu background since 1.20.5: the title screen's panorama, blurred and dimmed. */
+.panorama { position: absolute; left: -24px; top: -24px; right: -24px; bottom: -24px;
+            background: url(vanilla/panorama_0.png) center / cover; filter: blur(10px); }
+.dim { position: absolute; inset: 0; background: rgba(0, 0, 0, .25); }
+
+/* Text colours, each with the game's shadow: the same colour at a quarter of the brightness, a pixel down and right. */
+.t   { text-shadow: 2px 2px 0 #3f3f3f; }
+.c0 { color: #000; text-shadow: none; }
+.c7 { color: #aaa; text-shadow: 2px 2px 0 #2a2a2a; }
+.c8 { color: #555; text-shadow: 2px 2px 0 #151515; }
+.c9 { color: #55f; text-shadow: 2px 2px 0 #15153f; }
+.ca { color: #5f5; text-shadow: 2px 2px 0 #153f15; }
+.cb { color: #5ff; text-shadow: 2px 2px 0 #153f3f; }
+.cc { color: #f55; text-shadow: 2px 2px 0 #3f1515; }
+.cd { color: #f5f; text-shadow: 2px 2px 0 #3f153f; }
+.ce { color: #ff5; text-shadow: 2px 2px 0 #3f3f15; }
+.c6 { color: #fa0; text-shadow: 2px 2px 0 #2a2a00; }
+.cf { color: #fff; text-shadow: 2px 2px 0 #3f3f3f; }
+.flat { text-shadow: none; }
+
+/* widget/button.png: a black edge, a light top and left, two dark rows at the bottom. */
+.btn { display: flex; align-items: center; justify-content: center; height: 40px; width: 200px; padding-bottom: 2px;
+       background: #6f6f6f; border: 2px solid #000; box-shadow: inset 2px 2px 0 #aaa, inset -2px -4px 0 #565656;
+       color: #fff; text-shadow: 2px 2px 0 #3f3f3f; cursor: pointer; text-decoration: none; }
+.btn:hover { border-color: #fff; background: #757575; box-shadow: inset 2px 2px 0 #afafaf, inset -2px -4px 0 #5c5c5c; }
+.btn.off { background: #2c2c2c; box-shadow: none; color: #a0a0a0; text-shadow: none; cursor: default; }
+
+/* A container's panel (generic_54.png): grey, a black edge with its corners cut, white light and dark shade inside. */
+.panel { background: #c6c6c6; border: 2px solid #000; border-radius: 6px;
+         box-shadow: inset 4px 4px 0 #fff, inset -4px -4px 0 #555; padding: 14px; color: #404040; }
+
+/* An inventory slot: 18 game pixels, dark top-left, white bottom-right. */
+.slot { position: relative; width: 36px; height: 36px; background: #8b8b8b;
+        box-shadow: inset 2px 2px 0 #373737, inset -2px -2px 0 #fff; display: grid; place-items: center; }
+.slot img { width: 32px; height: 32px; }
+.slot .n { position: absolute; right: 0; bottom: 0; color: #fff; text-shadow: 2px 2px 0 #3f3f3f; }
+
+/* tooltip/background.png and frame.png: near-black, and a frame fading from violet to deep purple. */
+.tooltip { position: absolute; display: none; z-index: 10; padding: 8px 10px 6px; background: rgba(16, 0, 16, .94);
+           white-space: nowrap; }
+.tooltip::before { content: ""; position: absolute; left: 2px; top: 2px; right: 2px; bottom: 2px;
+                   background: linear-gradient(rgba(80, 0, 255, .31), rgba(40, 0, 127, .31)) left / 2px 100% no-repeat,
+                               linear-gradient(rgba(80, 0, 255, .31), rgba(40, 0, 127, .31)) right / 2px 100% no-repeat,
+                               linear-gradient(rgba(80, 0, 255, .31), rgba(80, 0, 255, .31)) top / 100% 2px no-repeat,
+                               linear-gradient(rgba(40, 0, 127, .31), rgba(40, 0, 127, .31)) bottom / 100% 2px no-repeat; }
+.tooltip > div { position: relative; }
+.tooltip .gap { height: 4px; }
+
+/* The radio buttons behind a list's selection: clicked through their labels, never drawn. */
+input.pick { display: none; }
