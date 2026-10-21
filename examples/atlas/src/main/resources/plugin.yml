@@ -1,0 +1,40 @@
+name: Atlas
+version: ${version}
+main: ai.resourcepack.atlas.AtlasPlugin
+api-version: '1.21'
+depend: [UIFramework]
+description: A live world map in the game's own map style, built on UI Framework. Fullscreen or on a wall; pan, zoom, pin and travel.
+commands:
+  atlas:
+    description: Open the world map, or put one up on a wall.
+    usage: /atlas [open] | wall [cols] [rows] | remove | pins clear
+permissions:
+  # One node per subcommand and action. atlas.admin is only a parent: nothing checks it.
+  atlas.admin:
+    description: Everything below.
+    default: op
+    children:
+      atlas.open: true
+      atlas.pin: true
+      atlas.teleport: true
+      atlas.wall: true
+      atlas.remove: true
+      atlas.pins: true
+  atlas.open:
+    description: Open the map fullscreen with /atlas, or by clicking a map wall.
+    default: true
+  atlas.pin:
+    description: Click the map to pin a place for everybody to see.
+    default: true
+  atlas.teleport:
+    description: Right-click the map to go there.
+    default: op
+  atlas.wall:
+    description: Put a map up on the wall you look at with /atlas wall.
+    default: op
+  atlas.remove:
+    description: Take down the map wall you look at with /atlas remove.
+    default: op
+  atlas.pins:
+    description: Remove every pin with /atlas pins clear.
+    default: op
