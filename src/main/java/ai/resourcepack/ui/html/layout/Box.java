@@ -110,7 +110,9 @@ public final class Box {
     }
 
     public boolean isOutOfFlow() {
-        return style.isOutOfFlow();
+        // A run of text shares its element's style, position included, but is always in that element's flow:
+        // read as out of flow, the text of an absolutely positioned flex container was dropped.
+        return inner != Inner.TEXT && style.isOutOfFlow();
     }
 
     /** A line of inline content. */
