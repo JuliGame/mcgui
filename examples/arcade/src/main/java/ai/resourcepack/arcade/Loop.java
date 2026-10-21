@@ -14,9 +14,14 @@ import java.util.logging.Logger;
  * faster than the server ticks and never costs the server thread a frame.
  */
 final class Loop {
+    /** Anything the loop runs: a game, a scene. */
+    interface Ticker {
+        void tick(double dt);
+    }
+
     private static final long FRAME_MICROS = 1_000_000 / 30;
 
-    private final List<Game> games = new CopyOnWriteArrayList<>();
+    private final List<Ticker> games = new CopyOnWriteArrayList<>();
     private final Logger log;
     private ScheduledExecutorService thread;
     private long last;
@@ -40,11 +45,11 @@ final class Loop {
         games.clear();
     }
 
-    void add(Game game) {
+    void add(Ticker game) {
         games.add(game);
     }
 
-    void remove(Game game) {
+    void remove(Ticker game) {
         games.remove(game);
     }
 
@@ -52,7 +57,7 @@ final class Loop {
         long now = System.nanoTime();
         double dt = Math.min(0.05, (now - last) / 1e9);
         last = now;
-        for (Game g : games) {
+        for (Ticker g : games) {
             try {
                 g.tick(dt);
             } catch (Throwable t) {

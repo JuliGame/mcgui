@@ -20,14 +20,16 @@ final class Cabinet implements WallContent {
     final Location topLeft;
     final BlockFace facing;
     final int cols, rows;
+    /** Neon Breakout's own game, or null for a cabinet running a scene. */
     final Game game;
+    final SceneRunner runner;
     WallScreen screen;
     /** Who is sitting at it, or null. Server thread only. */
     UUID player;
 
     private final ArcadePlugin plugin;
 
-    Cabinet(ArcadePlugin plugin, String id, Location topLeft, BlockFace facing, int cols, int rows, Game game) {
+    Cabinet(ArcadePlugin plugin, String id, Location topLeft, BlockFace facing, int cols, int rows, Game game, SceneRunner runner) {
         this.plugin = plugin;
         this.id = id;
         this.topLeft = topLeft;
@@ -35,11 +37,12 @@ final class Cabinet implements WallContent {
         this.cols = cols;
         this.rows = rows;
         this.game = game;
+        this.runner = runner;
     }
 
     @Override
     public Canvas canvas(Player viewer) {
-        return game.canvas;
+        return game != null ? game.canvas : runner.canvas;
     }
 
     @Override

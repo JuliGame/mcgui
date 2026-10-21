@@ -50,6 +50,7 @@ public final class ArcadePlugin extends JavaPlugin {
     private Loop loop;
     private Scores scores;
     private final Map<String, Cabinet> cabinets = new LinkedHashMap<>();
+    private final Map<String, Scores> sceneScores = new java.util.HashMap<>();
 
     @Override
     public void onEnable() {
@@ -65,7 +66,7 @@ public final class ArcadePlugin extends JavaPlugin {
     public void onDisable() {
         for (Player p : Bukkit.getOnlinePlayers()) {
             View v = ui.viewOf(p);
-            if (v != null && v.content() instanceof Seat) v.close();
+            if (v != null && (v.content() instanceof Seat || v.content() instanceof SceneRunner.SceneView)) v.close();
         }
         for (Cabinet c : cabinets.values()) if (c.screen != null) c.screen.remove();
         loop.stop();
@@ -114,7 +115,17 @@ public final class ArcadePlugin extends JavaPlugin {
         }
     }
 
-    private void play(Player p) {
+    private void play(Player p, String name) {
+        if (!name.equals("breakout")) {
+            SceneRunner runner = runner(name, false);
+            if (runner == null) {
+                say(p, "There is no game called " + name + ". Try: " + String.join(", ", gameNames()), NamedTextColor.RED);
+                return;
+            }
+            loop.add(runner);
+            if (!sitScene(p, runner)) loop.remove(runner);
+            return;
+        }
         Game game = new Game(ui.canvas(16, 9), host(p, null));
         loop.add(game);
         try {
@@ -129,6 +140,16 @@ public final class ArcadePlugin extends JavaPlugin {
     /** [p] clicked [cabinet]: sit them down at it, unless somebody already is. */
     void sit(Player p, Cabinet cabinet) {
         if (!p.hasPermission("arcade.play")) return;
+        if (cabinet.runner != null) {
+            View now = ui.viewOf(p);
+            if (now != null && now.content() instanceof SceneRunner.SceneView v && v.runner() == cabinet.runner) return;
+            if (cabinet.runner.seated().size() >= cabinet.runner.scene.maxPlayers()) {
+                say(p, "Every seat is taken. Watch, and wait your turn.", GREY);
+                return;
+            }
+            sitScene(p, cabinet.runner);
+            return;
+        }
         if (cabinet.player != null) {
             Player at = Bukkit.getPlayer(cabinet.player);
             if (at != null && at.isOnline() && ui.viewOf(at) != null) {
@@ -144,6 +165,85 @@ public final class ArcadePlugin extends JavaPlugin {
             say(p, e.getMessage(), NamedTextColor.RED);
         }
     }
+
+    /** Seats [p] at [runner] fullscreen; false if there was no room. */
+    private boolean sitScene(Player p, SceneRunner runner) {
+        ai.resourcepack.arcade.scene.Seat seat = runner.sit(p.getUniqueId(), p.getName());
+        if (seat == null) return false;
+        try {
+            View view = ui.openView(p, runner.new SceneView(seat), ViewOptions.DEFAULT);
+            if (!runner.scene.showPointer()) view.pointer(Pointer.HIDDEN);
+            return true;
+        } catch (IllegalStateException e) {
+            runner.leave(seat);
+            say(p, e.getMessage(), NamedTextColor.RED);
+            return false;
+        }
+    }
+
+    static List<String> gameNames() {
+        List<String> out = new ArrayList<>();
+        out.add("breakout");
+        out.addAll(Games.ALL.keySet());
+        return out;
+    }
+
+    /** A new runner for scene [name], or null if there is none. */
+    private SceneRunner runner(String name, boolean cabinet) {
+        var make = Games.ALL.get(name);
+        if (make == null) return null;
+        ai.resourcepack.arcade.scene.Scene scene = make.get();
+        return new SceneRunner(name, scene, ui.canvas(scene.cols(), scene.rows()), cabinet, room);
+    }
+
+    private Scores scoresOf(String id) {
+        return sceneScores.computeIfAbsent(id, k -> new Scores(new File(getDataFolder(), "scores-" + k + ".yml")));
+    }
+
+    /** What the plugin does for every scene: its sounds, its scores. */
+    private final SceneRunner.Room room = new SceneRunner.Room() {
+        @Override
+        public void sound(SceneRunner runner, String sound, float volume, float pitch) {
+            ui.serverThread().execute(() -> {
+                Location at = null;
+                for (Cabinet c : cabinets.values()) if (c.runner == runner) at = c.centre();
+                if (at != null) at.getWorld().playSound(at, sound, SoundCategory.BLOCKS, volume * 1.5f, pitch);
+                for (ai.resourcepack.arcade.scene.Seat seat : runner.seated()) {
+                    Player p = Bukkit.getPlayer(seat.id());
+                    if (p == null) continue;
+                    // Close to the cabinet they hear it from there.
+                    if (at != null && p.getWorld() == at.getWorld() && p.getLocation().distanceSquared(at) < 20 * 20) continue;
+                    p.playSound(p.getLocation(), sound, SoundCategory.MASTER, volume, pitch);
+                }
+            });
+        }
+
+        @Override
+        public int score(SceneRunner runner, ai.resourcepack.arcade.scene.Seat seat, int score) {
+            Scores table = scoresOf(runner.id);
+            int place = table.submit(seat.name(), score);
+            if (place > 0) ui.serverThread().execute(() -> {
+                try {
+                    table.save();
+                } catch (IOException e) {
+                    getLogger().log(Level.WARNING, "Could not save the scores of " + runner.id, e);
+                }
+            });
+            return place;
+        }
+
+        @Override
+        public List<ai.resourcepack.arcade.scene.Host.Score> scores(SceneRunner runner) {
+            List<ai.resourcepack.arcade.scene.Host.Score> out = new ArrayList<>();
+            for (Scores.Entry e : scoresOf(runner.id).top()) out.add(new ai.resourcepack.arcade.scene.Host.Score(e.name(), e.score()));
+            return out;
+        }
+
+        @Override
+        public void empty(SceneRunner runner) {
+            loop.remove(runner);
+        }
+    };
 
     private void open(Player p, Seat seat) {
         View view = ui.openView(p, seat, ViewOptions.DEFAULT);
@@ -212,10 +312,19 @@ public final class ArcadePlugin extends JavaPlugin {
 
     // ---- Cabinets ----
 
-    private Cabinet putUp(String id, Location topLeft, BlockFace facing, int cols, int rows) {
+    private Cabinet putUp(String id, Location topLeft, BlockFace facing, int cols, int rows, String name) {
+        if (!name.equals("breakout")) {
+            SceneRunner runner = runner(name, true);
+            if (runner == null) throw new IllegalArgumentException("No game called " + name);
+            Cabinet c = new Cabinet(this, id, topLeft, facing, runner.scene.cols(), runner.scene.rows(), null, runner);
+            c.screen = ui.placeWall(topLeft, facing, c.cols, c.rows, c);
+            cabinets.put(id, c);
+            loop.add(runner);
+            return c;
+        }
         Cabinet[] self = new Cabinet[1];
         Game game = new Game(ui.canvas(cols, rows), host(null, self));
-        Cabinet c = new Cabinet(this, id, topLeft, facing, cols, rows, game);
+        Cabinet c = new Cabinet(this, id, topLeft, facing, cols, rows, game, null);
         self[0] = c;
         c.screen = ui.placeWall(topLeft, facing, cols, rows, c);
         cabinets.put(id, c);
@@ -229,8 +338,16 @@ public final class ArcadePlugin extends JavaPlugin {
             View v = p == null ? null : ui.viewOf(p);
             if (v != null && v.content() instanceof Seat s && s.cabinet == c) v.close();
         }
+        if (c.runner != null) {
+            for (ai.resourcepack.arcade.scene.Seat seat : c.runner.seated()) {
+                Player p = Bukkit.getPlayer(seat.id());
+                View v = p == null ? null : ui.viewOf(p);
+                if (v != null && v.content() instanceof SceneRunner.SceneView sv && sv.runner() == c.runner) v.close();
+            }
+            loop.remove(c.runner);
+        }
         c.screen.remove();
-        loop.remove(c.game);
+        if (c.game != null) loop.remove(c.game);
         cabinets.remove(c.id);
     }
 
@@ -250,7 +367,7 @@ public final class ArcadePlugin extends JavaPlugin {
             }
             try {
                 putUp(id, new Location(w, s.getInt("x"), s.getInt("y"), s.getInt("z")),
-                        BlockFace.valueOf(s.getString("facing", "NORTH")), s.getInt("columns", 12), s.getInt("rows", 7));
+                        BlockFace.valueOf(s.getString("facing", "NORTH")), s.getInt("columns", 12), s.getInt("rows", 7), s.getString("game", "breakout"));
             } catch (RuntimeException e) {
                 getLogger().log(Level.WARNING, "Could not put cabinet " + id + " back up", e);
             }
@@ -268,6 +385,7 @@ public final class ArcadePlugin extends JavaPlugin {
             s.set("facing", c.facing.name());
             s.set("columns", c.cols);
             s.set("rows", c.rows);
+            s.set("game", c.runner != null ? c.runner.id : "breakout");
         }
         try {
             yaml.save(cabinetsFile());
@@ -282,7 +400,7 @@ public final class ArcadePlugin extends JavaPlugin {
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         String sub = args.length == 0 ? "play" : args[0].toLowerCase(Locale.ROOT);
         if (!SUBCOMMANDS.contains(sub)) {
-            say(sender, "/arcade play | cabinet [cols] [rows] | remove | scores", GREY);
+            say(sender, "/arcade play [game] | cabinet [game] [cols] [rows] | remove | scores [game]", GREY);
             return true;
         }
         if (!sender.hasPermission("arcade." + sub)) {
@@ -290,7 +408,8 @@ public final class ArcadePlugin extends JavaPlugin {
             return true;
         }
         if (sub.equals("scores")) {
-            List<Scores.Entry> top = scores.top();
+            String which = args.length > 1 ? args[1].toLowerCase(Locale.ROOT) : "breakout";
+            List<Scores.Entry> top = which.equals("breakout") ? scores.top() : scoresOf(which).top();
             if (top.isEmpty()) say(sender, "No scores yet. Be the first!", GREY);
             for (int i = 0; i < top.size(); i++) {
                 Scores.Entry e = top.get(i);
@@ -305,14 +424,24 @@ public final class ArcadePlugin extends JavaPlugin {
             return true;
         }
         switch (sub) {
-            case "play" -> play(p);
+            case "play" -> play(p, args.length > 1 ? args[1].toLowerCase(Locale.ROOT) : "breakout");
             case "cabinet" -> {
+                int at = 1;
+                String name = "breakout";
+                if (args.length > 1 && !args[1].matches("\\d+")) {
+                    name = args[1].toLowerCase(Locale.ROOT);
+                    at = 2;
+                    if (!gameNames().contains(name)) {
+                        say(p, "There is no game called " + name + ". Try: " + String.join(", ", gameNames()), NamedTextColor.RED);
+                        return true;
+                    }
+                }
                 int cols, rows;
                 try {
-                    cols = args.length > 1 ? Integer.parseInt(args[1]) : 12;
-                    rows = args.length > 2 ? Integer.parseInt(args[2]) : 7;
+                    cols = args.length > at ? Integer.parseInt(args[at]) : 12;
+                    rows = args.length > at + 1 ? Integer.parseInt(args[at + 1]) : 7;
                 } catch (NumberFormatException e) {
-                    say(p, "/arcade cabinet [cols] [rows]", GREY);
+                    say(p, "/arcade cabinet [game] [cols] [rows]", GREY);
                     return true;
                 }
                 if (cols < 4 || rows < 3 || cols > 32 || rows > 18) {
@@ -326,7 +455,7 @@ public final class ArcadePlugin extends JavaPlugin {
                     return true;
                 }
                 String id = "cabinet-" + UUID.randomUUID().toString().substring(0, 8);
-                putUp(id, block.getRelative(face).getLocation(), face, cols, rows);
+                putUp(id, block.getRelative(face).getLocation(), face, cols, rows, name);
                 saveCabinets();
                 say(p, "Cabinet up. Click it to play; everybody near it can watch.", NamedTextColor.GREEN);
             }
@@ -355,6 +484,8 @@ public final class ArcadePlugin extends JavaPlugin {
         List<String> out = new ArrayList<>();
         if (args.length == 1) {
             for (String s : SUBCOMMANDS) if (s.startsWith(args[0].toLowerCase(Locale.ROOT)) && sender.hasPermission("arcade." + s)) out.add(s);
+        } else if (args.length == 2 && List.of("play", "cabinet", "scores").contains(args[0].toLowerCase(Locale.ROOT))) {
+            for (String g : gameNames()) if (g.startsWith(args[1].toLowerCase(Locale.ROOT))) out.add(g);
         }
         return out;
     }

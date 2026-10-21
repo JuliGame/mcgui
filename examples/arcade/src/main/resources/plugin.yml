@@ -7,7 +7,7 @@ description: Neon Breakout, an example built on UI Framework. Play it fullscreen
 commands:
   arcade:
     description: Play Neon Breakout, or put up a cabinet.
-    usage: /arcade play | cabinet [cols] [rows] | remove | scores
+    usage: /arcade play [game] | cabinet [game] [cols] [rows] | remove | scores [game]
 permissions:
   # One node per subcommand. arcade.admin is only a parent: nothing checks it.
   arcade.admin:

@@ -35,7 +35,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * canvas only the rectangles something moved through. The canvas then re-encodes only the 128-pixel tiles
  * those touch, and each viewer is sent only the part of each map that changed.
  */
-final class Game {
+final class Game implements Loop.Ticker {
     /** The playfield is 1024 units wide whatever the canvas, and as tall as the canvas's shape makes it. */
     static final double W = 1024;
     static final double HUD = 52, SIDE = 32, BRICK_TOP = 84, BRICK_H = 24, GAP = 6, PADDLE_H = 14, R = 8;
@@ -169,7 +169,8 @@ final class Game {
 
     // ---- The game ----
 
-    void tick(double dt) {
+    @Override
+    public void tick(double dt) {
         for (Runnable r; (r = posted.poll()) != null; ) r.run();
         int clicks = presses.getAndSet(0);
         clock += dt;
