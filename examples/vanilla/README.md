@@ -11,8 +11,7 @@ Two UI Engine pages that look like the game's own screens and do more than they 
 
 Neither has any script. A selection is a radio button behind each row (a `<label>` clicks
 it), and `:checked ~` shows what goes with it. `vanilla.css` is the game's look in CSS:
-its buttons, slots, panels and tooltips, measured off its textures, in its font
-(Monocraft, bundled as `font-family: Minecraft`).
+its buttons, slots, panels and tooltips, measured off its textures, in its own font.
 
 ## The game's textures
 
@@ -23,6 +22,8 @@ this repository. Copy them out of your own client jar into the pages folder:
 java VanillaTextures.java ~/.minecraft/versions/26.3/26.3.jar pages
 ```
 
-That writes `pages/vanilla/` (including the title screen's panorama, which the launcher
-keeps beside the jar). Then copy `pages/` into `plugins/UIEngine/pages/` and open a page
+That writes `pages/vanilla/`: the textures, the title screen's panorama (which the launcher
+keeps beside the jar), and the game's font as `minecraft.ttf` and `minecraft_bold.ttf`, built
+from its glyph sheets pixel for pixel. Without them the pages fall back to Monocraft, which UI
+Engine bundles: close to the game's font, but monospaced. Then copy `pages/` into `plugins/UIEngine/pages/` and open a page
 with `/ui open servers` or `/ui open quests`.
