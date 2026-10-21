@@ -63,6 +63,30 @@ public class VanillaTextures {
             // The experience bar, shortened to the width of a book's line (both rounded ends kept).
             write(scale(shorten(read(jar, "gui/sprites/hud/experience_bar_background.png"), 114), 4, false), out.resolve("xp_background.png"));
             write(scale(shorten(read(jar, "gui/sprites/hud/experience_bar_progress.png"), 114), 4, false), out.resolve("xp_progress.png"));
+            // And every item, block, GUI and effect texture, under its own path (vanilla/item/apple.png,
+            // vanilla/gui/sprites/widget/button.png), for pages that want more than the list above.
+            // Anything bigger than 64 pixels a side is stored 4x, pixel for pixel, so it stays sharp too:
+            // a page always gives a texture's size itself (2 CSS pixels a texture pixel), never its file's.
+            var entries = jar.entries();
+            while (entries.hasMoreElements()) {
+                ZipEntry e = entries.nextElement();
+                String name = e.getName();
+                if (!name.startsWith(T) || !name.endsWith(".png")) continue;
+                String rel = name.substring(T.length());
+                if (!(rel.startsWith("item/") || rel.startsWith("block/") || rel.startsWith("gui/") || rel.startsWith("mob_effect/")
+                        || rel.startsWith("map/"))) continue;
+                Path to = out.resolve(rel);
+                Files.createDirectories(to.getParent());
+                BufferedImage img;
+                try (InputStream in = jar.getInputStream(e)) {
+                    img = ImageIO.read(in);
+                }
+                if (img == null) continue;
+                if (img.getWidth() > 64 || img.getHeight() > 64) write(scale(img, 4, false), to);
+                else try (InputStream in = jar.getInputStream(e)) {
+                    Files.copy(in, to, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                }
+            }
         }
         System.out.println("Wrote the vanilla textures to " + out);
     }
