@@ -1,0 +1,32 @@
+name: Arcade
+version: ${version}
+main: ai.resourcepack.arcade.ArcadePlugin
+api-version: '1.21'
+depend: [UIFramework]
+description: Neon Breakout, an example built on UI Framework. Play it fullscreen with your mouse, or put up a cabinet everyone can watch.
+commands:
+  arcade:
+    description: Play Neon Breakout, or put up a cabinet.
+    usage: /arcade play | cabinet [cols] [rows] | remove | scores
+permissions:
+  # One node per subcommand. arcade.admin is only a parent: nothing checks it.
+  arcade.admin:
+    description: Everything below.
+    default: op
+    children:
+      arcade.play: true
+      arcade.cabinet: true
+      arcade.remove: true
+      arcade.scores: true
+  arcade.play:
+    description: Play a game of your own with /arcade play, or sit down at a cabinet by clicking it.
+    default: true
+  arcade.cabinet:
+    description: Put up a cabinet on the wall you look at with /arcade cabinet.
+    default: op
+  arcade.remove:
+    description: Take down the cabinet you look at with /arcade remove.
+    default: op
+  arcade.scores:
+    description: See the high scores with /arcade scores.
+    default: true

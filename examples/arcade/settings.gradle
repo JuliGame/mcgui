@@ -1,0 +1,4 @@
+rootProject.name = 'arcade'
+
+// UI Framework, built from this checkout (the directory two up).
+includeBuild('../..')
