@@ -93,6 +93,14 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
   fastest and the framework's `Canvas` reads in place. A layer with a `filter`
   stays straight `TYPE_INT_ARGB`, because `Filters` edits its pixels as
   straight colour.
+- **An overlay page is painted on nothing** (`<meta name="ui:overlay">`,
+  `Painter.onNothing`): the painter clears the picture where it would fill it
+  white, so an image that held another picture (a pooled one, a band's, the
+  base a repaint goes over) keeps none of it where the page paints nothing,
+  at every moment of a page that moves too. Its alpha is where the world
+  shows: `Session` and the kept first pictures give the canvas transparency
+  and the page's tint with every drawing. `OverlayTest` checks the market
+  demo, its hovers, and a panel sliding across a reused image.
 - **A full picture is painted in up to four bands at once**, fewer when several pictures
   are painting (the framework's `Cpu` threads are split between them: a band costs CPU, see
   `sh gradlew loadBench`) (`HtmlRenderer.paintBands`), each by its own `Painter` into its own image,
@@ -245,6 +253,24 @@ wide for a default view). `/ui place <page> <cols> <rows> <name> <x> <y> <z>
   is off screen is culled before any shader runs. The pointer sits ON the
   picture's plane (the remap reads its distance from the axis there) and wins
   the depth test by a larger factor than the picture.
+- **Transparent is map colour 0** (`Canvas.transparency`): a pixel under half
+  alpha is kept as YCbCr (0, 0, 0), which no RGB colour converts to
+  (`Palette.isClear`), and sent as colour 0, which the client draws as
+  nothing: a whole 2×2 block in HI when two or more of its pixels are. A
+  transparent area is the same bytes from one drawing to the next, so it is
+  never sent again. A view's tint travels in its maps (the 2×2 block after its
+  size, `Palette.markTint`) and `text.fsh` blends it over the world. The
+  shader shows the next block in place of those, which leaves faint dots in
+  the top-left corner of some maps.
+- **A blurred view's camera is an invisible creeper** (`ViewOptions.blur`):
+  the game runs `post_effect/creeper.json` over a creeper camera's whole frame,
+  and the pack's (26.2 overlay only, in that dialect) is the menu blur outside
+  the view's panel. The maps carry the panel's edges (`HI_OWN_BLUR`, marker
+  third and third) and `text.fsh` writes them into the window's four
+  bottom-left pixels, between two check colours, for the post effect to read;
+  without them it passes the frame through. Paper spawns no creeper on
+  peaceful, so there the view is only tinted. The camera is not the player's,
+  so the server places the pointer.
 - **The mouse skips the tick.** `Pipeline.watch` reads a seated player's
   rotation packets on the netty thread as they arrive, and the pointer's move
   is written straight back (`Pipeline.sendNow`); the server's own position

@@ -636,6 +636,10 @@ public final class Session {
                         }
                     }
                 }
+                // An overlay page is transparent where it paints nothing, and its view tints the world there: both
+                // go out with this drawing.
+                canvas.transparency(f.page().overlay());
+                canvas.tint(f.page().overlayTint());
                 if (partial) {
                     // Only the changed rectangle goes to the canvas, so only its tiles are re-encoded and re-sent.
                     int x0 = Math.max(0, (int) Math.floor(changed.getX() * scale)), y0 = Math.max(0, (int) Math.floor(changed.getY() * scale));

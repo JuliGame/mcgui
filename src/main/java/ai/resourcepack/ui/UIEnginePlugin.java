@@ -30,6 +30,7 @@ import java.util.concurrent.TimeUnit;
 public final class UIEnginePlugin extends JavaPlugin {
     /** The example pages copied into a new pages folder. */
     private static final String[] EXAMPLES = {"menu.html", "rules.html", "shop.html", "style.css", "market.html",
+            "market-overlay.html", "market-blur.html",
             "market/awning_cloth.png", "market/coin_pouch.png", "market/dawn_apple.png", "market/echo_tome.png", "market/ember_blade.png",
             "market/ember_blade_3d.png", "market/emerald_chest.png", "market/emerald_coin.png", "market/frost_bow.png",
             "market/geode_heart.png", "market/glow_lantern.png", "market/glow_lantern_3d.png", "market/market_stall.png",
@@ -311,6 +312,8 @@ public final class UIEnginePlugin extends JavaPlugin {
                     var frame = HtmlRenderer.render(page, filled.copy(), size[0] * 128, size[1] * 128, scale, 0, HtmlRenderer.state(null, null),
                             null, null, renderTimeout());
                     var canvas = UIFramework.get().canvas(size[0], size[1]);
+                    canvas.transparency(page.overlay());
+                    canvas.tint(page.overlayTint());
                     canvas.draw(frame.image(), 0, 0);
                     picture = FirstPictures.Picture.of(key, frame, canvas);
                 } finally {

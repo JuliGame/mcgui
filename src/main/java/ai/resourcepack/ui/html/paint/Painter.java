@@ -95,6 +95,18 @@ public final class Painter {
         return this;
     }
 
+    /** Paints on nothing rather than on white (see {@link #onNothing()}). */
+    private boolean onNothing;
+
+    /**
+     * Paints the page on nothing rather than on white, so wherever it paints nothing the picture is transparent:
+     * an overlay page ({@code Page.overlay}). What was there is cleared, as white covers it otherwise.
+     */
+    public Painter onNothing() {
+        onNothing = true;
+        return this;
+    }
+
     /** Whether anything in [root]'s tree has a backdrop-filter. */
     public static boolean backdrops(Box root) {
         List<Box> todo = new ArrayList<>(List.of(root));
@@ -126,10 +138,18 @@ public final class Painter {
                 }
             }
         }
-        g.setColor(Color.WHITE);
         // All of the page, not only the view: a picture can be taller than the view (a ScrollCache's), and a band
         // paints rows past the picture's edges for the blurs there.
-        g.fill(new Rectangle2D.Double(0, -scrollY, viewportW, Math.max(scrollY + viewportH, root.overflowBottom)));
+        Rectangle2D all = new Rectangle2D.Double(0, -scrollY, viewportW, Math.max(scrollY + viewportH, root.overflowBottom));
+        if (onNothing) {
+            Composite was = g.getComposite();
+            g.setComposite(AlphaComposite.Clear);
+            g.fill(all);
+            g.setComposite(was);
+        } else {
+            g.setColor(Color.WHITE);
+            g.fill(all);
+        }
         if (!transparent(canvasSource.style)) {
             Rectangle2D page = new Rectangle2D.Double(0, 0, viewportW, Math.max(viewportH, root.overflowBottom));
             AffineTransform saved = g.getTransform();

@@ -28,15 +28,15 @@ class RepaintTest {
     private static final double SCALE = 2;
     private static final Page.Loader OFFLINE = new Page.Loader(false, null);
 
-    private record Walk(int steps, int partials, int worst, String where) {}
+    record Walk(int steps, int partials, int worst, String where) {}
 
     private static int[] pixels(HtmlRenderer.Frame f) {
         return ((DataBufferInt) f.image().getRaster().getDataBuffer()).getData();
     }
 
     /** Elements with a :hover rule of their own whose box is on the viewport. */
-    private static List<Element> targets(Page page, Document doc) {
-        HtmlRenderer.Frame f = HtmlRenderer.render(page, doc, W, H, SCALE, 0, Selector.State.NONE);
+    private static List<Element> targets(Page page, Document doc, double scale) {
+        HtmlRenderer.Frame f = HtmlRenderer.render(page, doc, W, H, scale, 0, Selector.State.NONE);
         Set<Element> seen = Collections.newSetFromMap(new IdentityHashMap<>());
         for (var h : f.hits()) {
             for (Element e = h.element(); e != null; e = e.parent()) {
@@ -50,20 +50,25 @@ class RepaintTest {
 
     /** Hovers every target in turn and out again, each time as Session would: partial over the last picture when it can. */
     private static Walk walk(Page page) {
+        return walk(page, SCALE);
+    }
+
+    /** As {@link #walk(Page)}, with the page drawn at [scale] (a page with its own ui:height). */
+    static Walk walk(Page page, double scale) {
         Document doc = page.document.clone();
-        HtmlRenderer.Frame cur = HtmlRenderer.render(page, doc, W, H, SCALE, 0, Selector.State.NONE);
+        HtmlRenderer.Frame cur = HtmlRenderer.render(page, doc, W, H, scale, 0, Selector.State.NONE);
         List<Element> drawn = List.of();
         int steps = 0, partials = 0, worst = 0;
         String where = "";
-        for (Element target : targets(page, doc)) {
+        for (Element target : targets(page, doc, scale)) {
             for (Element hover : new Element[]{target, null}) {
                 List<Element> key = page.styles.stateKey(hover, false);
                 Set<Element> moved = Collections.newSetFromMap(new IdentityHashMap<>());
                 for (Element e : drawn) if (!key.contains(e)) moved.add(e);
                 for (Element e : key) if (!drawn.contains(e)) moved.add(e);
                 var state = HtmlRenderer.state(hover, null);
-                Repaint.Result r = moved.isEmpty() ? null : Repaint.partial(page, doc, W, H, SCALE, 0, state, cur, moved, 0);
-                HtmlRenderer.Frame fresh = HtmlRenderer.render(page, doc, W, H, SCALE, 0, state);
+                Repaint.Result r = moved.isEmpty() ? null : Repaint.partial(page, doc, W, H, scale, 0, state, cur, moved, 0);
+                HtmlRenderer.Frame fresh = HtmlRenderer.render(page, doc, W, H, scale, 0, state);
                 steps++;
                 if (r != null && r.frame() != null) {
                     partials++;

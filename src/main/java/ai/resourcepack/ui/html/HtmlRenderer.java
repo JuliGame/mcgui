@@ -157,7 +157,8 @@ public final class HtmlRenderer {
         Laid laid = lay(page, document, vw, vh, state, budget);
         double scroll = Math.max(0, Math.min(scrollY, laid.pageHeight - rows / scale));
         // Premultiplied: Java2D blends onto it directly, where a plain ARGB surface costs a conversion of
-        // every pixel both ways on every fill. The page is painted on opaque white, so nothing reads alpha.
+        // every pixel both ways on every fill. The page is painted on opaque white, so nothing reads alpha,
+        // except an overlay page's, painted on nothing: its alpha is where the world shows (Canvas.transparency).
         BufferedImage img = base != null ? base : new BufferedImage(width, rows, BufferedImage.TYPE_INT_ARGB_PRE);
         int[] ring = null;
         int rx0 = 0, ry0 = 0, rx1 = 0, ry1 = 0;
@@ -258,6 +259,7 @@ public final class HtmlRenderer {
                 g.scale(scale, scale);
                 if (clip != null) g.clip(clip);
                 Painter painter = new Painter(page.shaper, page, vw, vh, scroll, budget).origin(0, row(scroll, scale));
+                if (page.overlay()) painter.onNothing();
                 painter.paint(g, laid.root, img, scale);
                 g.dispose();
                 hits = painter.hits;
@@ -342,6 +344,7 @@ public final class HtmlRenderer {
                     // No clip: the band's own edges stop the drawing, so the painter sees exactly what a whole
                     // picture's would (a clip changes how Java2D intersects overflow clips, by a pixel).
                     Painter painter = new Painter(page.shaper, page, vw, vh, scroll, budget).origin(0, above + top);
+                    if (page.overlay()) painter.onNothing();
                     if (!first) painter.withoutHits();
                     if (!backdrops) painter.keeping(new java.awt.Rectangle(0, y0 - top, width, y1 - y0));
                     try {

@@ -1,0 +1,167 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Night Market (overlay)</title>
+<meta name="ui:overlay" content="rgba(8, 10, 22, 0.55)">
+<meta name="ui:height" content="720">
+<style>
+:root {
+  --night: #0c111f; --night2: #161d33; --oak: #4a2f1b; --oak-dark: #24160d; --lantern: #ffb547;
+  --emerald: #46e08a; --parchment: #ead9b4; --ink: #1d140c; --text: #efe6d2; --muted: #b9ad94;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+/* An overlay page: nothing is painted round the stall, so the view shows the world there, tinted. */
+body { font-family: Inter, sans-serif; color: var(--text); overflow: hidden;
+  display: flex; align-items: center; justify-content: center; }
+input { display: none; }
+/* The stall is the whole market page at its own size, in the middle of a taller view (ui:height). */
+.stall { position: relative; width: 1024px; height: 576px; flex: none; border-radius: 18px; overflow: hidden;
+  border: 2px solid rgba(255,181,71,.35); box-shadow: 0 0 0 3px rgba(6,8,16,.9);
+  background:
+    radial-gradient(ellipse 60% 55% at 20% 18%, rgba(255,181,71,.30), transparent 70%),
+    radial-gradient(ellipse 50% 60% at 88% 110%, rgba(70,224,138,.14), transparent 70%),
+    linear-gradient(180deg, rgba(10,13,26,.55), rgba(6,8,16,.82)),
+    url(market/night_planks.png) 0 0 / 64px 64px; }
+
+/* The awning: the stall's striped cloth, with a scalloped hem. */
+.awning { height: 46px; background: url(market/awning_cloth.png) 0 0 / 48px 48px;
+  box-shadow: inset 0 -10px 14px rgba(0,0,0,.35), inset 0 6px 8px rgba(255,255,255,.08); }
+.hem { height: 9px;
+  background: radial-gradient(circle at 6px 0, #6a272b 6px, transparent 6.5px) 0 0 / 24px 9px,
+    radial-gradient(circle at 18px 0, #cfc09c 6px, transparent 6.5px) 0 0 / 24px 9px;
+  filter: drop-shadow(0 4px 3px rgba(0,0,0,.55)); }
+
+header { display: flex; align-items: center; gap: 18px; padding: 4px 34px 0; height: 62px; }
+.emblem { flex-shrink: 0; width: 96px; height: 96px; margin: -26px -12px -10px -16px; filter: drop-shadow(0 8px 8px rgba(0,0,0,.6)) drop-shadow(0 0 18px rgba(255,181,71,.25)); }
+.sign { flex-shrink: 0; white-space: nowrap; font-family: Minecraft; font-weight: bold; font-size: 34px; letter-spacing: 2px; color: #ffd27a;
+  text-shadow: 3px 3px 0 #4a2a00, 0 0 24px rgba(255,181,71,.55); }
+.sub { white-space: nowrap; font-size: 13px; color: var(--muted); line-height: 1.35; }
+.sub b { color: var(--text); font-weight: 600; }
+.spacer { flex: 1; }
+.purse { flex-shrink: 0; white-space: nowrap; display: flex; align-items: center; gap: 10px; font-family: Minecraft; font-size: 15px; color: #55ff55;
+  padding: 7px 14px 7px 8px; border-radius: 10px; background: rgba(0,0,0,.35); border: 1px solid rgba(70,224,138,.25); }
+.purse img { width: 28px; height: 28px; }
+.close { width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center;
+  font-family: Minecraft; font-size: 18px; color: var(--muted); background: rgba(0,0,0,.35); border: 1px solid rgba(255,255,255,.08);
+  cursor: pointer; }
+.close:hover { color: #fff; background: #7a1f2c; border-color: #b8344a; }
+
+main { display: flex; gap: 22px; padding: 4px 34px 0; height: 428px; }
+
+/* The showcase: whatever was picked, on a lantern-lit stand. */
+.show { width: 330px; flex: none; position: relative; border-radius: 16px; padding: 16px 20px 18px;
+  background: linear-gradient(180deg, rgba(30,22,14,.72), rgba(14,11,9,.86));
+  border: 1px solid rgba(255,181,71,.22); box-shadow: 0 20px 50px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.06);
+  backdrop-filter: blur(6px); }
+.detail { display: none; flex-direction: column; height: 100%; }
+.stage { position: relative; height: 178px; margin: -4px -8px 8px; display: flex; align-items: center; justify-content: center;
+  border-radius: 12px; overflow: hidden;
+  background: radial-gradient(circle at 50% 55%, rgba(255,190,90,.38), rgba(255,190,90,0) 62%),
+    conic-gradient(from 0deg at 50% 55%, rgba(255,214,140,.16) 0deg 9deg, transparent 9deg 30deg, rgba(255,214,140,.16) 30deg 39deg, transparent 39deg 60deg, rgba(255,214,140,.16) 60deg 69deg, transparent 69deg 90deg, rgba(255,214,140,.16) 90deg 99deg, transparent 99deg 120deg, rgba(255,214,140,.16) 120deg 129deg, transparent 129deg 150deg, rgba(255,214,140,.16) 150deg 159deg, transparent 159deg 180deg, rgba(255,214,140,.16) 180deg 189deg, transparent 189deg 210deg, rgba(255,214,140,.16) 210deg 219deg, transparent 219deg 240deg, rgba(255,214,140,.16) 240deg 249deg, transparent 249deg 270deg, rgba(255,214,140,.16) 270deg 279deg, transparent 279deg 300deg, rgba(255,214,140,.16) 300deg 309deg, transparent 309deg 330deg, rgba(255,214,140,.16) 330deg 339deg, transparent 339deg 360deg); }
+.stage::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 34px;
+  background: linear-gradient(180deg, transparent, rgba(14,11,9,.9)); }
+.model { width: 168px; height: 168px; filter: drop-shadow(0 12px 10px rgba(0,0,0,.6)); position: relative; z-index: 1; }
+.sprite { width: 128px; height: 128px; filter: drop-shadow(0 10px 8px rgba(0,0,0,.6)) drop-shadow(0 0 14px rgba(255,200,120,.35)); position: relative; z-index: 1; }
+.badge { position: absolute; top: 10px; right: 10px; z-index: 2; font-family: Minecraft; font-size: 10px; letter-spacing: 1px;
+  color: var(--ink); background: var(--lantern); padding: 3px 7px; border-radius: 5px; }
+.detail h2 { margin: 0; font-family: Minecraft; font-weight: bold; font-size: 22px; text-shadow: 2px 2px 0 rgba(0,0,0,.6); }
+.rar { margin: 2px 0 8px; font-family: Minecraft; font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: var(--muted); }
+.ench { list-style: none; margin: 0 0 6px; padding: 0; font-family: Minecraft; font-size: 13px; color: #aaaaaa; }
+.ench li { padding: 1px 0; }
+.lore { margin: 0; font-size: 14px; line-height: 1.45; color: #c79bd6; font-style: italic; }
+.trade { margin-top: auto; display: flex; align-items: center; justify-content: space-between; height: 48px; padding: 0 10px 0 18px;
+  border-radius: 10px; text-decoration: none; cursor: pointer; font-family: Minecraft; font-weight: bold; font-size: 18px; color: #06210f;
+  background: linear-gradient(180deg, #6ff0a4, #2fbf6d); border: 2px solid #0e3d22;
+  box-shadow: inset 0 2px 0 rgba(255,255,255,.45), inset 0 -4px 0 rgba(0,0,0,.25), 0 6px 0 #0e3d22, 0 14px 22px rgba(0,0,0,.45); }
+.trade:hover { background: linear-gradient(180deg, #8dffbd, #3fd47f); }
+.trade:active { transform: translateY(4px); box-shadow: inset 0 2px 0 rgba(255,255,255,.35), inset 0 -2px 0 rgba(0,0,0,.25), 0 2px 0 #0e3d22, 0 6px 12px rgba(0,0,0,.4); }
+.cost { display: flex; align-items: center; gap: 6px; padding: 5px 10px 5px 6px; border-radius: 7px; background: rgba(6,33,15,.22); }
+.cost img { width: 24px; height: 24px; }
+
+/* The shelves: three boards of goods. */
+.shelves { flex: 1; display: flex; flex-direction: column; gap: 10px; }
+.shelf { position: relative; flex: 1; display: flex; align-items: flex-end; gap: 14px; padding: 0 12px 18px; }
+.shelf::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 18px; border-radius: 3px;
+  background: linear-gradient(180deg, rgba(255,220,170,.18), rgba(0,0,0,.25) 40%, rgba(0,0,0,.55)), url(market/night_planks.png) 0 0 / 32px 32px;
+  box-shadow: 0 10px 14px rgba(0,0,0,.55), 0 1px 0 rgba(255,220,170,.25) inset; }
+.shelf h3 { position: absolute; left: 14px; bottom: 2px; z-index: 1; margin: 0; font-family: Minecraft; font-size: 11px; letter-spacing: 3px;
+  text-transform: uppercase; color: var(--parchment); opacity: .78; text-shadow: 1px 1px 0 #120a04; }
+.slot { position: relative; flex: 1; display: flex; flex-direction: column; align-items: center; gap: 0; cursor: pointer; margin-bottom: 8px; }
+.cubby { width: 92px; height: 76px; display: flex; align-items: center; justify-content: center; border-radius: 10px;
+  background: linear-gradient(180deg, rgba(0,0,0,.45), rgba(0,0,0,.2)); border: 2px solid rgba(255,255,255,.07);
+  box-shadow: inset 0 6px 12px rgba(0,0,0,.6), 0 1px 0 rgba(255,255,255,.06); }
+.cubby img { width: 64px; height: 64px; filter: drop-shadow(0 5px 4px rgba(0,0,0,.6)); }
+.slot:hover { z-index: 5; }
+.slot:hover .cubby { border-color: rgba(255,181,71,.6); background-color: rgba(255,181,71,.08); }
+.slot:hover .cubby img { transform: translateY(-4px) scale(1.06); }
+.tag { margin-top: 6px; display: flex; align-items: center; gap: 4px; padding: 2px 8px 2px 4px; border-radius: 5px;
+  font-family: Minecraft; font-size: 13px; color: var(--ink); background: var(--parchment);
+  box-shadow: 0 2px 0 #9c8456, 0 4px 6px rgba(0,0,0,.4); transform: rotate(-3deg); }
+.tag img { width: 18px; height: 18px; }
+.r-epic .cubby { box-shadow: inset 0 6px 12px rgba(0,0,0,.6), inset 0 0 24px rgba(255,85,255,.18); }
+.r-rare .cubby { box-shadow: inset 0 6px 12px rgba(0,0,0,.6), inset 0 0 24px rgba(85,255,255,.12); }
+
+/* The game's own item tooltip, as the inventory draws it. */
+.tip { display: none; pointer-events: none; position: absolute; left: calc(50% + 40px); top: -14px; z-index: 10; white-space: nowrap; padding: 6px 9px 7px;
+  font-family: Minecraft; font-size: 13px; line-height: 17px; flex-direction: column; text-align: left;
+  background: #100010; border: 2px solid; border-color: #5000ff #28007f #28007f #5000ff;
+  outline: 2px solid #100010; box-shadow: 0 10px 22px rgba(0,0,0,.55); }
+.slot:hover .tip { display: flex; }
+.tip b { font-weight: normal; margin-bottom: 3px; text-shadow: 2px 2px 0 rgba(0,0,0,.55); }
+.tip i { font-style: normal; text-shadow: 2px 2px 0 rgba(0,0,0,.55); }
+.tip .en { color: #aaaaaa; }
+.tip .lo { color: #aa00aa; }
+.tip .pr { color: #55ff55; margin-top: 3px; }
+.shelf .slot:last-child .tip, .shelf .slot:nth-last-child(2) .tip { left: auto; right: calc(50% + 40px); }
+
+footer { position: absolute; left: 34px; right: 34px; bottom: 9px; display: flex; justify-content: space-between;
+  font-size: 12px; color: rgba(185,173,148,.7); }
+footer kbd { font-family: Minecraft; font-size: 11px; color: var(--text); padding: 1px 5px; border-radius: 4px; background: rgba(255,255,255,.08); }
+
+#pick-ember_blade:checked ~ .stall .d-ember_blade { display: flex; }
+#pick-ember_blade:checked ~ .stall label[for=pick-ember_blade] .cubby { border-color: var(--lantern); background-color: #3a2a14; box-shadow: 0 0 0 2px #0b0806, 0 0 22px rgba(255,181,71,.55), inset 0 0 18px rgba(255,181,71,.35); }
+#pick-frost_bow:checked ~ .stall .d-frost_bow { display: flex; }
+#pick-frost_bow:checked ~ .stall label[for=pick-frost_bow] .cubby { border-color: var(--lantern); background-color: #3a2a14; box-shadow: 0 0 0 2px #0b0806, 0 0 22px rgba(255,181,71,.55), inset 0 0 18px rgba(255,181,71,.35); }
+#pick-warden_aegis:checked ~ .stall .d-warden_aegis { display: flex; }
+#pick-warden_aegis:checked ~ .stall label[for=pick-warden_aegis] .cubby { border-color: var(--lantern); background-color: #3a2a14; box-shadow: 0 0 0 2px #0b0806, 0 0 22px rgba(255,181,71,.55), inset 0 0 18px rgba(255,181,71,.35); }
+#pick-sky_boots:checked ~ .stall .d-sky_boots { display: flex; }
+#pick-sky_boots:checked ~ .stall label[for=pick-sky_boots] .cubby { border-color: var(--lantern); background-color: #3a2a14; box-shadow: 0 0 0 2px #0b0806, 0 0 22px rgba(255,181,71,.55), inset 0 0 18px rgba(255,181,71,.35); }
+#pick-phoenix_feather:checked ~ .stall .d-phoenix_feather { display: flex; }
+#pick-phoenix_feather:checked ~ .stall label[for=pick-phoenix_feather] .cubby { border-color: var(--lantern); background-color: #3a2a14; box-shadow: 0 0 0 2px #0b0806, 0 0 22px rgba(255,181,71,.55), inset 0 0 18px rgba(255,181,71,.35); }
+#pick-starlight_potion:checked ~ .stall .d-starlight_potion { display: flex; }
+#pick-starlight_potion:checked ~ .stall label[for=pick-starlight_potion] .cubby { border-color: var(--lantern); background-color: #3a2a14; box-shadow: 0 0 0 2px #0b0806, 0 0 22px rgba(255,181,71,.55), inset 0 0 18px rgba(255,181,71,.35); }
+#pick-echo_tome:checked ~ .stall .d-echo_tome { display: flex; }
+#pick-echo_tome:checked ~ .stall label[for=pick-echo_tome] .cubby { border-color: var(--lantern); background-color: #3a2a14; box-shadow: 0 0 0 2px #0b0806, 0 0 22px rgba(255,181,71,.55), inset 0 0 18px rgba(255,181,71,.35); }
+#pick-void_pearl:checked ~ .stall .d-void_pearl { display: flex; }
+#pick-void_pearl:checked ~ .stall label[for=pick-void_pearl] .cubby { border-color: var(--lantern); background-color: #3a2a14; box-shadow: 0 0 0 2px #0b0806, 0 0 22px rgba(255,181,71,.55), inset 0 0 18px rgba(255,181,71,.35); }
+#pick-glow_lantern:checked ~ .stall .d-glow_lantern { display: flex; }
+#pick-glow_lantern:checked ~ .stall label[for=pick-glow_lantern] .cubby { border-color: var(--lantern); background-color: #3a2a14; box-shadow: 0 0 0 2px #0b0806, 0 0 22px rgba(255,181,71,.55), inset 0 0 18px rgba(255,181,71,.35); }
+#pick-coin_pouch:checked ~ .stall .d-coin_pouch { display: flex; }
+#pick-coin_pouch:checked ~ .stall label[for=pick-coin_pouch] .cubby { border-color: var(--lantern); background-color: #3a2a14; box-shadow: 0 0 0 2px #0b0806, 0 0 22px rgba(255,181,71,.55), inset 0 0 18px rgba(255,181,71,.35); }
+#pick-dawn_apple:checked ~ .stall .d-dawn_apple { display: flex; }
+#pick-dawn_apple:checked ~ .stall label[for=pick-dawn_apple] .cubby { border-color: var(--lantern); background-color: #3a2a14; box-shadow: 0 0 0 2px #0b0806, 0 0 22px rgba(255,181,71,.55), inset 0 0 18px rgba(255,181,71,.35); }
+#pick-geode_heart:checked ~ .stall .d-geode_heart { display: flex; }
+#pick-geode_heart:checked ~ .stall label[for=pick-geode_heart] .cubby { border-color: var(--lantern); background-color: #3a2a14; box-shadow: 0 0 0 2px #0b0806, 0 0 22px rgba(255,181,71,.55), inset 0 0 18px rgba(255,181,71,.35); }</style>
+</head>
+<body>
+<input type="radio" name="pick" id="pick-ember_blade" checked><input type="radio" name="pick" id="pick-frost_bow"><input type="radio" name="pick" id="pick-warden_aegis"><input type="radio" name="pick" id="pick-sky_boots"><input type="radio" name="pick" id="pick-phoenix_feather"><input type="radio" name="pick" id="pick-starlight_potion"><input type="radio" name="pick" id="pick-echo_tome"><input type="radio" name="pick" id="pick-void_pearl"><input type="radio" name="pick" id="pick-glow_lantern"><input type="radio" name="pick" id="pick-coin_pouch"><input type="radio" name="pick" id="pick-dawn_apple"><input type="radio" name="pick" id="pick-geode_heart">
+<div class="stall">
+  <div class="awning"></div><div class="hem"></div>
+  <header>
+    <img class="emblem" src="market/market_stall.png" alt="">
+    <div class="sign">NIGHT MARKET</div>
+    <div class="sub">Open dusk till the rooster.<br><b>Browse the shelves</b>, {player}.</div>
+    <div class="spacer"></div>
+    <div class="purse"><img src="market/emerald_chest.png" alt="">Free tonight</div>
+    <a class="close" data-action="close">x</a>
+  </header>
+  <main>
+    <section class="show"><article class="detail d-ember_blade"><div class="stage"><img class="model" src="market/ember_blade_3d.png" alt=""><span class="badge">3D model</span></div><h2 style="color:#FF55FF">Ember Blade</h2><p class="rar">epic</p><ul class="ench"><li>Fire Aspect II</li><li>Sharpness V</li></ul><p class="lore">Forged in a dying blaze.<br>Still warm to the touch.</p><a class="trade" data-console="give {player} netherite_sword[custom_name={text:&#x27;Ember Blade&#x27;,color:&#x27;light_purple&#x27;,italic:false},enchantments={fire_aspect:2,sharpness:5}]" data-message="&lt;green&gt;Traded. &lt;white&gt;Ember Blade&lt;/white&gt; is in your inventory."><span>Trade</span><span class="cost"><img src="market/emerald_coin.png" alt="">48</span></a></article><article class="detail d-frost_bow"><div class="stage"><img class="sprite" src="market/frost_bow.png" alt=""></div><h2 style="color:#55FFFF">Frostbite Bow</h2><p class="rar">rare</p><ul class="ench"><li>Power IV</li><li>Infinity</li></ul><p class="lore">Every arrow leaves<br>a trail of rime.</p><a class="trade" data-console="give {player} bow[custom_name={text:&#x27;Frostbite Bow&#x27;,color:&#x27;aqua&#x27;,italic:false},enchantments={power:4,infinity:1}]" data-message="&lt;green&gt;Traded. &lt;white&gt;Frostbite Bow&lt;/white&gt; is in your inventory."><span>Trade</span><span class="cost"><img src="market/emerald_coin.png" alt="">36</span></a></article><article class="detail d-warden_aegis"><div class="stage"><img class="sprite" src="market/warden_aegis.png" alt=""></div><h2 style="color:#FF55FF">Warden&#x27;s Aegis</h2><p class="rar">epic</p><ul class="ench"><li>Unbreaking III</li></ul><p class="lore">Hums whenever<br>something is listening.</p><a class="trade" data-console="give {player} shield[custom_name={text:&quot;Warden&#x27;s Aegis&quot;,color:&#x27;light_purple&#x27;,italic:false},enchantments={unbreaking:3}]" data-message="&lt;green&gt;Traded. &lt;white&gt;Warden&amp;#x27;s Aegis&lt;/white&gt; is in your inventory."><span>Trade</span><span class="cost"><img src="market/emerald_coin.png" alt="">52</span></a></article><article class="detail d-sky_boots"><div class="stage"><img class="sprite" src="market/sky_boots.png" alt=""></div><h2 style="color:#55FFFF">Skyrunner Boots</h2><p class="rar">rare</p><ul class="ench"><li>Feather Falling IV</li></ul><p class="lore">Lighter than the wind<br>that carries you.</p><a class="trade" data-console="give {player} diamond_boots[custom_name={text:&#x27;Skyrunner Boots&#x27;,color:&#x27;aqua&#x27;,italic:false},enchantments={feather_falling:4}]" data-message="&lt;green&gt;Traded. &lt;white&gt;Skyrunner Boots&lt;/white&gt; is in your inventory."><span>Trade</span><span class="cost"><img src="market/emerald_coin.png" alt="">30</span></a></article><article class="detail d-phoenix_feather"><div class="stage"><img class="sprite" src="market/phoenix_feather.png" alt=""></div><h2 style="color:#FF55FF">Phoenix Feather</h2><p class="rar">epic</p><ul class="ench"><li>Saves you from death once</li></ul><p class="lore">Burns, but never<br>burns away.</p><a class="trade" data-console="give {player} totem_of_undying[custom_name={text:&#x27;Phoenix Feather&#x27;,color:&#x27;light_purple&#x27;,italic:false}]" data-message="&lt;green&gt;Traded. &lt;white&gt;Phoenix Feather&lt;/white&gt; is in your inventory."><span>Trade</span><span class="cost"><img src="market/emerald_coin.png" alt="">64</span></a></article><article class="detail d-starlight_potion"><div class="stage"><img class="model" src="market/starlight_potion_3d.png" alt=""><span class="badge">3D model</span></div><h2 style="color:#55FFFF">Starlight Draught</h2><p class="rar">rare</p><ul class="ench"><li>Night Vision (8:00)</li></ul><p class="lore">Tastes of a cold<br>clear midnight.</p><a class="trade" data-console="give {player} potion[potion_contents={potion:&#x27;minecraft:long_night_vision&#x27;},custom_name={text:&#x27;Starlight Draught&#x27;,color:&#x27;aqua&#x27;,italic:false}]" data-message="&lt;green&gt;Traded. &lt;white&gt;Starlight Draught&lt;/white&gt; is in your inventory."><span>Trade</span><span class="cost"><img src="market/emerald_coin.png" alt="">18</span></a></article><article class="detail d-echo_tome"><div class="stage"><img class="sprite" src="market/echo_tome.png" alt=""></div><h2 style="color:#FFFF55">Tome of Echoes</h2><p class="rar">uncommon</p><ul class="ench"><li>Mending</li></ul><p class="lore">Its pages repeat<br>whatever you whisper.</p><a class="trade" data-console="give {player} enchanted_book[stored_enchantments={mending:1},custom_name={text:&#x27;Tome of Echoes&#x27;,color:&#x27;yellow&#x27;,italic:false}]" data-message="&lt;green&gt;Traded. &lt;white&gt;Tome of Echoes&lt;/white&gt; is in your inventory."><span>Trade</span><span class="cost"><img src="market/emerald_coin.png" alt="">24</span></a></article><article class="detail d-void_pearl"><div class="stage"><img class="sprite" src="market/void_pearl.png" alt=""></div><h2 style="color:#55FFFF">Void Pearl</h2><p class="rar">rare</p><ul class="ench"><li>Stack of 4</li></ul><p class="lore">Goes further than<br>you meant it to.</p><a class="trade" data-console="give {player} ender_pearl[custom_name={text:&#x27;Void Pearl&#x27;,color:&#x27;aqua&#x27;,italic:false}] 4" data-message="&lt;green&gt;Traded. &lt;white&gt;Void Pearl&lt;/white&gt; is in your inventory."><span>Trade</span><span class="cost"><img src="market/emerald_coin.png" alt="">12</span></a></article><article class="detail d-glow_lantern"><div class="stage"><img class="model" src="market/glow_lantern_3d.png" alt=""><span class="badge">3D model</span></div><h2 style="color:#FFFFFF">Glowcap Lantern</h2><p class="rar">common</p><ul class="ench"><li>Light level 10</li></ul><p class="lore">A mushroom that<br>never goes to sleep.</p><a class="trade" data-console="give {player} soul_lantern[custom_name={text:&#x27;Glowcap Lantern&#x27;,italic:false}]" data-message="&lt;green&gt;Traded. &lt;white&gt;Glowcap Lantern&lt;/white&gt; is in your inventory."><span>Trade</span><span class="cost"><img src="market/emerald_coin.png" alt="">8</span></a></article><article class="detail d-coin_pouch"><div class="stage"><img class="sprite" src="market/coin_pouch.png" alt=""></div><h2 style="color:#FFFF55">Trader&#x27;s Purse</h2><p class="rar">uncommon</p><ul class="ench"><li>Holds a stack of anything</li></ul><p class="lore">Heavier than it looks.<br>Ask no questions.</p><a class="trade" data-console="give {player} bundle[custom_name={text:&quot;Trader&#x27;s Purse&quot;,color:&#x27;yellow&#x27;,italic:false}]" data-message="&lt;green&gt;Traded. &lt;white&gt;Trader&amp;#x27;s Purse&lt;/white&gt; is in your inventory."><span>Trade</span><span class="cost"><img src="market/emerald_coin.png" alt="">16</span></a></article><article class="detail d-dawn_apple"><div class="stage"><img class="sprite" src="market/dawn_apple.png" alt=""></div><h2 style="color:#FF55FF">Apple of Dawn</h2><p class="rar">epic</p><ul class="ench"><li>Regeneration II</li><li>Absorption IV</li></ul><p class="lore">Picked at first light<br>from a tree nobody owns.</p><a class="trade" data-console="give {player} enchanted_golden_apple[custom_name={text:&#x27;Apple of Dawn&#x27;,color:&#x27;light_purple&#x27;,italic:false}]" data-message="&lt;green&gt;Traded. &lt;white&gt;Apple of Dawn&lt;/white&gt; is in your inventory."><span>Trade</span><span class="cost"><img src="market/emerald_coin.png" alt="">40</span></a></article><article class="detail d-geode_heart"><div class="stage"><img class="sprite" src="market/geode_heart.png" alt=""></div><h2 style="color:#FFFF55">Geode Heart</h2><p class="rar">uncommon</p><ul class="ench"><li>Decoration</li></ul><p class="lore">Sing to it and<br>it sings back.</p><a class="trade" data-console="give {player} amethyst_cluster[custom_name={text:&#x27;Geode Heart&#x27;,color:&#x27;yellow&#x27;,italic:false}]" data-message="&lt;green&gt;Traded. &lt;white&gt;Geode Heart&lt;/white&gt; is in your inventory."><span>Trade</span><span class="cost"><img src="market/emerald_coin.png" alt="">20</span></a></article></section>
+    <section class="shelves"><div class="shelf"><h3>Arms</h3><label class="slot r-epic" for="pick-ember_blade"><span class="cubby"><img src="market/ember_blade.png" alt=""></span><span class="tag"><img src="market/emerald_coin.png" alt="">48</span><span class="tip"><b style="color:#FF55FF">Ember Blade</b><i class="en">Fire Aspect II</i><i class="en">Sharpness V</i><i class="lo">Forged in a dying blaze.</i><i class="lo">Still warm to the touch.</i><i class="pr">48 emeralds</i></span></label><label class="slot r-rare" for="pick-frost_bow"><span class="cubby"><img src="market/frost_bow.png" alt=""></span><span class="tag"><img src="market/emerald_coin.png" alt="">36</span><span class="tip"><b style="color:#55FFFF">Frostbite Bow</b><i class="en">Power IV</i><i class="en">Infinity</i><i class="lo">Every arrow leaves</i><i class="lo">a trail of rime.</i><i class="pr">36 emeralds</i></span></label><label class="slot r-epic" for="pick-warden_aegis"><span class="cubby"><img src="market/warden_aegis.png" alt=""></span><span class="tag"><img src="market/emerald_coin.png" alt="">52</span><span class="tip"><b style="color:#FF55FF">Warden&#x27;s Aegis</b><i class="en">Unbreaking III</i><i class="lo">Hums whenever</i><i class="lo">something is listening.</i><i class="pr">52 emeralds</i></span></label><label class="slot r-rare" for="pick-sky_boots"><span class="cubby"><img src="market/sky_boots.png" alt=""></span><span class="tag"><img src="market/emerald_coin.png" alt="">30</span><span class="tip"><b style="color:#55FFFF">Skyrunner Boots</b><i class="en">Feather Falling IV</i><i class="lo">Lighter than the wind</i><i class="lo">that carries you.</i><i class="pr">30 emeralds</i></span></label></div><div class="shelf"><h3>Arcana</h3><label class="slot r-epic" for="pick-phoenix_feather"><span class="cubby"><img src="market/phoenix_feather.png" alt=""></span><span class="tag"><img src="market/emerald_coin.png" alt="">64</span><span class="tip"><b style="color:#FF55FF">Phoenix Feather</b><i class="en">Saves you from death once</i><i class="lo">Burns, but never</i><i class="lo">burns away.</i><i class="pr">64 emeralds</i></span></label><label class="slot r-rare" for="pick-starlight_potion"><span class="cubby"><img src="market/starlight_potion.png" alt=""></span><span class="tag"><img src="market/emerald_coin.png" alt="">18</span><span class="tip"><b style="color:#55FFFF">Starlight Draught</b><i class="en">Night Vision (8:00)</i><i class="lo">Tastes of a cold</i><i class="lo">clear midnight.</i><i class="pr">18 emeralds</i></span></label><label class="slot r-uncommon" for="pick-echo_tome"><span class="cubby"><img src="market/echo_tome.png" alt=""></span><span class="tag"><img src="market/emerald_coin.png" alt="">24</span><span class="tip"><b style="color:#FFFF55">Tome of Echoes</b><i class="en">Mending</i><i class="lo">Its pages repeat</i><i class="lo">whatever you whisper.</i><i class="pr">24 emeralds</i></span></label><label class="slot r-rare" for="pick-void_pearl"><span class="cubby"><img src="market/void_pearl.png" alt=""></span><span class="tag"><img src="market/emerald_coin.png" alt="">12</span><span class="tip"><b style="color:#55FFFF">Void Pearl</b><i class="en">Stack of 4</i><i class="lo">Goes further than</i><i class="lo">you meant it to.</i><i class="pr">12 emeralds</i></span></label></div><div class="shelf"><h3>Curios</h3><label class="slot r-common" for="pick-glow_lantern"><span class="cubby"><img src="market/glow_lantern.png" alt=""></span><span class="tag"><img src="market/emerald_coin.png" alt="">8</span><span class="tip"><b style="color:#FFFFFF">Glowcap Lantern</b><i class="en">Light level 10</i><i class="lo">A mushroom that</i><i class="lo">never goes to sleep.</i><i class="pr">8 emeralds</i></span></label><label class="slot r-uncommon" for="pick-coin_pouch"><span class="cubby"><img src="market/coin_pouch.png" alt=""></span><span class="tag"><img src="market/emerald_coin.png" alt="">16</span><span class="tip"><b style="color:#FFFF55">Trader&#x27;s Purse</b><i class="en">Holds a stack of anything</i><i class="lo">Heavier than it looks.</i><i class="lo">Ask no questions.</i><i class="pr">16 emeralds</i></span></label><label class="slot r-epic" for="pick-dawn_apple"><span class="cubby"><img src="market/dawn_apple.png" alt=""></span><span class="tag"><img src="market/emerald_coin.png" alt="">40</span><span class="tip"><b style="color:#FF55FF">Apple of Dawn</b><i class="en">Regeneration II</i><i class="en">Absorption IV</i><i class="lo">Picked at first light</i><i class="lo">from a tree nobody owns.</i><i class="pr">40 emeralds</i></span></label><label class="slot r-uncommon" for="pick-geode_heart"><span class="cubby"><img src="market/geode_heart.png" alt=""></span><span class="tag"><img src="market/emerald_coin.png" alt="">20</span><span class="tip"><b style="color:#FFFF55">Geode Heart</b><i class="en">Decoration</i><i class="lo">Sing to it and</i><i class="lo">it sings back.</i><i class="pr">20 emeralds</i></span></label></div></section>
+  </main>
+  <footer><span>Hover anything on a shelf to read it, click it to put it on the stand.</span><span><kbd>Sneak</kbd> to leave</span></footer>
+</div>
+</body>
+</html>

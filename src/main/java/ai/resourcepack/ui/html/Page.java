@@ -738,6 +738,55 @@ public final class Page implements Resources {
         return m == null ? null : m.attr("content");
     }
 
+    /** What {@code <meta name="ui:overlay">} says (see {@link #overlay()}); [on] false for a page without it. */
+    private record Overlay(boolean on, int tint, boolean blur) {}
+
+    private static final Overlay NOT_OVERLAY = new Overlay(false, 0, false);
+    /** Read the first time it is asked for. */
+    private volatile Overlay overlay;
+
+    /**
+     * Whether this is an overlay page, {@code <meta name="ui:overlay" content="...">}: drawn on nothing rather than
+     * on white, so wherever it paints nothing (a transparent html and body) its picture is transparent, and a
+     * fullscreen view shows the world behind the player's window there, under {@link #overlayTint()}.
+     */
+    public boolean overlay() {
+        return overlayMeta().on();
+    }
+
+    /**
+     * What an overlay page's view lays over the world where the page is transparent: the meta's content, a CSS
+     * colour (ARGB; {@code rgba(10, 8, 24, 0.5)}, say), or 0 when it is empty, {@code none} or not a colour. 0
+     * for a page that is not an overlay.
+     */
+    public int overlayTint() {
+        return overlayMeta().tint();
+    }
+
+    /**
+     * Whether an overlay page's view also blurs the world round its panel: the word {@code blur} in the meta's
+     * content, before or after the colour ({@code content="rgba(10, 8, 24, 0.35) blur"}).
+     */
+    public boolean overlayBlur() {
+        return overlayMeta().blur();
+    }
+
+    private Overlay overlayMeta() {
+        Overlay o = overlay;
+        if (o != null) return o;
+        String content = meta("ui:overlay");
+        if (content == null) o = NOT_OVERLAY;
+        else {
+            String c = content.trim();
+            boolean blur = c.matches("(?i).*\\bblur\\b.*");
+            c = c.replaceAll("(?i)\\bblur\\b", "").trim();
+            Integer argb = c.isEmpty() || c.equalsIgnoreCase("none") ? null : ai.resourcepack.ui.html.css.Values.color(c, 0xFF000000);
+            o = new Overlay(true, argb == null ? 0 : argb, blur);
+        }
+        overlay = o;
+        return o;
+    }
+
     public String title() {
         String t = document.title();
         return t.isBlank() ? file.getFileName().toString() : t;

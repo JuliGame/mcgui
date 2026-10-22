@@ -42,7 +42,8 @@ A new `pages/` folder starts with examples: `menu`, `rules`, `shop`, and
 `market`, a night-market trader's stall that shows off hover tooltips, a
 click-to-showcase item stand (radio inputs, no JavaScript), pixel-art item
 sprites and pre-rendered 3D models, and a Trade button that runs a console
-`give` with item components. Try `/ui open market`.
+`give` with item components. Try `/ui open market`. `market-overlay` and
+`market-blur` are the same stall as an overlay, with the world round it.
 
 ## Commands
 
@@ -128,11 +129,22 @@ Page settings, all optional:
 <meta name="ui:scroll-step" content="tile"> <!-- a notch of the wheel: CSS px, or "tile" for one map row (config: scroll-step) -->
 <meta name="ui:click-sound" content="none"> <!-- what a click that does something sounds like (config: click-sound, the game's button click) -->
 <meta name="ui:open-sound" content="item.book.page_turn"> <!-- plays when the page opens -->
+<meta name="ui:overlay" content="rgba(8, 10, 22, 0.55)"> <!-- an overlay: the world shows wherever the page paints nothing -->
 ```
 
 A sound is any the game has, by its id (`entity.experience_orb.pickup`), or
 your own: put an `.ogg` in `plugins/UIEngine/sounds/` and restart, and
 `sounds/door.ogg` is `uiengine:door`. Only the player who clicked hears it.
+
+An overlay page (`ui:overlay`) is drawn on nothing instead of white: leave
+`html` and `body` transparent and put the page in a panel, and fullscreen the
+player sees the world round it, under the tint the meta gives (`none` for
+none). Add `blur` (`content="rgba(8, 10, 22, 0.3) blur"`) to blur the world
+round the panel too, as the game blurs it behind a menu: that needs a 26.2
+client and a world that is not on peaceful (on peaceful the world is only
+tinted), and the pointer is then placed by the server, so the world stays
+still behind it. On a wall, the wall behind shows through, untinted. Players
+without the pack see the world round the panel too, without a tint.
 
 Controls while a page is open: mouse moves the pointer, either button clicks,
 the wheel (or W/S) scrolls, F goes back, sneak closes; and any key the page
@@ -233,6 +245,11 @@ engine.openView(player, () -> canvas, ViewOptions.DEFAULT);
 `WallContent` and `ViewContent` have default methods for looking, pointing,
 clicking, scrolling, keys and chat; implement the ones you need. Every callback
 runs on the server thread. A wall can show each viewer their own canvas.
+
+A canvas with `canvas.transparency(true)` lets the world show through where an
+image's alpha is under half, and `canvas.tint(argb)` is what a view lays over
+the world there; `ViewOptions.DEFAULT.blur(true)` blurs the world round the
+opaque part too (26.2 clients, not on peaceful).
 
 The [examples](examples/) are whole plugins built this way:
 [arcade](examples/arcade/) (thirteen games, on cabinets and fullscreen),
