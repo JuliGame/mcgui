@@ -16,7 +16,6 @@ import ai.resourcepack.uiframework.pack.ResourcePack;
 import ai.resourcepack.uiframework.pack.Shaders;
 import io.papermc.paper.event.player.AsyncChatEvent;
 import net.kyori.adventure.text.Component;
-import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextColor;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import org.bukkit.Bukkit;
@@ -603,12 +602,14 @@ public final class Views implements Listener {
             p.teleport(v.vehicle.getLocation());
             v.vehicle.addPassenger(p);
             nms.setCamera(p, v.camera);
-            // Again once everything has settled, in case the teleport and mount reset it.
+            // Again once everything has settled, in case the teleport and mount reset it. The empty action
+            // bar replaces the game's own "Press Shift to Dismount", which the client shows on mounting.
             Bukkit.getScheduler().runTaskLater(plugin, () -> {
-                if (views.get(v.player) == v && p.isOnline()) nms.setCamera(p, v.camera);
+                if (views.get(v.player) != v || !p.isOnline()) return;
+                nms.setCamera(p, v.camera);
+                p.sendActionBar(Component.empty());
             }, 5);
         }
-        p.sendActionBar(Component.text("Sneak to leave", NamedTextColor.GRAY));
     }
 
     /** What {@link #hold} changes, each under the one key {@code uiframework:seated}. */
