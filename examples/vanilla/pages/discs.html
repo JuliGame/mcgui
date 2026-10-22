@@ -1,0 +1,509 @@
+<!--
+  discs.html: a jukebox collection cabinet for the 19 music discs in Java 1.21.
+  First-child radios select records; missing records show acquisition hints and hover tooltips.
+  Discoveries and playback progress are demo data; selection does not start or stop sound.
+  Replace the discovery states with server data. Play runs player-side playsound and needs permission.
+  Console playsound is deliberately not used: it is outside the allowed console command list.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Disc Collection</title>
+<meta name="ui:height" content="576">
+<meta name="ui:refresh" content="5">
+<link rel="stylesheet" href="vanilla.css">
+<style>
+  body { font-family: Minecraft; font-size: 16px; line-height: 18px; }
+  h1, h2, p { margin: 0; font-size: 16px; font-weight: normal; }
+  .screen { position: relative; width: 1024px; height: 576px; margin: 0 auto; }
+  .panorama {
+    inset: 0;
+    background: url(vanilla/block/dark_oak_planks.png) 0 0 / 32px 32px;
+    filter: none;
+  }
+  .dim { background: rgba(0,0,0,.76); }
+
+  .heading {
+    position: absolute; left: 40px; top: 26px;
+    display: flex; align-items: center; gap: 12px;
+  }
+  .heading img { width: 32px; height: 32px; flex: none; }
+  .heading p { margin-top: 8px; }
+  .owner { position: absolute; left: 40px; top: 88px; white-space: nowrap; }
+  .completion { position: absolute; right: 40px; top: 28px; width: 364px; }
+  .caption { display: flex; justify-content: space-between; margin-bottom: 12px; }
+  .meter {
+    width: 364px; height: 10px;
+    background: url(vanilla/gui/sprites/hud/experience_bar_background.png) 0 0 / 364px 10px;
+  }
+  .meter span {
+    display: block; width: 210px; height: 10px;
+    background: url(vanilla/gui/sprites/hud/experience_bar_progress.png) 0 0 / 364px 10px;
+  }
+  .completion p { margin-top: 12px; text-align: right; }
+
+  .cabinet {
+    position: absolute; left: 40px; top: 122px;
+    width: 684px; height: 376px;
+    padding: 14px;
+    background:
+      linear-gradient(rgba(30,16,7,.18),rgba(30,16,7,.18)) 0 0 / 100% 100%,
+      url(vanilla/block/spruce_planks.png) 0 0 / 32px 32px;
+    box-shadow: inset 4px 4px 0 #b18c60, inset -4px -4px 0 #49311f;
+  }
+  .grid {
+    display: grid; grid-template-columns: repeat(4,minmax(0,1fr));
+    grid-auto-rows: 64px; gap: 6px;
+    background: #17120e;
+    box-shadow: 0 0 0 4px #17120e, 0 2px 0 6px #725337;
+  }
+  .record {
+    position: relative; display: flex; align-items: center;
+    gap: 6px; padding: 4px; min-width: 0;
+    background: #29241e; border: 2px solid #100d0a;
+    box-shadow: inset 0 2px 0 #42372a, inset 0 -2px 0 #17120d;
+    cursor: pointer;
+  }
+  .record .slot { flex: none; }
+  .copy { display: flex; flex-direction: column; gap: 6px; white-space: nowrap; }
+  .record:hover { border-color: #aaa; background: #393126; z-index: 5; }
+  .missing .slot { background: #746c61; }
+  .missing .slot img { filter: brightness(0); opacity: .85; }
+  .record .tooltip { left: -2px; bottom: 70px; }
+  .record:nth-child(4n) .tooltip,
+  .record:nth-child(4n - 1) .tooltip { left: auto; right: -2px; }
+  .record:hover .tooltip { display: block; }
+  .tooltip .line { margin-top: 4px; }
+  .set-tile {
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    border: 2px solid #100d0a;
+    background:
+      linear-gradient(rgba(0,0,0,.6),rgba(0,0,0,.6)) 0 0 / 100% 100%,
+      url(vanilla/block/jukebox_side.png) 0 0 / 32px 32px;
+  }
+  .set-tile img { width: 32px; height: 32px; flex: none; }
+
+  #d01:checked ~ .screen .r01, #d02:checked ~ .screen .r02,
+  #d03:checked ~ .screen .r03, #d04:checked ~ .screen .r04,
+  #d05:checked ~ .screen .r05, #d06:checked ~ .screen .r06,
+  #d07:checked ~ .screen .r07, #d08:checked ~ .screen .r08,
+  #d09:checked ~ .screen .r09, #d10:checked ~ .screen .r10,
+  #d11:checked ~ .screen .r11, #d12:checked ~ .screen .r12,
+  #d13:checked ~ .screen .r13, #d14:checked ~ .screen .r14,
+  #d15:checked ~ .screen .r15, #d16:checked ~ .screen .r16,
+  #d17:checked ~ .screen .r17, #d18:checked ~ .screen .r18,
+  #d19:checked ~ .screen .r19 {
+    border-color: #fff; background: #49402c;
+    box-shadow: inset 0 0 0 2px #796343;
+  }
+
+  .player {
+    position: absolute; left: 736px; top: 122px;
+    width: 248px; height: 376px;
+  }
+  .player h2 { text-align: center; }
+  .deck {
+    position: absolute; left: 20px; top: 44px;
+    width: 204px; height: 118px;
+    background: url(vanilla/block/spruce_planks.png) 0 0 / 32px 32px;
+    border: 2px solid #24180f;
+    box-shadow: inset 2px 2px 0 #b18c60, inset -2px -2px 0 #49311f;
+  }
+
+  /* Three overlapping rectangles form a stepped record-player platter. */
+  .platter {
+    position: absolute; left: 48px; top: 12px;
+    width: 64px; height: 88px; background: #171717;
+    box-shadow: inset 0 2px 0 #666, inset 0 -2px 0 #080808;
+  }
+  .platter::before {
+    content: ""; position: absolute; left: -12px; top: 12px;
+    width: 88px; height: 64px; background: #171717;
+    box-shadow: inset 2px 0 0 #555, inset -2px 0 0 #080808;
+  }
+  .platter::after {
+    content: ""; position: absolute; left: -8px; top: 8px;
+    width: 80px; height: 72px; background: #171717;
+    box-shadow: inset 2px 2px 0 #333, inset -2px -2px 0 #0b0b0b;
+  }
+  .hub {
+    position: absolute; left: 58px; top: 34px;
+    width: 44px; height: 44px; background: #383838;
+    box-shadow: inset 2px 2px 0 #555, inset -2px -2px 0 #111;
+  }
+  .arm {
+    position: absolute; right: 22px; top: 18px;
+    width: 8px; height: 56px;
+    background: #aaa; border-left: 2px solid #eee; border-right: 2px solid #555;
+  }
+  .arm::before {
+    content: ""; position: absolute; left: -6px; top: -6px;
+    width: 16px; height: 16px; border: 2px solid #aaa; background: #454545;
+  }
+  .arm::after {
+    content: ""; position: absolute; right: -2px; bottom: -8px;
+    width: 32px; height: 12px; border: 2px solid #aaa; background: #383838;
+  }
+  .deck-light {
+    position: absolute; right: 12px; bottom: 10px;
+    width: 6px; height: 6px; background: #aa0000;
+    box-shadow: 2px 2px 0 #300000;
+  }
+
+  .track { display: none; }
+  #d01:checked ~ .screen .v01, #d02:checked ~ .screen .v02,
+  #d03:checked ~ .screen .v03, #d04:checked ~ .screen .v04,
+  #d05:checked ~ .screen .v05, #d06:checked ~ .screen .v06,
+  #d07:checked ~ .screen .v07, #d08:checked ~ .screen .v08,
+  #d09:checked ~ .screen .v09, #d10:checked ~ .screen .v10,
+  #d11:checked ~ .screen .v11, #d12:checked ~ .screen .v12,
+  #d13:checked ~ .screen .v13, #d14:checked ~ .screen .v14,
+  #d15:checked ~ .screen .v15, #d16:checked ~ .screen .v16,
+  #d17:checked ~ .screen .v17, #d18:checked ~ .screen .v18,
+  #d19:checked ~ .screen .v19 { display: block; }
+
+  .track > img {
+    position: absolute; left: 86px; top: 86px;
+    width: 32px; height: 32px;
+  }
+  .track.locked > img { filter: brightness(0); }
+  .track .name {
+    position: absolute; left: 14px; right: 14px; top: 176px;
+    text-align: center; color: #222;
+  }
+  .composer, .unknown {
+    position: absolute; left: 14px; right: 14px; top: 200px;
+    text-align: center; color: #444;
+  }
+  .preview {
+    position: absolute; left: 20px; top: 230px; width: 204px;
+  }
+  .playback {
+    width: 204px; height: 10px;
+    background: url(vanilla/gui/sprites/container/villager/experience_bar_background.png) 0 0 / 204px 10px;
+  }
+  .playback span {
+    display: block; width: 68px; height: 10px;
+    background: url(vanilla/gui/sprites/container/villager/experience_bar_current.png) 0 0 / 204px 10px;
+  }
+  .preview p { margin-top: 10px; text-align: center; color: #444; }
+  .track .hint {
+    position: absolute; left: 14px; right: 14px; top: 230px;
+    text-align: center; color: #444; line-height: 18px;
+  }
+  .track .btn, .unavailable {
+    position: absolute; left: 22px; top: 282px; width: 200px;
+  }
+  .unknown, .unavailable { display: none; }
+  :is(#d11,#d13,#d14,#d15,#d16,#d17,#d18,#d19):checked ~ .screen .when-found {
+    display: none;
+  }
+  :is(#d11,#d13,#d14,#d15,#d16,#d17,#d18,#d19):checked ~ .screen .unknown {
+    display: block;
+  }
+  :is(#d11,#d13,#d14,#d15,#d16,#d17,#d18,#d19):checked ~ .screen .unavailable {
+    display: flex;
+  }
+  .player-note {
+    position: absolute; left: 14px; right: 14px; bottom: 18px;
+    text-align: center; color: #555;
+  }
+  .footer {
+    position: absolute; left: 40px; right: 40px; top: 516px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .footer p { flex: 1; }
+  .footer .btn { width: 200px; flex: none; }
+</style>
+</head>
+<body>
+<input class="pick" type="radio" name="disc" id="d01">
+<input class="pick" type="radio" name="disc" id="d02" checked>
+<input class="pick" type="radio" name="disc" id="d03">
+<input class="pick" type="radio" name="disc" id="d04">
+<input class="pick" type="radio" name="disc" id="d05">
+<input class="pick" type="radio" name="disc" id="d06">
+<input class="pick" type="radio" name="disc" id="d07">
+<input class="pick" type="radio" name="disc" id="d08">
+<input class="pick" type="radio" name="disc" id="d09">
+<input class="pick" type="radio" name="disc" id="d10">
+<input class="pick" type="radio" name="disc" id="d11">
+<input class="pick" type="radio" name="disc" id="d12">
+<input class="pick" type="radio" name="disc" id="d13">
+<input class="pick" type="radio" name="disc" id="d14">
+<input class="pick" type="radio" name="disc" id="d15">
+<input class="pick" type="radio" name="disc" id="d16">
+<input class="pick" type="radio" name="disc" id="d17">
+<input class="pick" type="radio" name="disc" id="d18">
+<input class="pick" type="radio" name="disc" id="d19">
+
+<div class="screen">
+  <div class="panorama"></div>
+  <div class="dim"></div>
+
+  <header class="heading">
+    <img src="vanilla/block/jukebox_side.png" width="32" height="32" alt="Jukebox">
+    <div>
+      <h1 class="c6">Disc Collection</h1>
+      <p class="c7">Java 1.21 · Tricky Trials</p>
+    </div>
+  </header>
+  <div class="owner c7">Collector: <span class="cf">{player}</span></div>
+
+  <section class="completion" aria-label="11 of 19 discs found">
+    <div class="caption">
+      <span class="t">Collection</span>
+      <span class="ca">11 / 19 found</span>
+    </div>
+    <div class="meter"><span></span></div>
+    <p class="c7">8 records still out there</p>
+  </section>
+
+  <main class="cabinet panel" aria-label="Music disc collection">
+    <div class="grid">
+      <label class="record r01" for="d01">
+        <span class="slot"><img src="vanilla/item/music_disc_13.png" width="32" height="32" alt="13"></span>
+        <span class="copy"><span class="cf">13</span><span class="c7">C418</span></span>
+      </label>
+      <label class="record r02" for="d02">
+        <span class="slot"><img src="vanilla/item/music_disc_cat.png" width="32" height="32" alt="cat"></span>
+        <span class="copy"><span class="cf">cat</span><span class="c7">C418</span></span>
+      </label>
+      <label class="record r03" for="d03">
+        <span class="slot"><img src="vanilla/item/music_disc_blocks.png" width="32" height="32" alt="blocks"></span>
+        <span class="copy"><span class="cf">blocks</span><span class="c7">C418</span></span>
+      </label>
+      <label class="record r04" for="d04">
+        <span class="slot"><img src="vanilla/item/music_disc_chirp.png" width="32" height="32" alt="chirp"></span>
+        <span class="copy"><span class="cf">chirp</span><span class="c7">C418</span></span>
+      </label>
+      <label class="record r05" for="d05">
+        <span class="slot"><img src="vanilla/item/music_disc_far.png" width="32" height="32" alt="far"></span>
+        <span class="copy"><span class="cf">far</span><span class="c7">C418</span></span>
+      </label>
+      <label class="record r06" for="d06">
+        <span class="slot"><img src="vanilla/item/music_disc_mall.png" width="32" height="32" alt="mall"></span>
+        <span class="copy"><span class="cf">mall</span><span class="c7">C418</span></span>
+      </label>
+      <label class="record r07" for="d07">
+        <span class="slot"><img src="vanilla/item/music_disc_mellohi.png" width="32" height="32" alt="mellohi"></span>
+        <span class="copy"><span class="cf">mellohi</span><span class="c7">C418</span></span>
+      </label>
+      <label class="record r08" for="d08">
+        <span class="slot"><img src="vanilla/item/music_disc_stal.png" width="32" height="32" alt="stal"></span>
+        <span class="copy"><span class="cf">stal</span><span class="c7">C418</span></span>
+      </label>
+      <label class="record r09" for="d09">
+        <span class="slot"><img src="vanilla/item/music_disc_strad.png" width="32" height="32" alt="strad"></span>
+        <span class="copy"><span class="cf">strad</span><span class="c7">C418</span></span>
+      </label>
+      <label class="record r10" for="d10">
+        <span class="slot"><img src="vanilla/item/music_disc_ward.png" width="32" height="32" alt="ward"></span>
+        <span class="copy"><span class="cf">ward</span><span class="c7">C418</span></span>
+      </label>
+      <label class="record r11 missing" for="d11">
+        <span class="slot"><img src="vanilla/item/music_disc_11.png" width="32" height="32" alt="Missing disc"></span>
+        <span class="copy"><span class="c7">???</span><span class="c7">Creeper</span></span>
+        <span class="tooltip"><div>
+          <div class="ce">An unlikely duet</div>
+          <div class="line c7">Let a skeleton kill a creeper.</div>
+        </div></span>
+      </label>
+      <label class="record r12" for="d12">
+        <span class="slot"><img src="vanilla/item/music_disc_wait.png" width="32" height="32" alt="wait"></span>
+        <span class="copy"><span class="cf">wait</span><span class="c7">C418</span></span>
+      </label>
+      <label class="record r13 missing" for="d13">
+        <span class="slot"><img src="vanilla/item/music_disc_otherside.png" width="32" height="32" alt="Missing disc"></span>
+        <span class="copy"><span class="c7">???</span><span class="c7">Dungeon</span></span>
+        <span class="tooltip"><div>
+          <div class="ce">Buried melodies</div>
+          <div class="line c7">Search dungeon chests</div>
+          <div class="line c7">or stronghold altar chests.</div>
+        </div></span>
+      </label>
+      <label class="record r14 missing" for="d14">
+        <span class="slot"><img src="vanilla/item/music_disc_5.png" width="32" height="32" alt="Missing disc"></span>
+        <span class="copy"><span class="c7">???</span><span class="c7">Craft</span></span>
+        <span class="tooltip"><div>
+          <div class="ce">Nine broken pieces</div>
+          <div class="line c7">Find ancient city fragments.</div>
+          <div class="line c7">Craft nine into a record.</div>
+        </div></span>
+      </label>
+      <label class="record r15 missing" for="d15">
+        <span class="slot"><img src="vanilla/item/music_disc_pigstep.png" width="32" height="32" alt="Missing disc"></span>
+        <span class="copy"><span class="c7">???</span><span class="c7">Bastion</span></span>
+        <span class="tooltip"><div>
+          <div class="ce">A Nether beat</div>
+          <div class="line c7">Search bastion remnant chests.</div>
+        </div></span>
+      </label>
+      <label class="record r16 missing" for="d16">
+        <span class="slot"><img src="vanilla/item/music_disc_relic.png" width="32" height="32" alt="Missing disc"></span>
+        <span class="copy"><span class="c7">???</span><span class="c7">Brush</span></span>
+        <span class="tooltip"><div>
+          <div class="ce">Handle with care</div>
+          <div class="line c7">Brush suspicious gravel</div>
+          <div class="line c7">in trail ruins.</div>
+        </div></span>
+      </label>
+      <label class="record r17 missing" for="d17">
+        <span class="slot"><img src="vanilla/item/music_disc_creator.png" width="32" height="32" alt="Missing disc"></span>
+        <span class="copy"><span class="c7">???</span><span class="c7">Ominous</span></span>
+        <span class="tooltip"><div>
+          <div class="ce">A greater trial</div>
+          <div class="line c7">Unlock an ominous vault</div>
+          <div class="line c7">inside a trial chamber.</div>
+        </div></span>
+      </label>
+      <label class="record r18 missing" for="d18">
+        <span class="slot"><img src="vanilla/item/music_disc_creator_music_box.png" width="32" height="32" alt="Missing disc"></span>
+        <span class="copy"><span class="c7">???</span><span class="c7">Pots</span></span>
+        <span class="tooltip"><div>
+          <div class="ce">Small surprises</div>
+          <div class="line c7">Break decorated pots</div>
+          <div class="line c7">inside trial chambers.</div>
+        </div></span>
+      </label>
+      <label class="record r19 missing" for="d19">
+        <span class="slot"><img src="vanilla/item/music_disc_precipice.png" width="32" height="32" alt="Missing disc"></span>
+        <span class="copy"><span class="c7">???</span><span class="c7">Vault</span></span>
+        <span class="tooltip"><div>
+          <div class="ce">Earn your key</div>
+          <div class="line c7">Unlock a regular vault</div>
+          <div class="line c7">inside a trial chamber.</div>
+        </div></span>
+      </label>
+      <div class="set-tile">
+        <img src="vanilla/block/jukebox_top.png" width="32" height="32" alt="">
+        <span class="c6">1.21<br>set</span>
+      </div>
+    </div>
+  </main>
+
+  <aside class="player panel" aria-label="Selected record preview">
+    <h2>Now playing</h2>
+    <div class="deck" aria-hidden="true">
+      <div class="platter"></div>
+      <div class="hub"></div>
+      <div class="arm"></div>
+      <div class="deck-light"></div>
+    </div>
+
+    <div class="composer when-found">C418</div>
+    <div class="unknown">Not discovered</div>
+    <div class="preview when-found">
+      <div class="playback"><span></span></div>
+      <p>Demo progress</p>
+    </div>
+    <div class="btn off unavailable" aria-disabled="true">Not found</div>
+
+    <div class="track v01">
+      <img src="vanilla/item/music_disc_13.png" width="32" height="32" alt="13">
+      <div class="name">13</div>
+      <div class="btn" data-command="playsound minecraft:music_disc.13 record {player} ~ ~ ~ 1 1">Play</div>
+    </div>
+    <div class="track v02">
+      <img src="vanilla/item/music_disc_cat.png" width="32" height="32" alt="cat">
+      <div class="name">cat</div>
+      <div class="btn" data-command="playsound minecraft:music_disc.cat record {player} ~ ~ ~ 1 1">Play</div>
+    </div>
+    <div class="track v03">
+      <img src="vanilla/item/music_disc_blocks.png" width="32" height="32" alt="blocks">
+      <div class="name">blocks</div>
+      <div class="btn" data-command="playsound minecraft:music_disc.blocks record {player} ~ ~ ~ 1 1">Play</div>
+    </div>
+    <div class="track v04">
+      <img src="vanilla/item/music_disc_chirp.png" width="32" height="32" alt="chirp">
+      <div class="name">chirp</div>
+      <div class="btn" data-command="playsound minecraft:music_disc.chirp record {player} ~ ~ ~ 1 1">Play</div>
+    </div>
+    <div class="track v05">
+      <img src="vanilla/item/music_disc_far.png" width="32" height="32" alt="far">
+      <div class="name">far</div>
+      <div class="btn" data-command="playsound minecraft:music_disc.far record {player} ~ ~ ~ 1 1">Play</div>
+    </div>
+    <div class="track v06">
+      <img src="vanilla/item/music_disc_mall.png" width="32" height="32" alt="mall">
+      <div class="name">mall</div>
+      <div class="btn" data-command="playsound minecraft:music_disc.mall record {player} ~ ~ ~ 1 1">Play</div>
+    </div>
+    <div class="track v07">
+      <img src="vanilla/item/music_disc_mellohi.png" width="32" height="32" alt="mellohi">
+      <div class="name">mellohi</div>
+      <div class="btn" data-command="playsound minecraft:music_disc.mellohi record {player} ~ ~ ~ 1 1">Play</div>
+    </div>
+    <div class="track v08">
+      <img src="vanilla/item/music_disc_stal.png" width="32" height="32" alt="stal">
+      <div class="name">stal</div>
+      <div class="btn" data-command="playsound minecraft:music_disc.stal record {player} ~ ~ ~ 1 1">Play</div>
+    </div>
+    <div class="track v09">
+      <img src="vanilla/item/music_disc_strad.png" width="32" height="32" alt="strad">
+      <div class="name">strad</div>
+      <div class="btn" data-command="playsound minecraft:music_disc.strad record {player} ~ ~ ~ 1 1">Play</div>
+    </div>
+    <div class="track v10">
+      <img src="vanilla/item/music_disc_ward.png" width="32" height="32" alt="ward">
+      <div class="name">ward</div>
+      <div class="btn" data-command="playsound minecraft:music_disc.ward record {player} ~ ~ ~ 1 1">Play</div>
+    </div>
+    <div class="track v11 locked">
+      <img src="vanilla/item/music_disc_11.png" width="32" height="32" alt="Missing disc">
+      <div class="name">???</div>
+      <div class="hint">Skeleton arrows.<br>A creeper falls.</div>
+    </div>
+    <div class="track v12">
+      <img src="vanilla/item/music_disc_wait.png" width="32" height="32" alt="wait">
+      <div class="name">wait</div>
+      <div class="btn" data-command="playsound minecraft:music_disc.wait record {player} ~ ~ ~ 1 1">Play</div>
+    </div>
+    <div class="track v13 locked">
+      <img src="vanilla/item/music_disc_otherside.png" width="32" height="32" alt="Missing disc">
+      <div class="name">???</div>
+      <div class="hint">Dungeon chests.<br>Strongholds, too.</div>
+    </div>
+    <div class="track v14 locked">
+      <img src="vanilla/item/music_disc_5.png" width="32" height="32" alt="Missing disc">
+      <div class="name">???</div>
+      <div class="hint">Ancient cities.<br>Craft 9 fragments.</div>
+    </div>
+    <div class="track v15 locked">
+      <img src="vanilla/item/music_disc_pigstep.png" width="32" height="32" alt="Missing disc">
+      <div class="name">???</div>
+      <div class="hint">Bastion chests.<br>Mind the piglins.</div>
+    </div>
+    <div class="track v16 locked">
+      <img src="vanilla/item/music_disc_relic.png" width="32" height="32" alt="Missing disc">
+      <div class="name">???</div>
+      <div class="hint">Trail ruins.<br>Brush the gravel.</div>
+    </div>
+    <div class="track v17 locked">
+      <img src="vanilla/item/music_disc_creator.png" width="32" height="32" alt="Missing disc">
+      <div class="name">???</div>
+      <div class="hint">An ominous key.<br>An ominous vault.</div>
+    </div>
+    <div class="track v18 locked">
+      <img src="vanilla/item/music_disc_creator_music_box.png" width="32" height="32" alt="Missing disc">
+      <div class="name">???</div>
+      <div class="hint">Trial chambers.<br>Break the pots.</div>
+    </div>
+    <div class="track v19 locked">
+      <img src="vanilla/item/music_disc_precipice.png" width="32" height="32" alt="Missing disc">
+      <div class="name">???</div>
+      <div class="hint">Trial chambers.<br>Unlock a vault.</div>
+    </div>
+
+    <p class="player-note">Static preview</p>
+  </aside>
+
+  <footer class="footer">
+    <p class="c7">Select a disc. Hover for hints.</p>
+    <a class="btn" href="quests.html">Quest Log</a>
+    <div class="btn" data-action="close">Done</div>
+  </footer>
+</div>
+</body>
+</html>

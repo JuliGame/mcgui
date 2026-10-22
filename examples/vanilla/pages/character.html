@@ -1,0 +1,603 @@
+<!--
+  character.html is a character sheet with live player name, level and health.
+  First-child radios select a one-point preview; equipment and effects have hover tooltips.
+  The three available points, equipment and durations are samples; Send preview only sends chat.
+  Replace sample values and demo actions with server-validated RPG data and spending commands.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="ui:height" content="576">
+<meta name="ui:refresh" content="5">
+<title>Character</title>
+<link rel="stylesheet" href="vanilla.css">
+<style>
+  .screen {
+    position: relative;
+    width: 1024px;
+    height: 576px;
+    margin: 0 auto;
+  }
+  .panorama { background-size: 1072px 624px; }
+  .dim { background: rgba(0,0,0,.62); }
+  h1, h2, p {
+    margin: 0;
+    font-size: 16px;
+    line-height: 18px;
+    font-weight: normal;
+  }
+  img { display: block; }
+  .sheet {
+    position: absolute;
+    left: 48px;
+    top: 20px;
+    width: 928px;
+    height: 492px;
+    padding: 18px;
+  }
+  .heading {
+    height: 60px;
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .badge {
+    width: 52px;
+    height: 52px;
+    flex: none;
+    display: grid;
+    place-items: center;
+    background: url(vanilla/gui/sprites/advancements/challenge_frame_obtained.png)
+                center / 52px 52px no-repeat;
+  }
+  .badge img { width: 32px; height: 32px; }
+  .identity { flex: 1; padding-top: 4px; }
+  .identity h1 { color: #202020; margin-bottom: 8px; }
+  .identity p { color: #555; }
+  .level { text-align: right; padding-top: 2px; flex: none; }
+  .level-box {
+    margin-top: 6px;
+    padding: 6px 12px;
+    background: #283024;
+    box-shadow: inset 2px 2px #151a12, inset -2px -2px #eee;
+    white-space: nowrap;
+  }
+
+  .columns {
+    display: grid;
+    grid-template-columns: 280px 280px 304px;
+    gap: 12px;
+    height: 292px;
+  }
+  .well {
+    position: relative;
+    padding: 12px;
+    color: #fff;
+    background: #252525;
+    box-shadow: inset 2px 2px #555, inset -2px -2px #fff;
+  }
+  .section-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    white-space: nowrap;
+  }
+  .health-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 28px;
+    margin-bottom: 4px;
+  }
+  .health-row .value { margin-left: auto; white-space: nowrap; }
+  .heart {
+    flex: none;
+    width: 18px;
+    height: 18px;
+    background: url(vanilla/gui/sprites/hud/heart/container.png)
+                center / 18px 18px no-repeat;
+  }
+  .heart img { width: 18px; height: 18px; }
+  .vital { height: 40px; }
+  .vital-heading {
+    display: flex;
+    justify-content: space-between;
+    height: 18px;
+    white-space: nowrap;
+  }
+
+  /* Vanilla HUD spacing: each 18px sprite advances by 16px. */
+  .hud {
+    display: flex;
+    width: 162px;
+    height: 18px;
+    margin-top: 2px;
+  }
+  .hud img {
+    width: 18px;
+    height: 18px;
+    flex: none;
+    margin-right: -2px;
+  }
+  .hud img:last-child { margin-right: 0; }
+
+  .effects-title {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 6px;
+    padding-top: 8px;
+    border-top: 2px solid #505050;
+  }
+  .effects { display: flex; gap: 20px; margin-top: 8px; }
+  .effect {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .effect > img { width: 36px; height: 36px; }
+  .effect .tooltip { left: 0; bottom: 44px; }
+  .effect:last-child .tooltip { left: auto; right: 0; }
+  .effect:hover .tooltip, .slot:hover .tooltip { display: block; }
+
+  .equipment {
+    background:
+      linear-gradient(rgba(0,0,0,.82),rgba(0,0,0,.82)),
+      url(vanilla/block/stone_bricks.png) 0 0 / 32px 32px;
+  }
+  .equipment h2 { justify-content: center; }
+  .doll-spine {
+    position: absolute;
+    top: 64px;
+    left: 138px;
+    width: 4px;
+    height: 144px;
+    background: #505050;
+  }
+  .doll-shoulders {
+    position: absolute;
+    top: 110px;
+    left: 64px;
+    width: 152px;
+    height: 4px;
+    background: #505050;
+  }
+  .doll-charm-line {
+    position: absolute;
+    top: 206px;
+    left: 140px;
+    width: 76px;
+    height: 4px;
+    background: #505050;
+  }
+  .equipment > .slot { position: absolute; }
+  .helmet { left: 122px; top: 46px; }
+  .chest { left: 122px; top: 94px; }
+  .legs { left: 122px; top: 142px; }
+  .boots { left: 122px; top: 190px; }
+  .weapon { left: 46px; top: 94px; }
+  .tool { left: 198px; top: 94px; }
+  .charm { left: 198px; top: 190px; }
+  .slot-label {
+    position: absolute;
+    width: 76px;
+    text-align: center;
+    white-space: nowrap;
+  }
+  .hand-label { left: 26px; top: 136px; }
+  .tool-label { left: 178px; top: 136px; }
+  .charm-label { left: 178px; top: 232px; }
+  .equipment .slot:hover {
+    background: #aaa;
+    outline: 2px solid #fff;
+    z-index: 3;
+  }
+  .equipment .tooltip { top: 42px; left: -12px; }
+  .equipment .tool .tooltip,
+  .equipment .charm .tooltip { left: auto; right: -12px; }
+  .kit-name {
+    position: absolute;
+    left: 12px;
+    right: 12px;
+    bottom: 12px;
+    text-align: center;
+    white-space: nowrap;
+  }
+
+  .attribute {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 54px;
+  }
+  .attribute > img { width: 36px; height: 36px; flex: none; }
+  .attribute-info { flex: 1; min-width: 0; }
+  .attribute-name {
+    display: flex;
+    justify-content: space-between;
+    white-space: nowrap;
+  }
+  .number { display: flex; gap: 8px; }
+  .bonus { visibility: hidden; }
+  .pips { display: flex; gap: 4px; margin-top: 8px; }
+  .pip {
+    display: block;
+    width: 18px;
+    height: 8px;
+    flex: none;
+    background: #111;
+    border: 2px solid #606060;
+  }
+  .pip.filled {
+    background: #aaa;
+    border-color: #ddd #666 #666 #ddd;
+  }
+  .attribute-note { margin-top: 4px; }
+
+  #strength:checked ~ .screen .strength .bonus,
+  #agility:checked ~ .screen .agility .bonus,
+  #mining:checked ~ .screen .mining .bonus,
+  #luck:checked ~ .screen .luck .bonus { visibility: visible; }
+
+  #strength:checked ~ .screen .strength .next,
+  #agility:checked ~ .screen .agility .next,
+  #mining:checked ~ .screen .mining .next,
+  #luck:checked ~ .screen .luck .next {
+    background: #ff5;
+    border-color: #ffffaa #8a8a22 #8a8a22 #ffffaa;
+  }
+
+  .allocation {
+    height: 88px;
+    margin-top: 12px;
+    padding: 10px 12px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    background: #aaa;
+    border-top: 2px solid #555;
+    border-bottom: 2px solid #fff;
+  }
+  .allocation-title { width: 208px; flex: none; }
+  .allocation-title p { margin-top: 8px; }
+  .choices { display: flex; gap: 12px; flex: none; }
+  .choice {
+    width: 88px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+  }
+  .choice .btn { width: 40px; height: 40px; }
+  #strength:checked ~ .screen .choose-strength,
+  #agility:checked ~ .screen .choose-agility,
+  #mining:checked ~ .screen .choose-mining,
+  #luck:checked ~ .screen .choose-luck {
+    border-color: #fff;
+    background: #505c3e;
+    color: #ff5;
+    box-shadow: inset 2px 2px #758362, inset -2px -4px #35402b;
+  }
+  .apply { margin-left: auto; width: 200px; flex: none; }
+  .apply .btn { display: none; width: 200px; }
+  .apply p { margin-top: 6px; text-align: center; white-space: nowrap; }
+  #strength:checked ~ .screen .apply-strength,
+  #agility:checked ~ .screen .apply-agility,
+  #mining:checked ~ .screen .apply-mining,
+  #luck:checked ~ .screen .apply-luck { display: flex; }
+
+  .footer {
+    position: absolute;
+    top: 524px;
+    left: 48px;
+    right: 48px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .footer p { flex: 1; }
+  .footer .btn { flex: none; }
+</style>
+</head>
+<body>
+<input class="pick" type="radio" name="attribute" id="strength" checked>
+<input class="pick" type="radio" name="attribute" id="agility">
+<input class="pick" type="radio" name="attribute" id="mining">
+<input class="pick" type="radio" name="attribute" id="luck">
+
+<div class="screen">
+  <div class="panorama"></div>
+  <div class="dim"></div>
+
+  <main class="panel sheet">
+    <header class="heading">
+      <div class="badge">
+        <img src="vanilla/item/iron_sword.png" width="32" height="32" alt="Warrior">
+      </div>
+      <div class="identity">
+        <h1>{player}</h1>
+        <p>Warrior / Sample build</p>
+      </div>
+      <div class="level">
+        <span>Character</span>
+        <div class="level-box ca">Level {level}</div>
+      </div>
+    </header>
+
+    <div class="columns">
+      <section class="well">
+        <h2 class="section-title t">Vitals</h2>
+        <div class="health-row">
+          <span class="heart">
+            <img src="vanilla/gui/sprites/hud/heart/full.png" width="18" height="18" alt="">
+          </span>
+          <span class="t">Health</span>
+          <span class="value cc">{health} HP</span>
+        </div>
+
+        <div class="vital">
+          <div class="vital-heading">
+            <span class="t">Armour</span><span class="cf">15/20</span>
+          </div>
+          <div class="hud" aria-label="Sample armour: 15 of 20">
+            <img src="vanilla/gui/sprites/hud/armor_full.png" alt="">
+            <img src="vanilla/gui/sprites/hud/armor_full.png" alt="">
+            <img src="vanilla/gui/sprites/hud/armor_full.png" alt="">
+            <img src="vanilla/gui/sprites/hud/armor_full.png" alt="">
+            <img src="vanilla/gui/sprites/hud/armor_full.png" alt="">
+            <img src="vanilla/gui/sprites/hud/armor_full.png" alt="">
+            <img src="vanilla/gui/sprites/hud/armor_full.png" alt="">
+            <img src="vanilla/gui/sprites/hud/armor_half.png" alt="">
+            <img src="vanilla/gui/sprites/hud/armor_empty.png" alt="">
+            <img src="vanilla/gui/sprites/hud/armor_empty.png" alt="">
+          </div>
+        </div>
+
+        <div class="vital">
+          <div class="vital-heading">
+            <span class="t">Hunger</span><span class="c6">20/20</span>
+          </div>
+          <div class="hud" aria-label="Sample hunger: 20 of 20">
+            <img src="vanilla/gui/sprites/hud/food_full.png" alt="">
+            <img src="vanilla/gui/sprites/hud/food_full.png" alt="">
+            <img src="vanilla/gui/sprites/hud/food_full.png" alt="">
+            <img src="vanilla/gui/sprites/hud/food_full.png" alt="">
+            <img src="vanilla/gui/sprites/hud/food_full.png" alt="">
+            <img src="vanilla/gui/sprites/hud/food_full.png" alt="">
+            <img src="vanilla/gui/sprites/hud/food_full.png" alt="">
+            <img src="vanilla/gui/sprites/hud/food_full.png" alt="">
+            <img src="vanilla/gui/sprites/hud/food_full.png" alt="">
+            <img src="vanilla/gui/sprites/hud/food_full.png" alt="">
+          </div>
+        </div>
+
+        <div class="vital">
+          <div class="vital-heading">
+            <span class="t">Air</span><span class="cb">300/300</span>
+          </div>
+          <div class="hud" aria-label="Sample air: 300 of 300">
+            <img src="vanilla/gui/sprites/hud/air.png" alt="">
+            <img src="vanilla/gui/sprites/hud/air.png" alt="">
+            <img src="vanilla/gui/sprites/hud/air.png" alt="">
+            <img src="vanilla/gui/sprites/hud/air.png" alt="">
+            <img src="vanilla/gui/sprites/hud/air.png" alt="">
+            <img src="vanilla/gui/sprites/hud/air.png" alt="">
+            <img src="vanilla/gui/sprites/hud/air.png" alt="">
+            <img src="vanilla/gui/sprites/hud/air.png" alt="">
+            <img src="vanilla/gui/sprites/hud/air.png" alt="">
+            <img src="vanilla/gui/sprites/hud/air.png" alt="">
+          </div>
+        </div>
+
+        <h2 class="effects-title">
+          <span class="t">Effects</span><span class="c7">Sample</span>
+        </h2>
+        <div class="effects">
+          <div class="effect">
+            <img src="vanilla/mob_effect/strength.png" alt="Strength I">
+            <span class="cf">4:12</span>
+            <div class="tooltip">
+              <div class="cf">Strength I</div>
+              <div class="c7">Duration: 4:12</div>
+              <div class="c8">Sample, not a live timer</div>
+            </div>
+          </div>
+          <div class="effect">
+            <img src="vanilla/mob_effect/haste.png" alt="Haste II">
+            <span class="cf">1:30</span>
+            <div class="tooltip">
+              <div class="ce">Haste II</div>
+              <div class="c7">Duration: 1:30</div>
+              <div class="c8">Sample, not a live timer</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="well equipment">
+        <h2 class="section-title t">Equipment</h2>
+        <div class="doll-spine" aria-hidden="true"></div>
+        <div class="doll-shoulders" aria-hidden="true"></div>
+        <div class="doll-charm-line" aria-hidden="true"></div>
+
+        <div class="slot helmet">
+          <img src="vanilla/item/iron_helmet.png" alt="Iron Helmet">
+          <div class="tooltip">
+            <div class="cf">Iron Helmet</div>
+            <div class="c7">When on head:</div>
+            <div class="c9">+2 Armour</div>
+          </div>
+        </div>
+        <div class="slot chest">
+          <img src="vanilla/item/iron_chestplate.png" alt="Iron Chestplate">
+          <div class="tooltip">
+            <div class="cf">Iron Chestplate</div>
+            <div class="c7">When on body:</div>
+            <div class="c9">+6 Armour</div>
+          </div>
+        </div>
+        <div class="slot legs">
+          <img src="vanilla/item/iron_leggings.png" alt="Iron Leggings">
+          <div class="tooltip">
+            <div class="cf">Iron Leggings</div>
+            <div class="c7">When on legs:</div>
+            <div class="c9">+5 Armour</div>
+          </div>
+        </div>
+        <div class="slot boots">
+          <img src="vanilla/item/iron_boots.png" alt="Iron Boots">
+          <div class="tooltip">
+            <div class="cf">Iron Boots</div>
+            <div class="c7">When on feet:</div>
+            <div class="c9">+2 Armour</div>
+          </div>
+        </div>
+        <div class="slot weapon">
+          <img src="vanilla/item/iron_sword.png" alt="Iron Sword">
+          <div class="tooltip">
+            <div class="cf">Iron Sword</div>
+            <div class="c7">Main hand</div>
+            <div class="c9">6 Attack Damage</div>
+          </div>
+        </div>
+        <div class="slot tool">
+          <img src="vanilla/item/iron_pickaxe.png" alt="Iron Pickaxe">
+          <div class="tooltip">
+            <div class="cf">Iron Pickaxe</div>
+            <div class="c7">Sample RPG tool slot</div>
+          </div>
+        </div>
+        <div class="slot charm">
+          <img src="vanilla/item/amethyst_shard.png" alt="Amethyst Charm">
+          <div class="tooltip">
+            <div class="cd">Amethyst Charm</div>
+            <div class="c7">Sample RPG accessory</div>
+          </div>
+        </div>
+
+        <span class="slot-label hand-label c7">Hand</span>
+        <span class="slot-label tool-label c7">Tool</span>
+        <span class="slot-label charm-label c7">Charm</span>
+        <p class="kit-name c7">Iron set: 15 armour</p>
+      </section>
+
+      <section class="well attributes">
+        <h2 class="section-title">
+          <span class="t">Attributes</span><span class="ce">Preview</span>
+        </h2>
+
+        <div class="attribute strength">
+          <img src="vanilla/mob_effect/strength.png" alt="">
+          <div class="attribute-info">
+            <div class="attribute-name t">
+              <span>Strength</span>
+              <span class="number"><span>4</span><span class="bonus ce">+1</span></span>
+            </div>
+            <div class="pips" aria-label="Strength: 4 of 8">
+              <i class="pip filled"></i><i class="pip filled"></i>
+              <i class="pip filled"></i><i class="pip filled"></i>
+              <i class="pip next"></i><i class="pip"></i>
+              <i class="pip"></i><i class="pip"></i>
+            </div>
+          </div>
+        </div>
+
+        <div class="attribute agility">
+          <img src="vanilla/mob_effect/speed.png" alt="">
+          <div class="attribute-info">
+            <div class="attribute-name t">
+              <span>Agility</span>
+              <span class="number"><span>5</span><span class="bonus ce">+1</span></span>
+            </div>
+            <div class="pips" aria-label="Agility: 5 of 8">
+              <i class="pip filled"></i><i class="pip filled"></i>
+              <i class="pip filled"></i><i class="pip filled"></i>
+              <i class="pip filled"></i><i class="pip next"></i>
+              <i class="pip"></i><i class="pip"></i>
+            </div>
+          </div>
+        </div>
+
+        <div class="attribute mining">
+          <img src="vanilla/mob_effect/haste.png" alt="">
+          <div class="attribute-info">
+            <div class="attribute-name t">
+              <span>Mining</span>
+              <span class="number"><span>3</span><span class="bonus ce">+1</span></span>
+            </div>
+            <div class="pips" aria-label="Mining: 3 of 8">
+              <i class="pip filled"></i><i class="pip filled"></i>
+              <i class="pip filled"></i><i class="pip next"></i>
+              <i class="pip"></i><i class="pip"></i>
+              <i class="pip"></i><i class="pip"></i>
+            </div>
+          </div>
+        </div>
+
+        <div class="attribute luck">
+          <img src="vanilla/mob_effect/luck.png" alt="">
+          <div class="attribute-info">
+            <div class="attribute-name t">
+              <span>Luck</span>
+              <span class="number"><span>2</span><span class="bonus ce">+1</span></span>
+            </div>
+            <div class="pips" aria-label="Luck: 2 of 8">
+              <i class="pip filled"></i><i class="pip filled"></i>
+              <i class="pip next"></i><i class="pip"></i>
+              <i class="pip"></i><i class="pip"></i>
+              <i class="pip"></i><i class="pip"></i>
+            </div>
+          </div>
+        </div>
+
+        <p class="attribute-note c7">Yellow = preview</p>
+      </section>
+    </div>
+
+    <section class="allocation">
+      <div class="allocation-title">
+        <h2>Spend 3 points</h2>
+        <p>Demo: choose +1</p>
+      </div>
+      <div class="choices">
+        <div class="choice">
+          <label class="btn choose-strength" for="strength" aria-label="Preview Strength plus one">+</label>
+          <span>STR</span>
+        </div>
+        <div class="choice">
+          <label class="btn choose-agility" for="agility" aria-label="Preview Agility plus one">+</label>
+          <span>AGI</span>
+        </div>
+        <div class="choice">
+          <label class="btn choose-mining" for="mining" aria-label="Preview Mining plus one">+</label>
+          <span>MIN</span>
+        </div>
+        <div class="choice">
+          <label class="btn choose-luck" for="luck" aria-label="Preview Luck plus one">+</label>
+          <span>LCK</span>
+        </div>
+      </div>
+      <div class="apply">
+        <div class="btn apply-strength"
+             data-message="<yellow>Preview: Strength 4 to 5.</yellow> <gray>Demo only: all 3 sample points remain unspent.</gray>">Send preview</div>
+        <div class="btn apply-agility"
+             data-message="<yellow>Preview: Agility 5 to 6.</yellow> <gray>Demo only: all 3 sample points remain unspent.</gray>">Send preview</div>
+        <div class="btn apply-mining"
+             data-message="<yellow>Preview: Mining 3 to 4.</yellow> <gray>Demo only: all 3 sample points remain unspent.</gray>">Send preview</div>
+        <div class="btn apply-luck"
+             data-message="<yellow>Preview: Luck 2 to 3.</yellow> <gray>Demo only: all 3 sample points remain unspent.</gray>">Send preview</div>
+        <p>No points spent</p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <p class="c7">Live: name, level, HP.<br>All other data: sample.</p>
+    <a class="btn" href="quests.html">Quest Log</a>
+    <div class="btn" data-action="close">Done</div>
+  </footer>
+</div>
+</body>
+</html>

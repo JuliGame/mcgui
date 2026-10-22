@@ -1,0 +1,784 @@
+<!--
+  bestiary.html — a compact, leather-toned field journal with six preview entries.
+  Category radios reveal grouped lists; each group remembers its selected mob.
+  Hover drop slots for loot quantities and conditions; no JavaScript is used.
+  Replace the sample 23/40 discovery total with server-tracked collection data.
+  Combat notes assume Java / Normal; update loot and habitats for your version.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="ui:height" content="576">
+<title>Mob Field Guide</title>
+<link rel="stylesheet" href="vanilla.css">
+<style>
+  .screen {
+    position: relative;
+    width: 1024px;
+    height: 576px;
+    margin: 0 auto;
+  }
+  .panorama { background-size: 1072px 624px; }
+  .dim { background: rgba(0,0,0,.65); }
+  h1, h2, h3, p {
+    margin: 0;
+    font-size: 16px;
+    line-height: 18px;
+    font-weight: normal;
+  }
+  img { width: 32px; height: 32px; flex: none; }
+  .masthead {
+    position: absolute;
+    left: 76px;
+    right: 76px;
+    top: 26px;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .brand h1 { margin-bottom: 8px; }
+  .collection { width: 364px; }
+  .collection-line {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 10px;
+    white-space: nowrap;
+  }
+  .bar {
+    width: 364px;
+    height: 10px;
+    background: url(vanilla/gui/sprites/hud/experience_bar_background.png)
+      0 0 / 364px 10px no-repeat;
+  }
+  .bar-fill {
+    width: 210px;
+    height: 10px;
+    background: url(vanilla/gui/sprites/hud/experience_bar_progress.png)
+      0 0 / 364px 10px no-repeat;
+  }
+
+  .journal.panel {
+    position: absolute;
+    left: 76px;
+    top: 90px;
+    width: 872px;
+    height: 414px;
+    padding: 16px;
+    display: flex;
+    gap: 12px;
+    background: #593923;
+    border: 2px solid #1c100a;
+    border-radius: 6px;
+    box-shadow:
+      inset 4px 4px 0 #986a43,
+      inset -4px -4px 0 #2b190f,
+      inset 8px 8px 0 #67432b,
+      0 6px 0 #130d09;
+  }
+  .index {
+    position: relative;
+    flex: none;
+    width: 244px;
+    height: 378px;
+    padding: 12px;
+    color: #fff;
+    background:
+      linear-gradient(rgba(18,12,8,.86), rgba(18,12,8,.86)),
+      url(vanilla/block/dark_oak_planks.png) 0 0 / 32px 32px;
+    border: 2px solid #24170e;
+    box-shadow: inset 2px 2px 0 #080604, 2px 2px 0 #946541;
+  }
+  .index-title { margin-bottom: 12px; }
+  .category.btn {
+    width: 216px;
+    justify-content: space-between;
+    padding: 0 10px 2px;
+    margin-bottom: 6px;
+  }
+  .category .count { color: #ddd; }
+  .mob-list { display: none; margin-bottom: 8px; }
+  .mob {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 48px;
+    padding: 6px 10px;
+    border: 2px solid transparent;
+    background: #352b21;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .mob + .mob { margin-top: 4px; }
+  .mob:hover { background: #54432f; border-color: #fff; }
+  .index-note {
+    position: absolute;
+    left: 12px;
+    bottom: 18px;
+    line-height: 18px;
+  }
+
+  #passive:checked ~ .screen .passive-list,
+  #neutral:checked ~ .screen .neutral-list,
+  #hostile:checked ~ .screen .hostile-list { display: block; }
+
+  #passive:checked ~ .screen .cat-passive,
+  #neutral:checked ~ .screen .cat-neutral,
+  #hostile:checked ~ .screen .cat-hostile {
+    color: #ffff55;
+    border-color: #fff;
+    background: #565656;
+    box-shadow: inset 2px 2px 0 #888, inset -2px -4px 0 #373737;
+  }
+  #cow:checked ~ .screen .pick-cow,
+  #sheep:checked ~ .screen .pick-sheep,
+  #wolf:checked ~ .screen .pick-wolf,
+  #bee:checked ~ .screen .pick-bee,
+  #zombie:checked ~ .screen .pick-zombie,
+  #creeper:checked ~ .screen .pick-creeper {
+    border-color: #ecd8a9;
+    background: #645035;
+  }
+
+  .reading-area {
+    position: relative;
+    width: 580px;
+    height: 378px;
+    flex: none;
+  }
+  .book {
+    position: absolute;
+    left: 12px;
+    top: 9px;
+    width: 556px;
+    height: 360px;
+    color: #352719;
+  }
+  .page-group, .entry { display: none; }
+
+  #passive:checked ~ .screen .passive-pages,
+  #neutral:checked ~ .screen .neutral-pages,
+  #hostile:checked ~ .screen .hostile-pages { display: block; }
+
+  #cow:checked ~ .screen .entry-cow,
+  #sheep:checked ~ .screen .entry-sheep,
+  #wolf:checked ~ .screen .entry-wolf,
+  #bee:checked ~ .screen .entry-bee,
+  #zombie:checked ~ .screen .entry-zombie,
+  #creeper:checked ~ .screen .entry-creeper { display: block; }
+
+  .leaf {
+    position: absolute;
+    top: 0;
+    width: 292px;
+    height: 360px;
+    background-repeat: no-repeat;
+    background-size: 292px 360px;
+  }
+  .leaf.left {
+    left: 0;
+    z-index: 2;
+    background-image: url(vanilla/book_left.png);
+  }
+  .leaf.right {
+    left: 264px;
+    z-index: 1;
+    background-image: url(vanilla/book_right.png);
+  }
+  /* Allow a hovered loot tooltip to pass over the neighbouring leaf. */
+  .leaf.right:hover { z-index: 3; }
+
+  .ink {
+    position: absolute;
+    left: 32px;
+    top: 26px;
+    width: 220px;
+  }
+  .entry-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 52px;
+    margin-bottom: 12px;
+  }
+  .portrait {
+    display: grid;
+    place-items: center;
+    width: 52px;
+    height: 52px;
+    flex: none;
+    background: url(vanilla/gui/sprites/advancements/task_frame_obtained.png)
+      0 0 / 52px 52px no-repeat;
+  }
+  .entry-head h2 { font-weight: bold; margin-bottom: 6px; }
+  .muted { color: #66533b; }
+  .stat { margin-bottom: 12px; }
+  .stat-name { color: #66533b; margin-bottom: 6px; }
+
+  /* One full heart is nine texture pixels, displayed at 18 CSS pixels. */
+  .hearts {
+    height: 18px;
+    background:
+      url(vanilla/gui/sprites/hud/heart/full.png) 0 0 / 18px 18px repeat-x,
+      url(vanilla/gui/sprites/hud/heart/container.png) 0 0 / 18px 18px repeat-x;
+  }
+  .hearts.four { width: 72px; }
+  .hearts.five { width: 90px; }
+  .hearts.ten { width: 180px; }
+
+  .habitat-title { margin-bottom: 4px; color: #66533b; }
+  .biome {
+    min-height: 36px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .biome span { line-height: 18px; }
+  .spawn-note { margin-top: 6px; color: #66533b; }
+
+  .loot-heading {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 6px;
+  }
+  .loot-heading h3 { font-weight: bold; }
+  .loot-rule { color: #66533b; margin-bottom: 8px; }
+  .drops {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-height: 94px;
+  }
+  .drop {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 44px;
+  }
+  .slot { flex: none; }
+  .drop-text { line-height: 18px; }
+  .chance { display: block; color: #66533b; }
+  .loot-aside { color: #66533b; line-height: 18px; }
+  .slot .tooltip {
+    left: auto;
+    right: 0;
+    bottom: 44px;
+    text-align: left;
+  }
+  .slot:hover .tooltip { display: block; }
+
+  .tip {
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 2px solid #b7a079;
+  }
+  .tip h3 { margin-bottom: 6px; color: #684324; }
+  .tip p { line-height: 18px; }
+  .condition { margin-top: 8px; color: #66533b; }
+
+  .footer {
+    position: absolute;
+    top: 520px;
+    left: 76px;
+    right: 76px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .footer .btn { width: 200px; flex: none; }
+  .footer-note {
+    width: 448px;
+    text-align: center;
+    line-height: 18px;
+  }
+</style>
+</head>
+<body>
+<input class="pick" type="radio" name="category" id="passive" checked>
+<input class="pick" type="radio" name="category" id="neutral">
+<input class="pick" type="radio" name="category" id="hostile">
+<input class="pick" type="radio" name="passive-mob" id="cow" checked>
+<input class="pick" type="radio" name="passive-mob" id="sheep">
+<input class="pick" type="radio" name="neutral-mob" id="wolf" checked>
+<input class="pick" type="radio" name="neutral-mob" id="bee">
+<input class="pick" type="radio" name="hostile-mob" id="zombie" checked>
+<input class="pick" type="radio" name="hostile-mob" id="creeper">
+
+<div class="screen">
+  <div class="panorama"></div>
+  <div class="dim"></div>
+
+  <header class="masthead">
+    <div class="brand">
+      <img src="vanilla/item/writable_book.png" alt="">
+      <div>
+        <h1 class="ce">Mob Field Guide</h1>
+        <p class="c7">Observe. Prepare. Survive.</p>
+      </div>
+    </div>
+    <div class="collection">
+      <div class="collection-line">
+        <span class="ce">Discovered 23/40</span>
+        <span class="c7">Sample</span>
+      </div>
+      <div class="bar" aria-label="Sample collection: 23 of 40 discovered">
+        <div class="bar-fill"></div>
+      </div>
+    </div>
+  </header>
+
+  <main class="journal panel">
+    <aside class="index">
+      <h2 class="index-title c6">FIELD INDEX</h2>
+
+      <label class="category btn cat-passive" for="passive">
+        <span>Passive</span><span class="count">02</span>
+      </label>
+      <div class="mob-list passive-list">
+        <label class="mob pick-cow t" for="cow">
+          <img src="vanilla/item/cow_spawn_egg.png" alt="">Cow
+        </label>
+        <label class="mob pick-sheep t" for="sheep">
+          <img src="vanilla/item/sheep_spawn_egg.png" alt="">Sheep
+        </label>
+      </div>
+
+      <label class="category btn cat-neutral" for="neutral">
+        <span>Neutral</span><span class="count">02</span>
+      </label>
+      <div class="mob-list neutral-list">
+        <label class="mob pick-wolf t" for="wolf">
+          <img src="vanilla/item/wolf_spawn_egg.png" alt="">Wolf
+        </label>
+        <label class="mob pick-bee t" for="bee">
+          <img src="vanilla/item/bee_spawn_egg.png" alt="">Bee
+        </label>
+      </div>
+
+      <label class="category btn cat-hostile" for="hostile">
+        <span>Hostile</span><span class="count">02</span>
+      </label>
+      <div class="mob-list hostile-list">
+        <label class="mob pick-zombie t" for="zombie">
+          <img src="vanilla/item/zombie_spawn_egg.png" alt="">Zombie
+        </label>
+        <label class="mob pick-creeper t" for="creeper">
+          <img src="vanilla/item/creeper_spawn_egg.png" alt="">Creeper
+        </label>
+      </div>
+
+      <p class="index-note c7">6 preview entries<br>Hover loot slots<br>for drop details.</p>
+    </aside>
+
+    <section class="reading-area" aria-label="Selected mob journal entry">
+      <div class="book">
+
+        <div class="page-group passive-pages">
+          <article class="entry entry-cow">
+            <div class="leaf left">
+              <div class="ink">
+                <header class="entry-head">
+                  <div class="portrait">
+                    <img src="vanilla/item/cow_spawn_egg.png" alt="Cow spawn egg">
+                  </div>
+                  <div><h2>Cow</h2><p class="muted">Passive</p></div>
+                </header>
+                <div class="stat">
+                  <div class="stat-name">Health: 10 HP</div>
+                  <div class="hearts five" role="img" aria-label="5 hearts"></div>
+                </div>
+                <div class="stat">
+                  <div class="stat-name">Attack damage</div>
+                  <p>None</p>
+                </div>
+                <h3 class="habitat-title">Found in</h3>
+                <div class="biome">
+                  <img src="vanilla/block/grass_block_side.png" alt=""><span>Plains</span>
+                </div>
+                <div class="biome">
+                  <img src="vanilla/block/birch_log.png" alt=""><span>Forest</span>
+                </div>
+                <p class="spawn-note">Grass + daylight.</p>
+              </div>
+            </div>
+            <div class="leaf right">
+              <div class="ink">
+                <div class="loot-heading"><h3>Drops</h3><span class="muted">01</span></div>
+                <p class="loot-rule">Adult / no Looting</p>
+                <div class="drops">
+                  <div class="drop">
+                    <div class="slot">
+                      <img src="vanilla/item/beef.png" alt="Raw beef">
+                      <div class="tooltip">
+                        <div class="cf">Raw Beef</div>
+                        <div class="c7">1–3 per adult cow.</div>
+                        <div class="c7">Cooked if killed on fire.</div>
+                      </div>
+                    </div>
+                    <div class="drop-text">Raw beef<span class="chance">100%</span></div>
+                  </div>
+                  <div class="drop">
+                    <div class="slot">
+                      <img src="vanilla/item/leather.png" alt="Leather">
+                      <div class="tooltip">
+                        <div class="cf">Leather</div>
+                        <div class="c7">0–2 per adult cow.</div>
+                        <div class="c7">66.7% for at least one.</div>
+                      </div>
+                    </div>
+                    <div class="drop-text">Leather<span class="chance">66.7%</span></div>
+                  </div>
+                </div>
+                <section class="tip">
+                  <h3>Field tip</h3>
+                  <p>Lead with wheat.<br>
+                    Keep two to breed.<br>
+                    Use a bucket for<br>
+                    milk, not a sword.</p>
+                </section>
+              </div>
+            </div>
+          </article>
+
+          <article class="entry entry-sheep">
+            <div class="leaf left">
+              <div class="ink">
+                <header class="entry-head">
+                  <div class="portrait">
+                    <img src="vanilla/item/sheep_spawn_egg.png" alt="Sheep spawn egg">
+                  </div>
+                  <div><h2>Sheep</h2><p class="muted">Passive</p></div>
+                </header>
+                <div class="stat">
+                  <div class="stat-name">Health: 8 HP</div>
+                  <div class="hearts four" role="img" aria-label="4 hearts"></div>
+                </div>
+                <div class="stat">
+                  <div class="stat-name">Attack damage</div>
+                  <p>None</p>
+                </div>
+                <h3 class="habitat-title">Found in</h3>
+                <div class="biome">
+                  <img src="vanilla/block/grass_block_side.png" alt=""><span>Plains</span>
+                </div>
+                <div class="biome">
+                  <img src="vanilla/block/spruce_log.png" alt=""><span>Taiga</span>
+                </div>
+                <p class="spawn-note">Grass + daylight.</p>
+              </div>
+            </div>
+            <div class="leaf right">
+              <div class="ink">
+                <div class="loot-heading"><h3>Drops</h3><span class="muted">02</span></div>
+                <p class="loot-rule">Adult / no Looting</p>
+                <div class="drops">
+                  <div class="drop">
+                    <div class="slot">
+                      <img src="vanilla/item/mutton.png" alt="Raw mutton">
+                      <div class="tooltip">
+                        <div class="cf">Raw Mutton</div>
+                        <div class="c7">1–2 per adult sheep.</div>
+                        <div class="c7">Cooked if killed on fire.</div>
+                      </div>
+                    </div>
+                    <div class="drop-text">Raw mutton<span class="chance">100%</span></div>
+                  </div>
+                  <div class="drop">
+                    <div class="slot">
+                      <img src="vanilla/block/white_wool.png" alt="Wool">
+                      <div class="tooltip">
+                        <div class="cf">Wool</div>
+                        <div class="c7">1 if unshorn; otherwise 0.</div>
+                        <div class="c7">Matches the sheep's coat.</div>
+                      </div>
+                    </div>
+                    <div class="drop-text">Wool<span class="chance">100% unshorn</span></div>
+                  </div>
+                </div>
+                <section class="tip">
+                  <h3>Field tip</h3>
+                  <p>Shear for 1–3 wool.<br>
+                    Leave grass nearby.<br>
+                    Eating it regrows<br>
+                    the sheep's coat.<br>
+                    Breed with wheat.</p>
+                </section>
+              </div>
+            </div>
+          </article>
+        </div>
+
+        <div class="page-group neutral-pages">
+          <article class="entry entry-wolf">
+            <div class="leaf left">
+              <div class="ink">
+                <header class="entry-head">
+                  <div class="portrait">
+                    <img src="vanilla/item/wolf_spawn_egg.png" alt="Wolf spawn egg">
+                  </div>
+                  <div><h2>Wolf</h2><p class="muted">Neutral</p></div>
+                </header>
+                <div class="stat">
+                  <div class="stat-name">Wild health: 8 HP</div>
+                  <div class="hearts four" role="img" aria-label="4 hearts"></div>
+                </div>
+                <div class="stat">
+                  <div class="stat-name">Attack / Normal</div>
+                  <p>4 HP per bite</p>
+                </div>
+                <h3 class="habitat-title">Found in</h3>
+                <div class="biome">
+                  <img src="vanilla/block/spruce_log.png" alt=""><span>Taiga</span>
+                </div>
+                <div class="biome">
+                  <img src="vanilla/block/oak_log.png" alt=""><span>Forest</span>
+                </div>
+                <p class="spawn-note">Coats vary by biome.</p>
+              </div>
+            </div>
+            <div class="leaf right">
+              <div class="ink">
+                <div class="loot-heading"><h3>Drops</h3><span class="muted">03</span></div>
+                <p class="loot-rule">Wild adult</p>
+                <div class="drops">
+                  <div class="drop">
+                    <div class="slot">
+                      <img src="vanilla/item/barrier.png" alt="No item drops">
+                      <div class="tooltip">
+                        <div class="cf">No item drops</div>
+                        <div class="c7">Item drop chance: 0%.</div>
+                        <div class="c7">A friend is worth more.</div>
+                      </div>
+                    </div>
+                    <div class="drop-text">No items<span class="chance">0%</span></div>
+                  </div>
+                  <p class="loot-aside">Better as a friend.</p>
+                </div>
+                <section class="tip">
+                  <h3>Field tip</h3>
+                  <p>Do not hit one:<br>
+                    the pack hits back.<br>
+                    Tame with bones.<br>
+                    Meat heals a hurt<br>
+                    tamed wolf.</p>
+                </section>
+              </div>
+            </div>
+          </article>
+
+          <article class="entry entry-bee">
+            <div class="leaf left">
+              <div class="ink">
+                <header class="entry-head">
+                  <div class="portrait">
+                    <img src="vanilla/item/bee_spawn_egg.png" alt="Bee spawn egg">
+                  </div>
+                  <div><h2>Bee</h2><p class="muted">Neutral</p></div>
+                </header>
+                <div class="stat">
+                  <div class="stat-name">Health: 10 HP</div>
+                  <div class="hearts five" role="img" aria-label="5 hearts"></div>
+                </div>
+                <div class="stat">
+                  <div class="stat-name">Attack / Normal</div>
+                  <p>2 HP + poison</p>
+                </div>
+                <h3 class="habitat-title">Found in</h3>
+                <div class="biome">
+                  <img src="vanilla/block/dandelion.png" alt=""><span>Meadow</span>
+                </div>
+                <div class="biome">
+                  <img src="vanilla/block/grass_block_side.png" alt=""><span>Plains</span>
+                </div>
+                <p class="spawn-note">Nests hang in trees.</p>
+              </div>
+            </div>
+            <div class="leaf right">
+              <div class="ink">
+                <div class="loot-heading"><h3>Drops</h3><span class="muted">04</span></div>
+                <p class="loot-rule">On death</p>
+                <div class="drops">
+                  <div class="drop">
+                    <div class="slot">
+                      <img src="vanilla/item/barrier.png" alt="No item drops">
+                      <div class="tooltip">
+                        <div class="cf">No item drops</div>
+                        <div class="c7">Honey comes from the nest,</div>
+                        <div class="c7">not from killing the bee.</div>
+                      </div>
+                    </div>
+                    <div class="drop-text">No items<span class="chance">0%</span></div>
+                  </div>
+                  <p class="loot-aside">Harvest the nest.</p>
+                </div>
+                <section class="tip">
+                  <h3>Field tip</h3>
+                  <p>A lit campfire<br>
+                    below the nest<br>
+                    calms the bees.<br>
+                    Keep bees off fire.<br>
+                    Breed with flowers.</p>
+                </section>
+              </div>
+            </div>
+          </article>
+        </div>
+
+        <div class="page-group hostile-pages">
+          <article class="entry entry-zombie">
+            <div class="leaf left">
+              <div class="ink">
+                <header class="entry-head">
+                  <div class="portrait">
+                    <img src="vanilla/item/zombie_spawn_egg.png" alt="Zombie spawn egg">
+                  </div>
+                  <div><h2>Zombie</h2><p class="muted">Hostile</p></div>
+                </header>
+                <div class="stat">
+                  <div class="stat-name">Health: 20 HP</div>
+                  <div class="hearts ten" role="img" aria-label="10 hearts"></div>
+                </div>
+                <div class="stat">
+                  <div class="stat-name">Attack / Normal</div>
+                  <p>3 HP / unarmed</p>
+                </div>
+                <h3 class="habitat-title">Found in</h3>
+                <div class="biome">
+                  <img src="vanilla/block/grass_block_side.png" alt=""><span>Plains</span>
+                </div>
+                <div class="biome">
+                  <img src="vanilla/block/dripstone_block.png" alt=""><span>Dripstone<br>Caves</span>
+                </div>
+                <p class="spawn-note">Needs darkness.</p>
+              </div>
+            </div>
+            <div class="leaf right">
+              <div class="ink">
+                <div class="loot-heading"><h3>Notable drops</h3><span class="muted">05</span></div>
+                <p class="loot-rule">No Looting</p>
+                <div class="drops">
+                  <div class="drop">
+                    <div class="slot">
+                      <img src="vanilla/item/rotten_flesh.png" alt="Rotten flesh">
+                      <div class="tooltip">
+                        <div class="cf">Rotten Flesh</div>
+                        <div class="c7">0–2 per zombie.</div>
+                        <div class="c7">66.7% for at least one.</div>
+                      </div>
+                    </div>
+                    <div class="drop-text">Rotten flesh<span class="chance">66.7%</span></div>
+                  </div>
+                  <div class="drop">
+                    <div class="slot">
+                      <img src="vanilla/item/iron_ingot.png" alt="Iron ingot">
+                      <div class="tooltip">
+                        <div class="cf">Iron Ingot</div>
+                        <div class="c7">Player or tamed wolf kill.</div>
+                        <div class="c7">One third of a 2.5% roll;</div>
+                        <div class="c7">otherwise carrot or potato.</div>
+                      </div>
+                    </div>
+                    <div class="drop-text">Iron ingot<span class="chance">0.83%*</span></div>
+                  </div>
+                </div>
+                <section class="tip">
+                  <h3>Field tip</h3>
+                  <p>Light up your base.<br>
+                    Keep your distance.<br>
+                    Sun burns exposed,<br>
+                    unhelmeted zombies.</p>
+                </section>
+                <p class="condition">*Player / wolf kill.</p>
+              </div>
+            </div>
+          </article>
+
+          <article class="entry entry-creeper">
+            <div class="leaf left">
+              <div class="ink">
+                <header class="entry-head">
+                  <div class="portrait">
+                    <img src="vanilla/item/creeper_spawn_egg.png" alt="Creeper spawn egg">
+                  </div>
+                  <div><h2>Creeper</h2><p class="muted">Hostile</p></div>
+                </header>
+                <div class="stat">
+                  <div class="stat-name">Health: 20 HP</div>
+                  <div class="hearts ten" role="img" aria-label="10 hearts"></div>
+                </div>
+                <div class="stat">
+                  <div class="stat-name">Blast / Normal</div>
+                  <p>Up to 43 HP*</p>
+                </div>
+                <h3 class="habitat-title">Found in</h3>
+                <div class="biome">
+                  <img src="vanilla/block/grass_block_side.png" alt=""><span>Plains</span>
+                </div>
+                <div class="biome">
+                  <img src="vanilla/block/moss_block.png" alt=""><span>Lush Caves</span>
+                </div>
+                <p class="spawn-note">*Uncharged blast,<br>before armor.</p>
+              </div>
+            </div>
+            <div class="leaf right">
+              <div class="ink">
+                <div class="loot-heading"><h3>Drops</h3><span class="muted">06</span></div>
+                <p class="loot-rule">Kill before blast</p>
+                <div class="drops">
+                  <div class="drop">
+                    <div class="slot">
+                      <img src="vanilla/item/gunpowder.png" alt="Gunpowder">
+                      <div class="tooltip">
+                        <div class="cf">Gunpowder</div>
+                        <div class="c7">0–2 without Looting.</div>
+                        <div class="c7">66.7% for at least one.</div>
+                        <div class="c7">None if it explodes.</div>
+                      </div>
+                    </div>
+                    <div class="drop-text">Gunpowder<span class="chance">66.7%</span></div>
+                  </div>
+                  <div class="drop">
+                    <div class="slot">
+                      <img src="vanilla/item/music_disc_cat.png" alt="Example music disc">
+                      <div class="tooltip">
+                        <div class="cf">Random Music Disc</div>
+                        <div class="c7">Skeleton or stray must</div>
+                        <div class="c7">land the killing shot.</div>
+                        <div class="c7">Disc shown is an example.</div>
+                      </div>
+                    </div>
+                    <div class="drop-text">Music disc<span class="chance">100%*</span></div>
+                  </div>
+                </div>
+                <section class="tip">
+                  <h3>Field tip</h3>
+                  <p>Strike and retreat.<br>
+                    A bow is safer.<br>
+                    Cats repel it.<br>
+                    It needs darkness<br>
+                    to spawn naturally.</p>
+                </section>
+                <p class="condition">*Skeleton / stray.</p>
+              </div>
+            </div>
+          </article>
+        </div>
+
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <a class="btn" href="quests.html">Quest Log</a>
+    <div class="footer-note">
+      <div class="c7">Java / Normal / 1 heart = 2 HP</div>
+      <div class="c7">{player}'s field copy</div>
+    </div>
+    <div class="btn" data-action="close">Close Journal</div>
+  </footer>
+</div>
+</body>
+</html>

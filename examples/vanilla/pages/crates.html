@@ -1,0 +1,595 @@
+<!--
+  crates.html previews Common, Rare and Legendary loot tables; all key counts are samples.
+  Hover rewards for quantities and exact odds, or keys for their crate type.
+  Open sends a demo chat message only; no keys are spent and no items are granted.
+  For a real server, replace sample counts and demo actions with validated crate-plugin integration.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Loot Crates</title>
+<meta name="ui:height" content="576">
+<meta name="ui:refresh" content="5">
+<link rel="stylesheet" href="vanilla.css">
+<style>
+  .screen {
+    position: relative;
+    width: 1024px;
+    height: 576px;
+    margin: 0 auto;
+  }
+  .panorama { background-size: 1072px 624px; }
+  .dim { background: rgba(0,0,0,.65); }
+  .title, .subtitle {
+    position: absolute;
+    left: 0;
+    right: 0;
+    text-align: center;
+  }
+  .title { top: 26px; }
+  .subtitle { top: 56px; }
+
+  .crates {
+    position: absolute;
+    top: 94px;
+    left: 64px;
+    display: flex;
+    gap: 16px;
+  }
+  .crate {
+    position: relative;
+    width: 288px;
+    height: 414px;
+    padding: 14px;
+  }
+  .crate:hover { z-index: 2; }
+  .common { --rarity: #fff; --shade: #3f3f3f; --fill: #aaa; }
+  .rare { --rarity: #5ff; --shade: #153f3f; --fill: #299e9e; }
+  .legendary { --rarity: #fa0; --shade: #2a2a00; --fill: #ad7100; }
+
+  .crate-head {
+    height: 102px;
+    padding-top: 6px;
+    margin-bottom: 8px;
+    background: #303030;
+    box-shadow: inset 2px 2px #171717, inset -2px -2px #eee;
+    text-align: center;
+  }
+  h2 {
+    margin: 0;
+    font-size: 16px;
+    line-height: 18px;
+    font-weight: normal;
+  }
+  .art-stage {
+    height: 76px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Pixel-built chest silhouettes; every block texture uses a 32px tile. */
+  .chest {
+    position: relative;
+    width: 64px;
+    height: 52px;
+    border: 4px solid #30200e;
+    background: url(vanilla/block/oak_planks.png) 0 0 / 32px 32px;
+    box-shadow: inset 2px 2px #bd914e, inset -2px -2px #624017,
+                4px 4px #171717;
+  }
+  .chest::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 14px;
+    height: 6px;
+    border-top: 2px solid #bd914e;
+    background: #30200e;
+  }
+  .chest::after {
+    content: "";
+    position: absolute;
+    left: 24px;
+    top: 12px;
+    width: 8px;
+    height: 16px;
+    border: 2px solid #454545;
+    background: #d8d8d8;
+    box-shadow: inset -2px -2px #919191;
+  }
+  .rim {
+    position: absolute;
+    left: 2px;
+    right: 2px;
+    bottom: 2px;
+    height: 4px;
+    border-top: 2px solid #30200e;
+    background: #966830;
+  }
+  .ender {
+    border-color: #102725;
+    background-image: url(vanilla/block/obsidian.png);
+    box-shadow: inset 2px 2px #49796c, inset -2px -2px #203d37,
+                4px 4px #171717;
+  }
+  .ender::before {
+    border-color: #49796c;
+    background: #102725;
+  }
+  .ender::after {
+    border-color: #786127;
+    background: #f6d552;
+    box-shadow: inset -2px -2px #b79032;
+  }
+  .ender .rim {
+    border-color: #102725;
+    background: #36594f;
+  }
+  .spark {
+    position: absolute;
+    width: 4px;
+    height: 4px;
+    background: #cf65f4;
+  }
+  .spark.a { left: -16px; top: 8px; }
+  .spark.b { right: -14px; top: 30px; }
+  .spark.c { right: 6px; top: -8px; }
+
+  /* One native-scale texture on the lid, not a repeated patchwork. */
+  .shulker {
+    position: relative;
+    width: 48px;
+    height: 48px;
+    border: 4px solid #372342;
+    background: #67427b;
+    box-shadow: inset 2px 2px #9465a9, inset -2px -2px #503260,
+                4px 4px #171717;
+  }
+  .shulker::before {
+    content: "";
+    position: absolute;
+    left: -4px;
+    top: -4px;
+    width: 48px;
+    height: 36px;
+    border: 4px solid #372342;
+    background: #80539a url(vanilla/block/purple_shulker_box.png)
+                center center / 32px 32px no-repeat;
+    box-shadow: inset 2px 2px #ac82c1, inset -2px -2px #67427b;
+  }
+  .shulker::after {
+    content: "";
+    position: absolute;
+    left: 4px;
+    right: 4px;
+    top: 32px;
+    height: 4px;
+    background: #9465a9;
+  }
+
+  .rewards {
+    height: 184px;
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    background: #303030;
+    box-shadow: inset 2px 2px #171717, inset -2px -2px #eee;
+  }
+  .reward {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 36px;
+    flex: none;
+  }
+  .slot { flex: none; }
+  .reward-info { flex: 1; min-width: 0; }
+  .reward-name {
+    height: 18px;
+    line-height: 18px;
+    white-space: nowrap;
+  }
+  .reward-name, .odds {
+    color: var(--rarity);
+    text-shadow: 2px 2px var(--shade);
+  }
+  .chance {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 18px;
+  }
+  .bar {
+    width: 120px;
+    height: 6px;
+    flex: none;
+    background: #161616;
+    box-shadow: 0 2px #575757;
+  }
+  .bar i {
+    display: block;
+    height: 6px;
+    border-top: 2px solid var(--rarity);
+    background: var(--fill);
+  }
+  .odds {
+    width: 48px;
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  .reward .tooltip {
+    left: 0;
+    bottom: 42px;
+    text-align: left;
+  }
+  .legendary .reward .tooltip { left: auto; right: 0; }
+  .reward:hover { z-index: 5; }
+  .reward:hover .tooltip,
+  .keys:hover .tooltip,
+  .open-wrap:hover .tooltip { display: block; }
+  .tooltip .c7 { margin-top: 4px; }
+
+  .keys {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 44px;
+  }
+  .key-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+  }
+  .key-label img { width: 32px; height: 32px; }
+  .key-count {
+    min-width: 38px;
+    padding: 2px 8px;
+    text-align: center;
+    background: #303030;
+    box-shadow: inset 2px 2px #171717, inset -2px -2px #eee;
+  }
+  .keys .tooltip { left: 0; bottom: 44px; }
+  .legendary .keys .tooltip { left: auto; right: 0; }
+
+  .crate .btn { width: 100%; }
+  .open-wrap { position: relative; }
+  .open-wrap .tooltip { right: 0; bottom: 46px; }
+
+  .footer {
+    position: absolute;
+    top: 522px;
+    left: 64px;
+    right: 64px;
+    height: 40px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+</style>
+</head>
+<body>
+<div class="screen">
+  <div class="panorama"></div>
+  <div class="dim"></div>
+
+  <div class="title t">Loot Crates</div>
+  <div class="subtitle c7">Preview only. Hover rewards for odds.</div>
+
+  <main class="crates">
+    <section class="panel crate common">
+      <header class="crate-head">
+        <h2 class="cf">Common</h2>
+        <div class="art-stage">
+          <div class="chest" role="img" aria-label="Wooden chest">
+            <span class="rim"></span>
+          </div>
+        </div>
+      </header>
+
+      <div class="rewards">
+        <div class="reward">
+          <div class="slot">
+            <img src="vanilla/item/bread.png" alt="Bread" width="32" height="32">
+            <span class="n">16</span>
+          </div>
+          <div class="reward-info">
+            <div class="reward-name">Bread</div>
+            <div class="chance">
+              <div class="bar"><i style="width:66px"></i></div>
+              <span class="odds">55%</span>
+            </div>
+          </div>
+          <div class="tooltip"><div>
+            <div class="cf">16 Bread</div>
+            <div class="c7">Drop chance: <span class="cf">55%</span></div>
+          </div></div>
+        </div>
+
+        <div class="reward">
+          <div class="slot">
+            <img src="vanilla/item/iron_ingot.png" alt="Iron ingots" width="32" height="32">
+            <span class="n">8</span>
+          </div>
+          <div class="reward-info">
+            <div class="reward-name">Iron Ingots</div>
+            <div class="chance">
+              <div class="bar"><i style="width:36px"></i></div>
+              <span class="odds">30%</span>
+            </div>
+          </div>
+          <div class="tooltip"><div>
+            <div class="cf">8 Iron Ingots</div>
+            <div class="c7">Drop chance: <span class="cf">30%</span></div>
+          </div></div>
+        </div>
+
+        <div class="reward">
+          <div class="slot">
+            <img src="vanilla/item/emerald.png" alt="Emeralds" width="32" height="32">
+            <span class="n">4</span>
+          </div>
+          <div class="reward-info">
+            <div class="reward-name">Emeralds</div>
+            <div class="chance">
+              <div class="bar"><i style="width:12px"></i></div>
+              <span class="odds">10%</span>
+            </div>
+          </div>
+          <div class="tooltip"><div>
+            <div class="cf">4 Emeralds</div>
+            <div class="c7">Drop chance: <span class="cf">10%</span></div>
+          </div></div>
+        </div>
+
+        <div class="reward">
+          <div class="slot">
+            <img src="vanilla/item/diamond.png" alt="Diamond" width="32" height="32">
+          </div>
+          <div class="reward-info">
+            <div class="reward-name">Diamond</div>
+            <div class="chance">
+              <div class="bar"><i style="width:6px"></i></div>
+              <span class="odds">5%</span>
+            </div>
+          </div>
+          <div class="tooltip"><div>
+            <div class="cf">1 Diamond</div>
+            <div class="c7">Drop chance: <span class="cf">5%</span></div>
+          </div></div>
+        </div>
+      </div>
+
+      <div class="keys">
+        <span class="key-label">
+          <img src="vanilla/item/trial_key.png" alt="" width="32" height="32">
+          Keys held
+        </span>
+        <span class="key-count cf">3</span>
+        <div class="tooltip"><div>
+          <div class="cf">Common Key</div>
+          <div class="c7">1 key per reward</div>
+          <div class="c7">Sample balance: 3</div>
+        </div></div>
+      </div>
+      <div class="btn" role="button"
+           data-message="<white>Common crate</white><gray>: 1 Common Key per reward. Preview only, {player}; no key spent or item granted.</gray>">Open</div>
+    </section>
+
+    <section class="panel crate rare">
+      <header class="crate-head">
+        <h2 class="cb">Rare</h2>
+        <div class="art-stage">
+          <div class="chest ender" role="img" aria-label="Ender chest">
+            <span class="rim"></span>
+            <i class="spark a"></i>
+            <i class="spark b"></i>
+            <i class="spark c"></i>
+          </div>
+        </div>
+      </header>
+
+      <div class="rewards">
+        <div class="reward">
+          <div class="slot">
+            <img src="vanilla/item/gold_ingot.png" alt="Gold ingots" width="32" height="32">
+            <span class="n">16</span>
+          </div>
+          <div class="reward-info">
+            <div class="reward-name">Gold Ingots</div>
+            <div class="chance">
+              <div class="bar"><i style="width:60px"></i></div>
+              <span class="odds">50%</span>
+            </div>
+          </div>
+          <div class="tooltip"><div>
+            <div class="cb">16 Gold Ingots</div>
+            <div class="c7">Drop chance: <span class="cb">50%</span></div>
+          </div></div>
+        </div>
+
+        <div class="reward">
+          <div class="slot">
+            <img src="vanilla/item/diamond.png" alt="Diamonds" width="32" height="32">
+            <span class="n">8</span>
+          </div>
+          <div class="reward-info">
+            <div class="reward-name">Diamonds</div>
+            <div class="chance">
+              <div class="bar"><i style="width:36px"></i></div>
+              <span class="odds">30%</span>
+            </div>
+          </div>
+          <div class="tooltip"><div>
+            <div class="cb">8 Diamonds</div>
+            <div class="c7">Drop chance: <span class="cb">30%</span></div>
+          </div></div>
+        </div>
+
+        <div class="reward">
+          <div class="slot">
+            <img src="vanilla/item/enchanted_book.png" alt="Mending book" width="32" height="32">
+          </div>
+          <div class="reward-info">
+            <div class="reward-name">Mending Book</div>
+            <div class="chance">
+              <div class="bar"><i style="width:18px"></i></div>
+              <span class="odds">15%</span>
+            </div>
+          </div>
+          <div class="tooltip"><div>
+            <div class="cb">1 Enchanted Book</div>
+            <div class="c7">Mending</div>
+            <div class="c7">Drop chance: <span class="cb">15%</span></div>
+          </div></div>
+        </div>
+
+        <div class="reward">
+          <div class="slot">
+            <img src="vanilla/item/diamond_pickaxe.png" alt="Diamond pickaxe" width="32" height="32">
+          </div>
+          <div class="reward-info">
+            <div class="reward-name">Diamond Pickaxe</div>
+            <div class="chance">
+              <div class="bar"><i style="width:6px"></i></div>
+              <span class="odds">5%</span>
+            </div>
+          </div>
+          <div class="tooltip"><div>
+            <div class="cb">1 Diamond Pickaxe</div>
+            <div class="c7">Drop chance: <span class="cb">5%</span></div>
+          </div></div>
+        </div>
+      </div>
+
+      <div class="keys">
+        <span class="key-label">
+          <img src="vanilla/item/ominous_trial_key.png" alt="" width="32" height="32">
+          Keys held
+        </span>
+        <span class="key-count cb">1</span>
+        <div class="tooltip"><div>
+          <div class="cb">Rare Key</div>
+          <div class="c7">1 key per reward</div>
+          <div class="c7">Sample balance: 1</div>
+        </div></div>
+      </div>
+      <div class="btn" role="button"
+           data-message="<aqua>Rare crate</aqua><gray>: 1 Rare Key per reward. Preview only, {player}; no key spent or item granted.</gray>">Open</div>
+    </section>
+
+    <section class="panel crate legendary">
+      <header class="crate-head">
+        <h2 class="c6">Legendary</h2>
+        <div class="art-stage">
+          <div class="shulker" role="img" aria-label="Purple shulker box"></div>
+        </div>
+      </header>
+
+      <div class="rewards">
+        <div class="reward">
+          <div class="slot">
+            <img src="vanilla/item/netherite_ingot.png" alt="Netherite ingot" width="32" height="32">
+          </div>
+          <div class="reward-info">
+            <div class="reward-name">Netherite Ingot</div>
+            <div class="chance">
+              <div class="bar"><i style="width:66px"></i></div>
+              <span class="odds">55%</span>
+            </div>
+          </div>
+          <div class="tooltip"><div>
+            <div class="c6">1 Netherite Ingot</div>
+            <div class="c7">Drop chance: <span class="c6">55%</span></div>
+          </div></div>
+        </div>
+
+        <div class="reward">
+          <div class="slot">
+            <img src="vanilla/item/golden_apple.png" alt="Golden apples" width="32" height="32">
+            <span class="n">16</span>
+          </div>
+          <div class="reward-info">
+            <div class="reward-name">Golden Apples</div>
+            <div class="chance">
+              <div class="bar"><i style="width:36px"></i></div>
+              <span class="odds">30%</span>
+            </div>
+          </div>
+          <div class="tooltip"><div>
+            <div class="c6">16 Golden Apples</div>
+            <div class="c7">Drop chance: <span class="c6">30%</span></div>
+          </div></div>
+        </div>
+
+        <div class="reward">
+          <div class="slot">
+            <img src="vanilla/item/elytra.png" alt="Elytra" width="32" height="32">
+          </div>
+          <div class="reward-info">
+            <div class="reward-name">Elytra</div>
+            <div class="chance">
+              <div class="bar"><i style="width:12px"></i></div>
+              <span class="odds">10%</span>
+            </div>
+          </div>
+          <div class="tooltip"><div>
+            <div class="c6">1 Elytra</div>
+            <div class="c7">Drop chance: <span class="c6">10%</span></div>
+          </div></div>
+        </div>
+
+        <div class="reward">
+          <div class="slot">
+            <img src="vanilla/item/nether_star.png" alt="Nether star" width="32" height="32">
+          </div>
+          <div class="reward-info">
+            <div class="reward-name">Nether Star</div>
+            <div class="chance">
+              <div class="bar"><i style="width:6px"></i></div>
+              <span class="odds">5%</span>
+            </div>
+          </div>
+          <div class="tooltip"><div>
+            <div class="c6">1 Nether Star</div>
+            <div class="c7">Drop chance: <span class="c6">5%</span></div>
+          </div></div>
+        </div>
+      </div>
+
+      <div class="keys">
+        <span class="key-label">
+          <img src="vanilla/item/trial_key.png" alt="" width="32" height="32">
+          Keys held
+        </span>
+        <span class="key-count cc">0</span>
+        <div class="tooltip"><div>
+          <div class="c6">Legendary Key</div>
+          <div class="c7">1 key per reward</div>
+          <div class="c7">Sample balance: 0</div>
+        </div></div>
+      </div>
+      <div class="open-wrap">
+        <div class="btn off" role="button" aria-disabled="true">Open: No Key</div>
+        <div class="tooltip"><div>
+          <div class="cc">No Legendary Keys</div>
+          <div class="c7">Requires 1 Legendary Key.</div>
+        </div></div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="c7">Demo keys · No items granted</div>
+    <div class="btn" role="button" data-action="close">Done</div>
+  </footer>
+</div>
+</body>
+</html>

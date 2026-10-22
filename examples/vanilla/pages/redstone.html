@@ -1,0 +1,488 @@
+<!--
+  A five-lesson redstone workbench with radio-selected static build plans.
+  Select a lesson on the left; hover supply slots for names; Done closes the page.
+  Give me the parts grants a filled chest using Java 1.21+ item-component syntax.
+  Review kit permissions and command compatibility before enabling this on a real server.
+  Schematics are symbolic top views, not live power simulations or inventory models.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="ui:height" content="576">
+<title>Redstone Workshop</title>
+<link rel="stylesheet" href="vanilla.css">
+<style>
+  body { font-family: Minecraft; font-size: 16px; line-height: 18px; }
+  h1, h2, p { margin: 0; font-size: 16px; font-weight: normal; }
+  .screen { position: relative; width: 1024px; height: 576px; margin: 0 auto; }
+  .panorama { background-size: 1072px 624px; }
+  .dim { background: rgba(0,0,0,.65); }
+  .item { width: 32px; height: 32px; flex: none; }
+
+  .heading {
+    position: absolute; left: 40px; right: 40px; top: 22px;
+    height: 32px; display: flex; align-items: center;
+    justify-content: space-between;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .workbench {
+    position: absolute; left: 40px; top: 68px; width: 944px; height: 446px;
+    padding: 16px; display: flex; gap: 16px;
+  }
+  .sidebar {
+    width: 244px; flex: none; padding: 10px;
+    background-image: linear-gradient(rgba(0,0,0,.72),rgba(0,0,0,.72)),
+                      url(vanilla/block/deepslate_tiles.png);
+    background-size: 32px 32px;
+    border: 2px solid #373737;
+    box-shadow: inset 2px 2px #111, inset -2px -2px #888;
+  }
+  .sidebar-title { margin: 2px 0 12px; }
+  .lesson-link {
+    display: flex; align-items: center; gap: 6px;
+    height: 52px; margin-bottom: 6px; padding: 4px;
+    border: 2px solid #111; background: #303030;
+    cursor: pointer; white-space: nowrap;
+  }
+  .lesson-link img { width: 32px; height: 32px; flex: none; }
+  .lesson-link:hover { border-color: #aaa; background: #414141; }
+  #l1:checked ~ .screen .select1,
+  #l2:checked ~ .screen .select2,
+  #l3:checked ~ .screen .select3,
+  #l4:checked ~ .screen .select4,
+  #l5:checked ~ .screen .select5 {
+    border-color: #fff; background: #483a36;
+    box-shadow: inset 2px 0 #fa0;
+  }
+  .sidebar-note { margin-top: 12px; line-height: 22px; }
+  .content { width: 648px; flex: none; }
+  .lesson { display: none; }
+  #l1:checked ~ .screen .lesson1,
+  #l2:checked ~ .screen .lesson2,
+  #l3:checked ~ .screen .lesson3,
+  #l4:checked ~ .screen .lesson4,
+  #l5:checked ~ .screen .lesson5 { display: block; }
+
+  .lesson-title {
+    height: 30px; display: flex; align-items: flex-start;
+    justify-content: space-between;
+  }
+  .plan-row { display: flex; gap: 12px; height: 184px; }
+  .drawing { width: 356px; flex: none; }
+  .drawing-head {
+    height: 26px; padding: 4px 8px;
+    background: #292929; border: 2px solid #373737; border-bottom: 0;
+    display: flex; justify-content: space-between;
+  }
+  .plan {
+    position: relative; width: 356px; height: 132px;
+    border: 2px solid #373737;
+    background-image: linear-gradient(rgba(0,0,0,.24),rgba(0,0,0,.24)),
+                      url(vanilla/block/stone.png);
+    background-size: 32px 32px;
+    display: grid;
+    grid-template-columns: repeat(11,32px);
+    grid-template-rows: repeat(4,32px);
+  }
+  .plan::before {
+    content: ""; position: absolute; inset: 0;
+    background-image:
+      linear-gradient(to right,rgba(0,0,0,.18) 2px,transparent 2px),
+      linear-gradient(to bottom,rgba(0,0,0,.18) 2px,transparent 2px);
+    background-size: 32px 32px;
+  }
+  .tile {
+    position: relative; width: 32px; height: 32px;
+    display: grid; place-items: center; flex: none;
+  }
+  .plan > .tile { grid-row: 2; }
+  .tile > img { width: 32px; height: 32px; display: block; }
+  .col2 { grid-column: 2; }
+  .col3 { grid-column: 3; }
+  .col4 { grid-column: 4; }
+  .col5 { grid-column: 5; }
+  .col6 { grid-column: 6; }
+  .col7 { grid-column: 7; }
+  .col8 { grid-column: 8; }
+  .col9 { grid-column: 9; }
+  .col10 { grid-column: 10; }
+
+  /* Keep the actual dust silhouette rather than painting a straight CSS wire. */
+  .wire > img {
+    transform: rotate(90deg);
+    filter: grayscale(1) brightness(.55) sepia(1) saturate(12);
+  }
+
+  /* A readable, symbolic floor-mounted lever built from block textures. */
+  .lever::before {
+    content: ""; position: absolute; left: 8px; top: 14px;
+    width: 16px; height: 12px;
+    background: url(vanilla/block/cobblestone.png) center / 32px 32px;
+    box-shadow: 2px 2px #252525;
+  }
+  .lever::after {
+    content: ""; position: absolute; left: 14px; top: 4px;
+    width: 6px; height: 18px;
+    background: url(vanilla/block/oak_planks.png) center / 32px 32px;
+    border: 2px solid #49361c; transform: rotate(24deg);
+  }
+
+  /* Plates face right; torch caps show the single output end. */
+  .device > img { transform: rotate(90deg); }
+  .device::after {
+    content: ""; position: absolute; left: 24px; top: 12px;
+    width: 6px; height: 6px; background: #9a170b;
+    box-shadow: 0 2px #4c2112;
+  }
+  .repeater::before {
+    content: ""; position: absolute; z-index: 1; left: 4px; top: 12px;
+    width: 6px; height: 6px; background: #9a170b;
+    box-shadow: 0 2px #4c2112;
+  }
+  .comparator::before {
+    content: ""; position: absolute; z-index: 1; left: 4px; top: 4px;
+    width: 6px; height: 6px; background: #9a170b;
+    box-shadow: 0 16px #9a170b;
+  }
+  .piston > img { transform: rotate(90deg); }
+  .piston::after {
+    content: ""; position: absolute; right: 0; top: 2px;
+    width: 4px; height: 28px; background: #8cb454;
+    border-left: 2px solid #4b6835;
+  }
+  .gap-tile { border: 2px dashed #ffff55; background: rgba(0,0,0,.3); }
+
+  .mark {
+    position: relative; grid-row: 1; align-self: center; justify-self: center;
+    color: #fff; text-shadow: 2px 2px #222;
+  }
+  .direction {
+    position: absolute; top: 74px; left: 32px; right: 32px;
+    text-align: center;
+  }
+  .legend {
+    height: 24px; padding-top: 6px; text-align: center;
+    color: #404040; white-space: nowrap;
+  }
+  .readout {
+    width: 280px; height: 176px; flex: none;
+    padding: 10px; color: #fff; background: #303030;
+    box-shadow: inset 2px 2px #151515, inset -2px -2px #888;
+  }
+  .readout h2 { margin-bottom: 10px; }
+  .readout p { line-height: 20px; margin-bottom: 10px; }
+
+  .steps { margin: 0; padding: 0; list-style: none; }
+  .steps li {
+    display: flex; align-items: center; gap: 8px;
+    height: 34px; white-space: nowrap;
+  }
+  .steps img { width: 32px; height: 32px; flex: none; }
+  .step-number { width: 20px; flex: none; color: #793326; }
+  .kit {
+    border-top: 2px solid #888; margin-top: 8px; padding-top: 8px;
+    display: flex; justify-content: space-between; align-items: flex-end;
+  }
+  .kit-label { margin-bottom: 6px; }
+  .parts { display: flex; gap: 4px; }
+  .slot { flex: none; }
+  .slot > img { width: 32px; height: 32px; }
+  .slot .tooltip { left: 0; bottom: 42px; }
+  .slot:hover .tooltip { display: block; }
+  .kit .btn { width: 244px; }
+  .footer {
+    position: absolute; top: 528px; left: 40px; right: 40px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+</style>
+</head>
+<body>
+<input class="pick" type="radio" name="lesson" id="l1" checked>
+<input class="pick" type="radio" name="lesson" id="l2">
+<input class="pick" type="radio" name="lesson" id="l3">
+<input class="pick" type="radio" name="lesson" id="l4">
+<input class="pick" type="radio" name="lesson" id="l5">
+
+<div class="screen">
+  <div class="panorama"></div>
+  <div class="dim"></div>
+
+  <header class="heading">
+    <div class="brand">
+      <img class="item" src="vanilla/item/redstone.png" alt="">
+      <h1 class="cf">Redstone Workshop</h1>
+    </div>
+    <span class="c7">Learn it. Build it. Power it.</span>
+  </header>
+
+  <main class="panel workbench">
+    <nav class="sidebar" aria-label="Lessons">
+      <div class="sidebar-title c7">Choose a lesson</div>
+      <label class="lesson-link select1 cf" for="l1">
+        <img src="vanilla/block/redstone_lamp_on.png" alt="">Lever and lamp
+      </label>
+      <label class="lesson-link select2 cf" for="l2">
+        <img src="vanilla/item/repeater.png" alt="">Repeater delay
+      </label>
+      <label class="lesson-link select3 cf" for="l3">
+        <img src="vanilla/item/comparator.png" alt="">Comparator
+      </label>
+      <label class="lesson-link select4 cf" for="l4">
+        <img src="vanilla/block/piston_top_sticky.png" alt="">Piston door
+      </label>
+      <label class="lesson-link select5 cf" for="l5">
+        <img src="vanilla/block/copper_bulb_lit.png" alt="">T flip-flop
+      </label>
+      <div class="sidebar-note c7">Java 1.21+<br><span class="ca">5 hands-on builds</span></div>
+    </nav>
+
+    <section class="content">
+      <article class="lesson lesson1">
+        <div class="lesson-title"><h2>Lever and lamp</h2><span>01 / 05</span></div>
+        <div class="plan-row">
+          <div class="drawing">
+            <div class="drawing-head"><span class="cf">Top view</span><span class="c7">Build plan</span></div>
+            <div class="plan" aria-label="Lever, seven dust, then lamp, from left to right">
+              <span class="mark col2">A</span>
+              <span class="mark col6">B</span>
+              <span class="mark col10">C</span>
+              <span class="tile lever col2" aria-label="Lever"></span>
+              <span class="tile wire col3"><img src="vanilla/block/redstone_dust_line0.png" alt=""></span>
+              <span class="tile wire col4"><img src="vanilla/block/redstone_dust_line0.png" alt=""></span>
+              <span class="tile wire col5"><img src="vanilla/block/redstone_dust_line0.png" alt=""></span>
+              <span class="tile wire col6"><img src="vanilla/block/redstone_dust_line0.png" alt=""></span>
+              <span class="tile wire col7"><img src="vanilla/block/redstone_dust_line0.png" alt=""></span>
+              <span class="tile wire col8"><img src="vanilla/block/redstone_dust_line0.png" alt=""></span>
+              <span class="tile wire col9"><img src="vanilla/block/redstone_dust_line0.png" alt=""></span>
+              <span class="tile col10"><img src="vanilla/block/redstone_lamp.png" alt="Lamp"></span>
+              <span class="direction ce">Signal flows right &gt;</span>
+            </div>
+            <div class="legend">A lever / B dust / C lamp</div>
+          </div>
+          <aside class="readout">
+            <h2 class="ce">A simple switch</h2>
+            <p class="t">A lever stays on<br>until you flip it.</p>
+            <p class="c7">Dust carries power<br>for up to 15 blocks.</p>
+            <span class="ca">On = lamp lit</span>
+          </aside>
+        </div>
+        <ol class="steps">
+          <li><span class="step-number">1.</span><img src="vanilla/block/stone.png" alt="">Lay a stone floor under the plan.</li>
+          <li><span class="step-number">2.</span><img src="vanilla/item/redstone.png" alt="">Join lever and lamp with 7 dust.</li>
+          <li><span class="step-number">3.</span><span class="tile lever"></span>Flip the lever to light the lamp.</li>
+        </ol>
+        <div class="kit">
+          <div>
+            <div class="kit-label">Free kit / filled chest</div>
+            <div class="parts">
+              <div class="slot"><img src="vanilla/block/stone.png" alt="Stone"><span class="n">16</span><span class="tooltip"><div class="cf">16 Stone</div><div class="c7">Floor beneath the build.</div></span></div>
+              <div class="slot"><span class="tile lever"></span><span class="tooltip"><div class="cf">Lever</div></span></div>
+              <div class="slot"><img src="vanilla/item/redstone.png" alt="Redstone dust"><span class="n">7</span><span class="tooltip"><div class="cf">7 Redstone Dust</div></span></div>
+              <div class="slot"><img src="vanilla/block/redstone_lamp.png" alt="Lamp"><span class="tooltip"><div class="cf">Redstone Lamp</div></span></div>
+            </div>
+          </div>
+          <div class="btn" data-console='give {player} minecraft:chest[minecraft:container=[{slot:0,item:{id:"minecraft:stone",count:16}},{slot:1,item:{id:"minecraft:lever",count:1}},{slot:2,item:{id:"minecraft:redstone",count:7}},{slot:3,item:{id:"minecraft:redstone_lamp",count:1}}]] 1'>Give me the parts</div>
+        </div>
+      </article>
+
+      <article class="lesson lesson2">
+        <div class="lesson-title"><h2>Repeater delay</h2><span>02 / 05</span></div>
+        <div class="plan-row">
+          <div class="drawing">
+            <div class="drawing-head"><span class="cf">Top view</span><span class="c7">Build plan</span></div>
+            <div class="plan" aria-label="Lever, dust, repeater A, three dust, repeater B, dust, lamp">
+              <span class="mark col4">A</span>
+              <span class="mark col8">B</span>
+              <span class="tile lever col2"></span>
+              <span class="tile wire col3"><img src="vanilla/block/redstone_dust_line0.png" alt=""></span>
+              <span class="tile device repeater col4"><img src="vanilla/block/repeater.png" alt="Repeater A facing right"></span>
+              <span class="tile wire col5"><img src="vanilla/block/redstone_dust_line0.png" alt=""></span>
+              <span class="tile wire col6"><img src="vanilla/block/redstone_dust_line0.png" alt=""></span>
+              <span class="tile wire col7"><img src="vanilla/block/redstone_dust_line0.png" alt=""></span>
+              <span class="tile device repeater col8"><img src="vanilla/block/repeater.png" alt="Repeater B facing right"></span>
+              <span class="tile wire col9"><img src="vanilla/block/redstone_dust_line0.png" alt=""></span>
+              <span class="tile col10"><img src="vanilla/block/redstone_lamp.png" alt="Lamp"></span>
+              <span class="direction ce">Both outputs face &gt;</span>
+            </div>
+            <div class="legend">A + B: set both to 4 ticks</div>
+          </div>
+          <aside class="readout">
+            <h2 class="ce">Slow the signal</h2>
+            <p class="t">Repeaters delay and<br>renew the signal.</p>
+            <p class="c7">1 redstone tick<br>= 0.1s, without lag.</p>
+            <span class="ca">4 + 4 ticks = 0.8s</span>
+          </aside>
+        </div>
+        <ol class="steps">
+          <li><span class="step-number">1.</span><img src="vanilla/block/stone.png" alt="">Lay the plan on a stone floor.</li>
+          <li><span class="step-number">2.</span><img src="vanilla/item/repeater.png" alt="">Face right; use each one 3 times.</li>
+          <li><span class="step-number">3.</span><span class="tile lever"></span>Flip the lever. Watch the delay.</li>
+        </ol>
+        <div class="kit">
+          <div>
+            <div class="kit-label">Free kit / filled chest</div>
+            <div class="parts">
+              <div class="slot"><img src="vanilla/block/stone.png" alt="Stone"><span class="n">16</span><span class="tooltip"><div class="cf">16 Stone</div></span></div>
+              <div class="slot"><span class="tile lever"></span><span class="tooltip"><div class="cf">Lever</div></span></div>
+              <div class="slot"><img src="vanilla/item/redstone.png" alt="Dust"><span class="n">5</span><span class="tooltip"><div class="cf">5 Redstone Dust</div></span></div>
+              <div class="slot"><img src="vanilla/item/repeater.png" alt="Repeaters"><span class="n">2</span><span class="tooltip"><div class="cf">2 Repeaters</div><div class="c7">Three uses: 1 to 4 ticks.</div></span></div>
+              <div class="slot"><img src="vanilla/block/redstone_lamp.png" alt="Lamp"><span class="tooltip"><div class="cf">Redstone Lamp</div></span></div>
+            </div>
+          </div>
+          <div class="btn" data-console='give {player} minecraft:chest[minecraft:container=[{slot:0,item:{id:"minecraft:stone",count:16}},{slot:1,item:{id:"minecraft:lever",count:1}},{slot:2,item:{id:"minecraft:redstone",count:5}},{slot:3,item:{id:"minecraft:repeater",count:2}},{slot:4,item:{id:"minecraft:redstone_lamp",count:1}}]] 1'>Give me the parts</div>
+        </div>
+      </article>
+
+      <article class="lesson lesson3">
+        <div class="lesson-title"><h2>Comparator</h2><span>03 / 05</span></div>
+        <div class="plan-row">
+          <div class="drawing">
+            <div class="drawing-head"><span class="cf">Top view</span><span class="c7">Build plan</span></div>
+            <div class="plan" aria-label="Barrel, comparator facing right, one dust, lamp">
+              <span class="mark col4">A</span>
+              <span class="mark col5">B</span>
+              <span class="mark col7">C</span>
+              <span class="tile col4"><img src="vanilla/block/barrel_top.png" alt="Barrel"></span>
+              <span class="tile device comparator col5"><img src="vanilla/block/comparator.png" alt="Comparator facing right"></span>
+              <span class="tile wire col6"><img src="vanilla/block/redstone_dust_line0.png" alt="One dust"></span>
+              <span class="tile col7"><img src="vanilla/block/redstone_lamp.png" alt="Lamp"></span>
+              <span class="direction ce">Read barrel &gt; lamp</span>
+            </div>
+            <div class="legend">A barrel / B reader / C lamp</div>
+          </div>
+          <aside class="readout">
+            <h2 class="ce">Read a container</h2>
+            <p class="t">The two rear torches<br>go beside the barrel.</p>
+            <p class="c7">Empty: 0 power<br>Full: 15 power</p>
+            <span class="ca">One item lights it.</span>
+          </aside>
+        </div>
+        <ol class="steps">
+          <li><span class="step-number">1.</span><img src="vanilla/item/comparator.png" alt="">On stone, point away from barrel.</li>
+          <li><span class="step-number">2.</span><img src="vanilla/item/redstone.png" alt="">Add 1 dust, then the lamp.</li>
+          <li><span class="step-number">3.</span><img src="vanilla/item/apple.png" alt="">Add an apple; remove it to turn off.</li>
+        </ol>
+        <div class="kit">
+          <div>
+            <div class="kit-label">Free kit / filled chest</div>
+            <div class="parts">
+              <div class="slot"><img src="vanilla/block/stone.png" alt="Stone"><span class="n">16</span><span class="tooltip"><div class="cf">16 Stone</div></span></div>
+              <div class="slot"><img src="vanilla/block/barrel_top.png" alt="Barrel"><span class="tooltip"><div class="cf">Barrel</div></span></div>
+              <div class="slot"><img src="vanilla/item/comparator.png" alt="Comparator"><span class="tooltip"><div class="cf">Comparator</div><div class="c7">Leave front torch off.</div></span></div>
+              <div class="slot"><img src="vanilla/item/redstone.png" alt="Dust"><span class="tooltip"><div class="cf">1 Redstone Dust</div></span></div>
+              <div class="slot"><img src="vanilla/block/redstone_lamp.png" alt="Lamp"><span class="tooltip"><div class="cf">Redstone Lamp</div></span></div>
+              <div class="slot"><img src="vanilla/item/apple.png" alt="Apple"><span class="tooltip"><div class="cf">Apple</div></span></div>
+            </div>
+          </div>
+          <div class="btn" data-console='give {player} minecraft:chest[minecraft:container=[{slot:0,item:{id:"minecraft:stone",count:16}},{slot:1,item:{id:"minecraft:barrel",count:1}},{slot:2,item:{id:"minecraft:comparator",count:1}},{slot:3,item:{id:"minecraft:redstone",count:1}},{slot:4,item:{id:"minecraft:redstone_lamp",count:1}},{slot:5,item:{id:"minecraft:apple",count:1}}]] 1'>Give me the parts</div>
+        </div>
+      </article>
+
+      <article class="lesson lesson4">
+        <div class="lesson-title"><h2>Piston door</h2><span>04 / 05</span></div>
+        <div class="plan-row">
+          <div class="drawing">
+            <div class="drawing-head"><span class="cf">Top view</span><span class="c7">Retracted</span></div>
+            <div class="plan" aria-label="Lever, two dust, repeater, right-facing sticky piston, plank, empty cell">
+              <span class="mark col6">A</span>
+              <span class="mark col7">B</span>
+              <span class="mark col8">C</span>
+              <span class="tile lever col2"></span>
+              <span class="tile wire col3"><img src="vanilla/block/redstone_dust_line0.png" alt=""></span>
+              <span class="tile wire col4"><img src="vanilla/block/redstone_dust_line0.png" alt=""></span>
+              <span class="tile device repeater col5"><img src="vanilla/block/repeater.png" alt="Repeater facing right"></span>
+              <span class="tile piston col6"><img src="vanilla/block/piston_side.png" alt="Sticky piston facing right"></span>
+              <span class="tile col7"><img src="vanilla/block/oak_planks.png" alt="Plank"></span>
+              <span class="tile gap-tile col8" aria-label="Empty destination cell"></span>
+              <span class="direction ce">A pushes B into C &gt;</span>
+            </div>
+            <div class="legend">A piston / B plank / C gap</div>
+          </div>
+          <aside class="readout">
+            <h2 class="ce">Start with a gate</h2>
+            <p class="t">A one-block model,<br>not a full doorway.</p>
+            <p class="c7">On: push to close.<br>Off: pull to open.</p>
+            <span class="ca">Sticky face points &gt;</span>
+          </aside>
+        </div>
+        <ol class="steps">
+          <li><span class="step-number">1.</span><img src="vanilla/block/piston_top_sticky.png" alt="">On stone, aim the sticky face right.</li>
+          <li><span class="step-number">2.</span><img src="vanilla/block/oak_planks.png" alt="">Add a plank. Leave cell C empty.</li>
+          <li><span class="step-number">3.</span><img src="vanilla/item/repeater.png" alt="">Power the back; test both positions.</li>
+        </ol>
+        <div class="kit">
+          <div>
+            <div class="kit-label">Free kit / filled chest</div>
+            <div class="parts">
+              <div class="slot"><img src="vanilla/block/stone.png" alt="Stone"><span class="n">16</span><span class="tooltip"><div class="cf">16 Stone</div></span></div>
+              <div class="slot"><span class="tile lever"></span><span class="tooltip"><div class="cf">Lever</div></span></div>
+              <div class="slot"><img src="vanilla/item/redstone.png" alt="Dust"><span class="n">2</span><span class="tooltip"><div class="cf">2 Redstone Dust</div></span></div>
+              <div class="slot"><img src="vanilla/item/repeater.png" alt="Repeater"><span class="tooltip"><div class="cf">Repeater</div></span></div>
+              <div class="slot"><img src="vanilla/block/piston_top_sticky.png" alt="Sticky piston"><span class="tooltip"><div class="cf">Sticky Piston</div><div class="c7">Pulls the plank back.</div></span></div>
+              <div class="slot"><img src="vanilla/block/oak_planks.png" alt="Plank"><span class="tooltip"><div class="cf">Oak Planks</div></span></div>
+            </div>
+          </div>
+          <div class="btn" data-console='give {player} minecraft:chest[minecraft:container=[{slot:0,item:{id:"minecraft:stone",count:16}},{slot:1,item:{id:"minecraft:lever",count:1}},{slot:2,item:{id:"minecraft:redstone",count:2}},{slot:3,item:{id:"minecraft:repeater",count:1}},{slot:4,item:{id:"minecraft:sticky_piston",count:1}},{slot:5,item:{id:"minecraft:oak_planks",count:1}}]] 1'>Give me the parts</div>
+        </div>
+      </article>
+
+      <article class="lesson lesson5">
+        <div class="lesson-title"><h2>T flip-flop</h2><span>05 / 05</span></div>
+        <div class="plan-row">
+          <div class="drawing">
+            <div class="drawing-head"><span class="cf">Top view</span><span class="c7">Build plan</span></div>
+            <div class="plan" aria-label="Lever, dust, copper bulb, right-facing comparator, four dust, lamp">
+              <span class="mark col4">A</span>
+              <span class="mark col5">B</span>
+              <span class="mark col10">C</span>
+              <span class="tile lever col2"></span>
+              <span class="tile wire col3"><img src="vanilla/block/redstone_dust_line0.png" alt=""></span>
+              <span class="tile col4"><img src="vanilla/block/copper_bulb.png" alt="Copper bulb"></span>
+              <span class="tile device comparator col5"><img src="vanilla/block/comparator.png" alt="Comparator facing right"></span>
+              <span class="tile wire col6"><img src="vanilla/block/redstone_dust_line0.png" alt=""></span>
+              <span class="tile wire col7"><img src="vanilla/block/redstone_dust_line0.png" alt=""></span>
+              <span class="tile wire col8"><img src="vanilla/block/redstone_dust_line0.png" alt=""></span>
+              <span class="tile wire col9"><img src="vanilla/block/redstone_dust_line0.png" alt=""></span>
+              <span class="tile col10"><img src="vanilla/block/redstone_lamp.png" alt="Lamp"></span>
+              <span class="direction ce">A stores / B reads &gt;</span>
+            </div>
+            <div class="legend">A bulb / B reader / C lamp</div>
+          </div>
+          <aside class="readout">
+            <h2 class="ce">Remember a pulse</h2>
+            <p class="t">Each new power pulse<br>toggles the bulb.</p>
+            <p class="c7">The reader outputs<br>15 while it is lit.</p>
+            <span class="ca">Off does not reset.</span>
+          </aside>
+        </div>
+        <ol class="steps">
+          <li><span class="step-number">1.</span><img src="vanilla/item/comparator.png" alt="">On stone, point reader at the lamp.</li>
+          <li><span class="step-number">2.</span><span class="tile lever"></span>Flip on, then off. Lamp stays lit.</li>
+          <li><span class="step-number">3.</span><img src="vanilla/block/copper_bulb.png" alt="">Repeat on, then off. Lamp goes dark.</li>
+        </ol>
+        <div class="kit">
+          <div>
+            <div class="kit-label">Free kit / filled chest</div>
+            <div class="parts">
+              <div class="slot"><img src="vanilla/block/stone.png" alt="Stone"><span class="n">16</span><span class="tooltip"><div class="cf">16 Stone</div></span></div>
+              <div class="slot"><span class="tile lever"></span><span class="tooltip"><div class="cf">Lever</div><div class="c7">On, then off = one pulse.</div></span></div>
+              <div class="slot"><img src="vanilla/item/redstone.png" alt="Dust"><span class="n">5</span><span class="tooltip"><div class="cf">5 Redstone Dust</div></span></div>
+              <div class="slot"><img src="vanilla/block/copper_bulb.png" alt="Waxed copper bulb"><span class="tooltip"><div class="cf">Waxed Copper Bulb</div><div class="c7">Wax prevents oxidation.</div></span></div>
+              <div class="slot"><img src="vanilla/item/comparator.png" alt="Comparator"><span class="tooltip"><div class="cf">Comparator</div><div class="c7">Leave front torch off.</div></span></div>
+              <div class="slot"><img src="vanilla/block/redstone_lamp.png" alt="Lamp"><span class="tooltip"><div class="cf">Redstone Lamp</div></span></div>
+            </div>
+          </div>
+          <div class="btn" data-console='give {player} minecraft:chest[minecraft:container=[{slot:0,item:{id:"minecraft:stone",count:16}},{slot:1,item:{id:"minecraft:lever",count:1}},{slot:2,item:{id:"minecraft:redstone",count:5}},{slot:3,item:{id:"minecraft:waxed_copper_bulb",count:1}},{slot:4,item:{id:"minecraft:comparator",count:1}},{slot:5,item:{id:"minecraft:redstone_lamp",count:1}}]] 1'>Give me the parts</div>
+        </div>
+      </article>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span class="c7">Static plans / 1 cell = 1 block / Hover parts</span>
+    <div class="btn" data-action="close">Done</div>
+  </footer>
+</div>
+</body>
+</html>

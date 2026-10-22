@@ -1,0 +1,560 @@
+<!--
+  A vanilla-scale brewing stand with a selectable potion guide on the left.
+  First-child radios switch ingredients, result effects and recipe messages; hover slots for details.
+  The stand shows three Awkward Potions; fuel and partial brew progress are static previews.
+  For a real server, replace demo messages with validated recipe commands and retain live placeholders.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Brewing Guide</title>
+  <meta name="ui:height" content="576">
+  <meta name="ui:refresh" content="5">
+  <link rel="stylesheet" href="vanilla.css">
+  <style>
+    .screen {
+      position: relative;
+      width: 1024px;
+      height: 576px;
+    }
+
+    .panorama { background-size: 1072px 624px; }
+    .dim { background: rgba(0, 0, 0, .55); }
+
+    .title {
+      position: absolute;
+      top: 38px;
+      left: 0;
+      right: 0;
+      text-align: center;
+    }
+
+    .guide {
+      position: absolute;
+      left: 160px;
+      top: 88px;
+      width: 704px;
+      height: 376px;
+    }
+
+    .heading {
+      position: absolute;
+      left: 16px;
+      top: 16px;
+      white-space: nowrap;
+    }
+
+    .choices {
+      position: absolute;
+      left: 16px;
+      top: 46px;
+      width: 248px;
+    }
+
+    .choice {
+      position: relative;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      width: 248px;
+      height: 48px;
+      margin-bottom: 4px;
+      padding: 4px 8px;
+      border: 2px solid #555;
+      background: #8b8b8b;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .choice:hover {
+      background: #999;
+      border-color: #fff;
+    }
+
+    #speed:checked ~ .screen .choose-speed,
+    #heal:checked ~ .screen .choose-heal,
+    #strength:checked ~ .screen .choose-strength,
+    #vision:checked ~ .screen .choose-vision,
+    #poison:checked ~ .screen .choose-poison {
+      background: #373737;
+      border-color: #fff;
+    }
+
+    .divider {
+      position: absolute;
+      left: 278px;
+      top: 44px;
+      width: 2px;
+      height: 310px;
+      background: #8b8b8b;
+      box-shadow: 2px 0 0 #fff;
+    }
+
+    .player {
+      position: absolute;
+      left: 16px;
+      top: 318px;
+      width: 248px;
+      white-space: nowrap;
+    }
+
+    .player div + div { margin-top: 8px; }
+
+    .right {
+      position: absolute;
+      left: 300px;
+      top: 0;
+      width: 384px;
+      height: 372px;
+    }
+
+    .right > .heading {
+      left: 0;
+      right: 0;
+      text-align: center;
+    }
+
+    /*
+      Native GUI sheet at 2x, starting at source (8,12).
+      Stop at source y=76: the inventory below must not enter the crop.
+      Crop unused space on the right and centre the visible apparatus.
+      Overflow stays visible so slot tooltips are not cut off.
+    */
+    .stand {
+      position: absolute;
+      left: 72px;
+      top: 48px;
+      width: 240px;
+      height: 128px;
+      background: url(vanilla/gui/container/brewing_stand.png)
+                  -16px -24px / 512px 512px no-repeat;
+    }
+
+    .stand .slot { position: absolute; }
+
+    .fuel         { left: 16px;  top: 8px; }
+    .ingredient   { left: 140px; top: 8px; }
+    .bottle-one   { left: 94px;  top: 76px; }
+    .bottle-two   { left: 140px; top: 90px; }
+    .bottle-three { left: 186px; top: 76px; }
+
+    /*
+      Sprite anchors in the original GUI:
+      fuel (60,44), bubbles (63,14), progress (97,16).
+      Partial indicators are cropped, never stretched.
+    */
+    .fuel-bar {
+      position: absolute;
+      left: 104px;
+      top: 64px;
+      width: 28px;
+      height: 8px;
+      background: url(vanilla/gui/sprites/container/brewing_stand/fuel_length.png)
+                  0 0 / 36px 8px no-repeat;
+    }
+
+    .bubbles {
+      position: absolute;
+      left: 110px;
+      top: 24px;
+      width: 24px;
+      height: 38px;
+      background: url(vanilla/gui/sprites/container/brewing_stand/bubbles.png)
+                  0 -20px / 24px 58px no-repeat;
+    }
+
+    .progress {
+      position: absolute;
+      left: 178px;
+      top: 8px;
+      width: 18px;
+      height: 32px;
+      background: url(vanilla/gui/sprites/container/brewing_stand/brew_progress.png)
+                  0 0 / 18px 56px no-repeat;
+    }
+
+    .potion {
+      position: relative;
+      display: block;
+      width: 32px;
+      height: 32px;
+      flex: none;
+    }
+
+    .potion img {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 32px;
+      height: 32px;
+    }
+
+    /* Tint only the liquid layer; preserve the bottle and stopper. */
+    .potion .liquid {
+      filter: brightness(0) saturate(100%) invert(42%)
+              sepia(90%) saturate(1800%) hue-rotate(185deg);
+    }
+
+    .potion.speed .liquid {
+      filter: brightness(0) saturate(100%) invert(76%)
+              sepia(30%) saturate(620%) hue-rotate(155deg);
+    }
+
+    .potion.heal .liquid {
+      filter: brightness(0) saturate(100%) invert(25%)
+              sepia(95%) saturate(4500%) hue-rotate(350deg);
+    }
+
+    .potion.strength .liquid {
+      filter: brightness(0) saturate(100%) invert(20%)
+              sepia(65%) saturate(2100%) hue-rotate(330deg);
+    }
+
+    .potion.vision .liquid {
+      filter: brightness(0) saturate(100%) invert(18%)
+              sepia(88%) saturate(2900%) hue-rotate(238deg);
+    }
+
+    .potion.poison .liquid {
+      filter: brightness(0) saturate(100%) invert(49%)
+              sepia(42%) saturate(800%) hue-rotate(52deg);
+    }
+
+    .slot:hover { background-color: #b3b3b3; }
+    .slot:hover .tooltip { display: block; }
+
+    .slot .tooltip {
+      left: -20px;
+      bottom: 44px;
+      color: #fff;
+    }
+
+    .ingredient .tooltip {
+      left: auto;
+      right: -32px;
+    }
+
+    .bottle-three .tooltip {
+      left: auto;
+      right: -20px;
+    }
+
+    .tooltip .line + .line { margin-top: 4px; }
+
+    .base {
+      position: absolute;
+      left: 0;
+      top: 194px;
+      width: 384px;
+      text-align: center;
+      white-space: nowrap;
+    }
+
+    .result.tooltip {
+      display: block;
+      left: 0;
+      top: 230px;
+      width: 384px;
+      height: 92px;
+      padding: 10px 12px;
+      z-index: 1;
+    }
+
+    .result-title {
+      margin-bottom: 8px;
+      white-space: nowrap;
+    }
+
+    .effect-line {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      height: 36px;
+      white-space: nowrap;
+    }
+
+    .effect-icon {
+      width: 36px;
+      height: 36px;
+      flex: none;
+    }
+
+    .effect-copy {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      line-height: 18px;
+    }
+
+    .note {
+      position: absolute;
+      left: 0;
+      top: 338px;
+      width: 384px;
+      text-align: center;
+      white-space: nowrap;
+    }
+
+    .variant { display: none; }
+
+    #speed:checked ~ .screen .v-speed,
+    #heal:checked ~ .screen .v-heal,
+    #strength:checked ~ .screen .v-strength,
+    #vision:checked ~ .screen .v-vision,
+    #poison:checked ~ .screen .v-poison {
+      display: block;
+    }
+
+    .buttons {
+      position: absolute;
+      left: 308px;
+      top: 486px;
+      display: flex;
+      gap: 8px;
+    }
+
+    .buttons .recipe { display: none; }
+
+    #speed:checked ~ .screen .recipe.v-speed,
+    #heal:checked ~ .screen .recipe.v-heal,
+    #strength:checked ~ .screen .recipe.v-strength,
+    #vision:checked ~ .screen .recipe.v-vision,
+    #poison:checked ~ .screen .recipe.v-poison {
+      display: flex;
+    }
+
+    .hint {
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 546px;
+      text-align: center;
+      white-space: nowrap;
+    }
+  </style>
+</head>
+<body>
+  <input class="pick" type="radio" name="potion" id="speed" checked>
+  <input class="pick" type="radio" name="potion" id="heal">
+  <input class="pick" type="radio" name="potion" id="strength">
+  <input class="pick" type="radio" name="potion" id="vision">
+  <input class="pick" type="radio" name="potion" id="poison">
+
+  <div class="screen">
+    <div class="panorama"></div>
+    <div class="dim"></div>
+    <div class="title t">Brewing Guide</div>
+
+    <div class="panel guide">
+      <div class="heading">Potions</div>
+
+      <div class="choices">
+        <label class="choice choose-speed" for="speed">
+          <span class="potion speed">
+            <img class="liquid" src="vanilla/item/potion_overlay.png" width="32" height="32" alt="">
+            <img src="vanilla/item/potion.png" width="32" height="32" alt="">
+          </span>
+          <span class="cf">Swiftness</span>
+        </label>
+
+        <label class="choice choose-heal" for="heal">
+          <span class="potion heal">
+            <img class="liquid" src="vanilla/item/potion_overlay.png" width="32" height="32" alt="">
+            <img src="vanilla/item/potion.png" width="32" height="32" alt="">
+          </span>
+          <span class="cf">Healing</span>
+        </label>
+
+        <label class="choice choose-strength" for="strength">
+          <span class="potion strength">
+            <img class="liquid" src="vanilla/item/potion_overlay.png" width="32" height="32" alt="">
+            <img src="vanilla/item/potion.png" width="32" height="32" alt="">
+          </span>
+          <span class="cf">Strength</span>
+        </label>
+
+        <label class="choice choose-vision" for="vision">
+          <span class="potion vision">
+            <img class="liquid" src="vanilla/item/potion_overlay.png" width="32" height="32" alt="">
+            <img src="vanilla/item/potion.png" width="32" height="32" alt="">
+          </span>
+          <span class="cf">Night Vision</span>
+        </label>
+
+        <label class="choice choose-poison" for="poison">
+          <span class="potion poison">
+            <img class="liquid" src="vanilla/item/potion_overlay.png" width="32" height="32" alt="">
+            <img src="vanilla/item/potion.png" width="32" height="32" alt="">
+          </span>
+          <span class="cf">Poison</span>
+        </label>
+      </div>
+
+      <div class="player">
+        <div>{player}</div>
+        <div>Level: {level}</div>
+      </div>
+      <div class="divider"></div>
+
+      <div class="right">
+        <div class="heading">Brewing Stand</div>
+
+        <div class="stand">
+          <div class="fuel-bar"></div>
+          <div class="bubbles"></div>
+          <div class="progress"></div>
+
+          <div class="slot fuel">
+            <img src="vanilla/item/blaze_powder.png" width="32" height="32" alt="Blaze Powder">
+            <div class="tooltip">
+              <div>
+                <div class="line cf">Blaze Powder</div>
+                <div class="line c7">One fuels 20 brews</div>
+                <div class="line c8">Fuel bar: preview</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="slot ingredient">
+            <img class="variant v-speed" src="vanilla/item/sugar.png" width="32" height="32" alt="Sugar">
+            <img class="variant v-heal" src="vanilla/item/glistering_melon_slice.png" width="32" height="32" alt="Glistering Melon Slice">
+            <img class="variant v-strength" src="vanilla/item/blaze_powder.png" width="32" height="32" alt="Blaze Powder">
+            <img class="variant v-vision" src="vanilla/item/golden_carrot.png" width="32" height="32" alt="Golden Carrot">
+            <img class="variant v-poison" src="vanilla/item/spider_eye.png" width="32" height="32" alt="Spider Eye">
+            <div class="tooltip">
+              <div>
+                <div class="variant v-speed cf">Sugar</div>
+                <div class="variant v-heal cf">Glistering Melon Slice</div>
+                <div class="variant v-strength cf">Blaze Powder</div>
+                <div class="variant v-vision cf">Golden Carrot</div>
+                <div class="variant v-poison cf">Spider Eye</div>
+                <div class="gap"></div>
+                <div class="c7">One per batch</div>
+                <div class="c7">Up to three bottles</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="slot bottle-one">
+            <span class="potion">
+              <img class="liquid" src="vanilla/item/potion_overlay.png" width="32" height="32" alt="">
+              <img src="vanilla/item/potion.png" width="32" height="32" alt="Awkward Potion">
+            </span>
+            <div class="tooltip">
+              <div>
+                <div class="line cf">Awkward Potion</div>
+                <div class="line c7">No Effects</div>
+                <div class="gap"></div>
+                <div class="c7">Water + Nether Wart</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="slot bottle-two">
+            <span class="potion">
+              <img class="liquid" src="vanilla/item/potion_overlay.png" width="32" height="32" alt="">
+              <img src="vanilla/item/potion.png" width="32" height="32" alt="Awkward Potion">
+            </span>
+            <div class="tooltip">
+              <div>
+                <div class="line cf">Awkward Potion</div>
+                <div class="line c7">No Effects</div>
+                <div class="gap"></div>
+                <div class="c7">Water + Nether Wart</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="slot bottle-three">
+            <span class="potion">
+              <img class="liquid" src="vanilla/item/potion_overlay.png" width="32" height="32" alt="">
+              <img src="vanilla/item/potion.png" width="32" height="32" alt="Awkward Potion">
+            </span>
+            <div class="tooltip">
+              <div>
+                <div class="line cf">Awkward Potion</div>
+                <div class="line c7">No Effects</div>
+                <div class="gap"></div>
+                <div class="c7">Water + Nether Wart</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="base">Base: Awkward Potion</div>
+
+        <div class="result tooltip">
+          <div>
+            <div class="variant v-speed">
+              <div class="result-title cf">Potion of Swiftness</div>
+              <div class="effect-line">
+                <img class="effect-icon" src="vanilla/mob_effect/speed.png" width="36" height="36" alt="">
+                <span class="c9">Speed (3:00)</span>
+              </div>
+            </div>
+
+            <div class="variant v-heal">
+              <div class="result-title cf">Potion of Healing</div>
+              <div class="effect-line">
+                <img class="effect-icon" src="vanilla/mob_effect/instant_health.png" width="36" height="36" alt="">
+                <div class="effect-copy">
+                  <span class="c9">Instant Health</span>
+                  <span class="c7">Instant effect</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="variant v-strength">
+              <div class="result-title cf">Potion of Strength</div>
+              <div class="effect-line">
+                <img class="effect-icon" src="vanilla/mob_effect/strength.png" width="36" height="36" alt="">
+                <span class="c9">Strength (3:00)</span>
+              </div>
+            </div>
+
+            <div class="variant v-vision">
+              <div class="result-title cf">Potion of Night Vision</div>
+              <div class="effect-line">
+                <img class="effect-icon" src="vanilla/mob_effect/night_vision.png" width="36" height="36" alt="">
+                <span class="c9">Night Vision (3:00)</span>
+              </div>
+            </div>
+
+            <div class="variant v-poison">
+              <div class="result-title cf">Potion of Poison</div>
+              <div class="effect-line">
+                <img class="effect-icon" src="vanilla/mob_effect/poison.png" width="36" height="36" alt="">
+                <span class="cc">Poison (0:45)</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="note">Static preview · 20s brew</div>
+      </div>
+    </div>
+
+    <div class="buttons">
+      <div class="btn recipe variant v-speed"
+           data-message="<gold>Swiftness</gold><newline><gray>Fuel: Blaze Powder. Brew Water Bottles with Nether Wart to make Awkward Potions, then add Sugar.</gray><newline><blue>Speed (3:00)</blue><newline><gray>One ingredient brews up to 3 bottles in 20 seconds. Guide only; no items consumed.</gray>">Show Recipe</div>
+
+      <div class="btn recipe variant v-heal"
+           data-message="<gold>Healing</gold><newline><gray>Fuel: Blaze Powder. Brew Water Bottles with Nether Wart to make Awkward Potions, then add a Glistering Melon Slice.</gray><newline><blue>Instant Health: immediate, no timed duration.</blue><newline><gray>One ingredient brews up to 3 bottles in 20 seconds. Guide only; no items consumed.</gray>">Show Recipe</div>
+
+      <div class="btn recipe variant v-strength"
+           data-message="<gold>Strength</gold><newline><gray>Fuel: Blaze Powder. Brew Water Bottles with Nether Wart to make Awkward Potions, then add Blaze Powder in the ingredient slot.</gray><newline><blue>Strength (3:00)</blue><newline><gray>One ingredient brews up to 3 bottles in 20 seconds. Guide only; no items consumed.</gray>">Show Recipe</div>
+
+      <div class="btn recipe variant v-vision"
+           data-message="<gold>Night Vision</gold><newline><gray>Fuel: Blaze Powder. Brew Water Bottles with Nether Wart to make Awkward Potions, then add a Golden Carrot.</gray><newline><blue>Night Vision (3:00)</blue><newline><gray>One ingredient brews up to 3 bottles in 20 seconds. Guide only; no items consumed.</gray>">Show Recipe</div>
+
+      <div class="btn recipe variant v-poison"
+           data-message="<gold>Poison</gold><newline><gray>Fuel: Blaze Powder. Brew Water Bottles with Nether Wart to make Awkward Potions, then add a Spider Eye.</gray><newline><red>Poison (0:45)</red><newline><gray>One ingredient brews up to 3 bottles in 20 seconds. Guide only; no items consumed.</gray>">Show Recipe</div>
+
+      <div class="btn" data-action="close">Done</div>
+    </div>
+
+    <div class="hint c7">Select a potion · Hover slots for details</div>
+  </div>
+</body>
+</html>

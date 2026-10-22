@@ -1,0 +1,726 @@
+<!--
+  A wood-framed Java Edition cookbook with 41 foods and a parchment reference table.
+  First-child radios sort the scrolling list; Effects opens first to showcase special foods.
+  Hover marked icons or recipes for details. Health is live text, not a CSS condition.
+  For a real server, verify version-specific values and ensure placeholders are substituted.
+  This reference page does not grant, craft, or consume items.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Cookbook</title>
+<meta name="ui:height" content="576">
+<meta name="ui:refresh" content="5">
+<meta name="ui:scroll-step" content="48">
+<link rel="stylesheet" href="vanilla.css">
+<style>
+  body {
+    background: url(vanilla/block/dark_oak_planks.png) repeat;
+    background-size: 32px 32px;
+  }
+  .dim { background: rgba(0,0,0,.62); }
+  .screen {
+    position: absolute;
+    left: 50%;
+    top: 16px;
+    width: 960px;
+    height: 544px;
+    margin-left: -480px;
+  }
+  .frame {
+    height: 496px;
+    padding: 10px;
+    border: 2px solid #21160d;
+    background: url(vanilla/block/spruce_planks.png) repeat;
+    background-size: 32px 32px;
+    box-shadow: inset 2px 2px #b08c57, inset -2px -2px #382414,
+                4px 4px #0008;
+  }
+  .paper.panel {
+    position: relative;
+    height: 472px;
+    padding: 12px 16px;
+    border-radius: 0;
+    border: 2px solid #74532d;
+    color: #392b1b;
+    background: linear-gradient(90deg,
+      #c9ae77 0px, #e5d2a4 10px, #eddfba 34px,
+      #eddfba 866px, #e5d2a4 892px, #c9ae77 936px);
+    box-shadow: inset 2px 2px #fff0ce, inset -2px -2px #ad8c53,
+                0 2px #dfcb99, 0 4px #795a31;
+  }
+  .heading {
+    height: 80px;
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+  }
+  .identity { padding-top: 4px; }
+  .book-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 32px;
+    margin-bottom: 8px;
+  }
+  .book-title img { width: 32px; height: 32px; }
+  h1 { margin: 0; font-size: 24px; line-height: 28px; font-weight: normal; }
+  .subtitle { color: #695132; }
+  .advice {
+    flex: none;
+    width: 520px;
+    height: 74px;
+    padding: 8px 10px;
+    border: 2px solid #826b46;
+    background: #30291f;
+    box-shadow: inset 2px 2px #17130e;
+  }
+  .advice-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 6px;
+    white-space: nowrap;
+  }
+  .health { display: flex; align-items: center; gap: 6px; }
+  .heart {
+    width: 18px;
+    height: 18px;
+    flex: none;
+    background:
+      url(vanilla/gui/sprites/hud/heart/full.png) no-repeat,
+      url(vanilla/gui/sprites/hud/heart/container.png) no-repeat;
+    background-size: 18px 18px;
+  }
+  .advice-bottom { display: flex; align-items: center; gap: 10px; }
+  .advice-bottom img { width: 32px; height: 32px; flex: none; }
+
+  .tabs {
+    display: flex;
+    align-items: center;
+    height: 48px;
+    gap: 8px;
+  }
+  .sort-label { width: 84px; flex: none; }
+  .tabs .btn { width: 164px; flex: none; }
+  .sort-note { margin-left: auto; white-space: nowrap; color: #695132; }
+  .effect-order { display: none; }
+  #e:checked ~ .screen .numeric-order { display: none; }
+  #e:checked ~ .screen .effect-order { display: inline; }
+  #h:checked ~ .screen .tab-h,
+  #s:checked ~ .screen .tab-s,
+  #e:checked ~ .screen .tab-e {
+    color: #ffff55;
+    background: #514c3e;
+    border-color: #fff;
+    box-shadow: inset 2px 2px #29261f, inset -2px -2px #aaa18a;
+  }
+
+  .columns, .food {
+    display: grid;
+    grid-template-columns: 246px 112px 132px 96px 266px;
+    column-gap: 8px;
+    align-items: center;
+  }
+  .columns {
+    height: 30px;
+    border-bottom: 2px solid #947647;
+    color: #513d24;
+  }
+  .columns > span { white-space: nowrap; }
+  .list-wrap {
+    position: relative;
+    height: 240px;
+    background: rgba(255,248,223,.22);
+    border-bottom: 2px solid #947647;
+  }
+  .foods {
+    display: flex;
+    flex-direction: column;
+    height: 238px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding-right: 16px;
+  }
+  .food {
+    height: 48px;
+    min-height: 48px;
+    flex-shrink: 0;
+    border-bottom: 2px solid #bca47388;
+    order: var(--e);
+  }
+  #h:checked ~ .screen .food { order: var(--h); }
+  #s:checked ~ .screen .food { order: var(--s); }
+  #e:checked ~ .screen .food { order: var(--e); }
+  .food:hover { background: #ad874a26; }
+  .name { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .name .slot { flex: none; }
+  .name-text { line-height: 18px; }
+  .enchanted { color: #713786; }
+  .enchanted-slot { outline: 2px solid #8754a0; outline-offset: -4px; }
+
+  .drums { display: flex; align-items: center; height: 18px; }
+  .drums::before {
+    content: "";
+    display: block;
+    flex: none;
+    width: var(--d,0px);
+    height: 18px;
+    background:
+      url(vanilla/gui/sprites/hud/food_full.png) repeat-x,
+      url(vanilla/gui/sprites/hud/food_empty.png) repeat-x;
+    background-size: 18px 18px;
+  }
+  .drums.odd::after {
+    content: "";
+    display: block;
+    flex: none;
+    width: 18px;
+    height: 18px;
+    background:
+      url(vanilla/gui/sprites/hud/food_half.png) no-repeat,
+      url(vanilla/gui/sprites/hud/food_empty.png) no-repeat;
+    background-size: 18px 18px;
+  }
+  .sat { color: #513d24; }
+  .bar {
+    width: 112px;
+    height: 10px;
+    margin-bottom: 2px;
+    border: 2px solid #493a24;
+    background: #7b6948;
+  }
+  .bar i {
+    display: block;
+    height: 6px;
+    width: var(--p);
+    min-width: 2px;
+    background: #899b3d;
+    box-shadow: inset 0 2px #cbd885;
+  }
+  .effects { display: flex; align-items: center; gap: 4px; }
+  .effect {
+    display: block;
+    position: relative;
+    width: 36px;
+    height: 36px;
+    flex: none;
+    cursor: help;
+  }
+  .effect > img { width: 36px; height: 36px; }
+  .effect.item > img { width: 32px; height: 32px; margin: 2px; }
+  .effect.cure::after {
+    content: "−";
+    position: absolute;
+    right: -2px;
+    bottom: -2px;
+    color: #55ff55;
+    text-shadow: 2px 2px #153f15;
+    background: #25331c;
+  }
+  .effect.variable::after {
+    content: "?";
+    position: absolute;
+    right: -2px;
+    bottom: -2px;
+    color: #ffff55;
+    text-shadow: 2px 2px #3f3f15;
+    background: #352d23;
+  }
+  .no-effect { color: #8a7350; }
+  .hint { color: #604b30; line-height: 18px; }
+  .hint.more { cursor: help; }
+  .tooltip {
+    position: fixed;
+    left: auto;
+    right: 64px;
+    top: auto;
+    bottom: 82px;
+    z-index: 30;
+    line-height: 18px;
+    pointer-events: none;
+  }
+  .effect:hover .tooltip,
+  .hint:hover .tooltip,
+  .name:hover .tooltip { display: block; }
+  .list-cue {
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 12px;
+    border-left: 2px solid #bca473;
+    background: #c8ad7866;
+    pointer-events: none;
+  }
+  .list-cue::after {
+    content: "";
+    position: absolute;
+    left: 1px;
+    bottom: 6px;
+    width: 8px;
+    height: 4px;
+    background: #795d35;
+    box-shadow: 2px 4px #795d35;
+  }
+  .notes {
+    height: 46px;
+    padding-top: 8px;
+    color: #695132;
+  }
+  .note-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    height: 22px;
+    white-space: nowrap;
+  }
+  .scroll-note { color: #49351c; }
+  .footer {
+    height: 40px;
+    margin-top: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .footer .buttons { display: flex; gap: 8px; }
+  .footer .btn { width: 164px; }
+</style>
+</head>
+<body>
+<input class="pick" type="radio" name="sort" id="h">
+<input class="pick" type="radio" name="sort" id="s">
+<input class="pick" type="radio" name="sort" id="e" checked>
+
+<div class="dim"></div>
+<div class="screen">
+  <main class="frame">
+    <div class="paper panel">
+      <header class="heading">
+        <div class="identity">
+          <div class="book-title">
+            <img src="vanilla/item/book.png" width="32" height="32" alt="">
+            <h1>Cookbook</h1>
+          </div>
+          <div class="subtitle">Eat well. Dig longer.</div>
+        </div>
+        <aside class="advice">
+          <div class="advice-top">
+            <span class="ce">Best for you right now</span>
+            <span class="health cf"><span class="heart"></span>{health}/20</span>
+          </div>
+          <div class="advice-bottom">
+            <img src="vanilla/item/golden_apple.png" width="32" height="32" alt="">
+            <span class="cf">Hurt? Golden Apple.<br><span class="c7">Hungry? Cooked Beef.</span></span>
+          </div>
+        </aside>
+      </header>
+
+      <nav class="tabs" aria-label="Sort food">
+        <span class="sort-label">Sort by</span>
+        <label class="btn tab-h" for="h">Hunger</label>
+        <label class="btn tab-s" for="s">Saturation</label>
+        <label class="btn tab-e" for="e">Effects</label>
+        <span class="sort-note">
+          <span class="numeric-order">Highest first</span>
+          <span class="effect-order">Special first</span>
+        </span>
+      </nav>
+
+      <div class="columns">
+        <span>Food</span><span>Hunger</span><span>Saturation</span>
+        <span>Effects</span><span>Recipe / source</span>
+      </div>
+
+      <div class="list-wrap">
+        <section class="foods" aria-label="41 foods. Scroll inside this table.">
+
+          <article class="food" style="--h:-4;--s:-24;--e:100;--d:36px;--p:16.67%">
+            <div class="name"><span class="slot"><img src="vanilla/item/apple.png" width="32" height="32" alt=""></span><span>Apple</span></div>
+            <div class="drums" aria-label="4 hunger"></div>
+            <div class="sat"><div class="bar"><i></i></div>2.4</div>
+            <div class="no-effect">—</div><span class="hint">Oak leaves</span>
+          </article>
+
+          <article class="food" style="--h:-5;--s:-60;--e:100;--d:36px;--p:41.67%">
+            <div class="name"><span class="slot"><img src="vanilla/item/baked_potato.png" width="32" height="32" alt=""></span><span>Baked Potato</span></div>
+            <div class="drums odd" aria-label="5 hunger"></div>
+            <div class="sat"><div class="bar"><i></i></div>6.0</div>
+            <div class="no-effect">—</div><span class="hint">Smelt potato</span>
+          </article>
+
+          <article class="food" style="--h:-3;--s:-18;--e:100;--d:18px;--p:12.5%">
+            <div class="name"><span class="slot"><img src="vanilla/item/beef.png" width="32" height="32" alt=""></span><span>Raw Beef</span></div>
+            <div class="drums odd" aria-label="3 hunger"></div>
+            <div class="sat"><div class="bar"><i></i></div>1.8</div>
+            <div class="no-effect">—</div><span class="hint">Cows</span>
+          </article>
+
+          <article class="food" style="--h:-1;--s:-12;--e:100;--d:0px;--p:8.33%">
+            <div class="name"><span class="slot"><img src="vanilla/item/beetroot.png" width="32" height="32" alt=""></span><span>Beetroot</span></div>
+            <div class="drums odd" aria-label="1 hunger"></div>
+            <div class="sat"><div class="bar"><i></i></div>1.2</div>
+            <div class="no-effect">—</div><span class="hint">Harvest crop</span>
+          </article>
+
+          <article class="food" style="--h:-6;--s:-72;--e:100;--d:54px;--p:50%">
+            <div class="name"><span class="slot"><img src="vanilla/item/beetroot_soup.png" width="32" height="32" alt=""></span><span>Beetroot Soup</span></div>
+            <div class="drums" aria-label="6 hunger"></div>
+            <div class="sat"><div class="bar"><i></i></div>7.2</div>
+            <div class="no-effect">—</div><span class="hint">6 beetroots + bowl</span>
+          </article>
+
+          <article class="food" style="--h:-5;--s:-60;--e:100;--d:36px;--p:41.67%">
+            <div class="name"><span class="slot"><img src="vanilla/item/bread.png" width="32" height="32" alt=""></span><span>Bread</span></div>
+            <div class="drums odd" aria-label="5 hunger"></div>
+            <div class="sat"><div class="bar"><i></i></div>6.0</div>
+            <div class="no-effect">—</div><span class="hint">3 wheat in a row</span>
+          </article>
+
+          <article class="food" style="--h:-2;--s:-4;--e:100;--d:18px;--p:2.78%">
+            <div class="name"><span class="slot"><img src="vanilla/item/cake.png" width="32" height="32" alt=""></span><span>Cake<br>(one slice)</span></div>
+            <div class="drums" aria-label="2 hunger per slice"></div>
+            <div class="sat"><div class="bar"><i></i></div>0.4</div>
+            <div class="no-effect">—</div>
+            <span class="hint more">Milk, sugar,<br>egg + wheat
+              <span class="tooltip"><span class="cf">Cake · 7 slices</span><br><span class="c7">3 milk buckets, 2 sugar,</span><br><span class="c7">1 egg and 3 wheat.</span><br><span class="ce">Place it before eating.</span></span>
+            </span>
+          </article>
+
+          <article class="food" style="--h:-3;--s:-36;--e:100;--d:18px;--p:25%">
+            <div class="name"><span class="slot"><img src="vanilla/item/carrot.png" width="32" height="32" alt=""></span><span>Carrot</span></div>
+            <div class="drums odd" aria-label="3 hunger"></div>
+            <div class="sat"><div class="bar"><i></i></div>3.6</div>
+            <div class="no-effect">—</div><span class="hint">Harvest crop</span>
+          </article>
+
+          <article class="food" style="--h:-2;--s:-12;--e:20;--d:18px;--p:8.33%">
+            <div class="name"><span class="slot"><img src="vanilla/item/chicken.png" width="32" height="32" alt=""></span><span>Raw Chicken</span></div>
+            <div class="drums" aria-label="2 hunger"></div>
+            <div class="sat"><div class="bar"><i></i></div>1.2</div>
+            <div class="effects">
+              <span class="effect"><img src="vanilla/mob_effect/hunger.png" width="36" height="36" alt="May cause Hunger">
+                <span class="tooltip"><span class="cc">30%: Hunger I (0:30)</span><br><span class="c7">Cook it first.</span></span>
+              </span>
+            </div>
+            <span class="hint">Chickens</span>
+          </article>
+
+          <article class="food" style="--h:-4;--s:-24;--e:4;--d:36px;--p:16.67%">
+            <div class="name"><span class="slot"><img src="vanilla/item/chorus_fruit.png" width="32" height="32" alt=""></span><span>Chorus Fruit</span></div>
+            <div class="drums" aria-label="4 hunger"></div>
+            <div class="sat"><div class="bar"><i></i></div>2.4</div>
+            <div class="effects">
+              <span class="effect item"><img src="vanilla/item/ender_pearl.png" width="32" height="32" alt="Random teleport">
+                <span class="tooltip"><span class="cd">Random teleport</span><br><span class="c7">Up to 8 blocks per axis.</span><br><span class="c7">Edible at full hunger.</span><br><span class="c8">Not a status effect.</span></span>
+              </span>
+            </div>
+            <span class="hint">Break chorus plants</span>
+          </article>
+
+          <article class="food" style="--h:-2;--s:-4;--e:100;--d:18px;--p:2.78%">
+            <div class="name"><span class="slot"><img src="vanilla/item/cod.png" width="32" height="32" alt=""></span><span>Raw Cod</span></div>
+            <div class="drums" aria-label="2 hunger"></div>
+            <div class="sat"><div class="bar"><i></i></div>0.4</div>
+            <div class="no-effect">—</div><span class="hint">Fish or catch cod</span>
+          </article>
+
+          <article class="food" style="--h:-8;--s:-128;--e:100;--d:72px;--p:88.89%">
+            <div class="name"><span class="slot"><img src="vanilla/item/cooked_beef.png" width="32" height="32" alt=""></span><span>Cooked Beef</span></div>
+            <div class="drums" aria-label="8 hunger"></div>
+            <div class="sat"><div class="bar"><i></i></div>12.8</div>
+            <div class="no-effect">—</div><span class="hint">Cook raw beef</span>
+          </article>
+
+          <article class="food" style="--h:-6;--s:-72;--e:100;--d:54px;--p:50%">
+            <div class="name"><span class="slot"><img src="vanilla/item/cooked_chicken.png" width="32" height="32" alt=""></span><span>Cooked Chicken</span></div>
+            <div class="drums" aria-label="6 hunger"></div>
+            <div class="sat"><div class="bar"><i></i></div>7.2</div>
+            <div class="no-effect">—</div><span class="hint">Cook raw chicken</span>
+          </article>
+
+          <article class="food" style="--h:-5;--s:-60;--e:100;--d:36px;--p:41.67%">
+            <div class="name"><span class="slot"><img src="vanilla/item/cooked_cod.png" width="32" height="32" alt=""></span><span>Cooked Cod</span></div>
+            <div class="drums odd" aria-label="5 hunger"></div>
+            <div class="sat"><div class="bar"><i></i></div>6.0</div>
+            <div class="no-effect">—</div><span class="hint">Cook raw cod</span>
+          </article>
+
+          <article class="food" style="--h:-6;--s:-96;--e:100;--d:54px;--p:66.67%">
+            <div class="name"><span class="slot"><img src="vanilla/item/cooked_mutton.png" width="32" height="32" alt=""></span><span>Cooked Mutton</span></div>
+            <div class="drums" aria-label="6 hunger"></div>
+            <div class="sat"><div class="bar"><i></i></div>9.6</div>
+            <div class="no-effect">—</div><span class="hint">Cook raw mutton</span>
+          </article>
+
+          <article class="food" style="--h:-8;--s:-128;--e:100;--d:72px;--p:88.89%">
+            <div class="name"><span class="slot"><img src="vanilla/item/cooked_porkchop.png" width="32" height="32" alt=""></span><span>Cooked Porkchop</span></div>
+            <div class="drums" aria-label="8 hunger"></div>
+            <div class="sat"><div class="bar"><i></i></div>12.8</div>
+            <div class="no-effect">—</div><span class="hint">Cook raw porkchop</span>
+          </article>
+
+          <article class="food" style="--h:-5;--s:-60;--e:100;--d:36px;--p:41.67%">
+            <div class="name"><span class="slot"><img src="vanilla/item/cooked_rabbit.png" width="32" height="32" alt=""></span><span>Cooked Rabbit</span></div>
+            <div class="drums odd" aria-label="5 hunger"></div>
+            <div class="sat"><div class="bar"><i></i></div>6.0</div>
+            <div class="no-effect">—</div><span class="hint">Cook raw rabbit</span>
+          </article>
+
+          <article class="food" style="--h:-6;--s:-96;--e:100;--d:54px;--p:66.67%">
+            <div class="name"><span class="slot"><img src="vanilla/item/cooked_salmon.png" width="32" height="32" alt=""></span><span>Cooked Salmon</span></div>
+            <div class="drums" aria-label="6 hunger"></div>
+            <div class="sat"><div class="bar"><i></i></div>9.6</div>
+            <div class="no-effect">—</div><span class="hint">Cook raw salmon</span>
+          </article>
+
+          <article class="food" style="--h:-2;--s:-4;--e:100;--d:18px;--p:2.78%">
+            <div class="name"><span class="slot"><img src="vanilla/item/cookie.png" width="32" height="32" alt=""></span><span>Cookie</span></div>
+            <div class="drums" aria-label="2 hunger"></div>
+            <div class="sat"><div class="bar"><i></i></div>0.4</div>
+            <div class="no-effect">—</div><span class="hint">2 wheat + cocoa</span>
+          </article>
+
+          <article class="food" style="--h:-1;--s:-6;--e:100;--d:0px;--p:4.17%">
+            <div class="name"><span class="slot"><img src="vanilla/item/dried_kelp.png" width="32" height="32" alt=""></span><span>Dried Kelp</span></div>
+            <div class="drums odd" aria-label="1 hunger"></div>
+            <div class="sat"><div class="bar"><i></i></div>0.6</div>
+            <div class="no-effect">—</div><span class="hint">Smelt kelp</span>
+          </article>
+
+          <article class="food" style="--h:-4;--s:-96;--e:0;--d:36px;--p:66.67%">
+            <div class="name">
+              <span class="slot enchanted-slot"><img src="vanilla/item/golden_apple.png" width="32" height="32" alt=""></span>
+              <span class="name-text enchanted">Enchanted<br>Golden Apple</span>
+              <span class="tooltip"><span class="cd">Enchanted Golden Apple</span><br><span class="c7">Rare loot. Cannot be crafted.</span></span>
+            </div>
+            <div class="drums" aria-label="4 hunger"></div>
+            <div class="sat"><div class="bar"><i></i></div>9.6</div>
+            <div class="effects">
+              <span class="effect"><img src="vanilla/mob_effect/regeneration.png" width="36" height="36" alt="Regeneration and Absorption">
+                <span class="tooltip"><span class="cd">Enchanted Golden Apple</span><br><span class="ca">Regeneration II (0:20)</span><br><span class="ce">Absorption IV (2:00)</span><br><span class="c7">Resistance I (5:00)</span><br><span class="c7">Fire Resistance (5:00)</span></span>
+              </span>
+              <span class="effect"><img src="vanilla/mob_effect/fire_resistance.png" width="36" height="36" alt="Fire Resistance and Resistance">
+                <span class="tooltip"><span class="ce">Fire Resistance (5:00)</span><br><span class="c7">Resistance I (5:00)</span><br><span class="c7">Also grants Regeneration II</span><br><span class="c7">and Absorption IV.</span></span>
+              </span>
+            </div>
+            <span class="hint">Rare structure loot</span>
+          </article>
+
+          <article class="food" style="--h:-2;--s:-4;--e:100;--d:18px;--p:2.78%">
+            <div class="name"><span class="slot"><img src="vanilla/item/glow_berries.png" width="32" height="32" alt=""></span><span>Glow Berries</span></div>
+            <div class="drums" aria-label="2 hunger"></div>
+            <div class="sat"><div class="bar"><i></i></div>0.4</div>
+            <div class="no-effect">—</div><span class="hint">Harvest cave vines</span>
+          </article>
+
+          <article class="food" style="--h:-4;--s:-96;--e:1;--d:36px;--p:66.67%">
+            <div class="name"><span class="slot"><img src="vanilla/item/golden_apple.png" width="32" height="32" alt=""></span><span>Golden Apple</span></div>
+            <div class="drums" aria-label="4 hunger"></div>
+            <div class="sat"><div class="bar"><i></i></div>9.6</div>
+            <div class="effects">
+              <span class="effect"><img src="vanilla/mob_effect/regeneration.png" width="36" height="36" alt="Regeneration">
+                <span class="tooltip"><span class="ca">Regeneration II (0:05)</span><br><span class="c7">Restores 4 health over time.</span><br><span class="c7">Edible at full hunger.</span></span>
+              </span>
+              <span class="effect"><img src="vanilla/mob_effect/absorption.png" width="36" height="36" alt="Absorption">
+                <span class="tooltip"><span class="ce">Absorption I (2:00)</span><br><span class="c7">Adds 4 temporary health.</span></span>
+              </span>
+            </div>
+            <span class="hint">Apple + 8 gold ingots</span>
+          </article>
+
+          <article class="food" style="--h:-6;--s:-144;--e:100;--d:54px;--p:100%">
+            <div class="name"><span class="slot"><img src="vanilla/item/golden_carrot.png" width="32" height="32" alt=""></span><span>Golden Carrot</span></div>
+            <div class="drums" aria-label="6 hunger"></div>
+            <div class="sat"><div class="bar"><i></i></div>14.4</div>
+            <div class="no-effect">—</div><span class="hint">Carrot + 8 gold nuggets</span>
+          </article>
+
+          <article class="food" style="--h:-6;--s:-12;--e:3;--d:54px;--p:8.33%">
+            <div class="name"><span class="slot"><img src="vanilla/item/honey_bottle.png" width="32" height="32" alt=""></span><span>Honey Bottle</span></div>
+            <div class="drums" aria-label="6 hunger"></div>
+            <div class="sat"><div class="bar"><i></i></div>1.2</div>
+            <div class="effects">
+              <span class="effect cure"><img src="vanilla/mob_effect/poison.png" width="36" height="36" alt="Removes Poison">
+                <span class="tooltip"><span class="ca">Removes Poison</span><br><span class="c7">Does not give Poison.</span><br><span class="c7">Other effects stay.</span><br><span class="c7">Drink even at full hunger.</span></span>
+              </span>
+            </div>
+            <span class="hint">Bottle a full hive</span>
+          </article>
+
+          <article class="food" style="--h:-2;--s:-12;--e:100;--d:18px;--p:8.33%">
+            <div class="name"><span class="slot"><img src="vanilla/item/melon_slice.png" width="32" height="32" alt=""></span><span>Melon Slice</span></div>
+            <div class="drums" aria-label="2 hunger"></div>
+            <div class="sat"><div class="bar"><i></i></div>1.2</div>
+            <div class="no-effect">—</div><span class="hint">Break a melon</span>
+          </article>
+
+          <article class="food" style="--h:-6;--s:-72;--e:100;--d:54px;--p:50%">
+            <div class="name"><span class="slot"><img src="vanilla/item/mushroom_stew.png" width="32" height="32" alt=""></span><span>Mushroom Stew</span></div>
+            <div class="drums" aria-label="6 hunger"></div>
+            <div class="sat"><div class="bar"><i></i></div>7.2</div>
+            <div class="no-effect">—</div><span class="hint">Both mushrooms<br>+ bowl</span>
+          </article>
+
+          <article class="food" style="--h:-2;--s:-12;--e:100;--d:18px;--p:8.33%">
+            <div class="name"><span class="slot"><img src="vanilla/item/mutton.png" width="32" height="32" alt=""></span><span>Raw Mutton</span></div>
+            <div class="drums" aria-label="2 hunger"></div>
+            <div class="sat"><div class="bar"><i></i></div>1.2</div>
+            <div class="no-effect">—</div><span class="hint">Sheep</span>
+          </article>
+
+          <article class="food" style="--h:-2;--s:-12;--e:21;--d:18px;--p:8.33%">
+            <div class="name"><span class="slot"><img src="vanilla/item/poisonous_potato.png" width="32" height="32" alt=""></span><span>Poisonous Potato</span></div>
+            <div class="drums" aria-label="2 hunger"></div>
+            <div class="sat"><div class="bar"><i></i></div>1.2</div>
+            <div class="effects">
+              <span class="effect"><img src="vanilla/mob_effect/poison.png" width="36" height="36" alt="May cause Poison">
+                <span class="tooltip"><span class="cc">60%: Poison I (0:05)</span><br><span class="c7">Cannot be cooked.</span></span>
+              </span>
+            </div>
+            <span class="hint">Rare potato harvest</span>
+          </article>
+
+          <article class="food" style="--h:-3;--s:-18;--e:100;--d:18px;--p:12.5%">
+            <div class="name"><span class="slot"><img src="vanilla/item/porkchop.png" width="32" height="32" alt=""></span><span>Raw Porkchop</span></div>
+            <div class="drums odd" aria-label="3 hunger"></div>
+            <div class="sat"><div class="bar"><i></i></div>1.8</div>
+            <div class="no-effect">—</div><span class="hint">Pigs or hoglins</span>
+          </article>
+
+          <article class="food" style="--h:-1;--s:-6;--e:100;--d:0px;--p:4.17%">
+            <div class="name"><span class="slot"><img src="vanilla/item/potato.png" width="32" height="32" alt=""></span><span>Potato</span></div>
+            <div class="drums odd" aria-label="1 hunger"></div>
+            <div class="sat"><div class="bar"><i></i></div>0.6</div>
+            <div class="no-effect">—</div><span class="hint">Harvest crop</span>
+          </article>
+
+          <article class="food" style="--h:-1;--s:-2;--e:24;--d:0px;--p:1.39%">
+            <div class="name"><span class="slot"><img src="vanilla/item/pufferfish.png" width="32" height="32" alt=""></span><span>Pufferfish</span></div>
+            <div class="drums odd" aria-label="1 hunger"></div>
+            <div class="sat"><div class="bar"><i></i></div>0.2</div>
+            <div class="effects">
+              <span class="effect"><img src="vanilla/mob_effect/poison.png" width="36" height="36" alt="Poison and Hunger">
+                <span class="tooltip"><span class="cc">Poison II (1:00)</span><br><span class="cc">Hunger III (0:15)</span><br><span class="cc">Nausea I (0:15)</span><br><span class="c7">Better used for brewing.</span></span>
+              </span>
+              <span class="effect"><img src="vanilla/mob_effect/nausea.png" width="36" height="36" alt="Nausea">
+                <span class="tooltip"><span class="cc">Nausea I (0:15)</span><br><span class="c7">Also causes Poison II</span><br><span class="c7">and Hunger III.</span></span>
+              </span>
+            </div>
+            <span class="hint">Fishing / warm seas</span>
+          </article>
+
+          <article class="food" style="--h:-8;--s:-48;--e:100;--d:72px;--p:33.33%">
+            <div class="name"><span class="slot"><img src="vanilla/item/pumpkin_pie.png" width="32" height="32" alt=""></span><span>Pumpkin Pie</span></div>
+            <div class="drums" aria-label="8 hunger"></div>
+            <div class="sat"><div class="bar"><i></i></div>4.8</div>
+            <div class="no-effect">—</div><span class="hint">Pumpkin, sugar, egg</span>
+          </article>
+
+          <article class="food" style="--h:-3;--s:-18;--e:100;--d:18px;--p:12.5%">
+            <div class="name"><span class="slot"><img src="vanilla/item/rabbit.png" width="32" height="32" alt=""></span><span>Raw Rabbit</span></div>
+            <div class="drums odd" aria-label="3 hunger"></div>
+            <div class="sat"><div class="bar"><i></i></div>1.8</div>
+            <div class="no-effect">—</div><span class="hint">Rabbits</span>
+          </article>
+
+          <article class="food" style="--h:-10;--s:-120;--e:100;--d:90px;--p:83.33%">
+            <div class="name"><span class="slot"><img src="vanilla/item/rabbit_stew.png" width="32" height="32" alt=""></span><span>Rabbit Stew</span></div>
+            <div class="drums" aria-label="10 hunger"></div>
+            <div class="sat"><div class="bar"><i></i></div>12.0</div>
+            <div class="no-effect">—</div>
+            <span class="hint more">Cooked rabbit,<br>vegetables + bowl
+              <span class="tooltip"><span class="cf">Rabbit Stew</span><br><span class="c7">1 cooked rabbit</span><br><span class="c7">1 baked potato</span><br><span class="c7">1 carrot, 1 mushroom</span><br><span class="c7">1 bowl</span></span>
+            </span>
+          </article>
+
+          <article class="food" style="--h:-4;--s:-8;--e:22;--d:36px;--p:5.56%">
+            <div class="name"><span class="slot"><img src="vanilla/item/rotten_flesh.png" width="32" height="32" alt=""></span><span>Rotten Flesh</span></div>
+            <div class="drums" aria-label="4 hunger"></div>
+            <div class="sat"><div class="bar"><i></i></div>0.8</div>
+            <div class="effects">
+              <span class="effect"><img src="vanilla/mob_effect/hunger.png" width="36" height="36" alt="May cause Hunger">
+                <span class="tooltip"><span class="cc">80%: Hunger I (0:30)</span></span>
+              </span>
+            </div>
+            <span class="hint">Zombies</span>
+          </article>
+
+          <article class="food" style="--h:-2;--s:-4;--e:100;--d:18px;--p:2.78%">
+            <div class="name"><span class="slot"><img src="vanilla/item/salmon.png" width="32" height="32" alt=""></span><span>Raw Salmon</span></div>
+            <div class="drums" aria-label="2 hunger"></div>
+            <div class="sat"><div class="bar"><i></i></div>0.4</div>
+            <div class="no-effect">—</div><span class="hint">Fish or catch salmon</span>
+          </article>
+
+          <article class="food" style="--h:-2;--s:-32;--e:23;--d:18px;--p:22.22%">
+            <div class="name"><span class="slot"><img src="vanilla/item/spider_eye.png" width="32" height="32" alt=""></span><span>Spider Eye</span></div>
+            <div class="drums" aria-label="2 hunger"></div>
+            <div class="sat"><div class="bar"><i></i></div>3.2</div>
+            <div class="effects">
+              <span class="effect"><img src="vanilla/mob_effect/poison.png" width="36" height="36" alt="Poison">
+                <span class="tooltip"><span class="cc">Poison I (0:05)</span></span>
+              </span>
+            </div>
+            <span class="hint">Spiders or witches</span>
+          </article>
+
+          <article class="food" style="--h:-6;--s:-72;--e:2;--d:54px;--p:50%">
+            <div class="name"><span class="slot"><img src="vanilla/item/suspicious_stew.png" width="32" height="32" alt=""></span><span>Suspicious Stew</span></div>
+            <div class="drums" aria-label="6 base hunger"></div>
+            <div class="sat"><div class="bar"><i></i></div>7.2*</div>
+            <div class="effects">
+              <span class="effect variable"><img src="vanilla/mob_effect/saturation.png" width="36" height="36" alt="Effect depends on flower">
+                <span class="tooltip"><span class="ce">One effect per stew</span><br><span class="ca">Dandelion: Saturation</span><br><span class="ca">Blue orchid: Saturation</span><br><span class="ca">Oxeye daisy: Regeneration</span><br><span class="cc">Lily of the valley: Poison</span><br><span class="c7">*Table shows base values.</span></span>
+              </span>
+              <span class="effect variable"><img src="vanilla/mob_effect/night_vision.png" width="36" height="36" alt="Possible Night Vision">
+                <span class="tooltip"><span class="cb">Poppy: Night Vision</span><br><span class="c7">Icons are examples,</span><br><span class="c7">not combined effects.</span><br><span class="cc">Some flowers are harmful!</span></span>
+              </span>
+            </div>
+            <span class="hint">Both mushrooms,<br>bowl + small flower</span>
+          </article>
+
+          <article class="food" style="--h:-2;--s:-4;--e:100;--d:18px;--p:2.78%">
+            <div class="name"><span class="slot"><img src="vanilla/item/sweet_berries.png" width="32" height="32" alt=""></span><span>Sweet Berries</span></div>
+            <div class="drums" aria-label="2 hunger"></div>
+            <div class="sat"><div class="bar"><i></i></div>0.4</div>
+            <div class="no-effect">—</div><span class="hint">Harvest berry bush</span>
+          </article>
+
+          <article class="food" style="--h:-1;--s:-2;--e:100;--d:0px;--p:1.39%">
+            <div class="name"><span class="slot"><img src="vanilla/item/tropical_fish.png" width="32" height="32" alt=""></span><span>Tropical Fish</span></div>
+            <div class="drums odd" aria-label="1 hunger"></div>
+            <div class="sat"><div class="bar"><i></i></div>0.2</div>
+            <div class="no-effect">—</div><span class="hint">Warm oceans</span>
+          </article>
+
+        </section>
+        <div class="list-cue" aria-hidden="true"></div>
+      </div>
+
+      <div class="notes">
+        <div class="note-row">
+          <span>1 drumstick = 2 hunger</span>
+          <span>Bars: 0–14.4</span>
+          <span class="scroll-note">41 foods · Scroll table</span>
+        </div>
+        <div class="note-row">
+          <span>Java Edition · *Stew: base values</span>
+          <span>Hover effects / recipes</span>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer class="footer">
+    <span class="c7">Keep hunger high to heal.</span>
+    <div class="buttons">
+      <a class="btn" href="quests.html">Quest Log</a>
+      <div class="btn" data-action="close">Done</div>
+    </div>
+  </footer>
+</div>
+</body>
+</html>

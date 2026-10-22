@@ -1,0 +1,674 @@
+<!--
+  dungeon.html: four dungeon cards with block banners, boss names, loot and a four-slot party.
+  First-child radios select a dungeon and toggle readiness; hover slots for item details.
+  Invite and Queue send demo messages only; readiness is local and estimates are illustrative.
+  For a real server, replace demo actions and validate party membership, levels and readiness.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="ui:height" content="576">
+<meta name="ui:refresh" content="5">
+<title>Dungeon Finder</title>
+<link rel="stylesheet" href="vanilla.css">
+<style>
+  .screen {
+    position: relative;
+    width: 1024px;
+    height: 576px;
+    margin: 0 auto;
+  }
+  .panorama { background-size: 1072px 624px; }
+  .dim { background: rgba(0,0,0,.64); }
+
+  h1, h2 {
+    margin: 0;
+    font-size: 16px;
+    line-height: 18px;
+    font-weight: normal;
+  }
+  .heading {
+    position: absolute;
+    top: 24px;
+    left: 40px;
+    width: 944px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .heading-title {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .heading-title img { width: 32px; height: 32px; }
+  .heading-note { white-space: nowrap; }
+
+  .workspace {
+    position: absolute;
+    left: 40px;
+    top: 72px;
+    width: 944px;
+    display: grid;
+    grid-template-columns: 616px 312px;
+    gap: 16px;
+  }
+  .dungeons {
+    display: grid;
+    grid-template-columns: 302px 302px;
+    grid-template-rows: 204px 204px;
+    gap: 12px;
+  }
+  .dungeon {
+    display: block;
+    position: relative;
+    height: 204px;
+    padding: 6px;
+    cursor: pointer;
+  }
+  .dungeon:hover {
+    border-color: #fff;
+    z-index: 3;
+  }
+
+  /* A full-height block strip remains visible above the title. */
+  .banner {
+    display: block;
+    position: relative;
+    height: 52px;
+    border: 2px solid #373737;
+    background: #202020;
+  }
+  .block-strip {
+    display: block;
+    height: 24px;
+    background-size: 32px 32px;
+  }
+  .crypt .block-strip {
+    background-image: url(vanilla/block/mossy_cobblestone.png);
+  }
+  .fortress .block-strip {
+    background-image: url(vanilla/block/nether_bricks.png);
+  }
+  .monument .block-strip {
+    background-image: url(vanilla/block/prismarine.png);
+    background-size: 32px 128px;
+    background-position: 0 0;
+    background-repeat: repeat-x;
+  }
+  .city .block-strip {
+    background-image: url(vanilla/block/purpur_block.png);
+  }
+  .banner-name {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 24px;
+    padding: 2px 8px;
+    background: #242424;
+    white-space: nowrap;
+  }
+  .selected-mark {
+    width: 18px;
+    height: 16px;
+    flex: none;
+    visibility: hidden;
+  }
+
+  #crypt:checked ~ .screen .crypt,
+  #fortress:checked ~ .screen .fortress,
+  #monument:checked ~ .screen .monument,
+  #city:checked ~ .screen .city {
+    border-color: #fff;
+    box-shadow: inset 4px 4px 0 #fff, inset -4px -4px 0 #555,
+                0 0 0 2px #000;
+  }
+  #crypt:checked ~ .screen .crypt .banner-name,
+  #fortress:checked ~ .screen .fortress .banner-name,
+  #monument:checked ~ .screen .monument .banner-name,
+  #city:checked ~ .screen .city .banner-name {
+    background: #354226;
+    color: #ffff55;
+    text-shadow: 2px 2px 0 #3f3f15;
+    box-shadow: inset 4px 0 0 #ffff55;
+  }
+  #crypt:checked ~ .screen .crypt .selected-mark,
+  #fortress:checked ~ .screen .fortress .selected-mark,
+  #monument:checked ~ .screen .monument .selected-mark,
+  #city:checked ~ .screen .city .selected-mark {
+    visibility: visible;
+  }
+
+  .card-body { padding: 8px 6px 0; }
+  .levels {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 18px;
+    white-space: nowrap;
+  }
+  .reader-level { color: #404040; }
+  .risk {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 26px;
+  }
+  .risk-label { width: 70px; }
+  .skulls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 24px;
+  }
+
+  /* Eight-game-pixel skulls: every edge follows the 2 CSS px grid. */
+  .skull {
+    position: relative;
+    display: block;
+    width: 16px;
+    height: 14px;
+    margin-bottom: 4px;
+    background: #373737;
+    box-shadow: -2px 2px 0 #373737, 2px 2px 0 #373737;
+  }
+  .skull::before {
+    content: "";
+    position: absolute;
+    left: 2px;
+    top: 4px;
+    width: 4px;
+    height: 4px;
+    background: #c6c6c6;
+    box-shadow: 8px 0 0 #c6c6c6;
+  }
+  .skull::after {
+    content: "";
+    position: absolute;
+    left: 2px;
+    top: 14px;
+    width: 12px;
+    height: 4px;
+    background: linear-gradient(to right,
+      #373737 0, #373737 2px,
+      #c6c6c6 2px, #c6c6c6 4px,
+      #373737 4px, #373737 8px,
+      #c6c6c6 8px, #c6c6c6 10px,
+      #373737 10px, #373737 12px);
+  }
+  .skull.faded { opacity: .22; }
+  .risk-count { margin-left: auto; color: #555; }
+
+  .previews {
+    display: grid;
+    grid-template-columns: 92px 1fr;
+    margin-top: 4px;
+  }
+  .caption {
+    display: block;
+    height: 18px;
+    margin-bottom: 4px;
+  }
+  .slots { display: flex; gap: 4px; }
+  .slot { flex: none; }
+  .slot img { width: 32px; height: 32px; }
+  .boss-name {
+    margin-top: 6px;
+    height: 18px;
+    color: #404040;
+    white-space: nowrap;
+  }
+
+  .slot .tooltip {
+    left: -4px;
+    bottom: 42px;
+    text-align: left;
+    cursor: default;
+  }
+  .slot:hover .tooltip { display: block; }
+  .loot .slot .tooltip { left: auto; right: -4px; }
+  .tooltip .line {
+    display: block;
+    position: relative;
+  }
+
+  .party {
+    height: 420px;
+    padding: 14px;
+  }
+  .party-heading {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    height: 18px;
+    margin-bottom: 12px;
+  }
+  .members {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .member {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 48px;
+    padding: 4px;
+    background: #a6a6a6;
+    box-shadow: inset 2px 2px 0 #777, inset -2px -2px 0 #eee;
+  }
+  .member-info { flex: 1; min-width: 0; }
+  .member-name { white-space: nowrap; }
+  .member-status {
+    margin-top: 2px;
+    color: #404040;
+    white-space: nowrap;
+  }
+  .invite { cursor: pointer; }
+  .invite:hover {
+    background: #b9b9b9;
+    box-shadow: inset 0 0 0 2px #fff;
+  }
+  .invite .slot { background: #777; }
+  .invite img { opacity: .6; }
+
+  .ready-control { margin-top: 12px; }
+  .party .btn { width: 280px; }
+  .queue-control { margin-top: 8px; }
+  .unready-button, .ready-status, .queue { display: none; }
+
+  #ready:checked ~ .screen .ready-button,
+  #ready:checked ~ .screen .waiting-status,
+  #ready:checked ~ .screen .queue-locked { display: none; }
+  #ready:checked ~ .screen .unready-button { display: flex; }
+  #ready:checked ~ .screen .ready-status {
+    display: block;
+    color: #205820;
+  }
+  #ready:checked ~ .screen .queue { display: block; }
+  #ready:checked ~ .screen .unready-button {
+    color: #55ff55;
+    text-shadow: 2px 2px 0 #153f15;
+  }
+
+  .queue-option, .estimate { display: none; }
+  #crypt:checked ~ .screen .q-crypt,
+  #fortress:checked ~ .screen .q-fortress,
+  #monument:checked ~ .screen .q-monument,
+  #city:checked ~ .screen .q-city { display: flex; }
+
+  .estimate-line {
+    margin-top: 12px;
+    height: 18px;
+    text-align: center;
+    white-space: nowrap;
+  }
+  #crypt:checked ~ .screen .e-crypt,
+  #fortress:checked ~ .screen .e-fortress,
+  #monument:checked ~ .screen .e-monument,
+  #city:checked ~ .screen .e-city { display: inline; }
+
+  .party-note {
+    margin-top: 4px;
+    text-align: center;
+    color: #555;
+    white-space: nowrap;
+  }
+
+  .footer {
+    position: absolute;
+    top: 504px;
+    left: 0;
+    right: 0;
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+  }
+  .hint {
+    position: absolute;
+    top: 552px;
+    left: 0;
+    right: 0;
+    text-align: center;
+    white-space: nowrap;
+  }
+</style>
+</head>
+<body>
+<input class="pick" type="radio" name="dungeon" id="crypt" checked>
+<input class="pick" type="radio" name="dungeon" id="fortress">
+<input class="pick" type="radio" name="dungeon" id="monument">
+<input class="pick" type="radio" name="dungeon" id="city">
+<input class="pick" type="radio" name="readiness" id="not-ready" checked>
+<input class="pick" type="radio" name="readiness" id="ready">
+
+<div class="screen">
+  <div class="panorama"></div>
+  <div class="dim"></div>
+
+  <header class="heading">
+    <div class="heading-title">
+      <img src="vanilla/item/iron_sword.png" width="32" height="32" alt="">
+      <h1 class="t">Dungeon Finder</h1>
+    </div>
+    <div class="heading-note c7">
+      Choose a dungeon <span class="c8">|</span>
+      <span class="ca">Level {level}</span>
+    </div>
+  </header>
+
+  <main class="workspace">
+    <section class="dungeons" aria-label="Choose a dungeon">
+
+      <label class="panel dungeon crypt" for="crypt">
+        <span class="banner">
+          <span class="block-strip"></span>
+          <span class="banner-name cf">
+            <span>Crypt</span>
+            <img class="selected-mark" src="vanilla/gui/sprites/icon/checkmark.png"
+                 width="18" height="16" alt="Selected">
+          </span>
+        </span>
+        <div class="card-body">
+          <div class="levels">
+            <span>Rec. Lv 5</span><span class="reader-level">You {level}</span>
+          </div>
+          <div class="risk" aria-label="Difficulty: one of four skulls">
+            <span class="risk-label">Risk</span>
+            <span class="skulls" aria-hidden="true">
+              <span class="skull"></span><span class="skull faded"></span>
+              <span class="skull faded"></span><span class="skull faded"></span>
+            </span>
+            <span class="risk-count">1/4</span>
+          </div>
+          <div class="previews">
+            <div>
+              <span class="caption">Boss</span>
+              <div class="slot">
+                <img src="vanilla/item/zombie_spawn_egg.png"
+                     width="32" height="32" alt="Crypt Warden">
+                <span class="tooltip">
+                  <span class="line ce">Crypt Warden</span>
+                  <span class="line c7">Watch for the horde.</span>
+                </span>
+              </div>
+            </div>
+            <div class="loot">
+              <span class="caption">Loot</span>
+              <div class="slots">
+                <div class="slot">
+                  <img src="vanilla/item/iron_sword.png" width="32" height="32" alt="Iron Sword">
+                  <span class="tooltip"><span class="line cf">Iron Sword</span></span>
+                </div>
+                <div class="slot">
+                  <img src="vanilla/item/emerald.png" width="32" height="32" alt="Emerald">
+                  <span class="tooltip"><span class="line cf">Emerald</span></span>
+                </div>
+                <div class="slot">
+                  <img src="vanilla/item/enchanted_book.png" width="32" height="32" alt="Enchanted Book">
+                  <span class="tooltip"><span class="line ce">Enchanted Book</span></span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="boss-name">Boss: Crypt Warden</div>
+        </div>
+      </label>
+
+      <label class="panel dungeon fortress" for="fortress">
+        <span class="banner">
+          <span class="block-strip"></span>
+          <span class="banner-name cf">
+            <span>Nether Fortress</span>
+            <img class="selected-mark" src="vanilla/gui/sprites/icon/checkmark.png"
+                 width="18" height="16" alt="Selected">
+          </span>
+        </span>
+        <div class="card-body">
+          <div class="levels">
+            <span>Rec. Lv 15</span><span class="reader-level">You {level}</span>
+          </div>
+          <div class="risk" aria-label="Difficulty: two of four skulls">
+            <span class="risk-label">Risk</span>
+            <span class="skulls" aria-hidden="true">
+              <span class="skull"></span><span class="skull"></span>
+              <span class="skull faded"></span><span class="skull faded"></span>
+            </span>
+            <span class="risk-count">2/4</span>
+          </div>
+          <div class="previews">
+            <div>
+              <span class="caption">Boss</span>
+              <div class="slot">
+                <img src="vanilla/item/wither_skeleton_spawn_egg.png"
+                     width="32" height="32" alt="Ash Knight">
+                <span class="tooltip">
+                  <span class="line cc">Ash Knight</span>
+                  <span class="line c7">Bring fire resistance.</span>
+                </span>
+              </div>
+            </div>
+            <div class="loot">
+              <span class="caption">Loot</span>
+              <div class="slots">
+                <div class="slot">
+                  <img src="vanilla/item/blaze_rod.png" width="32" height="32" alt="Blaze Rod">
+                  <span class="tooltip"><span class="line cf">Blaze Rod</span></span>
+                </div>
+                <div class="slot">
+                  <img src="vanilla/item/netherite_scrap.png" width="32" height="32" alt="Netherite Scrap">
+                  <span class="tooltip"><span class="line cf">Netherite Scrap</span></span>
+                </div>
+                <div class="slot">
+                  <img src="vanilla/item/golden_apple.png" width="32" height="32" alt="Golden Apple">
+                  <span class="tooltip"><span class="line cb">Golden Apple</span></span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="boss-name">Boss: Ash Knight</div>
+        </div>
+      </label>
+
+      <label class="panel dungeon monument" for="monument">
+        <span class="banner">
+          <span class="block-strip"></span>
+          <span class="banner-name cf">
+            <span>Ocean Monument</span>
+            <img class="selected-mark" src="vanilla/gui/sprites/icon/checkmark.png"
+                 width="18" height="16" alt="Selected">
+          </span>
+        </span>
+        <div class="card-body">
+          <div class="levels">
+            <span>Rec. Lv 25</span><span class="reader-level">You {level}</span>
+          </div>
+          <div class="risk" aria-label="Difficulty: three of four skulls">
+            <span class="risk-label">Risk</span>
+            <span class="skulls" aria-hidden="true">
+              <span class="skull"></span><span class="skull"></span>
+              <span class="skull"></span><span class="skull faded"></span>
+            </span>
+            <span class="risk-count">3/4</span>
+          </div>
+          <div class="previews">
+            <div>
+              <span class="caption">Boss</span>
+              <div class="slot">
+                <img src="vanilla/item/elder_guardian_spawn_egg.png"
+                     width="32" height="32" alt="Elder Guardian">
+                <span class="tooltip">
+                  <span class="line cb">Elder Guardian</span>
+                  <span class="line c7">Bring water breathing.</span>
+                </span>
+              </div>
+            </div>
+            <div class="loot">
+              <span class="caption">Loot</span>
+              <div class="slots">
+                <div class="slot">
+                  <img src="vanilla/item/trident.png" width="32" height="32" alt="Trident">
+                  <span class="tooltip"><span class="line cb">Trident</span></span>
+                </div>
+                <div class="slot">
+                  <img src="vanilla/item/heart_of_the_sea.png" width="32" height="32" alt="Heart of the Sea">
+                  <span class="tooltip"><span class="line ce">Heart of the Sea</span></span>
+                </div>
+                <div class="slot">
+                  <img src="vanilla/block/sponge.png" width="32" height="32" alt="Sponge">
+                  <span class="tooltip"><span class="line cf">Sponge</span></span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="boss-name">Boss: Elder Guardian</div>
+        </div>
+      </label>
+
+      <label class="panel dungeon city" for="city">
+        <span class="banner">
+          <span class="block-strip"></span>
+          <span class="banner-name cf">
+            <span>End City</span>
+            <img class="selected-mark" src="vanilla/gui/sprites/icon/checkmark.png"
+                 width="18" height="16" alt="Selected">
+          </span>
+        </span>
+        <div class="card-body">
+          <div class="levels">
+            <span>Rec. Lv 35</span><span class="reader-level">You {level}</span>
+          </div>
+          <div class="risk" aria-label="Difficulty: four of four skulls">
+            <span class="risk-label">Risk</span>
+            <span class="skulls" aria-hidden="true">
+              <span class="skull"></span><span class="skull"></span>
+              <span class="skull"></span><span class="skull"></span>
+            </span>
+            <span class="risk-count">4/4</span>
+          </div>
+          <div class="previews">
+            <div>
+              <span class="caption">Boss</span>
+              <div class="slot">
+                <img src="vanilla/item/shulker_spawn_egg.png"
+                     width="32" height="32" alt="Void Sentinel">
+                <span class="tooltip">
+                  <span class="line cd">Void Sentinel</span>
+                  <span class="line c7">Mind the drop.</span>
+                </span>
+              </div>
+            </div>
+            <div class="loot">
+              <span class="caption">Loot</span>
+              <div class="slots">
+                <div class="slot">
+                  <img src="vanilla/item/elytra.png" width="32" height="32" alt="Elytra">
+                  <span class="tooltip"><span class="line cd">Elytra</span></span>
+                </div>
+                <div class="slot">
+                  <img src="vanilla/item/shulker_shell.png" width="32" height="32" alt="Shulker Shell">
+                  <span class="tooltip"><span class="line cf">Shulker Shell</span></span>
+                </div>
+                <div class="slot">
+                  <img src="vanilla/item/diamond.png" width="32" height="32" alt="Diamond">
+                  <span class="tooltip"><span class="line cf">Diamond</span></span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="boss-name">Boss: Void Sentinel</div>
+        </div>
+      </label>
+    </section>
+
+    <aside class="panel party">
+      <div class="party-heading">
+        <h2>Your party</h2><span>1 / 4</span>
+      </div>
+
+      <div class="members">
+        <div class="member">
+          <div class="slot">
+            <img src="vanilla/item/iron_helmet.png" width="32" height="32" alt="Party leader">
+            <span class="tooltip"><span class="line ce">Party leader</span></span>
+          </div>
+          <div class="member-info">
+            <div class="member-name">{player}</div>
+            <div class="member-status waiting-status">Not ready</div>
+            <div class="member-status ready-status">Ready!</div>
+          </div>
+        </div>
+
+        <div class="member invite"
+             data-message="<gold>Demo invite:</gold> <gray>Slot 2 is open. No invitation was sent.</gray>">
+          <div class="slot">
+            <img src="vanilla/item/name_tag.png" width="32" height="32" alt="">
+          </div>
+          <div class="member-info">
+            <div>+ Invite</div><div class="member-status">Open slot</div>
+          </div>
+        </div>
+
+        <div class="member invite"
+             data-message="<gold>Demo invite:</gold> <gray>Slot 3 is open. No invitation was sent.</gray>">
+          <div class="slot">
+            <img src="vanilla/item/name_tag.png" width="32" height="32" alt="">
+          </div>
+          <div class="member-info">
+            <div>+ Invite</div><div class="member-status">Open slot</div>
+          </div>
+        </div>
+
+        <div class="member invite"
+             data-message="<gold>Demo invite:</gold> <gray>Slot 4 is open. No invitation was sent.</gray>">
+          <div class="slot">
+            <img src="vanilla/item/name_tag.png" width="32" height="32" alt="">
+          </div>
+          <div class="member-info">
+            <div>+ Invite</div><div class="member-status">Open slot</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="ready-control">
+        <label class="btn ready-button" for="ready">Ready</label>
+        <label class="btn unready-button" for="not-ready">Ready! Undo</label>
+      </div>
+
+      <div class="queue-control">
+        <div class="btn off queue-locked" aria-disabled="true">Queue: ready first</div>
+        <div class="queue">
+          <div class="btn queue-option q-crypt"
+               data-message="<gold>Demo queue: Crypt.</gold> <gray>Matchmaking would fill your three open slots. No queue was started.</gray>">Queue</div>
+          <div class="btn queue-option q-fortress"
+               data-message="<gold>Demo queue: Nether Fortress.</gold> <gray>Matchmaking would fill your three open slots. No queue was started.</gray>">Queue</div>
+          <div class="btn queue-option q-monument"
+               data-message="<gold>Demo queue: Ocean Monument.</gold> <gray>Matchmaking would fill your three open slots. No queue was started.</gray>">Queue</div>
+          <div class="btn queue-option q-city"
+               data-message="<gold>Demo queue: End City.</gold> <gray>Matchmaking would fill your three open slots. No queue was started.</gray>">Queue</div>
+        </div>
+      </div>
+
+      <div class="estimate-line">
+        Est. wait:
+        <span class="estimate e-crypt">0:30</span>
+        <span class="estimate e-fortress">1:00</span>
+        <span class="estimate e-monument">1:30</span>
+        <span class="estimate e-city">2:00</span>
+      </div>
+      <div class="party-note">Demo matchmaking</div>
+    </aside>
+  </main>
+
+  <nav class="footer">
+    <a class="btn" href="servers.html">Servers</a>
+    <a class="btn" href="quests.html">Quest Log</a>
+    <div class="btn" data-action="close">Done</div>
+  </nav>
+  <div class="hint c7">Levels recommended · Loot not guaranteed</div>
+</div>
+</body>
+</html>

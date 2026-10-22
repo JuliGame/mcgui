@@ -1,0 +1,658 @@
+<!--
+  A Minecraft auction-house demo with five categories and three working sort orders.
+  First-child radios control filtering and sorting; hover listings or your bid for tooltips.
+  Bid, Buy and Details only send preview messages. Funds and timers are sample data.
+  Replace the lots and balances with server data, and route transactions through
+  server-side checks for funds, ownership, expiry and minimum bid increments.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Auction House</title>
+<meta name="ui:height" content="576">
+<meta name="ui:refresh" content="5">
+<link rel="stylesheet" href="vanilla.css">
+<style>
+  .screen {
+    position: relative;
+    width: 1024px;
+    height: 576px;
+    margin: auto;
+  }
+  .panorama { background-size: 1072px 624px; }
+  .dim { background: rgba(0,0,0,.55); }
+
+  h1, h2, p {
+    margin: 0;
+    font-size: 16px;
+    line-height: 18px;
+    font-weight: normal;
+  }
+  .heading {
+    position: absolute;
+    top: 26px;
+    left: 32px;
+    right: 32px;
+    text-align: center;
+  }
+  .house {
+    position: absolute;
+    left: 32px;
+    top: 62px;
+    width: 960px;
+    height: 446px;
+    padding: 16px;
+    display: flex;
+    gap: 16px;
+  }
+  .sidebar { width: 184px; flex: none; }
+  .section-name { height: 30px; padding-top: 2px; }
+  .category {
+    width: 184px;
+    height: 40px;
+    justify-content: flex-start;
+    gap: 10px;
+    padding-left: 10px;
+    margin-bottom: 8px;
+    white-space: nowrap;
+  }
+  .category img, .emerald {
+    width: 32px;
+    height: 32px;
+    flex: none;
+  }
+  #weapons:checked ~ .screen .tab-weapons,
+  #tools:checked ~ .screen .tab-tools,
+  #blocks:checked ~ .screen .tab-blocks,
+  #food:checked ~ .screen .tab-food,
+  #rare:checked ~ .screen .tab-rare,
+  #price:checked ~ .screen .sort-price,
+  #ending:checked ~ .screen .sort-ending,
+  #newest:checked ~ .screen .sort-newest {
+    border-color: #fff;
+    background: #454545;
+    box-shadow: inset 2px 2px 0 #222, inset -2px -2px 0 #777;
+    color: #ffff55;
+    text-shadow: 2px 2px 0 #3f3f15;
+  }
+
+  .inset {
+    background: #242424;
+    border: 2px solid #373737;
+    box-shadow: 2px 2px 0 #fff;
+  }
+  .balance {
+    margin-top: 16px;
+    height: 124px;
+    padding: 10px;
+  }
+  .balance-value {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 40px;
+  }
+  .balance-note { margin-top: 6px; white-space: nowrap; }
+
+  .market { width: 724px; flex: none; }
+  .sortbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 40px;
+    margin-bottom: 12px;
+  }
+  .browse-title {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+  }
+  .browse-title .count { margin-top: 4px; }
+  .category-title { display: none; }
+  #weapons:checked ~ .screen .title-weapons,
+  #tools:checked ~ .screen .title-tools,
+  #blocks:checked ~ .screen .title-blocks,
+  #food:checked ~ .screen .title-food,
+  #rare:checked ~ .screen .title-rare { display: block; }
+  .sortbar .btn { width: 112px; flex: none; }
+  .sortbar .sort-ending { width: 156px; }
+
+  .table { height: 232px; }
+  .columns, .listing {
+    display: grid;
+    grid-template-columns: 248px 104px 108px 64px 100px;
+    gap: 20px;
+    align-items: center;
+    padding: 0 8px;
+  }
+  .columns {
+    height: 34px;
+    background: #363636;
+    white-space: nowrap;
+  }
+  .rows { display: flex; flex-direction: column; }
+  .listing {
+    display: none;
+    position: relative;
+    height: 64px;
+    flex: none;
+    border-top: 2px solid #414141;
+  }
+  .listing:hover {
+    background: #383838;
+    z-index: 5;
+  }
+  #weapons:checked ~ .screen .listing.weapons,
+  #tools:checked ~ .screen .listing.tools,
+  #blocks:checked ~ .screen .listing.blocks,
+  #food:checked ~ .screen .listing.food,
+  #rare:checked ~ .screen .listing.rare { display: grid; }
+
+  #price:checked ~ .screen .listing { order: var(--price); }
+  #ending:checked ~ .screen .listing { order: var(--ending); }
+  #newest:checked ~ .screen .listing { order: var(--newest); }
+
+  .item, .bid-name {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    white-space: nowrap;
+  }
+  .item-copy { display: block; }
+  .sale { display: block; margin-top: 4px; }
+  .slot { flex: none; }
+  .cost {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
+  }
+  .listing .btn { width: 100px; height: 40px; }
+  .listing .tooltip {
+    left: 44px;
+    top: 44px;
+    line-height: 18px;
+  }
+  .listing:hover .tooltip { display: block; }
+
+  .bids {
+    height: 112px;
+    margin-top: 14px;
+    padding: 10px 12px;
+  }
+  .bids-heading {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    white-space: nowrap;
+  }
+  .bid-row {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0,1fr) 100px 104px 60px 100px;
+    gap: 8px;
+    align-items: center;
+    height: 44px;
+  }
+  .bid-row .btn { width: 100px; }
+  .bid-name .caption { margin-top: 4px; }
+  .bid-name .tooltip {
+    left: 0;
+    bottom: 52px;
+  }
+  .bid-name:hover .tooltip { display: block; }
+
+  .foot {
+    position: absolute;
+    left: 32px;
+    right: 32px;
+    top: 524px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .foot .btn { width: 200px; }
+</style>
+</head>
+<body>
+<input class="pick" type="radio" name="category" id="weapons" checked>
+<input class="pick" type="radio" name="category" id="tools">
+<input class="pick" type="radio" name="category" id="blocks">
+<input class="pick" type="radio" name="category" id="food">
+<input class="pick" type="radio" name="category" id="rare">
+<input class="pick" type="radio" name="sort" id="price">
+<input class="pick" type="radio" name="sort" id="ending" checked>
+<input class="pick" type="radio" name="sort" id="newest">
+
+<div class="screen">
+  <div class="panorama"></div>
+  <div class="dim"></div>
+
+  <header class="heading">
+    <h1 class="t">Auction House</h1>
+  </header>
+
+  <main class="panel house">
+    <aside class="sidebar">
+      <h2 class="section-name">Categories</h2>
+
+      <label class="btn category tab-weapons" for="weapons">
+        <img src="vanilla/item/diamond_sword.png" alt="">Weapons
+      </label>
+      <label class="btn category tab-tools" for="tools">
+        <img src="vanilla/item/iron_pickaxe.png" alt="">Tools
+      </label>
+      <label class="btn category tab-blocks" for="blocks">
+        <img src="vanilla/block/bricks.png" alt="">Blocks
+      </label>
+      <label class="btn category tab-food" for="food">
+        <img src="vanilla/item/bread.png" alt="">Food
+      </label>
+      <label class="btn category tab-rare" for="rare">
+        <img src="vanilla/item/nether_star.png" alt="">Rare
+      </label>
+
+      <section class="balance inset">
+        <h2 class="cf">Balance</h2>
+        <div class="balance-value ca">
+          <img class="emerald" src="vanilla/item/emerald.png" alt="Emeralds">1,280
+        </div>
+        <div class="c7">Available</div>
+        <div class="balance-note c7">160 reserved</div>
+      </section>
+    </aside>
+
+    <section class="market">
+      <div class="sortbar">
+        <div class="browse-title">
+          <h2 class="category-title title-weapons">Weapons</h2>
+          <h2 class="category-title title-tools">Tools</h2>
+          <h2 class="category-title title-blocks">Blocks</h2>
+          <h2 class="category-title title-food">Food</h2>
+          <h2 class="category-title title-rare">Rare</h2>
+          <div class="count">3 lots · Sort:</div>
+        </div>
+        <label class="btn sort-price" for="price">Price</label>
+        <label class="btn sort-ending" for="ending">Ending soon</label>
+        <label class="btn sort-newest" for="newest">Newest</label>
+      </div>
+
+      <div class="table inset">
+        <div class="columns c7">
+          <span>Item</span>
+          <span>Seller</span>
+          <span>Price</span>
+          <span>Left</span>
+          <span>Action</span>
+        </div>
+
+        <div class="rows">
+          <div class="listing weapons" style="--price:2;--ending:1;--newest:3">
+            <div class="item">
+              <span class="slot"><img src="vanilla/item/diamond_sword.png" alt=""></span>
+              <span class="item-copy">
+                <span class="cb">Frostbite</span>
+                <span class="sale c7">Next bid</span>
+              </span>
+            </div>
+            <span class="c7">Notch</span>
+            <span class="cost ca"><img class="emerald" src="vanilla/item/emerald.png" alt="">240</span>
+            <span class="cc">2m</span>
+            <div class="btn" data-message="<yellow>Demo:</yellow> <gray>{player}, your next bid on Frostbite would be 240 emeralds. No funds moved.">Bid</div>
+            <div class="tooltip"><div>
+              <div class="cb">Frostbite</div>
+              <div class="c7">Diamond Sword</div>
+              <div class="gap"></div>
+              <div class="c7">Sharpness V</div>
+              <div class="c7">Unbreaking III</div>
+              <div class="c7">Mending</div>
+              <div class="gap"></div>
+              <div class="ce">Next bid: 240 emeralds</div>
+            </div></div>
+          </div>
+
+          <div class="listing weapons" style="--price:1;--ending:2;--newest:2">
+            <div class="item">
+              <span class="slot"><img src="vanilla/item/bow.png" alt=""></span>
+              <span class="item-copy">
+                <span class="ce">Longbow</span>
+                <span class="sale c7">Buy now</span>
+              </span>
+            </div>
+            <span class="c7">Alex</span>
+            <span class="cost ca"><img class="emerald" src="vanilla/item/emerald.png" alt="">96</span>
+            <span class="ce">18m</span>
+            <div class="btn" data-message="<yellow>Demo:</yellow> <gray>Longbow costs 96 emeralds. Nothing purchased.">Buy</div>
+            <div class="tooltip"><div>
+              <div class="ce">Longbow</div>
+              <div class="c7">Bow</div>
+              <div class="gap"></div>
+              <div class="c7">Power IV</div>
+              <div class="c7">Infinity</div>
+              <div class="gap"></div>
+              <div class="ce">Buy now: 96 emeralds</div>
+            </div></div>
+          </div>
+
+          <div class="listing weapons" style="--price:3;--ending:3;--newest:1">
+            <div class="item">
+              <span class="slot"><img src="vanilla/item/trident.png" alt=""></span>
+              <span class="item-copy">
+                <span class="cd">Stormcall</span>
+                <span class="sale c7">Next bid</span>
+              </span>
+            </div>
+            <span class="c7">jeb_</span>
+            <span class="cost ca"><img class="emerald" src="vanilla/item/emerald.png" alt="">640</span>
+            <span class="c7">3h</span>
+            <div class="btn" data-message="<yellow>Demo:</yellow> <gray>Your next bid on Stormcall would be 640 emeralds. No funds moved.">Bid</div>
+            <div class="tooltip"><div>
+              <div class="cd">Stormcall</div>
+              <div class="c7">Trident</div>
+              <div class="gap"></div>
+              <div class="c7">Loyalty III</div>
+              <div class="c7">Channeling</div>
+              <div class="c7">Impaling V</div>
+              <div class="gap"></div>
+              <div class="ce">Next bid: 640 emeralds</div>
+            </div></div>
+          </div>
+
+          <div class="listing tools" style="--price:3;--ending:1;--newest:3">
+            <div class="item">
+              <span class="slot"><img src="vanilla/item/diamond_pickaxe.png" alt=""></span>
+              <span class="item-copy">
+                <span class="cb">Deep Delver</span>
+                <span class="sale c7">Next bid</span>
+              </span>
+            </div>
+            <span class="c7">Searge</span>
+            <span class="cost ca"><img class="emerald" src="vanilla/item/emerald.png" alt="">320</span>
+            <span class="ce">8m</span>
+            <div class="btn" data-message="<yellow>Demo:</yellow> <gray>Next bid: 320 emeralds for Deep Delver. No funds moved.">Bid</div>
+            <div class="tooltip"><div>
+              <div class="cb">Deep Delver</div>
+              <div class="c7">Diamond Pickaxe</div>
+              <div class="gap"></div>
+              <div class="c7">Efficiency V</div>
+              <div class="c7">Fortune III</div>
+              <div class="c7">Unbreaking III</div>
+              <div class="gap"></div>
+              <div class="ce">Next bid: 320 emeralds</div>
+            </div></div>
+          </div>
+
+          <div class="listing tools" style="--price:2;--ending:2;--newest:2">
+            <div class="item">
+              <span class="slot"><img src="vanilla/item/iron_axe.png" alt=""></span>
+              <span class="item-copy">
+                <span class="ce">Timber Axe</span>
+                <span class="sale c7">Buy now</span>
+              </span>
+            </div>
+            <span class="c7">Steve</span>
+            <span class="cost ca"><img class="emerald" src="vanilla/item/emerald.png" alt="">48</span>
+            <span class="c7">1h</span>
+            <div class="btn" data-message="<yellow>Demo:</yellow> <gray>Timber Axe costs 48 emeralds. Nothing purchased.">Buy</div>
+            <div class="tooltip"><div>
+              <div class="ce">Timber Axe</div>
+              <div class="c7">Iron Axe</div>
+              <div class="gap"></div>
+              <div class="c7">Efficiency III</div>
+              <div class="c7">Unbreaking II</div>
+              <div class="gap"></div>
+              <div class="ce">Buy now: 48 emeralds</div>
+            </div></div>
+          </div>
+
+          <div class="listing tools" style="--price:1;--ending:3;--newest:1">
+            <div class="item">
+              <span class="slot"><img src="vanilla/item/shears.png" alt=""></span>
+              <span class="item-copy">
+                <span class="cf">Shears</span>
+                <span class="sale c7">Buy now</span>
+              </span>
+            </div>
+            <span class="c7">Grumm</span>
+            <span class="cost ca"><img class="emerald" src="vanilla/item/emerald.png" alt="">12</span>
+            <span class="c7">4h</span>
+            <div class="btn" data-message="<yellow>Demo:</yellow> <gray>Shears cost 12 emeralds. Nothing purchased.">Buy</div>
+            <div class="tooltip"><div>
+              <div class="cf">Shears</div>
+              <div class="c7">Full durability</div>
+              <div class="gap"></div>
+              <div class="ce">Buy now: 12 emeralds</div>
+            </div></div>
+          </div>
+
+          <div class="listing blocks" style="--price:2;--ending:1;--newest:2">
+            <div class="item">
+              <span class="slot"><img src="vanilla/block/bricks.png" alt=""><span class="n">64</span></span>
+              <span class="item-copy">
+                <span class="cf">Bricks</span>
+                <span class="sale c7">Buy stack</span>
+              </span>
+            </div>
+            <span class="c7">Alex</span>
+            <span class="cost ca"><img class="emerald" src="vanilla/item/emerald.png" alt="">24</span>
+            <span class="ce">12m</span>
+            <div class="btn" data-message="<yellow>Demo:</yellow> <gray>64 Bricks cost 24 emeralds. Nothing purchased.">Buy</div>
+            <div class="tooltip"><div>
+              <div class="cf">Bricks ×64</div>
+              <div class="c7">Price is for all 64 blocks.</div>
+              <div class="gap"></div>
+              <div class="ce">Buy now: 24 emeralds</div>
+            </div></div>
+          </div>
+
+          <div class="listing blocks" style="--price:1;--ending:3;--newest:1">
+            <div class="item">
+              <span class="slot"><img src="vanilla/block/oak_log.png" alt=""><span class="n">64</span></span>
+              <span class="item-copy">
+                <span class="cf">Oak Logs</span>
+                <span class="sale c7">Buy stack</span>
+              </span>
+            </div>
+            <span class="c7">Steve</span>
+            <span class="cost ca"><img class="emerald" src="vanilla/item/emerald.png" alt="">16</span>
+            <span class="c7">6h</span>
+            <div class="btn" data-message="<yellow>Demo:</yellow> <gray>64 Oak Logs cost 16 emeralds. Nothing purchased.">Buy</div>
+            <div class="tooltip"><div>
+              <div class="cf">Oak Log ×64</div>
+              <div class="c7">Price is for all 64 blocks.</div>
+              <div class="gap"></div>
+              <div class="ce">Buy now: 16 emeralds</div>
+            </div></div>
+          </div>
+
+          <div class="listing blocks" style="--price:3;--ending:2;--newest:3">
+            <div class="item">
+              <span class="slot"><img src="vanilla/block/sea_lantern.png" alt=""><span class="n">32</span></span>
+              <span class="item-copy">
+                <span class="cf">Sea Lanterns</span>
+                <span class="sale c7">Buy stack</span>
+              </span>
+            </div>
+            <span class="c7">Notch</span>
+            <span class="cost ca"><img class="emerald" src="vanilla/item/emerald.png" alt="">80</span>
+            <span class="c7">2h</span>
+            <div class="btn" data-message="<yellow>Demo:</yellow> <gray>32 Sea Lanterns cost 80 emeralds. Nothing purchased.">Buy</div>
+            <div class="tooltip"><div>
+              <div class="cf">Sea Lantern ×32</div>
+              <div class="c7">Price is for all 32 blocks.</div>
+              <div class="gap"></div>
+              <div class="ce">Buy now: 80 emeralds</div>
+            </div></div>
+          </div>
+
+          <div class="listing food" style="--price:1;--ending:1;--newest:3">
+            <div class="item">
+              <span class="slot"><img src="vanilla/item/bread.png" alt=""><span class="n">32</span></span>
+              <span class="item-copy">
+                <span class="cf">Bread</span>
+                <span class="sale c7">Buy stack</span>
+              </span>
+            </div>
+            <span class="c7">Grumm</span>
+            <span class="cost ca"><img class="emerald" src="vanilla/item/emerald.png" alt="">8</span>
+            <span class="ce">6m</span>
+            <div class="btn" data-message="<yellow>Demo:</yellow> <gray>32 Bread cost 8 emeralds. Nothing purchased.">Buy</div>
+            <div class="tooltip"><div>
+              <div class="cf">Bread ×32</div>
+              <div class="c7">Price is for all 32 items.</div>
+              <div class="gap"></div>
+              <div class="ce">Buy now: 8 emeralds</div>
+            </div></div>
+          </div>
+
+          <div class="listing food" style="--price:2;--ending:3;--newest:1">
+            <div class="item">
+              <span class="slot"><img src="vanilla/item/cooked_beef.png" alt=""><span class="n">64</span></span>
+              <span class="item-copy">
+                <span class="cf">Steak</span>
+                <span class="sale c7">Buy stack</span>
+              </span>
+            </div>
+            <span class="c7">Alex</span>
+            <span class="cost ca"><img class="emerald" src="vanilla/item/emerald.png" alt="">32</span>
+            <span class="c7">5h</span>
+            <div class="btn" data-message="<yellow>Demo:</yellow> <gray>64 Steak cost 32 emeralds. Nothing purchased.">Buy</div>
+            <div class="tooltip"><div>
+              <div class="cf">Steak ×64</div>
+              <div class="c7">Price is for all 64 items.</div>
+              <div class="gap"></div>
+              <div class="ce">Buy now: 32 emeralds</div>
+            </div></div>
+          </div>
+
+          <div class="listing food" style="--price:3;--ending:2;--newest:2">
+            <div class="item">
+              <span class="slot"><img src="vanilla/item/golden_apple.png" alt=""><span class="n">8</span></span>
+              <span class="item-copy">
+                <span class="cb">Golden Apples</span>
+                <span class="sale c7">Buy stack</span>
+              </span>
+            </div>
+            <span class="c7">jeb_</span>
+            <span class="cost ca"><img class="emerald" src="vanilla/item/emerald.png" alt="">64</span>
+            <span class="c7">1h</span>
+            <div class="btn" data-message="<yellow>Demo:</yellow> <gray>8 Golden Apples cost 64 emeralds. Nothing purchased.">Buy</div>
+            <div class="tooltip"><div>
+              <div class="cb">Golden Apple ×8</div>
+              <div class="c7">Regeneration II (0:05)</div>
+              <div class="c7">Absorption (2:00)</div>
+              <div class="gap"></div>
+              <div class="c7">Price is for all 8 items.</div>
+              <div class="ce">Buy now: 64 emeralds</div>
+            </div></div>
+          </div>
+
+          <div class="listing rare" style="--price:3;--ending:1;--newest:3">
+            <div class="item">
+              <span class="slot"><img src="vanilla/item/elytra.png" alt=""></span>
+              <span class="item-copy">
+                <span class="cd">Sky Wings</span>
+                <span class="sale c7">Next bid</span>
+              </span>
+            </div>
+            <span class="c7">Searge</span>
+            <span class="cost ca"><img class="emerald" src="vanilla/item/emerald.png" alt="">960</span>
+            <span class="cc">3m</span>
+            <div class="btn" data-message="<yellow>Demo:</yellow> <gray>Next bid: 960 emeralds for Sky Wings. No funds moved.">Bid</div>
+            <div class="tooltip"><div>
+              <div class="cd">Sky Wings</div>
+              <div class="c7">Elytra</div>
+              <div class="gap"></div>
+              <div class="c7">Unbreaking III</div>
+              <div class="c7">Mending</div>
+              <div class="gap"></div>
+              <div class="ce">Next bid: 960 emeralds</div>
+            </div></div>
+          </div>
+
+          <div class="listing rare" style="--price:2;--ending:2;--newest:2">
+            <div class="item">
+              <span class="slot"><img src="vanilla/item/nether_star.png" alt=""></span>
+              <span class="item-copy">
+                <span class="ce">Nether Star</span>
+                <span class="sale c7">Buy now</span>
+              </span>
+            </div>
+            <span class="c7">Notch</span>
+            <span class="cost ca"><img class="emerald" src="vanilla/item/emerald.png" alt="">480</span>
+            <span class="c7">2h</span>
+            <div class="btn" data-message="<yellow>Demo:</yellow> <gray>Nether Star costs 480 emeralds. Nothing purchased.">Buy</div>
+            <div class="tooltip"><div>
+              <div class="ce">Nether Star</div>
+              <div class="c7">Beacon crafting ingredient</div>
+              <div class="gap"></div>
+              <div class="ce">Buy now: 480 emeralds</div>
+            </div></div>
+          </div>
+
+          <div class="listing rare" style="--price:1;--ending:3;--newest:1">
+            <div class="item">
+              <span class="slot"><img src="vanilla/item/enchanted_book.png" alt=""></span>
+              <span class="item-copy">
+                <span class="ce">Mending Book</span>
+                <span class="sale c7">Buy now</span>
+              </span>
+            </div>
+            <span class="c7">Grumm</span>
+            <span class="cost ca"><img class="emerald" src="vanilla/item/emerald.png" alt="">120</span>
+            <span class="c7">8h</span>
+            <div class="btn" data-message="<yellow>Demo:</yellow> <gray>Mending Book costs 120 emeralds. Nothing purchased.">Buy</div>
+            <div class="tooltip"><div>
+              <div class="ce">Enchanted Book</div>
+              <div class="c7">Mending</div>
+              <div class="gap"></div>
+              <div class="ce">Buy now: 120 emeralds</div>
+            </div></div>
+          </div>
+        </div>
+      </div>
+
+      <section class="bids inset">
+        <div class="bids-heading">
+          <h2 class="cf">Your bids · 1</h2>
+          <span class="c7">Demo funds &amp; timers</span>
+        </div>
+        <div class="bid-row">
+          <div class="bid-name">
+            <span class="slot"><img src="vanilla/item/diamond_boots.png" alt=""></span>
+            <div>
+              <div class="cb">Trail Boots</div>
+              <div class="caption c7">Your bid</div>
+            </div>
+            <div class="tooltip"><div>
+              <div class="cb">Trail Boots</div>
+              <div class="c7">Diamond Boots</div>
+              <div class="gap"></div>
+              <div class="c7">Protection IV</div>
+              <div class="c7">Feather Falling IV</div>
+              <div class="gap"></div>
+              <div class="ca">Leading: 160 emeralds</div>
+              <div class="c7">Reserved from your balance</div>
+            </div></div>
+          </div>
+          <span class="cost ca">
+            <img class="emerald" src="vanilla/item/emerald.png" alt="">160
+          </span>
+          <span class="ca">Leading</span>
+          <span class="c7">24m</span>
+          <div class="btn" data-message="<gold>{player}'s bids</gold><newline><aqua>Trail Boots</aqua><newline><gray>Protection IV</gray><newline><gray>Feather Falling IV</gray><newline><green>Leading with 160 emeralds reserved.</green><newline><yellow>Demo: funds and timers are sample data.</yellow>">Details</div>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <span class="c7">Hover for details. Prices are per lot.</span>
+    <div class="btn" data-action="close">Done</div>
+  </footer>
+</div>
+</body>
+</html>

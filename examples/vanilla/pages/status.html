@@ -1,0 +1,435 @@
+<!--
+  A redstone status board centred at 1024 x 576 and 1024 x 640.
+  Counts and viewer names use live placeholders; telemetry and history are samples.
+  Hover lamps, bars or paper for notes; Refresh reloads and Report sends demo chat.
+  Green-tinted vanilla torches mark clean restarts; red torches mark incidents.
+  For production, connect monitored values, matching meter fills and real history.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="ui:height" content="576">
+<meta name="ui:refresh" content="5">
+<title>Server Status</title>
+<link rel="stylesheet" href="vanilla.css">
+<style>
+  body {
+    background: #232323 url(vanilla/block/deepslate_tiles.png) repeat;
+    background-size: 32px 32px;
+  }
+  .dim { background: rgba(0,0,0,.58); }
+  .screen {
+    position: relative;
+    width: 1024px;
+    height: 100%;
+    min-height: 576px;
+    margin: auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .board { width: 944px; height: 536px; padding: 16px; }
+  h1, h2, p {
+    margin: 0;
+    font-size: 16px;
+    line-height: 18px;
+    font-weight: normal;
+  }
+  .item, .torch { width: 32px; height: 32px; flex: none; }
+  .healthy { filter: hue-rotate(85deg); }
+  .heading {
+    height: 40px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .heading h1 { color: #303030; }
+  .subtitle { color: #555; margin-top: 4px; }
+  .signal {
+    margin-left: auto;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 2px 10px;
+    background: #242424;
+    border: 2px solid;
+    border-color: #555 #fff #fff #555;
+    white-space: nowrap;
+  }
+  .metrics {
+    display: grid;
+    grid-template-columns: 552px 344px;
+    gap: 12px;
+    height: 244px;
+    margin-top: 12px;
+  }
+  .inset {
+    background: #242424;
+    color: #fff;
+    border: 2px solid;
+    border-color: #555 #fff #fff #555;
+  }
+  .machine {
+    padding: 12px;
+    background:
+      linear-gradient(rgba(0,0,0,.88),rgba(0,0,0,.88)),
+      url(vanilla/block/stone_bricks.png) repeat;
+    background-size: 32px 32px, 32px 32px;
+  }
+  .meter-title {
+    display: flex;
+    justify-content: space-between;
+    height: 18px;
+    margin-bottom: 6px;
+    white-space: nowrap;
+  }
+  .tps-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    height: 54px;
+  }
+  .lamp-meter { position: relative; width: 376px; }
+  .lamps { display: flex; gap: 6px; }
+  .lamps img { width: 32px; height: 32px; flex: none; }
+  .lamp-caption {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 4px;
+    white-space: nowrap;
+  }
+  .circuit {
+    width: 112px;
+    height: 52px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    background: url(vanilla/block/smooth_stone.png) repeat;
+    background-size: 32px 32px;
+    border: 2px solid #171717;
+    box-shadow: inset 2px 2px #999, inset -2px -2px #444;
+  }
+  .resources {
+    margin-top: 8px;
+    border-top: 2px solid #555;
+    padding-top: 8px;
+  }
+  .resource {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    height: 54px;
+  }
+  .resource + .resource { margin-top: 6px; }
+  .resource-name { width: 128px; flex: none; }
+  .bar-unit { position: relative; width: 384px; flex: none; }
+  .bar-label {
+    display: flex;
+    justify-content: space-between;
+    height: 18px;
+    margin-bottom: 4px;
+    white-space: nowrap;
+  }
+  .blockbar {
+    position: relative;
+    width: 384px;
+    height: 32px;
+    background: url(vanilla/block/coal_block.png) repeat-x;
+    background-size: 32px 32px;
+    box-shadow: 0 0 0 2px #777;
+  }
+  .blockbar::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image: linear-gradient(
+      to right,
+      transparent 0,
+      transparent 30px,
+      #555 30px,
+      #555 32px
+    );
+    background-size: 32px 32px;
+    box-shadow: inset 0 2px #555, inset 0 -2px #555;
+  }
+  .fill {
+    height: 32px;
+    background-size: 32px 32px;
+    background-repeat: repeat-x;
+  }
+  .memory {
+    width: 224px;
+    background-image: url(vanilla/block/emerald_block.png);
+  }
+  .cpu {
+    width: 96px;
+    background-image: url(vanilla/block/redstone_block.png);
+  }
+  .tooltip { left: 0; bottom: 60px; }
+  .lamp-meter:hover .tooltip,
+  .bar-unit:hover .tooltip,
+  .slot:hover .tooltip { display: block; }
+
+  .players { padding: 12px; }
+  .players h2 { margin-bottom: 10px; }
+  .player-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    height: 38px;
+    margin-bottom: 6px;
+  }
+  /* Generic 8-by-8 pixel faces, not claimed to be player skins. */
+  .head {
+    position: relative;
+    display: block;
+    width: 32px;
+    height: 32px;
+    flex: none;
+    background: #ac805d;
+    border-top: 8px solid #493326;
+    box-shadow: inset 4px 0 #76513a, inset -4px 0 #76513a;
+  }
+  .head::before {
+    content: "";
+    position: absolute;
+    left: 4px;
+    top: 8px;
+    width: 4px;
+    height: 4px;
+    background: #deded0;
+    box-shadow: 4px 0 #525285, 16px 0 #deded0, 20px 0 #525285;
+  }
+  .head::after {
+    content: "";
+    position: absolute;
+    left: 12px;
+    top: 16px;
+    width: 8px;
+    height: 4px;
+    background: #59372c;
+  }
+  .head.capacity { filter: grayscale(1); }
+  .head.you { background: #c59167; border-top-color: #a65a2e; }
+  .player-copy { min-width: 0; }
+  .player-copy > div { white-space: nowrap; }
+  .player-copy .c7 { margin-bottom: 2px; }
+  .uptime {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    border-top: 2px solid #555;
+    padding-top: 6px;
+    margin-top: 6px;
+  }
+  .uptime-copy > div { white-space: nowrap; }
+
+  .log { margin-top: 12px; height: 138px; padding: 6px 12px; }
+  .log-title {
+    height: 20px;
+    display: flex;
+    justify-content: space-between;
+    white-space: nowrap;
+  }
+  .incident {
+    height: 34px;
+    display: grid;
+    grid-template-columns: 32px 146px 1fr 160px;
+    gap: 10px;
+    align-items: center;
+    border-top: 2px solid #363636;
+    white-space: nowrap;
+  }
+  .incident .result { text-align: right; }
+  .footer {
+    height: 40px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 12px;
+  }
+  .footer-note {
+    margin-right: auto;
+    color: #555;
+    white-space: nowrap;
+    line-height: 18px;
+  }
+  .footer .btn { width: 200px; flex: none; }
+  .slot { flex: none; }
+  .slot .tooltip { left: 0; bottom: 44px; }
+</style>
+</head>
+<body>
+<div class="dim"></div>
+<main class="screen">
+  <section class="panel board">
+    <header class="heading">
+      <img class="item" src="vanilla/item/redstone.png" alt="">
+      <div>
+        <h1>Server Status</h1>
+        <div class="subtitle">Redstone control board</div>
+      </div>
+      <div class="signal">
+        <img class="torch healthy" src="vanilla/block/redstone_torch.png" alt="">
+        <span class="c7">Sample:</span>
+        <span class="ca">Healthy</span>
+      </div>
+    </header>
+
+    <div class="metrics">
+      <section class="inset machine">
+        <div class="meter-title">
+          <h2 class="t">Tick signal</h2>
+          <span class="ca">19.8 / 20 TPS</span>
+        </div>
+        <div class="tps-row">
+          <div class="lamp-meter">
+            <div class="lamps">
+              <img src="vanilla/block/redstone_lamp_on.png" alt="2 TPS reached">
+              <img src="vanilla/block/redstone_lamp_on.png" alt="4 TPS reached">
+              <img src="vanilla/block/redstone_lamp_on.png" alt="6 TPS reached">
+              <img src="vanilla/block/redstone_lamp_on.png" alt="8 TPS reached">
+              <img src="vanilla/block/redstone_lamp_on.png" alt="10 TPS reached">
+              <img src="vanilla/block/redstone_lamp_on.png" alt="12 TPS reached">
+              <img src="vanilla/block/redstone_lamp_on.png" alt="14 TPS reached">
+              <img src="vanilla/block/redstone_lamp_on.png" alt="16 TPS reached">
+              <img src="vanilla/block/redstone_lamp_on.png" alt="18 TPS reached">
+              <img src="vanilla/block/redstone_lamp.png" alt="20 TPS not reached">
+            </div>
+            <div class="lamp-caption c7">
+              <span>2 TPS / lamp</span><span>Sample</span>
+            </div>
+            <div class="tooltip">
+              <div class="cf">One lamp per full 2 TPS.</div>
+              <div class="c7">Last lamp lights at 20.</div>
+              <div class="ca">19.8 TPS: healthy sample</div>
+            </div>
+          </div>
+          <div class="circuit">
+            <img class="item" src="vanilla/block/comparator_on.png" alt="Comparator decoration">
+            <img class="item" src="vanilla/block/repeater_on.png" alt="Repeater decoration">
+          </div>
+        </div>
+
+        <div class="resources">
+          <div class="resource">
+            <span class="resource-name t">Memory</span>
+            <div class="bar-unit">
+              <div class="bar-label">
+                <span class="cf">3.5 / 6 GB</span>
+                <span class="ca">58%</span>
+              </div>
+              <div class="blockbar"><div class="fill memory"></div></div>
+              <div class="tooltip">
+                <div class="cf">Heap usage / sample</div>
+                <div class="c7">Each block = 0.5 GB</div>
+                <div class="ca">7 used / 5 free</div>
+              </div>
+            </div>
+          </div>
+          <div class="resource">
+            <span class="resource-name t">CPU</span>
+            <div class="bar-unit">
+              <div class="bar-label">
+                <span class="cf">Process load</span>
+                <span class="ca">25%</span>
+              </div>
+              <div class="blockbar"><div class="fill cpu"></div></div>
+              <div class="tooltip">
+                <div class="cf">CPU usage / sample</div>
+                <div class="c7">3 of 12 blocks used</div>
+                <div class="c7">Red = load, not an alarm.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="inset players">
+        <h2 class="t">Player connections</h2>
+        <div class="player-row">
+          <span class="head" aria-hidden="true"></span>
+          <div class="player-copy">
+            <div class="c7">Online / slots</div>
+            <div class="ca">{online}/{max}</div>
+          </div>
+        </div>
+        <div class="player-row">
+          <span class="head capacity" aria-hidden="true"></span>
+          <div class="player-copy">
+            <div class="c7">Server capacity</div>
+            <div class="cf">{max} players</div>
+          </div>
+        </div>
+        <div class="player-row">
+          <span class="head you" aria-hidden="true"></span>
+          <div class="player-copy">
+            <div class="c7">Viewing as</div>
+            <div class="cf">{player}</div>
+          </div>
+        </div>
+        <div class="uptime">
+          <img class="item" src="vanilla/item/clock_00.png" alt="">
+          <div class="uptime-copy">
+            <div class="c7">Uptime / sample</div>
+            <div class="cf">2d 14h 08m</div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <section class="inset log">
+      <div class="log-title">
+        <h2 class="t">Restart &amp; incident log</h2>
+        <span class="c7">Sample history</span>
+      </div>
+      <div class="incident">
+        <img class="torch healthy" src="vanilla/block/redstone_torch.png" alt="Clean restart">
+        <span class="c7">2d 14h ago</span>
+        <span class="cf">Scheduled restart</span>
+        <span class="result ca">Back in 18s</span>
+      </div>
+      <div class="incident">
+        <img class="torch" src="vanilla/block/redstone_torch.png" alt="Incident">
+        <span class="c7">3d 06h ago</span>
+        <span class="cf">Watchdog restart</span>
+        <span class="result cc">Down 1m 12s</span>
+      </div>
+      <div class="incident">
+        <img class="torch healthy" src="vanilla/block/redstone_torch.png" alt="Clean restart">
+        <span class="c7">4d 14h ago</span>
+        <span class="cf">Maintenance complete</span>
+        <span class="result ca">Back in 24s</span>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <div class="slot">
+        <img src="vanilla/item/paper.png" alt="Reading notes">
+        <div class="tooltip">
+          <div class="cf">Counts refresh every 5s.</div>
+          <div class="c7">Meters, uptime and history</div>
+          <div class="c7">are sample readings.</div>
+          <div class="gap"></div>
+          <div class="c7">Faces are generic symbols,</div>
+          <div class="c7">not connected player skins.</div>
+          <div class="gap"></div>
+          <div class="ca">Green torch: clean restart</div>
+          <div class="cc">Red torch: incident</div>
+        </div>
+      </div>
+      <div class="footer-note">
+        <div>Green: clean</div>
+        <div>Red: incident</div>
+      </div>
+      <div class="btn" data-action="reload">Refresh</div>
+      <div class="btn" data-message="<gold>Status demo:</gold> <gray>{online}/{max} players online. TPS, CPU, memory, uptime and restart history are sample readings.">Report</div>
+      <div class="btn" data-action="close">Done</div>
+    </footer>
+  </section>
+</main>
+</body>
+</html>

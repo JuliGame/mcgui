@@ -1,0 +1,604 @@
+<!--
+  A sample claim manager with a parchment chunk survey and ownership-coloured banners.
+  Select a banner or expansion marker; hidden checkboxes preview the four claim flags.
+  Lever widgets combine the catalogue's lever texture with a stone base and two handle angles.
+  Claim, Unclaim and Remove send demo messages only. Connect your claims plugin for persistence,
+  permission checks, real chunk coordinates, terrain, player position and claim allowance.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="ui:height" content="576">
+<meta name="ui:refresh" content="5">
+<title>Land Claims</title>
+<link rel="stylesheet" href="vanilla.css">
+<style>
+  .screen {
+    position: relative;
+    width: 1024px;
+    height: 576px;
+    margin: 0 auto;
+  }
+  .panorama { background-size: 1072px 624px; }
+  .dim { background: rgba(0,0,0,.62); }
+  h1, h2, p { margin: 0; font-size: 16px; line-height: 18px; font-weight: normal; }
+
+  .heading {
+    position: absolute;
+    top: 12px;
+    left: 32px;
+    right: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .heading h1 { display: flex; align-items: center; gap: 10px; }
+  .item { width: 32px; height: 32px; flex: none; }
+  .boards {
+    position: absolute;
+    top: 56px;
+    left: 32px;
+    display: flex;
+    gap: 16px;
+  }
+
+  .map-panel { width: 512px; height: 464px; padding: 14px; }
+  .map-heading {
+    height: 18px;
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 16px;
+  }
+  .map {
+    position: relative;
+    width: 480px;
+    height: 336px;
+    background: #dec998;
+    box-shadow: 0 0 0 2px #675234, 0 0 0 4px #f3e4ba;
+  }
+  .paper-grain {
+    position: absolute;
+    inset: 0;
+    background: url(vanilla/block/sand.png) 0 0 / 32px 32px;
+    opacity: .16;
+  }
+  .woods, .grove, .ridge, .water, .road { position: absolute; }
+  .woods {
+    left: 0; top: 0; width: 240px; height: 144px;
+    background: #859865; opacity: .38;
+  }
+  .grove {
+    left: 288px; top: 192px; width: 192px; height: 144px;
+    background: #859865; opacity: .32;
+  }
+  .ridge {
+    left: 336px; top: 0; width: 144px; height: 96px;
+    background: url(vanilla/block/stone.png) 0 0 / 32px 32px;
+    opacity: .16;
+  }
+  .water { background: #88a6af; opacity: .85; }
+  .water.a { left: 240px; top: 0; width: 48px; height: 192px; }
+  .water.b { left: 192px; top: 144px; width: 48px; height: 48px; }
+  .water.c { left: 192px; top: 192px; width: 48px; height: 144px; }
+  .road { left: 0; top: 286px; width: 480px; height: 10px; background: #b49a69; }
+  .bridge {
+    position: absolute; left: 190px; top: 280px; width: 52px; height: 22px;
+    background: url(vanilla/block/oak_planks.png) 0 0 / 32px 32px;
+    border-top: 2px solid #705330;
+    border-bottom: 2px solid #705330;
+  }
+  .grid-lines {
+    position: absolute;
+    inset: 0;
+    background-image:
+      linear-gradient(to right, rgba(91,71,38,.22) 2px, transparent 2px),
+      linear-gradient(to bottom, rgba(91,71,38,.22) 2px, transparent 2px);
+    background-size: 48px 48px, 48px 48px;
+    border-right: 2px solid rgba(91,71,38,.22);
+    border-bottom: 2px solid rgba(91,71,38,.22);
+  }
+  .paper-edge {
+    position: absolute;
+    inset: 0;
+    box-shadow: inset 4px 4px 0 rgba(255,245,205,.28),
+                inset -4px -4px 0 rgba(113,82,38,.18);
+  }
+  .map-label {
+    position: absolute;
+    color: #55482d;
+    white-space: nowrap;
+  }
+  .label-home { left: 48px; top: 22px; }
+  .label-other { left: 330px; top: 248px; }
+  .label-road { left: 16px; top: 310px; }
+  .landmark {
+    position: absolute;
+    left: 36px;
+    top: 218px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #675638;
+  }
+  .landmark img { width: 16px; height: 16px; }
+
+  .plots {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    grid-template-columns: repeat(10,48px);
+    grid-template-rows: repeat(7,48px);
+  }
+  .cell {
+    position: relative;
+    width: 48px;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    border: 2px solid rgba(78,59,34,.26);
+  }
+  .cell.home { background: rgba(137,50,184,.48); }
+  .cell.other { background: rgba(76,116,32,.52); }
+  .cell.target { background: rgba(255,240,187,.45); }
+  .cell img { width: 16px; height: 16px; flex: none; }
+  .cell:hover { border-color: #fff; z-index: 4; }
+  #home:checked ~ .screen .cell.home,
+  #other:checked ~ .screen .cell.other,
+  #wild:checked ~ .screen .cell.target {
+    box-shadow: inset 0 0 0 2px #ffe28a;
+  }
+  .cell.current::after {
+    content: "";
+    position: absolute;
+    inset: 4px;
+    border: 2px solid #fff;
+    box-shadow: 0 0 0 2px #493d2d;
+  }
+  .cell .tooltip { left: -2px; bottom: 54px; }
+  .cell.other .tooltip { left: auto; right: -2px; }
+  .cell:hover .tooltip { display: block; }
+
+  .legend {
+    height: 18px;
+    margin-top: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .legend span { display: flex; align-items: center; gap: 6px; }
+  .legend img { width: 16px; height: 16px; }
+  .outline {
+    width: 16px; height: 16px;
+    border: 2px solid #fff;
+    background: #887f6d;
+    box-shadow: 0 0 0 2px #716957;
+  }
+  .map-help {
+    margin-top: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #555;
+  }
+  .map-help img { width: 16px; height: 16px; }
+
+  .side { position: relative; width: 432px; height: 464px; padding: 0; }
+  .view { display: none; position: absolute; inset: 0; }
+  #home:checked ~ .screen .view-home,
+  #other:checked ~ .screen .view-other,
+  #wild:checked ~ .screen .view-wild { display: block; }
+
+  .claim-title {
+    position: absolute;
+    top: 14px; left: 18px; right: 18px;
+    height: 18px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .claim-title img { width: 16px; height: 16px; }
+  .owner { position: absolute; top: 38px; left: 18px; right: 18px; white-space: nowrap; }
+  .size {
+    position: absolute; top: 62px; left: 18px; right: 18px;
+    height: 26px; border-bottom: 2px solid #909090;
+    white-space: nowrap;
+  }
+  .trust { position: absolute; top: 96px; left: 18px; right: 18px; }
+  .trust h2 { margin-bottom: 4px; }
+  .trusted {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    height: 40px;
+  }
+  .trusted + .trusted { margin-top: 2px; }
+  .remove { position: relative; width: 100px; height: 40px; }
+  .remove .tooltip { right: 0; bottom: 44px; }
+  .remove:hover .tooltip { display: block; }
+
+  .flags { position: absolute; top: 208px; left: 18px; right: 18px; }
+  .flags h2 { margin-bottom: 4px; }
+  .flag {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 38px;
+  }
+  .flag > span { white-space: nowrap; }
+  .switch {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100px;
+    height: 36px;
+    cursor: pointer;
+  }
+  .lever {
+    position: relative;
+    width: 36px;
+    height: 36px;
+    flex: none;
+    background: #8b8b8b;
+    box-shadow: inset 2px 2px 0 #373737, inset -2px -2px 0 #fff;
+  }
+  /* The catalogue supplies a model texture, not separate GUI lever states. */
+  .lever::before {
+    content: "";
+    position: absolute;
+    left: 8px; top: 22px;
+    width: 20px; height: 10px;
+    background: url(vanilla/block/cobblestone.png) 0 0 / 32px 32px;
+    border: 2px solid #505050;
+    box-shadow: 0 2px 0 #373737;
+  }
+  .lever img {
+    position: absolute;
+    top: 0; left: 2px;
+    width: 32px; height: 32px;
+    transform-origin: 16px 26px;
+    transform: rotate(-35deg);
+  }
+  .switch:hover .lever { box-shadow: inset 0 0 0 2px #fff; }
+  .state {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 56px;
+    height: 28px;
+    background: #333;
+    border: 2px solid #202020;
+  }
+  .on { display: none; }
+  #pvp:checked ~ .screen .pvp .lever img,
+  #mobs:checked ~ .screen .mobs .lever img,
+  #blast:checked ~ .screen .blast .lever img,
+  #fire:checked ~ .screen .fire .lever img,
+  .fixed-on .lever img { transform: rotate(35deg); }
+
+  #pvp:checked ~ .screen .pvp .on,
+  #mobs:checked ~ .screen .mobs .on,
+  #blast:checked ~ .screen .blast .on,
+  #fire:checked ~ .screen .fire .on { display: inline; }
+
+  #pvp:checked ~ .screen .pvp .off-text,
+  #mobs:checked ~ .screen .mobs .off-text,
+  #blast:checked ~ .screen .blast .off-text,
+  #fire:checked ~ .screen .fire .off-text { display: none; }
+
+  .flag-note {
+    position: absolute;
+    top: 386px; left: 18px; right: 18px;
+    color: #555;
+  }
+  .actions {
+    position: absolute;
+    left: 18px; right: 18px; bottom: 12px;
+    height: 40px;
+    display: flex; gap: 8px;
+  }
+  .actions .btn { flex: 1; width: 192px; }
+
+  .inset {
+    position: absolute;
+    top: 104px; left: 18px; right: 18px;
+    padding: 14px;
+    background: #45433c;
+    box-shadow: inset 2px 2px 0 #29271f, inset -2px -2px 0 #fff;
+  }
+  .inset p + p { margin-top: 12px; }
+  .supply {
+    position: absolute;
+    top: 268px; left: 18px; right: 18px;
+    display: flex; align-items: center; gap: 12px;
+  }
+  .supply .slot { flex: none; }
+  .supply .tooltip { left: 0; bottom: 42px; }
+  .supply .slot:hover .tooltip { display: block; }
+  .wild-note {
+    position: absolute;
+    top: 328px; left: 18px; right: 18px;
+    line-height: 22px;
+  }
+  .view-other .flags { top: 174px; }
+  .read-only .switch { cursor: default; }
+  .read-only .switch:hover .lever {
+    box-shadow: inset 2px 2px 0 #373737, inset -2px -2px 0 #fff;
+  }
+  .other-note {
+    position: absolute;
+    top: 364px; left: 18px; right: 18px;
+    color: #555;
+  }
+  .bottom {
+    position: absolute;
+    top: 528px; left: 32px; right: 32px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .bottom .buttons { display: flex; gap: 8px; }
+  .bottom .btn { width: 148px; }
+</style>
+</head>
+<body>
+<input class="pick" type="radio" name="claim" id="home" checked>
+<input class="pick" type="radio" name="claim" id="wild">
+<input class="pick" type="radio" name="claim" id="other">
+<input class="pick" type="checkbox" id="pvp">
+<input class="pick" type="checkbox" id="mobs" checked>
+<input class="pick" type="checkbox" id="blast">
+<input class="pick" type="checkbox" id="fire">
+
+<div class="screen">
+  <div class="panorama"></div>
+  <div class="dim"></div>
+
+  <header class="heading">
+    <h1 class="t"><img class="item" src="vanilla/item/filled_map.png" alt="">Land Claims</h1>
+    <span class="c7">Position: <span class="cf">{x}, {z}</span></span>
+  </header>
+
+  <main class="boards">
+    <section class="panel map-panel">
+      <div class="map-heading">
+        <span>Chunk survey</span>
+        <span>16 x 16 blocks</span>
+      </div>
+
+      <div class="map" aria-label="Sample chunk map. Select a banner or the red expansion marker.">
+        <div class="paper-grain"></div>
+        <div class="woods"></div>
+        <div class="grove"></div>
+        <div class="ridge"></div>
+        <div class="water a"></div>
+        <div class="water b"></div>
+        <div class="water c"></div>
+        <div class="road"></div>
+        <div class="bridge"></div>
+        <div class="grid-lines"></div>
+        <div class="paper-edge"></div>
+        <span class="map-label label-home">Birchstead</span>
+        <span class="map-label label-other">Mossbank</span>
+        <span class="map-label label-road">Old road</span>
+        <span class="landmark">
+          <img src="vanilla/map/decorations/plains_village.png" alt="">
+          Mill
+        </span>
+
+        <div class="plots">
+          <label class="cell home" for="home" style="grid-column:2;grid-row:2" aria-label="Select Birchstead">
+            <img src="vanilla/map/decorations/purple_banner.png" alt="">
+            <span class="tooltip"><div class="cd">Birchstead</div><div class="c7">Your claim • 6 chunks</div></span>
+          </label>
+          <label class="cell home" for="home" style="grid-column:3;grid-row:2" aria-label="Select Birchstead">
+            <img src="vanilla/map/decorations/purple_banner.png" alt="">
+          </label>
+          <label class="cell home" for="home" style="grid-column:4;grid-row:2" aria-label="Select Birchstead">
+            <img src="vanilla/map/decorations/purple_banner.png" alt="">
+          </label>
+          <label class="cell home" for="home" style="grid-column:2;grid-row:3" aria-label="Select Birchstead">
+            <img src="vanilla/map/decorations/purple_banner.png" alt="">
+          </label>
+          <label class="cell home current" for="home" style="grid-column:3;grid-row:3" aria-label="Your sample chunk in Birchstead">
+            <img src="vanilla/map/decorations/purple_banner.png" alt="">
+            <span class="tooltip">
+              <div class="cf">You are here</div>
+              <div class="cd">Birchstead</div>
+              <div class="c7">Sample player position</div>
+            </span>
+          </label>
+          <label class="cell home" for="home" style="grid-column:4;grid-row:3" aria-label="Select Birchstead">
+            <img src="vanilla/map/decorations/purple_banner.png" alt="">
+          </label>
+          <label class="cell target" for="wild" style="grid-column:5;grid-row:3" aria-label="Select expansion chunk">
+            <img src="vanilla/map/decorations/target_point.png" alt="">
+            <span class="tooltip">
+              <div class="ce">Expansion chunk</div>
+              <div class="c7">Unclaimed • 16 x 16</div>
+            </span>
+          </label>
+          <label class="cell other" for="other" style="grid-column:8;grid-row:4" aria-label="Select Mossbank">
+            <img src="vanilla/map/decorations/green_banner.png" alt="">
+            <span class="tooltip"><div class="ca">Mossbank</div><div class="c7">Fern • 4 chunks</div></span>
+          </label>
+          <label class="cell other" for="other" style="grid-column:9;grid-row:4" aria-label="Select Mossbank">
+            <img src="vanilla/map/decorations/green_banner.png" alt="">
+          </label>
+          <label class="cell other" for="other" style="grid-column:8;grid-row:5" aria-label="Select Mossbank">
+            <img src="vanilla/map/decorations/green_banner.png" alt="">
+          </label>
+          <label class="cell other" for="other" style="grid-column:9;grid-row:5" aria-label="Select Mossbank">
+            <img src="vanilla/map/decorations/green_banner.png" alt="">
+          </label>
+        </div>
+      </div>
+
+      <div class="legend">
+        <span><img src="vanilla/map/decorations/purple_banner.png" alt="">Yours</span>
+        <span><img src="vanilla/map/decorations/green_banner.png" alt="">Other</span>
+        <span><i class="outline"></i>You</span>
+        <span>North ↑</span>
+      </div>
+      <p class="map-help">
+        <img src="vanilla/map/decorations/target_point.png" alt="">
+        Select red marker to expand
+      </p>
+    </section>
+
+    <aside class="panel side">
+      <section class="view view-home">
+        <h2 class="claim-title"><img src="vanilla/map/decorations/purple_banner.png" alt="">Birchstead</h2>
+        <p class="owner">Owner: {player}</p>
+        <p class="size">6 chunks • 48 x 32 blocks</p>
+
+        <div class="trust">
+          <h2>Trusted players</h2>
+          <div class="trusted">
+            <span>Mira</span>
+            <div class="btn remove" role="button" data-message="<yellow>Demo: remove Mira from Birchstead.</yellow> <gray>No permissions changed.</gray>">
+              Remove
+              <span class="tooltip"><div class="cf">Remove Mira</div><div class="c7">Demo only</div></span>
+            </div>
+          </div>
+          <div class="trusted">
+            <span>Oakley</span>
+            <div class="btn remove" role="button" data-message="<yellow>Demo: remove Oakley from Birchstead.</yellow> <gray>No permissions changed.</gray>">
+              Remove
+              <span class="tooltip"><div class="cf">Remove Oakley</div><div class="c7">Demo only</div></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="flags">
+          <h2>Allowed in this claim</h2>
+          <div class="flag pvp">
+            <span>PvP</span>
+            <label class="switch" for="pvp" aria-label="Toggle PvP">
+              <span class="lever"><img src="vanilla/block/lever.png" alt=""></span>
+              <span class="state"><span class="off-text c7">OFF</span><span class="on ca">ON</span></span>
+            </label>
+          </div>
+          <div class="flag mobs">
+            <span>Mob spawning</span>
+            <label class="switch" for="mobs" aria-label="Toggle mob spawning">
+              <span class="lever"><img src="vanilla/block/lever.png" alt=""></span>
+              <span class="state"><span class="off-text c7">OFF</span><span class="on ca">ON</span></span>
+            </label>
+          </div>
+          <div class="flag blast">
+            <span>Explosions</span>
+            <label class="switch" for="blast" aria-label="Toggle explosions">
+              <span class="lever"><img src="vanilla/block/lever.png" alt=""></span>
+              <span class="state"><span class="off-text c7">OFF</span><span class="on ca">ON</span></span>
+            </label>
+          </div>
+          <div class="flag fire">
+            <span>Fire spread</span>
+            <label class="switch" for="fire" aria-label="Toggle fire spread">
+              <span class="lever"><img src="vanilla/block/lever.png" alt=""></span>
+              <span class="state"><span class="off-text c7">OFF</span><span class="on ca">ON</span></span>
+            </label>
+          </div>
+        </div>
+
+        <p class="flag-note">Preview only • not saved</p>
+        <div class="actions">
+          <div class="btn off" aria-disabled="true">Claim</div>
+          <div class="btn" role="button" data-message="<yellow>Demo: unclaim all 6 chunks of Birchstead.</yellow> <gray>No land changed.</gray>">Unclaim</div>
+        </div>
+      </section>
+
+      <section class="view view-wild">
+        <h2 class="claim-title"><img src="vanilla/map/decorations/target_point.png" alt="">Expansion chunk</h2>
+        <p class="owner">Owner: Nobody</p>
+        <p class="size">1 chunk • 16 x 16 blocks</p>
+
+        <div class="inset">
+          <p class="ce">Unclaimed land</p>
+          <p class="cf">Extend Birchstead east<br>by one chunk.</p>
+          <p class="c7">Red marker: selected land<br>Gold border: selection</p>
+        </div>
+
+        <div class="supply">
+          <div class="slot">
+            <img src="vanilla/item/map.png" alt="Claim allowance">
+            <span class="tooltip"><div class="cf">Claim allowance</div><div class="c7">Sample value, not live</div></span>
+          </div>
+          <div>2 chunks available<br><span class="c8 flat">Sample allowance</span></div>
+        </div>
+
+        <p class="wild-note">Keeps Birchstead's trusted<br>players and flag settings.</p>
+        <p class="flag-note">Demo only • no land changes</p>
+        <div class="actions">
+          <div class="btn" role="button" data-message="<green>Demo: add the marked chunk to Birchstead.</green> <gray>No land changed.</gray>">Claim</div>
+          <div class="btn off" aria-disabled="true">Unclaim</div>
+        </div>
+      </section>
+
+      <section class="view view-other">
+        <h2 class="claim-title"><img src="vanilla/map/decorations/green_banner.png" alt="">Mossbank</h2>
+        <p class="owner">Owner: Fern</p>
+        <p class="size">4 chunks • 32 x 32 blocks</p>
+
+        <div class="trust">
+          <h2>Trusted players</h2>
+          <div class="trusted">
+            <span>Rowan</span>
+            <span class="c8 flat">View only</span>
+          </div>
+        </div>
+
+        <div class="flags read-only">
+          <h2>Allowed in this claim</h2>
+          <div class="flag">
+            <span>PvP</span>
+            <span class="switch">
+              <span class="lever"><img src="vanilla/block/lever.png" alt=""></span>
+              <span class="state c7">OFF</span>
+            </span>
+          </div>
+          <div class="flag fixed-on">
+            <span>Mob spawning</span>
+            <span class="switch">
+              <span class="lever"><img src="vanilla/block/lever.png" alt=""></span>
+              <span class="state ca">ON</span>
+            </span>
+          </div>
+          <div class="flag">
+            <span>Explosions</span>
+            <span class="switch">
+              <span class="lever"><img src="vanilla/block/lever.png" alt=""></span>
+              <span class="state c7">OFF</span>
+            </span>
+          </div>
+          <div class="flag">
+            <span>Fire spread</span>
+            <span class="switch">
+              <span class="lever"><img src="vanilla/block/lever.png" alt=""></span>
+              <span class="state c7">OFF</span>
+            </span>
+          </div>
+        </div>
+
+        <p class="other-note">Only Fern can edit this claim.</p>
+        <div class="actions">
+          <div class="btn off" aria-disabled="true">Claim</div>
+          <div class="btn off" aria-disabled="true">Unclaim</div>
+        </div>
+      </section>
+    </aside>
+  </main>
+
+  <footer class="bottom">
+    <span class="c7">Sample survey • select a banner</span>
+    <div class="buttons">
+      <a class="btn" href="quests.html">Quests</a>
+      <div class="btn" role="button" data-action="close">Done</div>
+    </div>
+  </footer>
+</div>
+</body>
+</html>

@@ -1,0 +1,417 @@
+<!--
+  mailbox.html: a centred inbox beside a vanilla book-paper letter.
+  First-child radios select letters; hover attachment slots for item details.
+  Collect all and Write a letter send demo chat messages without changing items.
+  For a real server, supply saved mail and storage counts, track read status,
+  and connect collecting and composing to validated, persistent mail actions.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="ui:height" content="576">
+<meta name="ui:refresh" content="5">
+<title>Mailbox</title>
+<link rel="stylesheet" href="vanilla.css">
+<style>
+  .screen {
+    position: relative;
+    width: 1024px;
+    height: 576px;
+    margin: 0 auto;
+  }
+
+  .panorama { background-size: 1072px 624px; }
+  .dim { background: rgba(0, 0, 0, .55); }
+
+  h1, h2, p {
+    margin: 0;
+    font-size: 16px;
+    line-height: 18px;
+  }
+
+  img { width: 32px; height: 32px; }
+
+  .heading {
+    position: absolute;
+    left: 156px;
+    top: 48px;
+    width: 712px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .heading h1 {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .owner { white-space: nowrap; }
+
+  .inbox {
+    position: absolute;
+    left: 156px;
+    top: 104px;
+    width: 400px;
+    height: 360px;
+  }
+
+  .inbox-heading {
+    height: 36px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding-top: 4px;
+    border-bottom: 2px solid #777;
+  }
+
+  .letters {
+    margin-top: 8px;
+    padding: 4px;
+    background: #252525;
+    box-shadow: inset 2px 2px 0 #373737,
+                inset -2px -2px 0 #fff;
+  }
+
+  .letter {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 70px;
+    padding: 6px 8px;
+    border: 2px solid transparent;
+    color: #fff;
+    cursor: pointer;
+  }
+
+  .letter + .letter { border-top-color: #444; }
+  .letter:hover { background: #3a3a3a; }
+  .letter > img { flex: none; }
+
+  .letter-copy { flex: 1; min-width: 0; }
+
+  .sender, .subject {
+    display: block;
+    white-space: nowrap;
+  }
+
+  .sender { margin-bottom: 6px; }
+  .unread .sender, .unread .subject { font-weight: bold; }
+
+  .dot {
+    width: 6px;
+    height: 6px;
+    flex: none;
+    background: #ffff55;
+  }
+
+  .read .dot { background: transparent; }
+
+  #mail1:checked ~ .screen .l1,
+  #mail2:checked ~ .screen .l2,
+  #mail3:checked ~ .screen .l3 {
+    border-color: #fff;
+    background: #080808;
+  }
+
+  .storage { margin-top: 20px; }
+
+  .storage-caption {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 10px;
+    white-space: nowrap;
+  }
+
+  .storage-track {
+    width: 364px;
+    height: 10px;
+    margin: 0 auto;
+    background: url(vanilla/gui/sprites/hud/experience_bar_background.png)
+                0 0 / 364px 10px no-repeat;
+  }
+
+  .storage-fill {
+    width: 40px;
+    height: 10px;
+    background: url(vanilla/gui/sprites/hud/experience_bar_progress.png)
+                0 0 / 364px 10px no-repeat;
+  }
+
+  .paper {
+    display: none;
+    position: absolute;
+    left: 576px;
+    top: 104px;
+    width: 292px;
+    height: 360px;
+    color: #352719;
+    background: url(vanilla/book_right.png)
+                0 0 / 292px 360px no-repeat;
+  }
+
+  #mail1:checked ~ .screen .p1,
+  #mail2:checked ~ .screen .p2,
+  #mail3:checked ~ .screen .p3 { display: block; }
+
+  .paper-content {
+    position: absolute;
+    left: 40px;
+    top: 28px;
+    width: 212px;
+  }
+
+  .paper h2 {
+    margin-bottom: 8px;
+    color: #22180e;
+    white-space: nowrap;
+  }
+
+  .from {
+    padding-bottom: 10px;
+    border-bottom: 2px solid #b3a17c;
+    white-space: nowrap;
+  }
+
+  .message {
+    margin-top: 12px;
+    line-height: 18px;
+  }
+
+  .signature {
+    margin-top: 18px;
+    white-space: nowrap;
+  }
+
+  .attachment-title {
+    display: flex;
+    justify-content: space-between;
+    margin: 20px 0 8px;
+    color: #65543d;
+    white-space: nowrap;
+  }
+
+  .attachments {
+    display: flex;
+    gap: 4px;
+    height: 36px;
+  }
+
+  .slot { flex: none; }
+  .slot .tooltip { bottom: 42px; right: 0; }
+  .slot:hover .tooltip { display: block; }
+
+  .collect {
+    width: 212px;
+    margin-top: 12px;
+  }
+
+  .footer {
+    position: absolute;
+    left: 156px;
+    top: 484px;
+    width: 712px;
+    display: grid;
+    grid-template-columns: 400px 292px;
+    gap: 20px;
+  }
+
+  .footer-cell {
+    display: flex;
+    justify-content: center;
+  }
+
+  .footer .write { width: 300px; gap: 10px; }
+  .footer .write img { flex: none; }
+
+  .hint {
+    position: absolute;
+    top: 542px;
+    left: 0;
+    width: 100%;
+    text-align: center;
+    white-space: nowrap;
+  }
+</style>
+</head>
+<body>
+<input class="pick" type="radio" name="mail" id="mail1" checked>
+<input class="pick" type="radio" name="mail" id="mail2">
+<input class="pick" type="radio" name="mail" id="mail3">
+
+<div class="screen">
+  <div class="panorama"></div>
+  <div class="dim"></div>
+
+  <header class="heading">
+    <h1 class="t">
+      <img src="vanilla/item/paper.png" alt="">
+      Mailbox
+    </h1>
+    <div class="owner c7">To: <span class="cf">{player}</span></div>
+  </header>
+
+  <section class="panel inbox">
+    <div class="inbox-heading">
+      <span>Inbox</span>
+      <span>2 unread</span>
+    </div>
+
+    <div class="letters">
+      <label class="letter unread l1" for="mail1">
+        <span class="dot"></span>
+        <img src="vanilla/item/paper.png" alt="Letter">
+        <span class="letter-copy">
+          <span class="sender cf">Mira the Baker</span>
+          <span class="subject ce">For the road</span>
+        </span>
+      </label>
+
+      <label class="letter unread l2" for="mail2">
+        <span class="dot"></span>
+        <img src="vanilla/item/writable_book.png" alt="Personal mail">
+        <span class="letter-copy">
+          <span class="sender cf">Rowan</span>
+          <span class="subject ce">Your share</span>
+        </span>
+      </label>
+
+      <label class="letter read l3" for="mail3">
+        <span class="dot"></span>
+        <img src="vanilla/item/enchanted_book.png" alt="Special delivery">
+        <span class="letter-copy">
+          <span class="sender c7">The Archivist</span>
+          <span class="subject c7">A little wisdom</span>
+        </span>
+      </label>
+    </div>
+
+    <div class="storage">
+      <div class="storage-caption">
+        <span>Storage</span>
+        <span>3 / 27 letters</span>
+      </div>
+      <div class="storage-track" aria-label="3 of 27 letter spaces used">
+        <div class="storage-fill"></div>
+      </div>
+    </div>
+  </section>
+
+  <article class="paper p1">
+    <div class="paper-content">
+      <h2>For the road</h2>
+      <div class="from">From: Mira</div>
+      <p class="message">Fresh bread for<br>your next trip.<br>Stay fed!</p>
+      <p class="signature">— Mira</p>
+
+      <div class="attachment-title">
+        <span>Gifts</span><span>1 stack</span>
+      </div>
+
+      <div class="attachments">
+        <div class="slot">
+          <img src="vanilla/item/bread.png" alt="8 bread">
+          <span class="n">8</span>
+          <span class="tooltip">
+            <span class="cf">Bread</span><br>
+            <span class="c7">8 freshly baked</span>
+          </span>
+        </div>
+      </div>
+
+      <div class="btn collect"
+           data-message="<yellow>Mailbox demo:</yellow> <gray>8 bread attached. Nothing was collected or removed.</gray>">
+        Collect all
+      </div>
+    </div>
+  </article>
+
+  <article class="paper p2">
+    <div class="paper-content">
+      <h2>Your share</h2>
+      <div class="from">From: Rowan</div>
+      <p class="message">All smelted.<br>Here is your cut.<br>Mine tomorrow?</p>
+      <p class="signature">— Rowan</p>
+
+      <div class="attachment-title">
+        <span>Gifts</span><span>2 stacks</span>
+      </div>
+
+      <div class="attachments">
+        <div class="slot">
+          <img src="vanilla/item/iron_ingot.png" alt="16 iron ingots">
+          <span class="n">16</span>
+          <span class="tooltip">
+            <span class="cf">Iron Ingot</span><br>
+            <span class="c7">16 from the mine</span>
+          </span>
+        </div>
+
+        <div class="slot">
+          <img src="vanilla/item/coal.png" alt="8 coal">
+          <span class="n">8</span>
+          <span class="tooltip">
+            <span class="cf">Coal</span><br>
+            <span class="c7">8 spare fuel</span>
+          </span>
+        </div>
+      </div>
+
+      <div class="btn collect"
+           data-message="<yellow>Mailbox demo:</yellow> <gray>16 iron ingots and 8 coal attached. Nothing was collected or removed.</gray>">
+        Collect all
+      </div>
+    </div>
+  </article>
+
+  <article class="paper p3">
+    <div class="paper-content">
+      <h2>A little wisdom</h2>
+      <div class="from">From: Archivist</div>
+      <p class="message">The books are<br>home at last.<br>Use these wisely.</p>
+      <p class="signature">— The Archivist</p>
+
+      <div class="attachment-title">
+        <span>Gifts</span><span>1 stack</span>
+      </div>
+
+      <div class="attachments">
+        <div class="slot">
+          <img src="vanilla/item/experience_bottle.png" alt="4 experience bottles">
+          <span class="n">4</span>
+          <span class="tooltip">
+            <span class="ce">Bottle o' Enchanting</span><br>
+            <span class="c7">4 bottled lessons</span>
+          </span>
+        </div>
+      </div>
+
+      <div class="btn collect"
+           data-message="<yellow>Mailbox demo:</yellow> <gray>4 experience bottles attached. Nothing was collected or removed.</gray>">
+        Collect all
+      </div>
+    </div>
+  </article>
+
+  <footer class="footer">
+    <div class="footer-cell">
+      <div class="btn write"
+           data-message="<yellow>Mailbox demo:</yellow> <gray>Compose in a Book and Quill. A live server must connect this button to its mail submission system.</gray>">
+        <img src="vanilla/item/writable_book.png" alt="">
+        Write a letter
+      </div>
+    </div>
+
+    <div class="footer-cell">
+      <div class="btn" data-action="close">Done</div>
+    </div>
+  </footer>
+
+  <div class="hint c7">Demo mailbox · No items granted</div>
+</div>
+</body>
+</html>

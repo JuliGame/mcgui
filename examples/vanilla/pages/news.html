@@ -1,0 +1,391 @@
+<!--
+  news.html: a scrolling news feed built from native, correctly scaled vanilla toasts.
+  Hover notifications for details; buttons send clickable demo /news command links to chat.
+  Recipe text stays dark on its native pale sprite; maintenance uses the baked-in warning icon.
+  Replace sample stories and supply /news handlers on a real server; player values resolve in game.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Server News</title>
+  <meta name="ui:height" content="576">
+  <meta name="ui:refresh" content="5">
+  <meta name="ui:scroll-step" content="64">
+  <link rel="stylesheet" href="vanilla.css">
+  <style>
+    html {
+      height: 576px;
+      overflow-x: hidden;
+      overflow-y: auto;
+    }
+    body {
+      height: auto;
+      min-height: 576px;
+      overflow: visible;
+    }
+    .panorama {
+      position: fixed;
+      background-size: 1072px 624px;
+    }
+    .dim {
+      position: fixed;
+      background: rgba(0, 0, 0, .55);
+    }
+    .screen {
+      position: relative;
+      width: 1024px;
+      min-height: 576px;
+      padding: 24px 0 28px;
+    }
+    h1, h2, p {
+      margin: 0;
+      font-size: 16px;
+      line-height: 18px;
+      font-weight: normal;
+    }
+    .heading {
+      text-align: center;
+    }
+    .heading p {
+      margin-top: 12px;
+    }
+    .feed {
+      width: 544px;
+      margin: 28px auto 0;
+    }
+    .day {
+      margin-bottom: 28px;
+    }
+    .day h2 {
+      padding-bottom: 10px;
+      margin-bottom: 14px;
+      border-bottom: 2px solid #555;
+      box-shadow: 0 2px 0 rgba(0, 0, 0, .6);
+    }
+    .entry {
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      margin-bottom: 14px;
+    }
+    .entry:last-child {
+      margin-bottom: 0;
+    }
+    .toast {
+      position: relative;
+      flex: none;
+      width: 320px;
+      height: 64px;
+      background-repeat: no-repeat;
+      background-size: 320px 64px;
+    }
+    .advancement {
+      background-image: url(vanilla/gui/sprites/toast/advancement.png);
+    }
+    .recipe {
+      background-image: url(vanilla/gui/sprites/toast/recipe.png);
+    }
+    .system {
+      height: 128px;
+      background-image: url(vanilla/gui/sprites/toast/system.png);
+      background-size: 320px 128px;
+    }
+    .toast-icon {
+      position: absolute;
+      left: 16px;
+      top: 16px;
+      width: 32px;
+      height: 32px;
+    }
+    .toast-copy {
+      position: absolute;
+      left: 60px;
+      top: 14px;
+      width: 248px;
+    }
+    .toast-title,
+    .toast-description {
+      display: block;
+      white-space: nowrap;
+      line-height: 18px;
+    }
+    .recipe .toast-title {
+      color: #500050;
+      text-shadow: none;
+    }
+    .recipe .toast-description {
+      color: #000;
+      text-shadow: none;
+    }
+    .system .toast-copy {
+      top: 16px;
+    }
+    .system .toast-description {
+      margin-top: 12px;
+      line-height: 22px;
+    }
+
+    /* Native hover overlays may cover nearby controls temporarily.
+       Keep the entire tooltip inside the horizontal viewport. */
+    .toast .tooltip {
+      left: 332px;
+      top: 0;
+      width: 320px;
+      white-space: normal;
+      line-height: 18px;
+    }
+    .tooltip p {
+      margin-top: 8px;
+    }
+    .toast:hover {
+      z-index: 10;
+    }
+    .toast:hover > .tooltip {
+      display: block;
+    }
+    .entry .btn {
+      flex: none;
+      width: 200px;
+      white-space: nowrap;
+    }
+    .footer {
+      width: 616px;
+      margin: 0 auto;
+      text-align: center;
+    }
+    .footer > p {
+      margin-bottom: 16px;
+    }
+    .footer .buttons {
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+    }
+    .footer .note {
+      margin: 16px 0 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="panorama"></div>
+  <div class="dim"></div>
+
+  <main class="screen" id="top">
+    <header class="heading">
+      <h1 class="t">Server News</h1>
+      <p class="c7">Hover for details · Scroll for older news</p>
+    </header>
+
+    <div class="feed">
+      <section class="day">
+        <h2 class="cf">Today</h2>
+
+        <div class="entry">
+          <div class="toast advancement">
+            <img class="toast-icon" src="vanilla/item/diamond.png"
+                 width="32" height="32" alt="">
+            <div class="toast-copy">
+              <span class="toast-title ce">Advancement Made!</span>
+              <span class="toast-description cf">Diamonds!</span>
+            </div>
+            <div class="tooltip">
+              <div>
+                <div class="ce">Diamonds!</div>
+                <p class="cf">{player}</p>
+                <p class="cf">Joined the diamond club.</p>
+                <p class="c7">A first diamond is worth celebrating.</p>
+                <p class="c7">Sample story, not live achievement progress.</p>
+              </div>
+            </div>
+          </div>
+          <div class="btn"
+               data-message="<yellow>Diamonds!</yellow><newline><white>{player}</white><newline><gray>Demo link; requires /news:</gray><newline><aqua><click:run_command:'/news diamonds'><hover:show_text:'Read the diamond club story'>[Read story]</hover></click></aqua>">
+            Read Story
+          </div>
+        </div>
+
+        <div class="entry">
+          <div class="toast recipe">
+            <img class="toast-icon" src="vanilla/item/bundle.png"
+                 width="32" height="32" alt="">
+            <div class="toast-copy">
+              <span class="toast-title">New Recipe Unlocked!</span>
+              <span class="toast-description">Better Bundles</span>
+            </div>
+            <div class="tooltip">
+              <div>
+                <div class="ce">Better Bundles</div>
+                <p class="cf">Bundle crafting is now available.</p>
+                <p class="c7">Pack your supplies and head out.</p>
+                <p class="c7">Read the patch notes for recipe changes.</p>
+              </div>
+            </div>
+          </div>
+          <div class="btn"
+               data-message="<yellow>Better Bundles</yellow><newline><gray>Demo link; requires /news:</gray><newline><aqua><click:run_command:'/news bundles'><hover:show_text:'Read the bundle update'>[Patch notes]</hover></click></aqua>">
+            Patch Notes
+          </div>
+        </div>
+
+        <div class="entry">
+          <div class="toast system">
+            <!-- The system texture already supplies the warning icon. -->
+            <div class="toast-copy">
+              <span class="toast-title cf">Maintenance</span>
+              <span class="toast-description cf">23:00–23:15 UTC<br>Brief downtime.<br>No world reset.</span>
+            </div>
+            <div class="tooltip">
+              <div>
+                <div class="ce">Server Maintenance</div>
+                <p class="cf">Tonight<br>23:00–23:15 UTC</p>
+                <p class="c7">World backup and server updates.</p>
+                <p class="c7">Log out before the restart.</p>
+                <p class="ca">Your builds are safe.</p>
+              </div>
+            </div>
+          </div>
+          <div class="btn"
+               data-message="<yellow>Maintenance</yellow><newline><white>Tonight, 23:00–23:15 UTC</white><newline><gray>Demo link; requires /news:</gray><newline><aqua><click:run_command:'/news maintenance'><hover:show_text:'Read the maintenance notice'>[View notice]</hover></click></aqua>">
+            View Notice
+          </div>
+        </div>
+      </section>
+
+      <section class="day">
+        <h2 class="cf">Yesterday</h2>
+
+        <div class="entry">
+          <div class="toast advancement">
+            <img class="toast-icon" src="vanilla/item/elytra.png"
+                 width="32" height="32" alt="">
+            <div class="toast-copy">
+              <span class="toast-title ce">Advancement Made!</span>
+              <span class="toast-description cf">Sky's the Limit</span>
+            </div>
+            <div class="tooltip">
+              <div>
+                <div class="ce">Sky's the Limit</div>
+                <p class="cf">Alex found an elytra in an end ship.</p>
+                <p class="c7">Next stop: the community flight course.</p>
+                <p class="c7">Sample community story.</p>
+              </div>
+            </div>
+          </div>
+          <div class="btn"
+               data-message="<yellow>Sky's the Limit</yellow><newline><white>Alex earned wings!</white><newline><gray>Demo link; requires /news:</gray><newline><aqua><click:run_command:'/news wings'><hover:show_text:'Read the first flight story'>[Read story]</hover></click></aqua>">
+            Read Story
+          </div>
+        </div>
+
+        <div class="entry">
+          <div class="toast recipe">
+            <img class="toast-icon" src="vanilla/item/emerald.png"
+                 width="32" height="32" alt="">
+            <div class="toast-copy">
+              <span class="toast-title">New Recipe Unlocked!</span>
+              <span class="toast-description">Market Update</span>
+            </div>
+            <div class="tooltip">
+              <div>
+                <div class="ce">Village Market</div>
+                <p class="cf">Fresh trades at the spawn market.</p>
+                <p class="c7">Browse food, tools and building supplies.</p>
+                <p class="c7">See the update for trading rules.</p>
+              </div>
+            </div>
+          </div>
+          <div class="btn"
+               data-message="<yellow>Village Market</yellow><newline><gray>Demo link; requires /news:</gray><newline><aqua><click:run_command:'/news market'><hover:show_text:'Read the market update'>[View update]</hover></click></aqua>">
+            View Update
+          </div>
+        </div>
+
+        <div class="entry">
+          <div class="toast advancement">
+            <img class="toast-icon" src="vanilla/item/fishing_rod.png"
+                 width="32" height="32" alt="">
+            <div class="toast-copy">
+              <span class="toast-title ce">Server Event!</span>
+              <span class="toast-description cf">Fishing Contest</span>
+            </div>
+            <div class="tooltip">
+              <div>
+                <div class="ce">Fishing Contest</div>
+                <p class="cf">Saturday<br>18:00–18:30 UTC</p>
+                <p class="c7">Meet at spawn. Bring a rod!</p>
+                <p class="c7">Thirty minutes to land the winning catch.</p>
+                <p class="ca">Everyone welcome.<br>No entry fee.</p>
+              </div>
+            </div>
+          </div>
+          <div class="btn"
+               data-message="<yellow>Fishing Contest</yellow><newline><white>Saturday, 18:00–18:30 UTC</white><newline><gray>Demo link; requires /news:</gray><newline><aqua><click:run_command:'/news fishing'><hover:show_text:'Read event rules and meeting details'>[Event info]</hover></click></aqua>">
+            Event Info
+          </div>
+        </div>
+      </section>
+
+      <section class="day">
+        <h2 class="cf">Earlier This Week</h2>
+
+        <div class="entry">
+          <div class="toast advancement">
+            <img class="toast-icon" src="vanilla/item/iron_pickaxe.png"
+                 width="32" height="32" alt="">
+            <div class="toast-copy">
+              <span class="toast-title ce">Advancement Made!</span>
+              <span class="toast-description cf">A Team Effort</span>
+            </div>
+            <div class="tooltip">
+              <div>
+                <div class="ce">The Great Tunnel</div>
+                <p class="cf">The community rail tunnel is complete!</p>
+                <p class="c7">Thanks to every miner and track layer.</p>
+                <p class="c7">Entrance below spawn station.</p>
+              </div>
+            </div>
+          </div>
+          <div class="btn"
+               data-message="<yellow>The Great Tunnel</yellow><newline><gray>Demo link; requires /news:</gray><newline><aqua><click:run_command:'/news tunnel'><hover:show_text:'Read the community build story'>[Read story]</hover></click></aqua>">
+            Read Story
+          </div>
+        </div>
+
+        <div class="entry">
+          <div class="toast recipe">
+            <img class="toast-icon" src="vanilla/item/written_book.png"
+                 width="32" height="32" alt="">
+            <div class="toast-copy">
+              <span class="toast-title">New Recipe Unlocked!</span>
+              <span class="toast-description">A New Chapter</span>
+            </div>
+            <div class="tooltip">
+              <div>
+                <div class="ce">A New Chapter</div>
+                <p class="cf">New goals for farmers and explorers.</p>
+                <p class="c7">Open the Quest Log to get started.</p>
+                <p class="c7">Your level: <span class="ca">{level}</span></p>
+              </div>
+            </div>
+          </div>
+          <div class="btn"
+               data-message="<yellow>A New Chapter</yellow><newline><gray>Demo link; requires /news:</gray><newline><aqua><click:run_command:'/news quests'><hover:show_text:'Read the quest update'>[View update]</hover></click></aqua>">
+            View Update
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <footer class="footer">
+      <p class="c7">You're all caught up.</p>
+      <div class="buttons">
+        <div class="btn" data-action="top">Back to Top</div>
+        <a class="btn" href="quests.html">Quest Log</a>
+        <div class="btn" data-action="close">Done</div>
+      </div>
+      <p class="note c7">Sample news · Links require /news</p>
+    </footer>
+  </main>
+</body>
+</html>

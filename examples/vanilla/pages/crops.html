@@ -1,0 +1,571 @@
+<!--
+  A compact Java Edition crop guide with eight selectable growth strips.
+  Click a row to change the planting diagram; hover soil, harvests and meal notes for details.
+  The diagram leaves soil visible and uses crop pictures at the start of alternating rows.
+  Growth estimates assume randomTickSpeed 3; replace estimates and advice for your server.
+  All actions are local selections or chat tips; no items or rewards are granted.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="ui:height" content="576">
+<title>Farmer's Field Guide</title>
+<link rel="stylesheet" href="vanilla.css">
+<style>
+  body { font-family: Minecraft; font-size: 16px; line-height: 18px; }
+  h1,h2,p { margin: 0; font-size: 16px; font-weight: normal; }
+  .screen { position: relative; width: 1024px; height: 576px; margin: auto; }
+  .backdrop {
+    position: absolute; inset: 0;
+    background: url(vanilla/block/dark_oak_planks.png) repeat;
+    background-size: 32px 32px;
+  }
+  .dim { background: rgba(0,0,0,.74); }
+  .heading {
+    position: absolute; left: 24px; right: 24px; top: 14px;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .subtitle { position: absolute; left: 24px; top: 38px; }
+
+  .ledger {
+    position: absolute; left: 24px; top: 64px;
+    width: 648px; height: 456px; padding: 10px;
+  }
+  .crop {
+    position: relative; display: block;
+    width: 624px; height: 54px; padding: 0 6px;
+    cursor: pointer;
+  }
+  .crop:nth-child(even) { background: #b9b9b9; }
+  .crop:hover { background: #d8d8d8; }
+  .line {
+    height: 18px; display: grid;
+    grid-template-columns: 166px 112px 112px 1fr;
+    white-space: nowrap; color: #404040;
+  }
+  .name { color: #202020; }
+  .meal { position: relative; }
+  .specimens {
+    height: 36px; display: flex;
+    align-items: center; gap: 12px;
+  }
+  .stages {
+    display: flex; align-items: flex-end;
+    flex: none; width: 256px; height: 32px;
+    background: #979797;
+    box-shadow: inset 0 -2px 0 #737373;
+  }
+  .stages img {
+    display: block; width: 32px; height: 32px; flex: none;
+  }
+  .stages.short { gap: 8px; }
+  .stage-note {
+    align-self: center; margin-left: auto; margin-right: 8px;
+    color: #333; white-space: nowrap;
+  }
+  .soil {
+    position: relative; display: flex; align-items: center;
+    width: 64px; height: 32px; flex: none;
+    background: #aaa;
+  }
+  .soil img { width: 32px; height: 32px; flex: none; }
+  .dry { display: grid; place-items: center; width: 32px; height: 32px; color: #555; }
+  .drops { display: flex; align-items: center; gap: 8px; }
+  .drop {
+    position: relative; display: flex; align-items: center;
+    gap: 6px; width: 110px; height: 36px; flex: none;
+  }
+  .slot { flex: none; }
+  .amount { white-space: nowrap; color: #303030; }
+
+  .tooltip { pointer-events: none; text-align: left; line-height: 18px; }
+  .tooltip > span { position: relative; display: block; }
+  .soil .tooltip { left: -260px; bottom: 40px; }
+  .drop .tooltip { right: 0; bottom: 42px; }
+  .meal .tooltip { right: 0; top: 22px; }
+  .crop:nth-last-child(-n+2) .meal .tooltip { top: auto; bottom: 22px; }
+  .soil:hover .tooltip,
+  .drop:hover .tooltip,
+  .meal:hover .tooltip { display: block; }
+
+  .stem {
+    display: block; width: 32px; flex: none;
+    background-size: 32px 32px;
+    background-position: center bottom; background-repeat: no-repeat;
+    filter: sepia(1) saturate(4) hue-rotate(38deg) brightness(.78);
+  }
+  .melon-strip .stem { background-image: url(vanilla/block/melon_stem.png); }
+  .pumpkin-strip .stem { background-image: url(vanilla/block/pumpkin_stem.png); }
+  .s0 { height: 4px; } .s1 { height: 8px; }
+  .s2 { height: 12px; } .s3 { height: 16px; }
+  .s4 { height: 20px; } .s5 { height: 24px; }
+  .s6 { height: 28px; }
+  .s7 { height: 32px; filter: sepia(1) saturate(4) brightness(.72); }
+
+  #wheat:checked ~ .screen .r-wheat,
+  #carrot:checked ~ .screen .r-carrot,
+  #potato:checked ~ .screen .r-potato,
+  #beet:checked ~ .screen .r-beet,
+  #melon:checked ~ .screen .r-melon,
+  #pumpkin:checked ~ .screen .r-pumpkin,
+  #wart:checked ~ .screen .r-wart,
+  #berry:checked ~ .screen .r-berry {
+    background: #e4ddbb;
+    box-shadow: inset 4px 0 0 #78632c;
+  }
+
+  .card {
+    position: absolute; left: 684px; top: 64px;
+    width: 316px; height: 456px; padding: 14px;
+  }
+  .choice,.advice { display: none; }
+  #wheat:checked ~ .screen .for-wheat,
+  #carrot:checked ~ .screen .for-carrot,
+  #potato:checked ~ .screen .for-potato,
+  #beet:checked ~ .screen .for-beet,
+  #melon:checked ~ .screen .for-melon,
+  #pumpkin:checked ~ .screen .for-pumpkin,
+  #wart:checked ~ .screen .for-wart,
+  #berry:checked ~ .screen .for-berry { display: block; }
+
+  .card-title { height: 24px; color: #202020; }
+  .caption { height: 24px; color: #555; }
+  .farm {
+    width: 164px; height: 164px; margin: 0 auto 10px;
+    display: grid;
+    grid-template-columns: repeat(5,32px);
+    grid-template-rows: repeat(5,32px);
+    border: 2px solid #373737;
+    box-shadow: 2px 2px 0 #fff;
+  }
+  .tile {
+    position: relative; width: 32px; height: 32px;
+    background: url(vanilla/block/farmland_moist.png) 0 0 / 32px 32px;
+  }
+
+  /* Only the first square of each ordinary crop row carries a plant marker.
+     The remaining squares deliberately show the farmland underneath. */
+  .tile.marker::after {
+    content: ""; position: absolute; inset: 0;
+    background: url(vanilla/block/wheat_stage7.png) 0 0 / 32px 32px;
+  }
+  .tile.marker.alt::after { background-image: url(vanilla/block/carrots_stage3.png); }
+  #carrot:checked ~ .screen .tile.marker::after { background-image: url(vanilla/block/carrots_stage3.png); }
+  #potato:checked ~ .screen .tile.marker::after { background-image: url(vanilla/block/potatoes_stage3.png); }
+  #beet:checked ~ .screen .tile.marker::after { background-image: url(vanilla/block/beetroots_stage3.png); }
+  #carrot:checked ~ .screen .tile.marker.alt::after,
+  #potato:checked ~ .screen .tile.marker.alt::after,
+  #beet:checked ~ .screen .tile.marker.alt::after { background-image: url(vanilla/block/wheat_stage7.png); }
+
+  .tile.water { background: #325ea4; }
+  .tile.water::before {
+    content: ""; position: absolute; inset: 0;
+    background: url(vanilla/block/water_still.png) 0 0 / 32px 1024px;
+    opacity: .3;
+  }
+  .tile.water::after {
+    content: ""; position: absolute; inset: 0;
+    background: url(vanilla/item/water_bucket.png) 0 0 / 32px 32px;
+  }
+
+  #melon:checked ~ .screen .tile.lane,
+  #pumpkin:checked ~ .screen .tile.lane { background-image: url(vanilla/block/dirt.png); }
+  #melon:checked ~ .screen .tile:not(.lane):not(.water)::after,
+  #pumpkin:checked ~ .screen .tile:not(.lane):not(.water)::after {
+    content: ""; position: absolute; inset: 0;
+    background: url(vanilla/block/melon_stem.png) 0 0 / 32px 32px;
+    filter: sepia(1) saturate(4) brightness(.72);
+  }
+  #pumpkin:checked ~ .screen .tile:not(.lane):not(.water)::after {
+    background-image: url(vanilla/block/pumpkin_stem.png);
+  }
+
+  #wart:checked ~ .screen .tile {
+    background: url(vanilla/block/soul_sand.png) 0 0 / 32px 32px;
+  }
+  #wart:checked ~ .screen .tile.marker::after {
+    background-image: url(vanilla/block/nether_wart_stage2.png);
+  }
+  #wart:checked ~ .screen .tile.water::before,
+  #wart:checked ~ .screen .tile.water::after { display: none; }
+
+  #berry:checked ~ .screen .tile {
+    background: url(vanilla/block/dirt.png) 0 0 / 32px 32px;
+  }
+  #berry:checked ~ .screen .tile:not(.lane)::after {
+    content: ""; position: absolute; inset: 0;
+    background: url(vanilla/block/sweet_berry_bush_stage3.png) 0 0 / 32px 32px;
+  }
+  #berry:checked ~ .screen .tile.lane {
+    background-image: url(vanilla/block/dirt_path_top.png);
+  }
+  #berry:checked ~ .screen .tile.water::before { display: none; }
+
+  .map-key { height: 40px; text-align: center; color: #404040; }
+  .normal { display: block; }
+  .stem-key,.wart-key,.berry-key { display: none; }
+  #melon:checked ~ .screen .normal,
+  #pumpkin:checked ~ .screen .normal,
+  #wart:checked ~ .screen .normal,
+  #berry:checked ~ .screen .normal { display: none; }
+  #melon:checked ~ .screen .stem-key,
+  #pumpkin:checked ~ .screen .stem-key,
+  #wart:checked ~ .screen .wart-key,
+  #berry:checked ~ .screen .berry-key { display: block; }
+
+  .advice {
+    height: 104px; padding-top: 8px;
+    border-top: 2px solid #888; color: #404040;
+  }
+  .advice p { margin-bottom: 8px; line-height: 18px; }
+  .card-foot {
+    height: 48px; padding: 6px;
+    background: #b0b0b0; box-shadow: inset 2px 2px 0 #888;
+    color: #383838;
+  }
+  .footer {
+    position: absolute; left: 24px; right: 24px; top: 528px;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .footer-note { line-height: 18px; }
+</style>
+</head>
+<body>
+<input class="pick" type="radio" name="crop" id="wheat" checked>
+<input class="pick" type="radio" name="crop" id="carrot">
+<input class="pick" type="radio" name="crop" id="potato">
+<input class="pick" type="radio" name="crop" id="beet">
+<input class="pick" type="radio" name="crop" id="melon">
+<input class="pick" type="radio" name="crop" id="pumpkin">
+<input class="pick" type="radio" name="crop" id="wart">
+<input class="pick" type="radio" name="crop" id="berry">
+
+<div class="screen">
+  <div class="backdrop"></div>
+  <div class="dim"></div>
+
+  <header class="heading">
+    <h1 class="ce">The Farmer's Field Guide</h1>
+    <span class="c7">Java Edition</span>
+  </header>
+  <p class="subtitle c7">Select a crop · Hover its soil, drops or meal tip</p>
+
+  <main class="ledger panel" aria-label="Crop growth and harvest guide">
+    <label class="crop r-wheat" for="wheat">
+      <span class="line">
+        <span class="name">Wheat</span><span>~20–40m</span><span>Light 9+</span>
+        <span class="meal">Meal +2–5
+          <span class="tooltip"><span class="cf">Bone meal: +2–5 ages.</span><span class="c7">Seven age advances to maturity.</span></span>
+        </span>
+      </span>
+      <span class="specimens">
+        <span class="stages">
+          <img src="vanilla/block/wheat_stage0.png" alt="Wheat age 0">
+          <img src="vanilla/block/wheat_stage1.png" alt="Age 1">
+          <img src="vanilla/block/wheat_stage2.png" alt="Age 2">
+          <img src="vanilla/block/wheat_stage3.png" alt="Age 3">
+          <img src="vanilla/block/wheat_stage4.png" alt="Age 4">
+          <img src="vanilla/block/wheat_stage5.png" alt="Age 5">
+          <img src="vanilla/block/wheat_stage6.png" alt="Age 6">
+          <img src="vanilla/block/wheat_stage7.png" alt="Mature wheat">
+        </span>
+        <span class="soil">
+          <img src="vanilla/block/farmland_moist.png" alt="Wet farmland">
+          <img src="vanilla/item/water_bucket.png" alt="Nearby water">
+          <span class="tooltip"><span class="cf">Hydrated farmland</span><span class="c7">Water within 4 blocks.</span><span class="c7">Light 9+ above the crop.</span></span>
+        </span>
+        <span class="drops">
+          <span class="drop"><span class="slot"><img src="vanilla/item/wheat.png" alt="Wheat"></span><span class="amount">1</span>
+            <span class="tooltip"><span class="cf">1 wheat</span><span class="c7">Harvest fully golden heads.</span></span>
+          </span>
+          <span class="drop"><span class="slot"><img src="vanilla/item/wheat_seeds.png" alt="Wheat seeds"></span><span class="amount">0–3</span>
+            <span class="tooltip"><span class="cf">0–3 wheat seeds</span><span class="c7">Keep seeds for replanting.</span></span>
+          </span>
+        </span>
+      </span>
+    </label>
+
+    <label class="crop r-carrot" for="carrot">
+      <span class="line">
+        <span class="name">Carrots</span><span>~20–40m</span><span>Light 9+</span>
+        <span class="meal">Meal +2–5
+          <span class="tooltip"><span class="cf">Bone meal: +2–5 ages.</span><span class="c7">Eight ages; four appearances.</span></span>
+        </span>
+      </span>
+      <span class="specimens">
+        <span class="stages">
+          <img src="vanilla/block/carrots_stage0.png" alt="Carrot age 0">
+          <img src="vanilla/block/carrots_stage0.png" alt="Age 1">
+          <img src="vanilla/block/carrots_stage1.png" alt="Age 2">
+          <img src="vanilla/block/carrots_stage1.png" alt="Age 3">
+          <img src="vanilla/block/carrots_stage2.png" alt="Age 4">
+          <img src="vanilla/block/carrots_stage2.png" alt="Age 5">
+          <img src="vanilla/block/carrots_stage2.png" alt="Age 6">
+          <img src="vanilla/block/carrots_stage3.png" alt="Mature carrots">
+        </span>
+        <span class="soil">
+          <img src="vanilla/block/farmland_moist.png" alt="Wet farmland">
+          <img src="vanilla/item/water_bucket.png" alt="Nearby water">
+          <span class="tooltip"><span class="cf">Hydrated farmland</span><span class="c7">Water within 4 blocks.</span><span class="c7">Light 9+ above the crop.</span></span>
+        </span>
+        <span class="drops">
+          <span class="drop"><span class="slot"><img src="vanilla/item/carrot.png" alt="Carrots"></span><span class="amount">2–5</span>
+            <span class="tooltip"><span class="cf">2–5 carrots</span><span class="c7">Replant one per crop.</span></span>
+          </span>
+        </span>
+      </span>
+    </label>
+
+    <label class="crop r-potato" for="potato">
+      <span class="line">
+        <span class="name">Potatoes</span><span>~20–40m</span><span>Light 9+</span>
+        <span class="meal">Meal +2–5
+          <span class="tooltip"><span class="cf">Bone meal: +2–5 ages.</span><span class="c7">Eight ages; four appearances.</span></span>
+        </span>
+      </span>
+      <span class="specimens">
+        <span class="stages">
+          <img src="vanilla/block/potatoes_stage0.png" alt="Potato age 0">
+          <img src="vanilla/block/potatoes_stage0.png" alt="Age 1">
+          <img src="vanilla/block/potatoes_stage1.png" alt="Age 2">
+          <img src="vanilla/block/potatoes_stage1.png" alt="Age 3">
+          <img src="vanilla/block/potatoes_stage2.png" alt="Age 4">
+          <img src="vanilla/block/potatoes_stage2.png" alt="Age 5">
+          <img src="vanilla/block/potatoes_stage2.png" alt="Age 6">
+          <img src="vanilla/block/potatoes_stage3.png" alt="Mature potatoes">
+        </span>
+        <span class="soil">
+          <img src="vanilla/block/farmland_moist.png" alt="Wet farmland">
+          <img src="vanilla/item/water_bucket.png" alt="Nearby water">
+          <span class="tooltip"><span class="cf">Hydrated farmland</span><span class="c7">Water within 4 blocks.</span><span class="c7">Light 9+ above the crop.</span></span>
+        </span>
+        <span class="drops">
+          <span class="drop"><span class="slot"><img src="vanilla/item/potato.png" alt="Potatoes"></span><span class="amount">2–5</span>
+            <span class="tooltip"><span class="cf">2–5 potatoes</span><span class="c7">Keep one for replanting.</span></span>
+          </span>
+          <span class="drop"><span class="slot"><img src="vanilla/item/poisonous_potato.png" alt="Poisonous potato"></span><span class="amount">2%</span>
+            <span class="tooltip"><span class="cf">Poisonous potato</span><span class="c7">2% chance of one extra drop.</span><span class="c7">Cannot be planted.</span></span>
+          </span>
+        </span>
+      </span>
+    </label>
+
+    <label class="crop r-beet" for="beet">
+      <span class="line">
+        <span class="name">Beetroots</span><span>~20–40m</span><span>Light 9+</span>
+        <span class="meal">Meal: chance
+          <span class="tooltip"><span class="cf">Bone meal can fail.</span><span class="c7">A successful use adds one age.</span></span>
+        </span>
+      </span>
+      <span class="specimens">
+        <span class="stages short">
+          <img src="vanilla/block/beetroots_stage0.png" alt="Beetroot age 0">
+          <img src="vanilla/block/beetroots_stage1.png" alt="Age 1">
+          <img src="vanilla/block/beetroots_stage2.png" alt="Age 2">
+          <img src="vanilla/block/beetroots_stage3.png" alt="Mature beetroot">
+          <span class="stage-note">4 ages</span>
+        </span>
+        <span class="soil">
+          <img src="vanilla/block/farmland_moist.png" alt="Wet farmland">
+          <img src="vanilla/item/water_bucket.png" alt="Nearby water">
+          <span class="tooltip"><span class="cf">Hydrated farmland</span><span class="c7">Plant seeds, not beetroot.</span><span class="c7">Water within 4; light 9+.</span></span>
+        </span>
+        <span class="drops">
+          <span class="drop"><span class="slot"><img src="vanilla/item/beetroot.png" alt="Beetroot"></span><span class="amount">1</span>
+            <span class="tooltip"><span class="cf">1 beetroot</span><span class="c7">Harvest at full size.</span></span>
+          </span>
+          <span class="drop"><span class="slot"><img src="vanilla/item/beetroot_seeds.png" alt="Beetroot seeds"></span><span class="amount">1–4</span>
+            <span class="tooltip"><span class="cf">1–4 beetroot seeds</span><span class="c7">Save one per planted block.</span></span>
+          </span>
+        </span>
+      </span>
+    </label>
+
+    <label class="crop r-melon" for="melon">
+      <span class="line">
+        <span class="name">Melon</span><span>~20–40m*</span><span>Light 9+</span>
+        <span class="meal">Meal: stem
+          <span class="tooltip"><span class="cf">Bone meal grows the stem.</span><span class="c7">It does not create fruit.</span></span>
+        </span>
+      </span>
+      <span class="specimens">
+        <span class="stages melon-strip" aria-label="Melon stem ages 0 through 7">
+          <span class="stem s0"></span><span class="stem s1"></span>
+          <span class="stem s2"></span><span class="stem s3"></span>
+          <span class="stem s4"></span><span class="stem s5"></span>
+          <span class="stem s6"></span><span class="stem s7"></span>
+        </span>
+        <span class="soil">
+          <img src="vanilla/block/farmland_moist.png" alt="Wet farmland">
+          <img src="vanilla/item/water_bucket.png" alt="Nearby water">
+          <span class="tooltip"><span class="cf">Stem on hydrated farmland.</span><span class="c7">Leave adjacent dirt clear.</span><span class="c7">Fruit needs space above it.</span></span>
+        </span>
+        <span class="drops">
+          <span class="drop"><span class="slot"><img src="vanilla/item/melon_slice.png" alt="Melon slices"></span><span class="amount">3–7</span>
+            <span class="tooltip"><span class="cf">3–7 melon slices</span><span class="c7">Per fruit, without Fortune.</span><span class="c7">Silk Touch keeps the block.</span></span>
+          </span>
+        </span>
+      </span>
+    </label>
+
+    <label class="crop r-pumpkin" for="pumpkin">
+      <span class="line">
+        <span class="name">Pumpkin</span><span>~20–40m*</span><span>Light 9+</span>
+        <span class="meal">Meal: stem
+          <span class="tooltip"><span class="cf">Bone meal grows the stem.</span><span class="c7">Fruit still takes extra time.</span></span>
+        </span>
+      </span>
+      <span class="specimens">
+        <span class="stages pumpkin-strip" aria-label="Pumpkin stem ages 0 through 7">
+          <span class="stem s0"></span><span class="stem s1"></span>
+          <span class="stem s2"></span><span class="stem s3"></span>
+          <span class="stem s4"></span><span class="stem s5"></span>
+          <span class="stem s6"></span><span class="stem s7"></span>
+        </span>
+        <span class="soil">
+          <img src="vanilla/block/farmland_moist.png" alt="Wet farmland">
+          <img src="vanilla/item/water_bucket.png" alt="Nearby water">
+          <span class="tooltip"><span class="cf">Stem on hydrated farmland.</span><span class="c7">Leave adjacent dirt clear.</span><span class="c7">Keep stems lit at night.</span></span>
+        </span>
+        <span class="drops">
+          <span class="drop"><span class="slot"><img src="vanilla/block/pumpkin_side.png" alt="Pumpkin block face"></span><span class="amount">1</span>
+            <span class="tooltip"><span class="cf">1 pumpkin block</span><span class="c7">Block face shown.</span><span class="c7">Break fruit, not the stem.</span></span>
+          </span>
+        </span>
+      </span>
+    </label>
+
+    <label class="crop r-wart" for="wart">
+      <span class="line">
+        <span class="name">Nether wart</span><span>~34m</span><span>Any light</span>
+        <span class="meal">No meal
+          <span class="tooltip"><span class="cf">Bone meal has no effect.</span><span class="c7">Let the wart grow naturally.</span></span>
+        </span>
+      </span>
+      <span class="specimens">
+        <span class="stages short">
+          <img src="vanilla/block/nether_wart_stage0.png" alt="Wart age 0">
+          <img src="vanilla/block/nether_wart_stage1.png" alt="Age 1">
+          <img src="vanilla/block/nether_wart_stage1.png" alt="Age 2">
+          <img src="vanilla/block/nether_wart_stage2.png" alt="Mature wart">
+          <span class="stage-note">4 ages</span>
+        </span>
+        <span class="soil">
+          <img src="vanilla/block/soul_sand.png" alt="Soul sand">
+          <span class="dry" aria-label="No water needed">–</span>
+          <span class="tooltip"><span class="cf">Soul sand only</span><span class="c7">No water or light required.</span><span class="c7">Works in any dimension.</span></span>
+        </span>
+        <span class="drops">
+          <span class="drop"><span class="slot"><img src="vanilla/item/nether_wart.png" alt="Nether wart"></span><span class="amount">2–4</span>
+            <span class="tooltip"><span class="cf">2–4 nether wart</span><span class="c7">Save one per planted block.</span></span>
+          </span>
+        </span>
+      </span>
+    </label>
+
+    <label class="crop r-berry" for="berry">
+      <span class="line">
+        <span class="name">Sweet berries</span><span>~17m</span><span>Light 9+</span>
+        <span class="meal">Meal +1
+          <span class="tooltip"><span class="cf">Bone meal: +1 age.</span><span class="c7">Picking resets the bush to age 1.</span></span>
+        </span>
+      </span>
+      <span class="specimens">
+        <span class="stages short">
+          <img src="vanilla/block/sweet_berry_bush_stage0.png" alt="Berry bush age 0">
+          <img src="vanilla/block/sweet_berry_bush_stage1.png" alt="Age 1">
+          <img src="vanilla/block/sweet_berry_bush_stage2.png" alt="Age 2, some berries">
+          <img src="vanilla/block/sweet_berry_bush_stage3.png" alt="Mature berry bush">
+          <span class="stage-note">4 ages</span>
+        </span>
+        <span class="soil">
+          <img src="vanilla/block/dirt.png" alt="Dirt">
+          <span class="dry" aria-label="No water needed">–</span>
+          <span class="tooltip"><span class="cf">Dirt or grass</span><span class="c7">No water needed; light 9+.</span><span class="c7">Leave paths for safe picking.</span></span>
+        </span>
+        <span class="drops">
+          <span class="drop"><span class="slot"><img src="vanilla/item/sweet_berries.png" alt="Sweet berries"></span><span class="amount">2–3</span>
+            <span class="tooltip"><span class="cf">2–3 berries when mature</span><span class="c7">Age 2 gives only 1–2 berries.</span><span class="c7">Use the bush; do not break it.</span></span>
+          </span>
+        </span>
+      </span>
+    </label>
+  </main>
+
+  <aside class="card panel" aria-label="Selected crop planting plan">
+    <h2 class="card-title">
+      <span class="choice for-wheat">Wheat · planting plan</span>
+      <span class="choice for-carrot">Carrots · planting plan</span>
+      <span class="choice for-potato">Potatoes · bed plan</span>
+      <span class="choice for-beet">Beetroots · bed plan</span>
+      <span class="choice for-melon">Melon · fruit lanes</span>
+      <span class="choice for-pumpkin">Pumpkin · fruit lanes</span>
+      <span class="choice for-wart">Nether wart · sand bed</span>
+      <span class="choice for-berry">Berries · picking lanes</span>
+    </h2>
+    <p class="caption">5×5 starter · top view</p>
+
+    <div class="farm" aria-label="Five by five soil plan with planting markers">
+      <span class="tile marker"></span><span class="tile lane"></span><span class="tile"></span><span class="tile lane"></span><span class="tile"></span>
+      <span class="tile marker alt"></span><span class="tile lane"></span><span class="tile"></span><span class="tile lane"></span><span class="tile"></span>
+      <span class="tile marker"></span><span class="tile lane"></span><span class="tile water"></span><span class="tile lane"></span><span class="tile"></span>
+      <span class="tile marker alt"></span><span class="tile lane"></span><span class="tile"></span><span class="tile lane"></span><span class="tile"></span>
+      <span class="tile marker"></span><span class="tile lane"></span><span class="tile"></span><span class="tile lane"></span><span class="tile"></span>
+    </div>
+
+    <div class="map-key">
+      <span class="normal">Plant each marked row.<br>Centre = water source</span>
+      <span class="stem-key">Stems on wet farmland.<br>Clear dirt = fruit lanes</span>
+      <span class="wart-key">Plant all 25 squares.<br>Soul sand, not soul soil</span>
+      <span class="berry-key">Bushes in dirt columns.<br>Paths stay clear.</span>
+    </div>
+
+    <div class="advice for-wheat">
+      <p>Alternate carrot rows<br>for faster growth.</p>
+      <p>Harvest golden heads.<br>Replant with seeds.</p>
+    </div>
+    <div class="advice for-carrot">
+      <p>Alternate wheat rows.<br>Keep the soil hydrated.</p>
+      <p>Save one carrot per<br>crop for replanting.</p>
+    </div>
+    <div class="advice for-potato">
+      <p>Alternate wheat rows.<br>Light the bed at night.</p>
+      <p>Poisonous potatoes<br>cannot be replanted.</p>
+    </div>
+    <div class="advice for-beet">
+      <p>Alternate wheat rows.<br>Plant seeds, not roots.</p>
+      <p>Bone meal can fail.<br>Wait for full red roots.</p>
+    </div>
+    <div class="advice for-melon">
+      <p>Keep dirt lanes clear.<br>Break fruit, not stems.</p>
+      <p>*Time is for the stem.<br>Fruit takes extra time.</p>
+    </div>
+    <div class="advice for-pumpkin">
+      <p>Keep stems planted.<br>Fruit regrows beside them.</p>
+      <p>*Time is for the stem.<br>Fruit takes extra time.</p>
+    </div>
+    <div class="advice for-wart">
+      <p>Any dimension works.<br>No light requirement.</p>
+      <p>Harvest thick red tips.<br>Replant one per block.</p>
+    </div>
+    <div class="advice for-berry">
+      <p>Use to pick berries.<br>Do not break the bush.</p>
+      <p>Walk along the paths.<br>Bushes hurt to cross!</p>
+    </div>
+
+    <div class="card-foot">
+      <span class="normal">Water reaches 4 blocks.<br>One source serves 9×9.</span>
+      <span class="stem-key">Keep stems at light 9+.<br>Do not plant the lanes.</span>
+      <span class="wart-key">No water needed.<br>No bone meal shortcut.</span>
+      <span class="berry-key">No water needed.<br>Regrowth: about 11m.</span>
+    </div>
+  </aside>
+
+  <footer class="footer">
+    <div class="footer-note c7">Growth varies · randomTickSpeed 3 · Stay nearby<br>Mature drops, no Fortune · *Stem time only</div>
+    <div class="btn" data-action="close">Done</div>
+  </footer>
+</div>
+</body>
+</html>

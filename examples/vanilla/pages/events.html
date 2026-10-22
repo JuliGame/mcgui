@@ -1,0 +1,754 @@
+<!--
+  A two-month event calendar with oak day tiles and a framed spruce noticeboard.
+  Month arrows and all current-month dates select hidden radios; prizes have hover tooltips.
+  Gold marks the sample today; a white outline marks the selected date independently.
+  Remind me sends a chat note only. Replace it with your server's reminder integration.
+  Update the sample date, schedules, prizes and ended-event states for a real server.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="ui:height" content="576">
+<title>Server Event Calendar</title>
+<link rel="stylesheet" href="vanilla.css">
+<style>
+  .screen {
+    position: relative;
+    width: 1024px;
+    height: 576px;
+    margin: 0 auto;
+  }
+  .panorama { background-size: 1072px 624px; }
+  .dim { background: rgba(0,0,0,.55); }
+  h1, h2, p {
+    margin: 0;
+    font-size: 16px;
+    line-height: 18px;
+    font-weight: normal;
+  }
+  .title {
+    position: absolute;
+    top: 22px;
+    left: 0;
+    right: 0;
+    text-align: center;
+  }
+  .month-nav {
+    display: none;
+    position: absolute;
+    left: 312px;
+    top: 56px;
+    width: 400px;
+    height: 40px;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .month-nav .btn { width: 44px; }
+  .month-name { white-space: nowrap; }
+  .month {
+    display: none;
+    position: absolute;
+    left: 40px;
+    top: 110px;
+    width: 944px;
+    height: 382px;
+    padding: 18px;
+  }
+  .contents { display: flex; gap: 18px; }
+  .calendar { width: 542px; flex: none; }
+  .weekdays {
+    display: grid;
+    grid-template-columns: repeat(7,74px);
+    gap: 4px;
+    height: 26px;
+    text-align: center;
+  }
+  .days {
+    display: grid;
+    grid-template-columns: repeat(7,74px);
+    grid-template-rows: repeat(5,60px);
+    gap: 4px;
+  }
+  .day, .outside {
+    position: relative;
+    width: 74px;
+    height: 60px;
+    border: 2px solid #49301a;
+    background: url(vanilla/block/oak_planks.png) 0 0 / 32px 32px;
+  }
+  .day {
+    display: block;
+    box-shadow: inset 2px 2px 0 #ba9460, inset -2px -2px 0 #614224;
+    cursor: pointer;
+    color: #fff;
+    text-shadow: 2px 2px 0 #3f3f3f;
+  }
+  .day .num, .outside .num {
+    position: absolute;
+    left: 4px;
+    top: 4px;
+    height: 20px;
+    padding: 0 2px;
+  }
+  .day .num { background: #554027; }
+  .day > img {
+    position: absolute;
+    right: 4px;
+    bottom: 4px;
+    width: 32px;
+    height: 32px;
+  }
+  .day:hover {
+    background-image:
+      linear-gradient(rgba(255,255,255,.16),rgba(255,255,255,.16)),
+      url(vanilla/block/oak_planks.png);
+    background-size: 32px 32px;
+  }
+  .day:active { background-color: #765735; }
+  .today {
+    box-shadow: inset 0 0 0 2px #ffff55, inset 0 0 0 4px #8c6b25;
+  }
+  .today .num {
+    color: #ffff55;
+    background: #493619;
+    text-shadow: 2px 2px 0 #3f3f15;
+  }
+  .today::after {
+    content: "";
+    position: absolute;
+    left: 6px;
+    bottom: 6px;
+    width: 18px;
+    height: 4px;
+    background: #ffff55;
+    box-shadow: 0 2px 0 #806020;
+  }
+  .outside {
+    background:
+      linear-gradient(rgba(0,0,0,.62),rgba(0,0,0,.62)),
+      url(vanilla/block/oak_planks.png);
+    background-size: 32px 32px;
+    border-color: #665b49;
+    color: #aaa08b;
+  }
+  .outside .month-tag {
+    position: absolute;
+    left: 6px;
+    bottom: 6px;
+    color: #aaa08b;
+  }
+
+  .notice {
+    position: relative;
+    width: 344px;
+    height: 342px;
+    flex: none;
+    padding: 14px;
+    color: #fff;
+    border: 2px solid #342719;
+    box-shadow: inset 2px 2px 0 #90744e, inset -2px -2px 0 #17120d;
+    background: url(vanilla/block/spruce_planks.png) 0 0 / 32px 32px;
+  }
+  .notice::before {
+    content: "";
+    position: absolute;
+    inset: 8px;
+    background: #25221c;
+    box-shadow: inset 2px 2px 0 #100e0a, inset -2px -2px 0 #75603e;
+  }
+  .notice > * { position: relative; }
+  .date {
+    height: 28px;
+    border-bottom: 2px solid #65573c;
+    margin-bottom: 10px;
+  }
+  .june .date::before { content: var(--jday,"14") " June"; }
+  .july .date::before { content: var(--kday,"4") " July"; }
+  .today-label { display: none; float: none; position: absolute; right: 0; top: 0; }
+  .event { display: none; }
+  .event-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 36px;
+    margin-bottom: 10px;
+  }
+  .event-head > img { width: 32px; height: 32px; flex: none; }
+  .event h2 { white-space: nowrap; }
+  .facts {
+    display: grid;
+    grid-template-columns: 64px 1fr;
+    gap: 8px 10px;
+    margin-bottom: 12px;
+  }
+  .facts > span { white-space: nowrap; }
+  .prize-label { margin-bottom: 6px; }
+  .prizes { display: flex; gap: 6px; }
+  .slot { flex: none; }
+  .slot .tooltip { left: -4px; bottom: 42px; }
+  .slot:hover .tooltip { display: block; }
+  .event, .empty { position: static; }
+  .notice .btn {
+    position: absolute;
+    left: 14px;
+    right: 14px;
+    bottom: 14px;
+    width: auto;
+  }
+  .reminder-note {
+    position: absolute;
+    left: 14px;
+    right: 14px;
+    bottom: 64px;
+    text-align: center;
+    white-space: nowrap;
+  }
+  .empty { text-align: center; }
+  .empty > img {
+    width: 32px;
+    height: 32px;
+    margin: 16px 0 12px;
+  }
+  .empty p { margin-top: 14px; line-height: 24px; }
+
+  .legend {
+    position: absolute;
+    top: 504px;
+    left: 58px;
+    height: 18px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .today-mark {
+    width: 20px;
+    height: 4px;
+    background: #ffff55;
+    box-shadow: 0 2px 0 #806020;
+  }
+  .outline {
+    width: 16px;
+    height: 16px;
+    border: 2px solid #fff;
+    margin-left: 14px;
+  }
+  .footer { position: absolute; top: 538px; left: 58px; }
+  .done { position: absolute; top: 514px; right: 58px; }
+
+  #m6:checked ~ .screen .june,
+  #m7:checked ~ .screen .july { display: block; }
+  #m6:checked ~ .screen .nav6,
+  #m7:checked ~ .screen .nav7 { display: flex; }
+
+  #j1:checked ~ .screen { --jday:"1"; }
+  #j2:checked ~ .screen { --jday:"2"; }
+  #j3:checked ~ .screen { --jday:"3"; }
+  #j4:checked ~ .screen { --jday:"4"; }
+  #j5:checked ~ .screen { --jday:"5"; }
+  #j6:checked ~ .screen { --jday:"6"; }
+  #j7:checked ~ .screen { --jday:"7"; }
+  #j8:checked ~ .screen { --jday:"8"; }
+  #j9:checked ~ .screen { --jday:"9"; }
+  #j10:checked ~ .screen { --jday:"10"; }
+  #j11:checked ~ .screen { --jday:"11"; }
+  #j12:checked ~ .screen { --jday:"12"; }
+  #j13:checked ~ .screen { --jday:"13"; }
+  #j14:checked ~ .screen { --jday:"14"; }
+  #j15:checked ~ .screen { --jday:"15"; }
+  #j16:checked ~ .screen { --jday:"16"; }
+  #j17:checked ~ .screen { --jday:"17"; }
+  #j18:checked ~ .screen { --jday:"18"; }
+  #j19:checked ~ .screen { --jday:"19"; }
+  #j20:checked ~ .screen { --jday:"20"; }
+  #j21:checked ~ .screen { --jday:"21"; }
+  #j22:checked ~ .screen { --jday:"22"; }
+  #j23:checked ~ .screen { --jday:"23"; }
+  #j24:checked ~ .screen { --jday:"24"; }
+  #j25:checked ~ .screen { --jday:"25"; }
+  #j26:checked ~ .screen { --jday:"26"; }
+  #j27:checked ~ .screen { --jday:"27"; }
+  #j28:checked ~ .screen { --jday:"28"; }
+  #j29:checked ~ .screen { --jday:"29"; }
+  #j30:checked ~ .screen { --jday:"30"; }
+
+  #k1:checked ~ .screen { --kday:"1"; }
+  #k2:checked ~ .screen { --kday:"2"; }
+  #k3:checked ~ .screen { --kday:"3"; }
+  #k4:checked ~ .screen { --kday:"4"; }
+  #k5:checked ~ .screen { --kday:"5"; }
+  #k6:checked ~ .screen { --kday:"6"; }
+  #k7:checked ~ .screen { --kday:"7"; }
+  #k8:checked ~ .screen { --kday:"8"; }
+  #k9:checked ~ .screen { --kday:"9"; }
+  #k10:checked ~ .screen { --kday:"10"; }
+  #k11:checked ~ .screen { --kday:"11"; }
+  #k12:checked ~ .screen { --kday:"12"; }
+  #k13:checked ~ .screen { --kday:"13"; }
+  #k14:checked ~ .screen { --kday:"14"; }
+  #k15:checked ~ .screen { --kday:"15"; }
+  #k16:checked ~ .screen { --kday:"16"; }
+  #k17:checked ~ .screen { --kday:"17"; }
+  #k18:checked ~ .screen { --kday:"18"; }
+  #k19:checked ~ .screen { --kday:"19"; }
+  #k20:checked ~ .screen { --kday:"20"; }
+  #k21:checked ~ .screen { --kday:"21"; }
+  #k22:checked ~ .screen { --kday:"22"; }
+  #k23:checked ~ .screen { --kday:"23"; }
+  #k24:checked ~ .screen { --kday:"24"; }
+  #k25:checked ~ .screen { --kday:"25"; }
+  #k26:checked ~ .screen { --kday:"26"; }
+  #k27:checked ~ .screen { --kday:"27"; }
+  #k28:checked ~ .screen { --kday:"28"; }
+  #k29:checked ~ .screen { --kday:"29"; }
+  #k30:checked ~ .screen { --kday:"30"; }
+  #k31:checked ~ .screen { --kday:"31"; }
+
+  #j1:checked ~ .screen [for="j1"],
+  #j2:checked ~ .screen [for="j2"],
+  #j3:checked ~ .screen [for="j3"],
+  #j4:checked ~ .screen [for="j4"],
+  #j5:checked ~ .screen [for="j5"],
+  #j6:checked ~ .screen [for="j6"],
+  #j7:checked ~ .screen [for="j7"],
+  #j8:checked ~ .screen [for="j8"],
+  #j9:checked ~ .screen [for="j9"],
+  #j10:checked ~ .screen [for="j10"],
+  #j11:checked ~ .screen [for="j11"],
+  #j12:checked ~ .screen [for="j12"],
+  #j13:checked ~ .screen [for="j13"],
+  #j14:checked ~ .screen [for="j14"],
+  #j15:checked ~ .screen [for="j15"],
+  #j16:checked ~ .screen [for="j16"],
+  #j17:checked ~ .screen [for="j17"],
+  #j18:checked ~ .screen [for="j18"],
+  #j19:checked ~ .screen [for="j19"],
+  #j20:checked ~ .screen [for="j20"],
+  #j21:checked ~ .screen [for="j21"],
+  #j22:checked ~ .screen [for="j22"],
+  #j23:checked ~ .screen [for="j23"],
+  #j24:checked ~ .screen [for="j24"],
+  #j25:checked ~ .screen [for="j25"],
+  #j26:checked ~ .screen [for="j26"],
+  #j27:checked ~ .screen [for="j27"],
+  #j28:checked ~ .screen [for="j28"],
+  #j29:checked ~ .screen [for="j29"],
+  #j30:checked ~ .screen [for="j30"],
+  #k1:checked ~ .screen [for="k1"],
+  #k2:checked ~ .screen [for="k2"],
+  #k3:checked ~ .screen [for="k3"],
+  #k4:checked ~ .screen [for="k4"],
+  #k5:checked ~ .screen [for="k5"],
+  #k6:checked ~ .screen [for="k6"],
+  #k7:checked ~ .screen [for="k7"],
+  #k8:checked ~ .screen [for="k8"],
+  #k9:checked ~ .screen [for="k9"],
+  #k10:checked ~ .screen [for="k10"],
+  #k11:checked ~ .screen [for="k11"],
+  #k12:checked ~ .screen [for="k12"],
+  #k13:checked ~ .screen [for="k13"],
+  #k14:checked ~ .screen [for="k14"],
+  #k15:checked ~ .screen [for="k15"],
+  #k16:checked ~ .screen [for="k16"],
+  #k17:checked ~ .screen [for="k17"],
+  #k18:checked ~ .screen [for="k18"],
+  #k19:checked ~ .screen [for="k19"],
+  #k20:checked ~ .screen [for="k20"],
+  #k21:checked ~ .screen [for="k21"],
+  #k22:checked ~ .screen [for="k22"],
+  #k23:checked ~ .screen [for="k23"],
+  #k24:checked ~ .screen [for="k24"],
+  #k25:checked ~ .screen [for="k25"],
+  #k26:checked ~ .screen [for="k26"],
+  #k27:checked ~ .screen [for="k27"],
+  #k28:checked ~ .screen [for="k28"],
+  #k29:checked ~ .screen [for="k29"],
+  #k30:checked ~ .screen [for="k30"],
+  #k31:checked ~ .screen [for="k31"] { border-color: #fff; }
+
+  #j14:checked ~ .screen .today-label { display: block; }
+
+  #j6:checked ~ .screen .e6,
+  #j14:checked ~ .screen .e14,
+  #j19:checked ~ .screen .e19,
+  #j27:checked ~ .screen .e27,
+  #k4:checked ~ .screen .ek4,
+  #k18:checked ~ .screen .ek18 { display: block; }
+
+  #j6:checked ~ .screen .june .empty,
+  #j14:checked ~ .screen .june .empty,
+  #j19:checked ~ .screen .june .empty,
+  #j27:checked ~ .screen .june .empty,
+  #k4:checked ~ .screen .july .empty,
+  #k18:checked ~ .screen .july .empty { display: none; }
+</style>
+</head>
+<body>
+<input class="pick" type="radio" name="month" id="m6" checked>
+<input class="pick" type="radio" name="month" id="m7">
+<input class="pick" type="radio" name="june" id="j1">
+<input class="pick" type="radio" name="june" id="j2">
+<input class="pick" type="radio" name="june" id="j3">
+<input class="pick" type="radio" name="june" id="j4">
+<input class="pick" type="radio" name="june" id="j5">
+<input class="pick" type="radio" name="june" id="j6">
+<input class="pick" type="radio" name="june" id="j7">
+<input class="pick" type="radio" name="june" id="j8">
+<input class="pick" type="radio" name="june" id="j9">
+<input class="pick" type="radio" name="june" id="j10">
+<input class="pick" type="radio" name="june" id="j11">
+<input class="pick" type="radio" name="june" id="j12">
+<input class="pick" type="radio" name="june" id="j13">
+<input class="pick" type="radio" name="june" id="j14" checked>
+<input class="pick" type="radio" name="june" id="j15">
+<input class="pick" type="radio" name="june" id="j16">
+<input class="pick" type="radio" name="june" id="j17">
+<input class="pick" type="radio" name="june" id="j18">
+<input class="pick" type="radio" name="june" id="j19">
+<input class="pick" type="radio" name="june" id="j20">
+<input class="pick" type="radio" name="june" id="j21">
+<input class="pick" type="radio" name="june" id="j22">
+<input class="pick" type="radio" name="june" id="j23">
+<input class="pick" type="radio" name="june" id="j24">
+<input class="pick" type="radio" name="june" id="j25">
+<input class="pick" type="radio" name="june" id="j26">
+<input class="pick" type="radio" name="june" id="j27">
+<input class="pick" type="radio" name="june" id="j28">
+<input class="pick" type="radio" name="june" id="j29">
+<input class="pick" type="radio" name="june" id="j30">
+<input class="pick" type="radio" name="july" id="k1">
+<input class="pick" type="radio" name="july" id="k2">
+<input class="pick" type="radio" name="july" id="k3">
+<input class="pick" type="radio" name="july" id="k4" checked>
+<input class="pick" type="radio" name="july" id="k5">
+<input class="pick" type="radio" name="july" id="k6">
+<input class="pick" type="radio" name="july" id="k7">
+<input class="pick" type="radio" name="july" id="k8">
+<input class="pick" type="radio" name="july" id="k9">
+<input class="pick" type="radio" name="july" id="k10">
+<input class="pick" type="radio" name="july" id="k11">
+<input class="pick" type="radio" name="july" id="k12">
+<input class="pick" type="radio" name="july" id="k13">
+<input class="pick" type="radio" name="july" id="k14">
+<input class="pick" type="radio" name="july" id="k15">
+<input class="pick" type="radio" name="july" id="k16">
+<input class="pick" type="radio" name="july" id="k17">
+<input class="pick" type="radio" name="july" id="k18">
+<input class="pick" type="radio" name="july" id="k19">
+<input class="pick" type="radio" name="july" id="k20">
+<input class="pick" type="radio" name="july" id="k21">
+<input class="pick" type="radio" name="july" id="k22">
+<input class="pick" type="radio" name="july" id="k23">
+<input class="pick" type="radio" name="july" id="k24">
+<input class="pick" type="radio" name="july" id="k25">
+<input class="pick" type="radio" name="july" id="k26">
+<input class="pick" type="radio" name="july" id="k27">
+<input class="pick" type="radio" name="july" id="k28">
+<input class="pick" type="radio" name="july" id="k29">
+<input class="pick" type="radio" name="july" id="k30">
+<input class="pick" type="radio" name="july" id="k31">
+
+<div class="screen">
+  <div class="panorama"></div>
+  <div class="dim"></div>
+  <h1 class="title ce">Server Event Calendar</h1>
+
+  <div class="month-nav nav6">
+    <span class="btn off" aria-disabled="true" aria-label="No earlier month">&lt;</span>
+    <span class="month-name t">June 2026</span>
+    <label class="btn" for="m7" aria-label="Next month">&gt;</label>
+  </div>
+  <div class="month-nav nav7">
+    <label class="btn" for="m6" aria-label="Previous month">&lt;</label>
+    <span class="month-name t">July 2026</span>
+    <span class="btn off" aria-disabled="true" aria-label="No later month">&gt;</span>
+  </div>
+
+  <section class="month june panel" aria-label="June 2026 events">
+    <div class="contents">
+      <div class="calendar">
+        <div class="weekdays">
+          <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span>
+          <span>Fri</span><span>Sat</span><span>Sun</span>
+        </div>
+        <div class="days">
+          <label class="day" for="j1"><span class="num">1</span></label>
+          <label class="day" for="j2"><span class="num">2</span></label>
+          <label class="day" for="j3"><span class="num">3</span></label>
+          <label class="day" for="j4"><span class="num">4</span></label>
+          <label class="day" for="j5"><span class="num">5</span></label>
+          <label class="day" for="j6"><span class="num">6</span><img src="vanilla/item/bow.png" alt="Archery contest"></label>
+          <label class="day" for="j7"><span class="num">7</span></label>
+          <label class="day" for="j8"><span class="num">8</span></label>
+          <label class="day" for="j9"><span class="num">9</span></label>
+          <label class="day" for="j10"><span class="num">10</span></label>
+          <label class="day" for="j11"><span class="num">11</span></label>
+          <label class="day" for="j12"><span class="num">12</span></label>
+          <label class="day" for="j13"><span class="num">13</span></label>
+          <label class="day today" for="j14" aria-label="14 June, today, Anniversary"><span class="num">14</span><img src="vanilla/item/cake.png" alt="Anniversary"></label>
+          <label class="day" for="j15"><span class="num">15</span></label>
+          <label class="day" for="j16"><span class="num">16</span></label>
+          <label class="day" for="j17"><span class="num">17</span></label>
+          <label class="day" for="j18"><span class="num">18</span></label>
+          <label class="day" for="j19"><span class="num">19</span><img src="vanilla/block/tnt_side.png" alt="Minigame night"></label>
+          <label class="day" for="j20"><span class="num">20</span></label>
+          <label class="day" for="j21"><span class="num">21</span></label>
+          <label class="day" for="j22"><span class="num">22</span></label>
+          <label class="day" for="j23"><span class="num">23</span></label>
+          <label class="day" for="j24"><span class="num">24</span></label>
+          <label class="day" for="j25"><span class="num">25</span></label>
+          <label class="day" for="j26"><span class="num">26</span></label>
+          <label class="day" for="j27"><span class="num">27</span><img src="vanilla/item/diamond.png" alt="Drop party"></label>
+          <label class="day" for="j28"><span class="num">28</span></label>
+          <label class="day" for="j29"><span class="num">29</span></label>
+          <label class="day" for="j30"><span class="num">30</span></label>
+          <div class="outside" aria-label="1 July, outside this month"><span class="num">1</span><span class="month-tag">Jul</span></div>
+          <div class="outside" aria-label="2 July, outside this month"><span class="num">2</span></div>
+          <div class="outside" aria-label="3 July, outside this month"><span class="num">3</span></div>
+          <div class="outside" aria-label="4 July, outside this month"><span class="num">4</span></div>
+          <div class="outside" aria-label="5 July, outside this month"><span class="num">5</span></div>
+        </div>
+      </div>
+
+      <aside class="notice">
+        <h2 class="date c7"><span class="today-label ce">Today</span></h2>
+
+        <div class="empty">
+          <img src="vanilla/item/oak_sign.png" alt="">
+          <h2 class="t">A quiet day</h2>
+          <p class="c7">No events planned.<br>Time for your next<br>great build.</p>
+          <div class="reminder-note c7">Select a marked day.</div>
+          <div class="btn off" aria-disabled="true">No reminder</div>
+        </div>
+
+        <div class="event e6">
+          <div class="event-head">
+            <img src="vanilla/item/bow.png" alt="">
+            <h2 class="ce">Archery Contest</h2>
+          </div>
+          <div class="facts">
+            <span class="c7">Time</span><span class="cf">18:00 UTC</span>
+            <span class="c7">Place</span><span class="cf">Target Range</span>
+            <span class="c7">Entry</span><span class="ca">Free · solo</span>
+          </div>
+          <div class="prize-label c7">Winner's prizes</div>
+          <div class="prizes">
+            <div class="slot">
+              <img src="vanilla/item/bow.png" alt="Champion's Bow">
+              <div class="tooltip"><div><div class="cf">Champion's Bow</div><div class="c7">Power IV</div></div></div>
+            </div>
+            <div class="slot">
+              <img src="vanilla/item/emerald.png" alt="16 emeralds"><span class="n">16</span>
+              <div class="tooltip"><div class="cf">16 Emeralds</div></div>
+            </div>
+          </div>
+          <div class="reminder-note c7">This event has ended.</div>
+          <div class="btn off" aria-disabled="true">Event ended</div>
+        </div>
+
+        <div class="event e14">
+          <div class="event-head">
+            <img src="vanilla/item/cake.png" alt="">
+            <h2 class="ce">Anniversary</h2>
+          </div>
+          <div class="facts">
+            <span class="c7">Time</span><span class="ce">20:00 UTC</span>
+            <span class="c7">Place</span><span class="cf">Spawn Square</span>
+            <span class="c7">Entry</span><span class="ca">Everyone!</span>
+          </div>
+          <div class="prize-label c7">Gifts for guests</div>
+          <div class="prizes">
+            <div class="slot">
+              <img src="vanilla/item/cake.png" alt="Birthday cake">
+              <div class="tooltip"><div><div class="cf">Birthday Cake</div><div class="c7">One per guest.</div></div></div>
+            </div>
+            <div class="slot">
+              <img src="vanilla/item/firework_rocket.png" alt="16 fireworks"><span class="n">16</span>
+              <div class="tooltip"><div><div class="cf">16 Fireworks</div><div class="c7">Light the sky!</div></div></div>
+            </div>
+            <div class="slot">
+              <img src="vanilla/item/diamond.png" alt="4 diamonds"><span class="n">4</span>
+              <div class="tooltip"><div class="cb">4 Diamonds</div></div>
+            </div>
+          </div>
+          <div class="reminder-note c7">Demo: chat note only</div>
+          <div class="btn" data-message="<gold>Event note for {player}:</gold> <yellow>Anniversary</yellow><gray> — 14 June 2026, 20:00 UTC at Spawn Square. Demo only; no reminder scheduled.</gray>">Remind me</div>
+        </div>
+
+        <div class="event e19">
+          <div class="event-head">
+            <img src="vanilla/block/tnt_side.png" alt="">
+            <h2 class="ce">Minigame Night</h2>
+          </div>
+          <div class="facts">
+            <span class="c7">Time</span><span class="cf">19:00 UTC</span>
+            <span class="c7">Place</span><span class="cf">Games Arena</span>
+            <span class="c7">Entry</span><span class="ca">Free · teams</span>
+          </div>
+          <div class="prize-label c7">Winning team loot</div>
+          <div class="prizes">
+            <div class="slot">
+              <img src="vanilla/item/emerald.png" alt="32 emeralds"><span class="n">32</span>
+              <div class="tooltip"><div><div class="cf">32 Emeralds</div><div class="c7">Per winner.</div></div></div>
+            </div>
+            <div class="slot">
+              <img src="vanilla/item/golden_apple.png" alt="2 golden apples"><span class="n">2</span>
+              <div class="tooltip"><div class="cf">2 Golden Apples</div></div>
+            </div>
+          </div>
+          <div class="reminder-note c7">Demo: chat note only</div>
+          <div class="btn" data-message="<gold>Event note for {player}:</gold> <yellow>Minigame Night</yellow><gray> — 19 June 2026, 19:00 UTC at Games Arena. Demo only; no reminder scheduled.</gray>">Remind me</div>
+        </div>
+
+        <div class="event e27">
+          <div class="event-head">
+            <img src="vanilla/item/diamond.png" alt="">
+            <h2 class="ce">Drop Party</h2>
+          </div>
+          <div class="facts">
+            <span class="c7">Time</span><span class="cf">18:30 UTC</span>
+            <span class="c7">Place</span><span class="cf">Spawn Fountain</span>
+            <span class="c7">Entry</span><span class="ca">Everyone!</span>
+          </div>
+          <div class="prize-label c7">In the loot pool</div>
+          <div class="prizes">
+            <div class="slot">
+              <img src="vanilla/item/diamond.png" alt="Diamonds">
+              <div class="tooltip"><div><div class="cb">Diamonds</div><div class="c7">Catch the drops!</div></div></div>
+            </div>
+            <div class="slot">
+              <img src="vanilla/item/enchanted_book.png" alt="Enchanted books">
+              <div class="tooltip"><div><div class="ce">Enchanted Books</div><div class="c7">Random enchants.</div></div></div>
+            </div>
+            <div class="slot">
+              <img src="vanilla/item/experience_bottle.png" alt="Experience bottles">
+              <div class="tooltip"><div class="cf">XP Bottles</div></div>
+            </div>
+          </div>
+          <div class="reminder-note c7">Demo: chat note only</div>
+          <div class="btn" data-message="<gold>Event note for {player}:</gold> <aqua>Drop Party</aqua><gray> — 27 June 2026, 18:30 UTC at Spawn Fountain. Demo only; no reminder scheduled.</gray>">Remind me</div>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <section class="month july panel" aria-label="July 2026 events">
+    <div class="contents">
+      <div class="calendar">
+        <div class="weekdays">
+          <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span>
+          <span>Fri</span><span>Sat</span><span>Sun</span>
+        </div>
+        <div class="days">
+          <div class="outside" aria-label="29 June, outside this month"><span class="num">29</span><span class="month-tag">Jun</span></div>
+          <div class="outside" aria-label="30 June, outside this month"><span class="num">30</span></div>
+          <label class="day" for="k1"><span class="num">1</span></label>
+          <label class="day" for="k2"><span class="num">2</span></label>
+          <label class="day" for="k3"><span class="num">3</span></label>
+          <label class="day" for="k4"><span class="num">4</span><img src="vanilla/block/tnt_side.png" alt="Minigame night"></label>
+          <label class="day" for="k5"><span class="num">5</span></label>
+          <label class="day" for="k6"><span class="num">6</span></label>
+          <label class="day" for="k7"><span class="num">7</span></label>
+          <label class="day" for="k8"><span class="num">8</span></label>
+          <label class="day" for="k9"><span class="num">9</span></label>
+          <label class="day" for="k10"><span class="num">10</span></label>
+          <label class="day" for="k11"><span class="num">11</span></label>
+          <label class="day" for="k12"><span class="num">12</span></label>
+          <label class="day" for="k13"><span class="num">13</span></label>
+          <label class="day" for="k14"><span class="num">14</span></label>
+          <label class="day" for="k15"><span class="num">15</span></label>
+          <label class="day" for="k16"><span class="num">16</span></label>
+          <label class="day" for="k17"><span class="num">17</span></label>
+          <label class="day" for="k18"><span class="num">18</span><img src="vanilla/item/bow.png" alt="Archery contest"></label>
+          <label class="day" for="k19"><span class="num">19</span></label>
+          <label class="day" for="k20"><span class="num">20</span></label>
+          <label class="day" for="k21"><span class="num">21</span></label>
+          <label class="day" for="k22"><span class="num">22</span></label>
+          <label class="day" for="k23"><span class="num">23</span></label>
+          <label class="day" for="k24"><span class="num">24</span></label>
+          <label class="day" for="k25"><span class="num">25</span></label>
+          <label class="day" for="k26"><span class="num">26</span></label>
+          <label class="day" for="k27"><span class="num">27</span></label>
+          <label class="day" for="k28"><span class="num">28</span></label>
+          <label class="day" for="k29"><span class="num">29</span></label>
+          <label class="day" for="k30"><span class="num">30</span></label>
+          <label class="day" for="k31"><span class="num">31</span></label>
+          <div class="outside" aria-label="1 August, outside this month"><span class="num">1</span><span class="month-tag">Aug</span></div>
+          <div class="outside" aria-label="2 August, outside this month"><span class="num">2</span></div>
+        </div>
+      </div>
+
+      <aside class="notice">
+        <h2 class="date c7"></h2>
+
+        <div class="empty">
+          <img src="vanilla/item/oak_sign.png" alt="">
+          <h2 class="t">A quiet day</h2>
+          <p class="c7">No events planned.<br>Time for your next<br>great build.</p>
+          <div class="reminder-note c7">Select a marked day.</div>
+          <div class="btn off" aria-disabled="true">No reminder</div>
+        </div>
+
+        <div class="event ek4">
+          <div class="event-head">
+            <img src="vanilla/block/tnt_side.png" alt="">
+            <h2 class="ce">Minigame Night</h2>
+          </div>
+          <div class="facts">
+            <span class="c7">Time</span><span class="cf">19:00 UTC</span>
+            <span class="c7">Place</span><span class="cf">Games Arena</span>
+            <span class="c7">Entry</span><span class="ca">Free · teams</span>
+          </div>
+          <div class="prize-label c7">Winning team loot</div>
+          <div class="prizes">
+            <div class="slot">
+              <img src="vanilla/item/emerald.png" alt="32 emeralds"><span class="n">32</span>
+              <div class="tooltip"><div><div class="cf">32 Emeralds</div><div class="c7">Per winner.</div></div></div>
+            </div>
+            <div class="slot">
+              <img src="vanilla/item/golden_apple.png" alt="2 golden apples"><span class="n">2</span>
+              <div class="tooltip"><div class="cf">2 Golden Apples</div></div>
+            </div>
+          </div>
+          <div class="reminder-note c7">Demo: chat note only</div>
+          <div class="btn" data-message="<gold>Event note for {player}:</gold> <yellow>Minigame Night</yellow><gray> — 4 July 2026, 19:00 UTC at Games Arena. Demo only; no reminder scheduled.</gray>">Remind me</div>
+        </div>
+
+        <div class="event ek18">
+          <div class="event-head">
+            <img src="vanilla/item/bow.png" alt="">
+            <h2 class="ce">Archery Contest</h2>
+          </div>
+          <div class="facts">
+            <span class="c7">Time</span><span class="cf">18:00 UTC</span>
+            <span class="c7">Place</span><span class="cf">Target Range</span>
+            <span class="c7">Entry</span><span class="ca">Free · solo</span>
+          </div>
+          <div class="prize-label c7">Winner's prizes</div>
+          <div class="prizes">
+            <div class="slot">
+              <img src="vanilla/item/bow.png" alt="Champion's Bow">
+              <div class="tooltip"><div><div class="cf">Champion's Bow</div><div class="c7">Power IV</div></div></div>
+            </div>
+            <div class="slot">
+              <img src="vanilla/item/emerald.png" alt="16 emeralds"><span class="n">16</span>
+              <div class="tooltip"><div class="cf">16 Emeralds</div></div>
+            </div>
+          </div>
+          <div class="reminder-note c7">Demo: chat note only</div>
+          <div class="btn" data-message="<gold>Event note for {player}:</gold> <yellow>Archery Contest</yellow><gray> — 18 July 2026, 18:00 UTC at Target Range. Demo only; no reminder scheduled.</gray>">Remind me</div>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <div class="legend c7">
+    <span class="today-mark"></span><span>Today</span>
+    <span class="outline"></span><span>Selected</span>
+    <span>· All times UTC</span>
+  </div>
+  <div class="footer c7">Sample schedule · Today: 14 June 2026</div>
+  <div class="btn done" data-action="close">Done</div>
+</div>
+</body>
+</html>

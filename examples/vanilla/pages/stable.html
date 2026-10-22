@@ -1,0 +1,560 @@
+<!--
+  A spruce-and-hay stable with six selectable sample animals and an equipment inspector.
+  Pet radios select an animal; action radios open modal Rename and Release previews.
+  Hover equipment for details. Movement bars are sample ratings, not measured vanilla speeds.
+  Replace chat previews with ownership-checked pet commands and load actual saved animal data.
+  Rename uses a preset because UI Engine does not support typing; no script is required.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="ui:height" content="576">
+<meta name="ui:refresh" content="5">
+<title>Stable</title>
+<link rel="stylesheet" href="vanilla.css">
+<style>
+  .screen {
+    position: relative;
+    width: 1024px;
+    height: 576px;
+    margin: 0 auto;
+  }
+  .barn {
+    position: absolute;
+    inset: 0;
+    background: url(vanilla/block/spruce_planks.png) 0 0 / 32px 32px;
+  }
+  .dim { background: rgba(0,0,0,.55); }
+  .beam {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 32px;
+    background: url(vanilla/block/spruce_log.png) 0 0 / 32px 32px;
+    box-shadow: inset 2px 0 #745536, inset -2px 0 #24180e;
+  }
+  .beam.left { left: 8px; }
+  .beam.right { right: 8px; }
+  .hay {
+    position: absolute;
+    bottom: 0;
+    width: 96px;
+    height: 64px;
+    background: url(vanilla/block/hay_block_side.png) 0 0 / 32px 32px;
+    border-top: 2px solid #392b13;
+  }
+  .hay.left { left: 40px; }
+  .hay.right { right: 40px; }
+
+  header {
+    position: absolute;
+    top: 20px;
+    left: 48px;
+    right: 48px;
+    height: 64px;
+  }
+  .heading { display: flex; align-items: center; gap: 12px; height: 32px; }
+  .heading img { width: 32px; height: 32px; }
+  h1, h2, p { margin: 0; font-size: 16px; line-height: 18px; font-weight: normal; }
+  .subtitle { margin: 8px 0 0 44px; }
+  .owner { position: absolute; right: 0; top: 0; text-align: right; line-height: 24px; }
+
+  .layout {
+    position: absolute;
+    top: 98px;
+    left: 48px;
+    width: 928px;
+    height: 394px;
+    display: grid;
+    grid-template-columns: 544px 368px;
+    gap: 16px;
+  }
+  .roster {
+    display: grid;
+    grid-template-columns: repeat(2, 266px);
+    grid-template-rows: repeat(3, 126px);
+    gap: 8px 12px;
+  }
+  .animal {
+    position: relative;
+    display: block;
+    padding: 8px 10px;
+    border: 2px solid #000;
+    background: #373737;
+    box-shadow: inset 2px 2px #747474, inset -2px -2px #202020;
+    cursor: pointer;
+  }
+  .animal:hover { border-color: #aaa; background: #414141; }
+  #horse:checked ~ .screen .horse,
+  #donkey:checked ~ .screen .donkey,
+  #wolf:checked ~ .screen .wolf,
+  #cat:checked ~ .screen .cat,
+  #parrot:checked ~ .screen .parrot,
+  #llama:checked ~ .screen .llama {
+    border-color: #fff;
+    background: #4a4737;
+    box-shadow: inset 2px 2px #8c815b, inset -2px -2px #29261c;
+  }
+  .animal-top { display: flex; align-items: center; gap: 10px; height: 36px; }
+  .animal-top .slot { flex: none; }
+  .name, .species { display: block; white-space: nowrap; }
+  .species { margin-top: 2px; }
+  .vitals { height: 42px; padding-top: 6px; }
+  .heart-row { display: flex; align-items: center; height: 18px; gap: 6px; }
+  .hearts {
+    display: block;
+    height: 18px;
+    flex: none;
+    background:
+      url(vanilla/gui/sprites/hud/heart/full.png) 0 0 / 18px 18px repeat-x,
+      url(vanilla/gui/sprites/hud/heart/container.png) 0 0 / 18px 18px repeat-x;
+  }
+  .h10 { width: 180px; }
+  .h5 { width: 90px; }
+  .h3 { width: 54px; }
+  .health-line { display: flex; align-items: center; justify-content: space-between; height: 18px; }
+  .armor { display: flex; align-items: center; gap: 6px; }
+  .armor img { width: 18px; height: 18px; }
+  .wolf-health { position: relative; }
+  .wolf-health .tooltip { left: 0; bottom: 24px; }
+  .wolf-health:hover .tooltip { display: block; }
+
+  .small-stats { display: flex; align-items: center; gap: 16px; height: 18px; margin-top: 8px; }
+  .meter { display: flex; align-items: center; gap: 6px; }
+  .meter-letter { width: 14px; }
+  .segments {
+    position: relative;
+    display: block;
+    width: 68px;
+    height: 8px;
+    background: repeating-linear-gradient(to right, #222 0px, #222 12px, transparent 12px, transparent 14px);
+  }
+  .segments::after {
+    content: "";
+    display: block;
+    height: 8px;
+    width: var(--fill);
+    background: repeating-linear-gradient(to right, #9ccc61 0px, #9ccc61 12px, transparent 12px, transparent 14px);
+  }
+  .jump::after {
+    background: repeating-linear-gradient(to right, #e2c774 0px, #e2c774 12px, transparent 12px, transparent 14px);
+  }
+  .r1 { --fill: 12px; }
+  .r2 { --fill: 26px; }
+  .r3 { --fill: 40px; }
+  .r4 { --fill: 54px; }
+
+  .inspector { position: relative; height: 394px; padding: 16px; }
+  .pet { display: none; }
+  #horse:checked ~ .screen .p1,
+  #donkey:checked ~ .screen .p2,
+  #wolf:checked ~ .screen .p3,
+  #cat:checked ~ .screen .p4,
+  #parrot:checked ~ .screen .p5,
+  #llama:checked ~ .screen .p6 { display: block; }
+
+  .portrait-row { display: flex; align-items: center; gap: 12px; height: 64px; }
+  .portrait {
+    width: 64px;
+    height: 64px;
+    flex: none;
+    display: grid;
+    place-items: center;
+    border: 2px solid #392b17;
+    background: url(vanilla/block/hay_block_side.png) 0 0 / 32px 32px;
+    box-shadow: inset 2px 2px #e0cd7d, inset -2px -2px #755426;
+  }
+  .portrait img { width: 32px; height: 32px; }
+  .identity h2 { margin-bottom: 6px; }
+  .tag { margin-top: 6px; color: #435627; }
+  .notes {
+    margin-top: 12px;
+    height: 66px;
+    padding: 10px;
+    background: #aaa99f;
+    box-shadow: inset 2px 2px #68685e, inset -2px -2px #eee;
+    line-height: 22px;
+  }
+  .notes .pet { white-space: nowrap; }
+  .equipment-title { margin: 12px 0 8px; }
+  .equipment { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .equip { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .equip .caption { white-space: nowrap; }
+  .slot .tooltip { right: 0; bottom: 42px; }
+  .slot:hover .tooltip { display: block; }
+  .slot.unsupported {
+    background: #666;
+    box-shadow: inset 2px 2px #373737, inset -2px -2px #eee;
+  }
+  .slot.unsupported::after {
+    content: "—";
+    color: #aaa;
+    text-shadow: 2px 2px #333;
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    pointer-events: none;
+  }
+  .equipment-note { margin-top: 10px; color: #555; }
+  .summons { position: absolute; left: 16px; right: 16px; bottom: 62px; }
+  .summons .btn { width: 100%; }
+  .tools { position: absolute; left: 16px; right: 16px; bottom: 14px; display: flex; gap: 8px; }
+  .tools .btn { width: 162px; }
+
+  footer {
+    position: absolute;
+    top: 506px;
+    left: 0;
+    right: 0;
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+  }
+  .hint { position: absolute; top: 550px; left: 0; right: 0; text-align: center; }
+
+  .modal-layer { display: none; position: absolute; inset: 0; z-index: 30; }
+  #rename:checked ~ .screen .modal-layer,
+  #release:checked ~ .screen .modal-layer { display: block; }
+  .scrim { position: absolute; inset: 0; background: rgba(0,0,0,.72); }
+  .dialog {
+    position: absolute;
+    left: 312px;
+    top: 128px;
+    width: 400px;
+    height: 320px;
+    padding: 22px;
+  }
+  .rename-only, .release-only { display: none; }
+  #rename:checked ~ .screen .rename-only,
+  #release:checked ~ .screen .release-only { display: block; }
+  .dialog h2 { margin-bottom: 16px; }
+  .dialog-name {
+    padding: 10px;
+    height: 40px;
+    background: #8b8b8b;
+    box-shadow: inset 2px 2px #373737, inset -2px -2px #fff;
+    margin-bottom: 14px;
+  }
+  .dialog p { line-height: 22px; }
+  .confirmations { position: absolute; left: 22px; right: 22px; bottom: 74px; }
+  .confirmations .btn { width: 100%; }
+  .cancel { position: absolute; bottom: 22px; left: 22px; width: 352px; }
+</style>
+</head>
+<body>
+<input class="pick" type="radio" name="pet" id="horse" checked>
+<input class="pick" type="radio" name="pet" id="donkey">
+<input class="pick" type="radio" name="pet" id="wolf">
+<input class="pick" type="radio" name="pet" id="cat">
+<input class="pick" type="radio" name="pet" id="parrot">
+<input class="pick" type="radio" name="pet" id="llama">
+<input class="pick" type="radio" name="action" id="inspect" checked>
+<input class="pick" type="radio" name="action" id="rename">
+<input class="pick" type="radio" name="action" id="release">
+
+<div class="screen">
+  <div class="barn"></div><div class="dim"></div>
+  <div class="beam left"></div><div class="beam right"></div>
+  <div class="hay left"></div><div class="hay right"></div>
+
+  <header>
+    <div class="heading">
+      <img src="vanilla/item/saddle.png" alt="">
+      <h1 class="ce">Stable</h1>
+    </div>
+    <div class="subtitle c7"><span class="ca">S</span> Speed · <span class="ce">J</span> Jump · Rated 1–5</div>
+    <div class="owner">
+      <div class="cf">{player}</div>
+      <div class="c7">6 animals · Demo stable</div>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="roster" aria-label="Select an animal">
+      <label class="animal horse" for="horse">
+        <span class="animal-top">
+          <span class="slot"><img src="vanilla/item/horse_spawn_egg.png" alt="Horse"></span>
+          <span><span class="name cf">Chestnut</span><span class="species c7">Horse</span></span>
+        </span>
+        <span class="vitals">
+          <span class="heart-row"><span class="hearts h10"></span></span>
+          <span class="health-line c7">
+            <span>20/20 HP</span>
+            <span class="armor"><img src="vanilla/gui/sprites/hud/armor_full.png" alt="Armour"><span>5</span></span>
+          </span>
+        </span>
+        <span class="small-stats">
+          <span class="meter"><span class="meter-letter ca">S</span><span class="segments r4" aria-label="Speed 4 of 5"></span></span>
+          <span class="meter"><span class="meter-letter ce">J</span><span class="segments jump r3" aria-label="Jump 3 of 5"></span></span>
+        </span>
+      </label>
+
+      <label class="animal donkey" for="donkey">
+        <span class="animal-top">
+          <span class="slot"><img src="vanilla/item/donkey_spawn_egg.png" alt="Donkey"></span>
+          <span><span class="name cf">Pockets</span><span class="species c7">Donkey</span></span>
+        </span>
+        <span class="vitals">
+          <span class="heart-row"><span class="hearts h10"></span></span>
+          <span class="health-line c7">
+            <span>20/20 HP</span>
+            <span class="armor"><img src="vanilla/gui/sprites/hud/armor_empty.png" alt="Armour"><span>0</span></span>
+          </span>
+        </span>
+        <span class="small-stats">
+          <span class="meter"><span class="meter-letter ca">S</span><span class="segments r2" aria-label="Speed 2 of 5"></span></span>
+          <span class="meter"><span class="meter-letter ce">J</span><span class="segments jump r2" aria-label="Jump 2 of 5"></span></span>
+        </span>
+      </label>
+
+      <label class="animal wolf" for="wolf">
+        <span class="animal-top">
+          <span class="slot"><img src="vanilla/item/wolf_spawn_egg.png" alt="Wolf"></span>
+          <span><span class="name cf">Bramble</span><span class="species c7">Wolf</span></span>
+        </span>
+        <span class="vitals">
+          <span class="heart-row wolf-health">
+            <span class="hearts h10"></span><span class="c7">×2</span>
+            <span class="tooltip"><span class="cf">20 hearts · 40 HP</span></span>
+          </span>
+          <span class="health-line c7">
+            <span>40/40 HP</span>
+            <span class="armor"><img src="vanilla/gui/sprites/hud/armor_full.png" alt="Wolf armour"><span>On</span></span>
+          </span>
+        </span>
+        <span class="small-stats">
+          <span class="meter"><span class="meter-letter ca">S</span><span class="segments r3" aria-label="Speed 3 of 5"></span></span>
+          <span class="meter"><span class="meter-letter ce">J</span><span class="segments jump r1" aria-label="Jump 1 of 5"></span></span>
+        </span>
+      </label>
+
+      <label class="animal cat" for="cat">
+        <span class="animal-top">
+          <span class="slot"><img src="vanilla/item/cat_spawn_egg.png" alt="Cat"></span>
+          <span><span class="name cf">Marmalade</span><span class="species c7">Cat</span></span>
+        </span>
+        <span class="vitals">
+          <span class="heart-row"><span class="hearts h5"></span></span>
+          <span class="health-line c7">
+            <span>10/10 HP</span>
+            <span class="armor"><img src="vanilla/gui/sprites/hud/armor_empty.png" alt="Armour"><span>0</span></span>
+          </span>
+        </span>
+        <span class="small-stats">
+          <span class="meter"><span class="meter-letter ca">S</span><span class="segments r4" aria-label="Speed 4 of 5"></span></span>
+          <span class="meter"><span class="meter-letter ce">J</span><span class="segments jump r1" aria-label="Jump 1 of 5"></span></span>
+        </span>
+      </label>
+
+      <label class="animal parrot" for="parrot">
+        <span class="animal-top">
+          <span class="slot"><img src="vanilla/item/parrot_spawn_egg.png" alt="Parrot"></span>
+          <span><span class="name cf">Pip</span><span class="species c7">Parrot</span></span>
+        </span>
+        <span class="vitals">
+          <span class="heart-row"><span class="hearts h3"></span></span>
+          <span class="health-line c7">
+            <span>6/6 HP</span>
+            <span class="armor"><img src="vanilla/gui/sprites/hud/armor_empty.png" alt="Armour"><span>0</span></span>
+          </span>
+        </span>
+        <span class="small-stats">
+          <span class="meter"><span class="meter-letter ca">S</span><span class="segments r2" aria-label="Speed 2 of 5"></span></span>
+          <span class="meter"><span class="meter-letter ce">J</span><span class="c7">Flies</span></span>
+        </span>
+      </label>
+
+      <label class="animal llama" for="llama">
+        <span class="animal-top">
+          <span class="slot"><img src="vanilla/item/llama_spawn_egg.png" alt="Llama"></span>
+          <span><span class="name cf">Woolbert</span><span class="species c7">Llama</span></span>
+        </span>
+        <span class="vitals">
+          <span class="heart-row"><span class="hearts h10"></span></span>
+          <span class="health-line c7">
+            <span>20/20 HP</span>
+            <span class="armor"><img src="vanilla/gui/sprites/hud/armor_empty.png" alt="Armour"><span>0</span></span>
+          </span>
+        </span>
+        <span class="small-stats">
+          <span class="meter"><span class="meter-letter ca">S</span><span class="segments r2" aria-label="Speed 2 of 5"></span></span>
+          <span class="meter"><span class="meter-letter ce">J</span><span class="segments jump r1" aria-label="Jump 1 of 5"></span></span>
+        </span>
+      </label>
+    </section>
+
+    <section class="panel inspector" aria-label="Selected animal">
+      <div class="portrait-row">
+        <div class="portrait">
+          <img class="pet p1" src="vanilla/item/horse_spawn_egg.png" alt="Horse">
+          <img class="pet p2" src="vanilla/item/donkey_spawn_egg.png" alt="Donkey">
+          <img class="pet p3" src="vanilla/item/wolf_spawn_egg.png" alt="Wolf">
+          <img class="pet p4" src="vanilla/item/cat_spawn_egg.png" alt="Cat">
+          <img class="pet p5" src="vanilla/item/parrot_spawn_egg.png" alt="Parrot">
+          <img class="pet p6" src="vanilla/item/llama_spawn_egg.png" alt="Llama">
+        </div>
+        <div class="identity">
+          <div class="pet p1"><h2>Chestnut</h2><div>Horse · Mount</div></div>
+          <div class="pet p2"><h2>Pockets</h2><div>Donkey · Mount</div></div>
+          <div class="pet p3"><h2>Bramble</h2><div>Wolf · Pet</div></div>
+          <div class="pet p4"><h2>Marmalade</h2><div>Cat · Pet</div></div>
+          <div class="pet p5"><h2>Pip</h2><div>Parrot · Bird</div></div>
+          <div class="pet p6"><h2>Woolbert</h2><div>Llama · Pack</div></div>
+          <div class="tag">Safe at home</div>
+        </div>
+      </div>
+
+      <div class="notes">
+        <div class="pet p1">A trusty trail friend.<br>Speed 4/5 · Jump 3/5</div>
+        <div class="pet p2">Ready for supply runs.<br>Speed 2/5 · Jump 2/5</div>
+        <div class="pet p3">A loyal trail guard.<br>Speed 3/5 · Jump 1/5</div>
+        <div class="pet p4">Keeps creepers away.<br>Speed 4/5 · Jump 1/5</div>
+        <div class="pet p5">A feathered lookout.<br>Speed 2/5 · Can fly</div>
+        <div class="pet p6">Bring a lead along.<br>Speed 2/5 · Jump 1/5</div>
+      </div>
+
+      <div class="equipment-title">Equipment</div>
+      <div class="equipment">
+        <div class="equip">
+          <div class="pet p1 p2">
+            <div class="slot">
+              <img src="vanilla/item/saddle.png" alt="Saddle">
+              <div class="tooltip"><div class="cf">Saddle</div><div class="c7">Equipped</div></div>
+            </div>
+          </div>
+          <div class="pet p3 p4 p5 p6">
+            <div class="slot unsupported">
+              <div class="tooltip"><div class="c7">Cannot be saddled.</div></div>
+            </div>
+          </div>
+          <span class="caption">Saddle</span>
+        </div>
+
+        <div class="equip">
+          <div class="pet p1">
+            <div class="slot">
+              <img src="vanilla/item/iron_horse_armor.png" alt="Iron horse armour">
+              <div class="tooltip"><div class="cf">Iron Horse Armour</div><div class="c7">5 armour points</div></div>
+            </div>
+          </div>
+          <div class="pet p2 p4 p5">
+            <div class="slot unsupported">
+              <div class="tooltip"><div class="c7">Cannot wear armour.</div></div>
+            </div>
+          </div>
+          <div class="pet p3">
+            <div class="slot">
+              <img src="vanilla/item/wolf_armor.png" alt="Wolf armour">
+              <div class="tooltip">
+                <div class="cf">Wolf Armour</div>
+                <div class="c7">Durability: 64/64</div>
+                <div class="c7">Absorbs most damage.</div>
+                <div class="c7">No armour points added.</div>
+              </div>
+            </div>
+          </div>
+          <div class="pet p6">
+            <div class="slot">
+              <img src="vanilla/gui/sprites/container/slot/llama_armor.png" alt="Empty carpet slot">
+              <div class="tooltip"><div class="cf">Carpet · Empty</div><div class="c7">Decoration only.</div></div>
+            </div>
+          </div>
+          <span class="caption pet p1 p2 p3 p4 p5">Armour</span>
+          <span class="caption pet p6">Carpet</span>
+        </div>
+
+        <div class="equip">
+          <div class="pet p1 p2 p5 p6">
+            <div class="slot unsupported">
+              <div class="tooltip"><div class="c7">No collar slot.</div></div>
+            </div>
+          </div>
+          <div class="pet p3">
+            <div class="slot">
+              <img src="vanilla/item/red_dye.png" alt="Red collar">
+              <div class="tooltip"><div class="cc">Red Collar</div><div class="c7">Current colour</div></div>
+            </div>
+          </div>
+          <div class="pet p4">
+            <div class="slot">
+              <img src="vanilla/item/light_blue_dye.png" alt="Light blue collar">
+              <div class="tooltip"><div class="cb">Light Blue Collar</div><div class="c7">Current colour</div></div>
+            </div>
+          </div>
+          <span class="caption">Collar</span>
+        </div>
+      </div>
+
+      <div class="equipment-note">
+        <span class="pet p1 p2">Saddled and ready.</span>
+        <span class="pet p3">Armoured · Red collar</span>
+        <span class="pet p4">Light blue collar</span>
+        <span class="pet p5">No equipment needed.</span>
+        <span class="pet p6">Ready for a caravan.</span>
+      </div>
+
+      <div class="summons">
+        <div class="pet p1"><div class="btn" data-message="<gold>Demo:</gold> Summon Chestnut. <gray>No animal was moved.</gray>">Summon</div></div>
+        <div class="pet p2"><div class="btn" data-message="<gold>Demo:</gold> Summon Pockets. <gray>No animal was moved.</gray>">Summon</div></div>
+        <div class="pet p3"><div class="btn" data-message="<gold>Demo:</gold> Summon Bramble. <gray>No animal was moved.</gray>">Summon</div></div>
+        <div class="pet p4"><div class="btn" data-message="<gold>Demo:</gold> Summon Marmalade. <gray>No animal was moved.</gray>">Summon</div></div>
+        <div class="pet p5"><div class="btn" data-message="<gold>Demo:</gold> Summon Pip. <gray>No animal was moved.</gray>">Summon</div></div>
+        <div class="pet p6"><div class="btn" data-message="<gold>Demo:</gold> Summon Woolbert. <gray>No animal was moved.</gray>">Summon</div></div>
+      </div>
+      <div class="tools">
+        <label class="btn" for="rename">Rename</label>
+        <label class="btn" for="release"><span class="cc">Release</span></label>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <a class="btn" href="quests.html">Quest Log</a>
+    <div class="btn" data-action="close">Done</div>
+  </footer>
+  <div class="hint c7">Sample stats · Hover equipment · Sneak to close</div>
+
+  <div class="modal-layer">
+    <label class="scrim" for="inspect" aria-label="Cancel"></label>
+    <section class="panel dialog" aria-label="Animal action preview">
+      <h2 class="rename-only">Rename preview</h2>
+      <h2 class="release-only">Release preview</h2>
+
+      <div class="dialog-name cf">
+        <span class="pet p1">Chestnut</span>
+        <span class="pet p2">Pockets</span>
+        <span class="pet p3">Bramble</span>
+        <span class="pet p4">Marmalade</span>
+        <span class="pet p5">Pip</span>
+        <span class="pet p6">Woolbert</span>
+      </div>
+
+      <p class="rename-only">Try the name Clover?<br>Demo: no saved changes.</p>
+      <p class="release-only">Remove from the stable?<br>Demo: nothing is removed.</p>
+
+      <div class="confirmations">
+        <div class="rename-only">
+          <div class="pet p1"><label class="btn" for="inspect" data-message="<gold>Demo:</gold> Chestnut would be renamed Clover. <gray>No saved changes.</gray>">Use Clover</label></div>
+          <div class="pet p2"><label class="btn" for="inspect" data-message="<gold>Demo:</gold> Pockets would be renamed Clover. <gray>No saved changes.</gray>">Use Clover</label></div>
+          <div class="pet p3"><label class="btn" for="inspect" data-message="<gold>Demo:</gold> Bramble would be renamed Clover. <gray>No saved changes.</gray>">Use Clover</label></div>
+          <div class="pet p4"><label class="btn" for="inspect" data-message="<gold>Demo:</gold> Marmalade would be renamed Clover. <gray>No saved changes.</gray>">Use Clover</label></div>
+          <div class="pet p5"><label class="btn" for="inspect" data-message="<gold>Demo:</gold> Pip would be renamed Clover. <gray>No saved changes.</gray>">Use Clover</label></div>
+          <div class="pet p6"><label class="btn" for="inspect" data-message="<gold>Demo:</gold> Woolbert would be renamed Clover. <gray>No saved changes.</gray>">Use Clover</label></div>
+        </div>
+        <div class="release-only">
+          <div class="pet p1"><label class="btn" for="inspect" data-message="<gold>Demo:</gold> Release Chestnut confirmed. <gray>No animal was released.</gray>"><span class="cc">Confirm demo</span></label></div>
+          <div class="pet p2"><label class="btn" for="inspect" data-message="<gold>Demo:</gold> Release Pockets confirmed. <gray>No animal was released.</gray>"><span class="cc">Confirm demo</span></label></div>
+          <div class="pet p3"><label class="btn" for="inspect" data-message="<gold>Demo:</gold> Release Bramble confirmed. <gray>No animal was released.</gray>"><span class="cc">Confirm demo</span></label></div>
+          <div class="pet p4"><label class="btn" for="inspect" data-message="<gold>Demo:</gold> Release Marmalade confirmed. <gray>No animal was released.</gray>"><span class="cc">Confirm demo</span></label></div>
+          <div class="pet p5"><label class="btn" for="inspect" data-message="<gold>Demo:</gold> Release Pip confirmed. <gray>No animal was released.</gray>"><span class="cc">Confirm demo</span></label></div>
+          <div class="pet p6"><label class="btn" for="inspect" data-message="<gold>Demo:</gold> Release Woolbert confirmed. <gray>No animal was released.</gray>"><span class="cc">Confirm demo</span></label></div>
+        </div>
+      </div>
+      <label class="btn cancel" for="inspect">Cancel</label>
+    </section>
+  </div>
+</div>
+</body>
+</html>

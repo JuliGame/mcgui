@@ -1,0 +1,323 @@
+<!--
+  rules.html — a tall, manually scrolled End Poem-style server rules screen.
+  Green and cyan voices explain each rule; hover a passage for its punishment.
+  I agree sends a demo chat message and closes the screen; it does not save consent.
+  Replace policies and penalties, verify player placeholders, and enforce consent server-side.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Server Rules</title>
+  <meta name="ui:height" content="576">
+  <meta name="ui:scroll-step" content="48">
+  <link rel="stylesheet" href="vanilla.css">
+  <style>
+    html {
+      height: 100%;
+      overflow-x: hidden;
+      overflow-y: auto;
+    }
+
+    body {
+      height: auto;
+      min-height: 576px;
+      overflow: visible;
+      background: #000;
+      font-family: Minecraft;
+      font-size: 16px;
+      line-height: 18px;
+    }
+
+    .screen {
+      width: 1024px;
+      margin: 0 auto;
+      padding: 24px 0 64px;
+    }
+
+    /* Size the source sheet explicitly at 2x, then reduce the logo uniformly.
+       The wrapper reserves its final 320x80 footprint, including transparency. */
+    .logo {
+      position: relative;
+      width: 320px;
+      height: 80px;
+      margin: 0 auto 8px;
+      overflow: hidden;
+    }
+
+    .logo img {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 2048px;
+      height: 512px;
+      transform: scale(.15625);
+      transform-origin: top left;
+    }
+
+    .poem {
+      width: 548px;
+      margin: 0 auto;
+    }
+
+    .heading {
+      margin: 0 0 16px;
+      font-size: 16px;
+      line-height: 18px;
+      font-weight: normal;
+      text-align: center;
+    }
+
+    .hint {
+      margin: 0 0 28px;
+      line-height: 24px;
+      text-align: center;
+    }
+
+    p {
+      margin: 0 0 24px;
+      line-height: 24px;
+    }
+
+    .intro {
+      margin-bottom: 36px;
+    }
+
+    .intro p {
+      margin-bottom: 16px;
+    }
+
+    .intro p:last-child {
+      margin-bottom: 0;
+    }
+
+    .rule {
+      position: relative;
+      margin-bottom: 48px;
+    }
+
+    .number {
+      margin: 0 0 16px;
+      font-size: 16px;
+      line-height: 18px;
+      font-weight: normal;
+    }
+
+    .rule p:last-of-type {
+      margin-bottom: 0;
+    }
+
+    .rule:hover .number {
+      text-decoration: underline;
+    }
+
+    /* A viewport-fixed tooltip remains readable even when a passage
+       straddles the scroll boundary. Wrapping prevents horizontal overflow. */
+    .rule > .tooltip {
+      position: fixed;
+      left: 548px;
+      right: 24px;
+      bottom: 24px;
+      width: auto;
+      max-width: 452px;
+      line-height: 24px;
+      white-space: normal;
+      text-align: left;
+      pointer-events: none;
+    }
+
+    .rule:hover > .tooltip {
+      display: block;
+    }
+
+    .closing {
+      margin-top: 56px;
+    }
+
+    .closing p:last-child {
+      margin-bottom: 0;
+    }
+
+    .agreement {
+      margin-top: 40px;
+      text-align: center;
+    }
+
+    .agreement p {
+      margin-bottom: 24px;
+    }
+
+    .agreement .btn {
+      width: 400px;
+      height: 40px;
+      margin: 0 auto;
+      line-height: 18px;
+      white-space: nowrap;
+    }
+
+    .end {
+      margin: 32px 0 0;
+      line-height: 24px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <main class="screen">
+    <div class="logo">
+      <img src="vanilla/gui/title/minecraft.png"
+           width="2048" height="512" alt="Minecraft">
+    </div>
+
+    <div class="poem">
+      <h1 class="heading t">The world we share</h1>
+      <p class="hint c7">Scroll to read. Hover for penalties.</p>
+
+      <div class="intro">
+        <p class="ca">I see the player you mean.</p>
+        <p class="cb">{player}?</p>
+        <p class="ca">Yes. Let them read.<br>
+          A world is more than its blocks.</p>
+      </div>
+
+      <section class="rule">
+        <h2 class="number ce">1. Be kind.</h2>
+        <p class="ca">Others share this dream.<br>
+          Each is a person beyond the screen.</p>
+        <p class="cb">Speak with respect. No harassment,<br>
+          hate speech, threats, or slurs.<br>
+          A joke must not become a weapon.</p>
+        <div class="tooltip">
+          <div>
+            <div class="ce">Rule 1: Respect</div>
+            <div class="gap"></div>
+            <div class="cf">Warning or mute.</div>
+            <div class="c7">Severe abuse: removal or ban.</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="rule">
+        <h2 class="number ce">2. Leave their work standing.</h2>
+        <p class="ca">I saw a house beside the water.<br>
+          Someone spent an evening making it.</p>
+        <p class="cb">Do not grief, steal, or set traps.<br>
+          Ask before changing another's build.<br>
+          An unclaimed home is still a home.</p>
+        <div class="tooltip">
+          <div>
+            <div class="ce">Rule 2: Builds and belongings</div>
+            <div class="gap"></div>
+            <div class="cf">Rollback and temporary ban.</div>
+            <div class="c7">Repeat griefing: permanent ban.</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="rule">
+        <h2 class="number ce">3. Play fairly.</h2>
+        <p class="ca">They found a diamond in the dark.<br>
+          It mattered: they had searched.</p>
+        <p class="cb">No x-ray, cheats, combat automation,<br>
+          or duplication exploits.<br>
+          Report bugs. Do not profit from them.</p>
+        <div class="tooltip">
+          <div>
+            <div class="ce">Rule 3: Fair play</div>
+            <div class="gap"></div>
+            <div class="cf">Illicit gains removed.</div>
+            <div class="cf">Temporary ban.</div>
+            <div class="c7">Repeat cheating: permanent ban.</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="rule">
+        <h2 class="number ce">4. Let the chat breathe.</h2>
+        <p class="ca">There were many voices.<br>
+          The quiet ones wanted a turn, too.</p>
+        <p class="cb">Do not spam, flood, or advertise.<br>
+          Keep chat suitable for all ages.<br>
+          Never share another's private info.</p>
+        <div class="tooltip">
+          <div>
+            <div class="ce">Rule 4: Chat and privacy</div>
+            <div class="gap"></div>
+            <div class="cf">Spam: warning, then mute.</div>
+            <div class="c7">Sharing private info: ban.</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="rule">
+        <h2 class="number ce">5. Choose the fight together.</h2>
+        <p class="ca">One player carried a sword.<br>
+          Another carried flowers.</p>
+        <p class="cb">PvP requires everyone's consent.<br>
+          Stop when asked. No spawn killing.<br>
+          Do not lure players into danger.</p>
+        <div class="tooltip">
+          <div>
+            <div class="ce">Rule 5: Consensual PvP</div>
+            <div class="gap"></div>
+            <div class="cf">Warning; lost items returned.</div>
+            <div class="c7">Repeated attacks: temporary ban.</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="rule">
+        <h2 class="number ce">6. Keep the world moving.</h2>
+        <p class="ca">They built a machine that never slept.<br>
+          Soon the world moved more slowly.</p>
+        <p class="cb">No lag machines or deliberate crashes.<br>
+          Limit idle mobs. Switch off clocks.<br>
+          Follow staff requests to reduce lag.</p>
+        <div class="tooltip">
+          <div>
+            <div class="ce">Rule 6: Server performance</div>
+            <div class="gap"></div>
+            <div class="cf">Problem builds disabled or removed.</div>
+            <div class="c7">Deliberate disruption: ban.</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="rule">
+        <h2 class="number ce">7. Help put things right.</h2>
+        <p class="ca">And if something goes wrong?</p>
+        <p class="cb">Report it honestly. Keep evidence.<br>
+          Follow staff instructions.<br>
+          Appeal calmly. Do not evade penalties.</p>
+        <div class="tooltip">
+          <div>
+            <div class="ce">Rule 7: Reports and moderation</div>
+            <div class="gap"></div>
+            <div class="cf">False reports: warning or mute.</div>
+            <div class="c7">Ban evasion: extended ban.</div>
+          </div>
+        </div>
+      </section>
+
+      <div class="closing">
+        <p class="ca">Must they remember every word?</p>
+        <p class="cb">Remember that the world is shared.<br>
+          Ask when unsure. Leave it better.</p>
+        <p class="ca">And now?</p>
+        <p class="cb">Now they may return to the dream.<br>
+          There is still so much to build.</p>
+      </div>
+
+      <div class="agreement">
+        <p class="c7">By choosing below,<br>
+          you agree to these rules.</p>
+        <div class="btn"
+             data-message="&lt;green&gt;Thank you, {player}.&lt;/green&gt; &lt;aqua&gt;You have agreed to the server rules. Build kindly.&lt;/aqua&gt;"
+             data-close>I agree</div>
+      </div>
+
+      <p class="end c7">The world is waiting.</p>
+    </div>
+  </main>
+</body>
+</html>

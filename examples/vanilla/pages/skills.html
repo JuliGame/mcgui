@@ -1,0 +1,719 @@
+<!--
+  Six RPG skill cards with sample XP and milestone perks; overall level uses {level}.
+  First-child radios select a skill; hover cards for XP and nodes for perk details.
+  All skill progress and unlock states are illustrative, not saved player data.
+  Replace sample values and states with your jobs plugin's server-rendered values.
+  If {level} is literal in game, check placeholder substitution in UI Engine.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Skills &amp; Perks</title>
+<meta name="ui:height" content="576">
+<meta name="ui:refresh" content="5">
+<link rel="stylesheet" href="vanilla.css">
+<style>
+  .screen {
+    position: relative;
+    width: 1024px;
+    height: 576px;
+    margin: 0 auto;
+  }
+
+  .panorama {
+    inset: 0;
+    background: url(vanilla/block/deepslate_tiles.png) repeat;
+    background-size: 32px 32px;
+    filter: none;
+  }
+  .dim { background: rgba(0,0,0,.82); }
+
+  .heading {
+    position: absolute;
+    left: 50px;
+    right: 50px;
+    top: 22px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  h1 {
+    margin: 0;
+    font-size: 16px;
+    line-height: 18px;
+    font-weight: normal;
+  }
+  .overall {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    white-space: nowrap;
+  }
+  .overall img { width: 32px; height: 32px; }
+
+  .cards {
+    position: absolute;
+    left: 50px;
+    top: 78px;
+    width: 924px;
+    display: grid;
+    grid-template-columns: repeat(3, 300px);
+    grid-template-rows: repeat(2, 116px);
+    gap: 12px;
+  }
+  .card {
+    position: relative;
+    display: block;
+    padding: 12px;
+    cursor: pointer;
+  }
+  .card:hover {
+    z-index: 5;
+    background-color: #d4d4d4;
+    border-color: #fff;
+  }
+  .cardhead {
+    display: flex;
+    align-items: center;
+    height: 36px;
+    gap: 8px;
+  }
+  .cardhead .slot { flex: none; }
+  .skillname { flex: 1; white-space: nowrap; }
+  .level { white-space: nowrap; color: #404040; }
+
+  .xp {
+    display: block;
+    width: 228px;
+    height: 10px;
+    margin: 10px auto 8px;
+    background: url(vanilla/xp_background.png) no-repeat;
+    background-size: 228px 10px;
+  }
+  .xp > span {
+    display: block;
+    height: 10px;
+    background: url(vanilla/xp_progress.png) no-repeat;
+    background-size: 228px 10px;
+  }
+  .next {
+    display: block;
+    text-align: center;
+    white-space: nowrap;
+    color: #404040;
+  }
+  .card > .tooltip {
+    top: 114px;
+    left: 10px;
+    cursor: default;
+  }
+  .card:nth-child(3n) > .tooltip { left: auto; right: 10px; }
+  .card:hover > .tooltip { display: block; }
+
+  #mining:checked ~ .screen .mining-card,
+  #farming:checked ~ .screen .farming-card,
+  #fishing:checked ~ .screen .fishing-card,
+  #combat:checked ~ .screen .combat-card,
+  #building:checked ~ .screen .building-card,
+  #enchanting:checked ~ .screen .enchanting-card {
+    border-color: #000;
+    background: #dfd1a4;
+    box-shadow: inset 4px 4px 0 #fff4cd,
+                inset -4px -4px 0 #756039,
+                0 0 0 2px #d6a43c;
+  }
+
+  .treebox {
+    position: absolute;
+    left: 50px;
+    top: 334px;
+    width: 924px;
+    height: 176px;
+    padding: 14px 18px;
+  }
+  .treebox::before {
+    content: "";
+    position: absolute;
+    inset: 8px;
+    background:
+      linear-gradient(rgba(0,0,0,.72), rgba(0,0,0,.72)),
+      url(vanilla/block/stone_bricks.png) repeat;
+    background-size: 100% 100%, 32px 32px;
+  }
+  .tree { position: relative; display: none; }
+
+  #mining:checked ~ .screen .mining-tree,
+  #farming:checked ~ .screen .farming-tree,
+  #fishing:checked ~ .screen .fishing-tree,
+  #combat:checked ~ .screen .combat-tree,
+  #building:checked ~ .screen .building-tree,
+  #enchanting:checked ~ .screen .enchanting-tree { display: block; }
+
+  .treehead {
+    display: flex;
+    height: 24px;
+    align-items: center;
+    justify-content: space-between;
+    white-space: nowrap;
+  }
+  .nodes {
+    position: relative;
+    display: flex;
+    margin-top: 10px;
+  }
+  .nodes::before,
+  .nodes::after {
+    content: "";
+    position: absolute;
+    left: 12.5%;
+    top: 24px;
+    height: 6px;
+  }
+  .nodes::before {
+    width: 75%;
+    background: #424242;
+    border-top: 2px solid #686868;
+    border-bottom: 2px solid #111;
+  }
+  .nodes::after {
+    width: 25%;
+    background: #b58a2d;
+    border-top: 2px solid #ffe08a;
+    border-bottom: 2px solid #61420c;
+  }
+  .combat-tree .nodes::after { width: 50%; }
+  .enchanting-tree .nodes::after { display: none; }
+
+  .node {
+    position: relative;
+    z-index: 1;
+    flex: 0 0 25%;
+    display: flex;
+    align-items: center;
+    flex-direction: column;
+  }
+  .node:hover { z-index: 10; }
+
+  .socket {
+    position: relative;
+    width: 52px;
+    height: 52px;
+    display: grid;
+    place-items: center;
+    background-size: 52px 52px;
+    background-repeat: no-repeat;
+  }
+  .lit .socket {
+    background-image: url(vanilla/gui/sprites/advancements/task_frame_obtained.png);
+  }
+  .locked .socket {
+    background-image: url(vanilla/gui/sprites/advancements/task_frame_unobtained.png);
+  }
+  .lit .slot {
+    background: #a88742;
+    box-shadow: inset 2px 2px 0 #e5c778,
+                inset -2px -2px 0 #685023;
+  }
+  .locked .slot {
+    background: #414141;
+    box-shadow: inset 2px 2px 0 #202020,
+                inset -2px -2px 0 #707070;
+  }
+  .locked .slot img { opacity: .7; }
+  .locked .socket::after {
+    content: "";
+    position: absolute;
+    right: -4px;
+    bottom: -2px;
+    width: 20px;
+    height: 28px;
+    background: url(vanilla/gui/sprites/container/cartography_table/locked.png) no-repeat;
+    background-size: 20px 28px;
+  }
+
+  .node-name { margin-top: 6px; white-space: nowrap; }
+  .node-level { margin-top: 4px; white-space: nowrap; }
+
+  .node .tooltip {
+    bottom: 108px;
+    left: 8px;
+    text-align: left;
+  }
+  .node:nth-child(3) .tooltip,
+  .node:last-child .tooltip { left: auto; right: 8px; }
+  .node:hover .tooltip { display: block; }
+
+  .footer {
+    position: absolute;
+    left: 50px;
+    right: 50px;
+    top: 522px;
+    height: 40px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .footer-note { white-space: nowrap; }
+  .actions { display: flex; gap: 8px; }
+  .footer .btn { width: 200px; }
+</style>
+</head>
+<body>
+<input class="pick" type="radio" name="skill" id="mining" checked>
+<input class="pick" type="radio" name="skill" id="farming">
+<input class="pick" type="radio" name="skill" id="fishing">
+<input class="pick" type="radio" name="skill" id="combat">
+<input class="pick" type="radio" name="skill" id="building">
+<input class="pick" type="radio" name="skill" id="enchanting">
+
+<div class="screen">
+  <div class="panorama"></div>
+  <div class="dim"></div>
+
+  <header class="heading">
+    <h1 class="t">Skills &amp; Perks</h1>
+    <div class="overall">
+      <img src="vanilla/item/experience_bottle.png" alt="">
+      <span class="c7">Overall level <span class="ca">{level}</span></span>
+    </div>
+  </header>
+
+  <div class="cards">
+    <label class="panel card mining-card" for="mining">
+      <span class="cardhead">
+        <span class="slot"><img src="vanilla/item/iron_pickaxe.png" alt=""></span>
+        <span class="skillname">Mining</span>
+        <span class="level">Lv.12</span>
+      </span>
+      <span class="xp"><span style="width:162px"></span></span>
+      <span class="next">Lv.13: +2% ore XP</span>
+      <span class="tooltip">
+        <span class="ce">Mining · Level 12</span><br>
+        <span class="cf">640 / 900 skill XP</span><br>
+        <span class="c7">Select to view perks.</span>
+      </span>
+    </label>
+
+    <label class="panel card farming-card" for="farming">
+      <span class="cardhead">
+        <span class="slot"><img src="vanilla/item/iron_hoe.png" alt=""></span>
+        <span class="skillname">Farming</span>
+        <span class="level">Lv.8</span>
+      </span>
+      <span class="xp"><span style="width:92px"></span></span>
+      <span class="next">Lv.9: +2% crop XP</span>
+      <span class="tooltip">
+        <span class="ce">Farming · Level 8</span><br>
+        <span class="cf">240 / 600 skill XP</span><br>
+        <span class="c7">Select to view perks.</span>
+      </span>
+    </label>
+
+    <label class="panel card fishing-card" for="fishing">
+      <span class="cardhead">
+        <span class="slot"><img src="vanilla/item/fishing_rod.png" alt=""></span>
+        <span class="skillname">Fishing</span>
+        <span class="level">Lv.6</span>
+      </span>
+      <span class="xp"><span style="width:136px"></span></span>
+      <span class="next">Lv.7: +2% fish XP</span>
+      <span class="tooltip">
+        <span class="ce">Fishing · Level 6</span><br>
+        <span class="cf">270 / 450 skill XP</span><br>
+        <span class="c7">Select to view perks.</span>
+      </span>
+    </label>
+
+    <label class="panel card combat-card" for="combat">
+      <span class="cardhead">
+        <span class="slot"><img src="vanilla/item/iron_sword.png" alt=""></span>
+        <span class="skillname">Combat</span>
+        <span class="level">Lv.17</span>
+      </span>
+      <span class="xp"><span style="width:57px"></span></span>
+      <span class="next">Lv.18: +2% mob XP</span>
+      <span class="tooltip">
+        <span class="ce">Combat · Level 17</span><br>
+        <span class="cf">300 / 1200 skill XP</span><br>
+        <span class="c7">Select to view perks.</span>
+      </span>
+    </label>
+
+    <label class="panel card building-card" for="building">
+      <span class="cardhead">
+        <span class="slot"><img src="vanilla/item/iron_axe.png" alt=""></span>
+        <span class="skillname">Building</span>
+        <span class="level">Lv.9</span>
+      </span>
+      <span class="xp"><span style="width:182px"></span></span>
+      <span class="next">Lv.10: +2% build XP</span>
+      <span class="tooltip">
+        <span class="ce">Building · Level 9</span><br>
+        <span class="cf">520 / 650 skill XP</span><br>
+        <span class="c7">Select to view perks.</span>
+      </span>
+    </label>
+
+    <label class="panel card enchanting-card" for="enchanting">
+      <span class="cardhead">
+        <span class="slot"><img src="vanilla/item/enchanted_book.png" alt=""></span>
+        <span class="skillname">Enchanting</span>
+        <span class="level">Lv.4</span>
+      </span>
+      <span class="xp"><span style="width:171px"></span></span>
+      <span class="next">Lv.5: Lapis Saver</span>
+      <span class="tooltip">
+        <span class="ce">Enchanting · Level 4</span><br>
+        <span class="cf">225 / 300 skill XP</span><br>
+        <span class="c7">Select to view perks.</span>
+      </span>
+    </label>
+  </div>
+
+  <section class="panel treebox" aria-label="Selected skill milestone perks">
+    <div class="tree mining-tree">
+      <div class="treehead">
+        <span class="ce">Mining <span class="c7">/ Milestone perks</span></span>
+        <span class="c7">640 / 900 XP</span>
+      </div>
+      <div class="nodes">
+        <div class="node lit">
+          <div class="socket"><div class="slot"><img src="vanilla/item/wooden_pickaxe.png" alt="Prospector"></div></div>
+          <span class="node-name c6">Prospector</span>
+          <span class="node-level c7">Lv.1</span>
+          <div class="tooltip"><div>
+            <div class="ce">Prospector</div>
+            <div class="ca">Unlocked · Mining 1</div>
+            <div class="gap"></div>
+            <div class="cf">Earn skill XP from ores.</div>
+          </div></div>
+        </div>
+        <div class="node lit">
+          <div class="socket"><div class="slot"><img src="vanilla/item/raw_iron.png" alt="Ore Sense"></div></div>
+          <span class="node-name c6">Ore Sense</span>
+          <span class="node-level c7">Lv.5</span>
+          <div class="tooltip"><div>
+            <div class="ce">Ore Sense</div>
+            <div class="ca">Unlocked · Mining 5</div>
+            <div class="gap"></div>
+            <div class="cf">+5% ore skill XP.</div>
+          </div></div>
+        </div>
+        <div class="node locked">
+          <div class="socket"><div class="slot"><img src="vanilla/item/golden_pickaxe.png" alt="Quick Swing"></div></div>
+          <span class="node-name c7">Quick Swing</span>
+          <span class="node-level c7">Lv.15</span>
+          <div class="tooltip"><div>
+            <div class="ce">Quick Swing</div>
+            <div class="cc">Requires Mining 15</div>
+            <div class="gap"></div>
+            <div class="cf">Ore breaks may grant</div>
+            <div class="cf">Haste I for 5 seconds.</div>
+          </div></div>
+        </div>
+        <div class="node locked">
+          <div class="socket"><div class="slot"><img src="vanilla/item/diamond.png" alt="Deep Fortune"></div></div>
+          <span class="node-name c7">Deep Fortune</span>
+          <span class="node-level c7">Lv.30</span>
+          <div class="tooltip"><div>
+            <div class="ce">Deep Fortune</div>
+            <div class="cc">Requires Mining 30</div>
+            <div class="gap"></div>
+            <div class="cf">5% chance for bonus ore.</div>
+          </div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tree farming-tree">
+      <div class="treehead">
+        <span class="ce">Farming <span class="c7">/ Milestone perks</span></span>
+        <span class="c7">240 / 600 XP</span>
+      </div>
+      <div class="nodes">
+        <div class="node lit">
+          <div class="socket"><div class="slot"><img src="vanilla/item/wheat_seeds.png" alt="Green Thumb"></div></div>
+          <span class="node-name c6">Green Thumb</span>
+          <span class="node-level c7">Lv.1</span>
+          <div class="tooltip"><div>
+            <div class="ce">Green Thumb</div>
+            <div class="ca">Unlocked · Farming 1</div>
+            <div class="gap"></div>
+            <div class="cf">Earn XP from ripe crops.</div>
+          </div></div>
+        </div>
+        <div class="node lit">
+          <div class="socket"><div class="slot"><img src="vanilla/item/wheat.png" alt="Good Harvest"></div></div>
+          <span class="node-name c6">Good Harvest</span>
+          <span class="node-level c7">Lv.5</span>
+          <div class="tooltip"><div>
+            <div class="ce">Good Harvest</div>
+            <div class="ca">Unlocked · Farming 5</div>
+            <div class="gap"></div>
+            <div class="cf">+5% crop skill XP.</div>
+          </div></div>
+        </div>
+        <div class="node locked">
+          <div class="socket"><div class="slot"><img src="vanilla/item/iron_hoe.png" alt="Replant"></div></div>
+          <span class="node-name c7">Replant</span>
+          <span class="node-level c7">Lv.15</span>
+          <div class="tooltip"><div>
+            <div class="ce">Replant</div>
+            <div class="cc">Requires Farming 15</div>
+            <div class="gap"></div>
+            <div class="cf">Harvest with a hoe to</div>
+            <div class="cf">replant using one seed.</div>
+          </div></div>
+        </div>
+        <div class="node locked">
+          <div class="socket"><div class="slot"><img src="vanilla/item/golden_carrot.png" alt="Bounty"></div></div>
+          <span class="node-name c7">Bounty</span>
+          <span class="node-level c7">Lv.30</span>
+          <div class="tooltip"><div>
+            <div class="ce">Bounty</div>
+            <div class="cc">Requires Farming 30</div>
+            <div class="gap"></div>
+            <div class="cf">5% chance to harvest</div>
+            <div class="cf">double crops.</div>
+          </div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tree fishing-tree">
+      <div class="treehead">
+        <span class="ce">Fishing <span class="c7">/ Milestone perks</span></span>
+        <span class="c7">270 / 450 XP</span>
+      </div>
+      <div class="nodes">
+        <div class="node lit">
+          <div class="socket"><div class="slot"><img src="vanilla/item/fishing_rod.png" alt="First Cast"></div></div>
+          <span class="node-name c6">First Cast</span>
+          <span class="node-level c7">Lv.1</span>
+          <div class="tooltip"><div>
+            <div class="ce">First Cast</div>
+            <div class="ca">Unlocked · Fishing 1</div>
+            <div class="gap"></div>
+            <div class="cf">Earn skill XP from</div>
+            <div class="cf">successful catches.</div>
+          </div></div>
+        </div>
+        <div class="node lit">
+          <div class="socket"><div class="slot"><img src="vanilla/item/salmon.png" alt="Fresh Catch"></div></div>
+          <span class="node-name c6">Fresh Catch</span>
+          <span class="node-level c7">Lv.5</span>
+          <div class="tooltip"><div>
+            <div class="ce">Fresh Catch</div>
+            <div class="ca">Unlocked · Fishing 5</div>
+            <div class="gap"></div>
+            <div class="cf">+5% fishing skill XP.</div>
+          </div></div>
+        </div>
+        <div class="node locked">
+          <div class="socket"><div class="slot"><img src="vanilla/item/nautilus_shell.png" alt="Salvager"></div></div>
+          <span class="node-name c7">Salvager</span>
+          <span class="node-level c7">Lv.15</span>
+          <div class="tooltip"><div>
+            <div class="ce">Salvager</div>
+            <div class="cc">Requires Fishing 15</div>
+            <div class="gap"></div>
+            <div class="cf">Junk catches may become</div>
+            <div class="cf">a nautilus shell.</div>
+          </div></div>
+        </div>
+        <div class="node locked">
+          <div class="socket"><div class="slot"><img src="vanilla/item/heart_of_the_sea.png" alt="Sea's Favor"></div></div>
+          <span class="node-name c7">Sea's Favor</span>
+          <span class="node-level c7">Lv.30</span>
+          <div class="tooltip"><div>
+            <div class="ce">Sea's Favor</div>
+            <div class="cc">Requires Fishing 30</div>
+            <div class="gap"></div>
+            <div class="cf">5% chance to catch</div>
+            <div class="cf">a bonus fish.</div>
+          </div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tree combat-tree">
+      <div class="treehead">
+        <span class="ce">Combat <span class="c7">/ Milestone perks</span></span>
+        <span class="c7">300 / 1200 XP</span>
+      </div>
+      <div class="nodes">
+        <div class="node lit">
+          <div class="socket"><div class="slot"><img src="vanilla/item/wooden_sword.png" alt="Recruit"></div></div>
+          <span class="node-name c6">Recruit</span>
+          <span class="node-level c7">Lv.1</span>
+          <div class="tooltip"><div>
+            <div class="ce">Recruit</div>
+            <div class="ca">Unlocked · Combat 1</div>
+            <div class="gap"></div>
+            <div class="cf">Earn skill XP by</div>
+            <div class="cf">defeating hostile mobs.</div>
+          </div></div>
+        </div>
+        <div class="node lit">
+          <div class="socket"><div class="slot"><img src="vanilla/item/iron_sword.png" alt="Veteran"></div></div>
+          <span class="node-name c6">Veteran</span>
+          <span class="node-level c7">Lv.5</span>
+          <div class="tooltip"><div>
+            <div class="ce">Veteran</div>
+            <div class="ca">Unlocked · Combat 5</div>
+            <div class="gap"></div>
+            <div class="cf">+5% combat skill XP.</div>
+          </div></div>
+        </div>
+        <div class="node lit">
+          <div class="socket"><div class="slot"><img src="vanilla/item/iron_chestplate.png" alt="Second Wind"></div></div>
+          <span class="node-name c6">Second Wind</span>
+          <span class="node-level c7">Lv.15</span>
+          <div class="tooltip"><div>
+            <div class="ce">Second Wind</div>
+            <div class="ca">Unlocked · Combat 15</div>
+            <div class="gap"></div>
+            <div class="cf">Mob kills may restore</div>
+            <div class="cf">one heart of health.</div>
+          </div></div>
+        </div>
+        <div class="node locked">
+          <div class="socket"><div class="slot"><img src="vanilla/item/diamond_sword.png" alt="Champion"></div></div>
+          <span class="node-name c7">Champion</span>
+          <span class="node-level c7">Lv.30</span>
+          <div class="tooltip"><div>
+            <div class="ce">Champion</div>
+            <div class="cc">Requires Combat 30</div>
+            <div class="gap"></div>
+            <div class="cf">+5% damage against mobs.</div>
+            <div class="c7">Does not affect PvP.</div>
+          </div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tree building-tree">
+      <div class="treehead">
+        <span class="ce">Building <span class="c7">/ Milestone perks</span></span>
+        <span class="c7">520 / 650 XP</span>
+      </div>
+      <div class="nodes">
+        <div class="node lit">
+          <div class="socket"><div class="slot"><img src="vanilla/item/brick.png" alt="Foundation"></div></div>
+          <span class="node-name c6">Foundation</span>
+          <span class="node-level c7">Lv.1</span>
+          <div class="tooltip"><div>
+            <div class="ce">Foundation</div>
+            <div class="ca">Unlocked · Building 1</div>
+            <div class="gap"></div>
+            <div class="cf">Earn XP for new blocks.</div>
+            <div class="c7">Replacements give no XP.</div>
+          </div></div>
+        </div>
+        <div class="node lit">
+          <div class="socket"><div class="slot"><img src="vanilla/item/iron_axe.png" alt="Craftsman"></div></div>
+          <span class="node-name c6">Craftsman</span>
+          <span class="node-level c7">Lv.5</span>
+          <div class="tooltip"><div>
+            <div class="ce">Craftsman</div>
+            <div class="ca">Unlocked · Building 5</div>
+            <div class="gap"></div>
+            <div class="cf">+5% building skill XP.</div>
+          </div></div>
+        </div>
+        <div class="node locked">
+          <div class="socket"><div class="slot"><img src="vanilla/item/feather.png" alt="Sure Foot"></div></div>
+          <span class="node-name c7">Sure Foot</span>
+          <span class="node-level c7">Lv.15</span>
+          <div class="tooltip"><div>
+            <div class="ce">Sure Foot</div>
+            <div class="cc">Requires Building 15</div>
+            <div class="gap"></div>
+            <div class="cf">Take 10% less fall damage</div>
+            <div class="cf">inside your own claim.</div>
+          </div></div>
+        </div>
+        <div class="node locked">
+          <div class="socket"><div class="slot"><img src="vanilla/item/golden_axe.png" alt="Architect"></div></div>
+          <span class="node-name c7">Architect</span>
+          <span class="node-level c7">Lv.30</span>
+          <div class="tooltip"><div>
+            <div class="ce">Architect</div>
+            <div class="cc">Requires Building 30</div>
+            <div class="gap"></div>
+            <div class="cf">Unlock the Architect title</div>
+            <div class="cf">and 500 claim blocks.</div>
+          </div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tree enchanting-tree">
+      <div class="treehead">
+        <span class="ce">Enchanting <span class="c7">/ Milestone perks</span></span>
+        <span class="c7">225 / 300 XP</span>
+      </div>
+      <div class="nodes">
+        <div class="node lit">
+          <div class="socket"><div class="slot"><img src="vanilla/item/book.png" alt="Apprentice"></div></div>
+          <span class="node-name c6">Apprentice</span>
+          <span class="node-level c7">Lv.1</span>
+          <div class="tooltip"><div>
+            <div class="ce">Apprentice</div>
+            <div class="ca">Unlocked · Enchanting 1</div>
+            <div class="gap"></div>
+            <div class="cf">Earn skill XP by</div>
+            <div class="cf">enchanting your gear.</div>
+          </div></div>
+        </div>
+        <div class="node locked">
+          <div class="socket"><div class="slot"><img src="vanilla/item/lapis_lazuli.png" alt="Lapis Saver"></div></div>
+          <span class="node-name c7">Lapis Saver</span>
+          <span class="node-level c7">Lv.5</span>
+          <div class="tooltip"><div>
+            <div class="ce">Lapis Saver</div>
+            <div class="cc">Requires Enchanting 5</div>
+            <div class="gap"></div>
+            <div class="cf">10% chance to refund</div>
+            <div class="cf">one lapis per enchant.</div>
+          </div></div>
+        </div>
+        <div class="node locked">
+          <div class="socket"><div class="slot"><img src="vanilla/item/experience_bottle.png" alt="Scholar"></div></div>
+          <span class="node-name c7">Scholar</span>
+          <span class="node-level c7">Lv.15</span>
+          <div class="tooltip"><div>
+            <div class="ce">Scholar</div>
+            <div class="cc">Requires Enchanting 15</div>
+            <div class="gap"></div>
+            <div class="cf">+10% enchanting skill XP.</div>
+          </div></div>
+        </div>
+        <div class="node locked">
+          <div class="socket"><div class="slot"><img src="vanilla/item/enchanted_book.png" alt="Arcanist"></div></div>
+          <span class="node-name c7">Arcanist</span>
+          <span class="node-level c7">Lv.30</span>
+          <div class="tooltip"><div>
+            <div class="ce">Arcanist</div>
+            <div class="cc">Requires Enchanting 30</div>
+            <div class="gap"></div>
+            <div class="cf">5% chance to refund</div>
+            <div class="cf">one experience level.</div>
+          </div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <span class="footer-note c7">Demo skills · Hover for details</span>
+    <div class="actions">
+      <a class="btn" href="quests.html">Quest Log</a>
+      <div class="btn" data-action="close">Done</div>
+    </div>
+  </footer>
+</div>
+</body>
+</html>
