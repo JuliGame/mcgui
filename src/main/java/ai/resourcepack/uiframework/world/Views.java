@@ -220,6 +220,8 @@ public final class Views implements Listener {
         Pointer shape = Pointer.ARROW;
         Pointer shownShape = null;
         int lastPointerX = -1, lastPointerY = -1;
+        /** The player has moved the pointer off the centre it opens on; until then it is not reported (see report). */
+        boolean pointerMoved;
         /** A pointer report is waiting for the server thread (see turned). */
         final java.util.concurrent.atomic.AtomicBoolean reportQueued = new java.util.concurrent.atomic.AtomicBoolean();
         boolean pinged;
@@ -868,6 +870,13 @@ public final class Views implements Listener {
      */
     private void report(ViewImpl v) {
         int x = (int) v.cursorX, y = (int) v.cursorY;
+        // A view opens with the pointer in the middle, wherever the player's mouse is: whatever happens to be
+        // there should not light up until they move it, so the first report waits for a deliberate move.
+        if (!v.pointerMoved) {
+            double off = Math.hypot(v.cursorX - v.canvas.width() / 2.0, v.cursorY - v.canvas.height() / 2.0);
+            if (off < Math.max(4, v.canvas.width() / 64.0)) return;
+            v.pointerMoved = true;
+        }
         if (x != v.lastPointerX || y != v.lastPointerY) {
             v.lastPointerX = x;
             v.lastPointerY = y;
