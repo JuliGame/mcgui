@@ -112,9 +112,10 @@ resource-pack:
   prompt: "This server's screens need a small resource pack for full colour."
 
 screens:
-  # Map data sent to each player, in bytes per second, before Minecraft's own compression. One map pixel
-  # is one byte and only changed areas are sent, so a static page costs its size once.
-  max-bytes-per-second-per-player: 16000000
+  # Map data sent to each player, in bytes per second as it goes over the network, compressed. One map pixel
+  # is one byte before compression and only changed areas are sent, so a static page costs its size once;
+  # a game moving the whole of a 16x9 view 30 times a second needs about 1 to 4 MB a second.
+  max-bytes-per-second-per-player: 8000000
   # Players further than this many blocks from a wall screen get no updates for it.
   view-distance: 48
   # How far away a player can point at and click a wall screen, in blocks.

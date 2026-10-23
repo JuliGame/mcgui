@@ -55,7 +55,10 @@ public final class MapSender implements AutoCloseable {
 
     private static final class Viewer {
         final Map<Integer, byte[]> sent = new ConcurrentHashMap<>(); // map id -> exact array the client last got
+        /** Bytes they may be sent now, as they go on the wire (compressed): see {@link #charge}. */
         long budget;
+        /** Bytes on the wire per raw map byte, as their patches the wire could size came out: for those it cannot. */
+        double ratio = 1;
         final Map<MapWall, Frame> frames = new HashMap<>();
         /** The walls this pass assigned them; frames for any other are dropped. */
         final Set<MapWall> walls = new HashSet<>();
@@ -71,6 +74,8 @@ public final class MapSender implements AutoCloseable {
         final List<Wire.MapPatch> pending = new ArrayList<>();
         final List<Patch> patches = new ArrayList<>();
         long batchCost;
+        /** What this pass's patches took from the budget so far: their estimated bytes on the wire. */
+        long batchCharged;
         /** Bumped whenever patches are forgotten (a failed write), which no snapshot or pointing would show. */
         final AtomicInteger forgets = new AtomicInteger();
     }
@@ -106,7 +111,10 @@ public final class MapSender implements AutoCloseable {
     private final Wire wire;
     private final Palette palette;
     private final int bytesPerSecond;
-    /** Bytes a player may have queued but unwritten: about 50 ms at the full rate. */
+    /**
+     * Map bytes (uncompressed) a player may have queued but unwritten: 800 KB at the default budget, which a 4 MB
+     * window measured slower than (whole picture 78.2 against 66.6 ms), and a tenth of a second's budget above it.
+     */
     private final long maxInFlight;
     private final Map<UUID, Viewer> viewers = new ConcurrentHashMap<>();
     private final AtomicReference<List<Assignment>> latest = new AtomicReference<>(List.of());
@@ -117,10 +125,13 @@ public final class MapSender implements AutoCloseable {
     /** Whether the last pass left tiles to send (out of budget, or the connection full): then the loop looks again soon. */
     private volatile boolean unsent;
     private long lastRun = System.nanoTime();
-    /** The most a player's budget can build up to: a quarter of a second, so a burst after a quiet moment goes out at once. */
+    /**
+     * The most a player's budget can build up to: half a second, so a burst after a quiet moment goes out at once (a
+     * new player's first patches count uncompressed until compression has been seen, and a 16x9 picture is 2.4 MB).
+     */
     private final long burst;
     /**
-     * Budgets of players dropped in the last quarter second ({budget, when}). One who comes straight back carries on
+     * Budgets of players dropped in the last half second ({budget, when}). One who comes straight back carries on
      * from there, so stepping out of range and back cannot earn a fresh burst; anyone else starts with a full one.
      */
     private final Map<UUID, long[]> left = new ConcurrentHashMap<>();
@@ -136,8 +147,8 @@ public final class MapSender implements AutoCloseable {
         this.wire = wire;
         this.palette = palette;
         this.bytesPerSecond = bytesPerSecond;
-        this.maxInFlight = Math.max(512 * 1024L, bytesPerSecond / 20L);
-        this.burst = bytesPerSecond / 4L;
+        this.maxInFlight = Math.max(800_000L, bytesPerSecond / 10L);
+        this.burst = bytesPerSecond / 2L;
         this.log = log;
         loop.setDaemon(true);
     }
@@ -277,7 +288,7 @@ public final class MapSender implements AutoCloseable {
             left.put(e.getKey(), new long[]{e.getValue().budget, now});
             it.remove();
         }
-        left.values().removeIf(was -> now - was[1] > 250_000_000L); // refilled to the full burst by now anyway
+        left.values().removeIf(was -> now - was[1] > 500_000_000L); // refilled to the full burst by now anyway
         // And each player's frames for walls they are no longer near, even where others still are.
         for (Viewer v : viewers.values()) {
             v.frames.keySet().retainAll(v.walls);
@@ -382,7 +393,9 @@ public final class MapSender implements AutoCloseable {
             v.pending.add(patch(a, id, rect, current));
             v.patches.add(new Patch(id, current, cost, wallInFlight));
             v.batchCost += cost;
-            v.budget -= cost;
+            long take = estimate(v, cost);
+            v.batchCharged += take;
+            v.budget -= take;
             v.sent.put(id, current);
             frame.queue.pollFirst();
         }
@@ -483,9 +496,12 @@ public final class MapSender implements AutoCloseable {
         v.pointing.point(a.wall, to);
         v.inFlight.addAndGet(cost);
         wallInFlight.addAndGet(cost);
-        v.budget -= cost;
+        long taken = estimate(v, cost);
+        v.budget -= taken;
         for (Patch p : patches) v.sent.put(p.id, p.tile);
-        packets.addAll(made(a.player, v, made, patches, cost));
+        List<Object> sized = made(a.player, v, made, patches, cost);
+        charge(v, made, sized, taken);
+        packets.addAll(sized);
         write(a.player, v, packets, patches, cost, true);
         return true;
     }
@@ -495,11 +511,43 @@ public final class MapSender implements AutoCloseable {
         if (v == null || v.pending.isEmpty()) return;
         List<Wire.MapPatch> pending = List.copyOf(v.pending);
         List<Patch> patches = List.copyOf(v.patches);
-        long cost = v.batchCost;
+        long cost = v.batchCost, charged = v.batchCharged;
         v.pending.clear();
         v.patches.clear();
         v.batchCost = 0;
-        write(player, v, made(player, v, pending, patches, cost), patches, cost, false);
+        v.batchCharged = 0;
+        List<Object> packets = made(player, v, pending, patches, cost);
+        charge(v, pending, packets, charged);
+        write(player, v, packets, patches, cost, false);
+    }
+
+    /** What [raw] map bytes are likely to take on [v]'s wire: what is taken from their budget before they are made. */
+    private static long estimate(Viewer v, long raw) {
+        return (long) Math.ceil(raw * v.ratio);
+    }
+
+    /**
+     * Settles [v]'s budget for [made], which took [taken] from it ({@link #estimate}) and became [packets]: the
+     * budget is spent by the bytes on the wire, compressed. It is for the player's connection and the server's
+     * uplink, and a moving game's frame of pixel art scaled up shrinks fourteen-fold (1.9 MB of map pixels to
+     * 136 KB), so counting map pixels held such a game to 8 frames a second. A patch the wire cannot size (its
+     * connection compresses it later) counts at the ratio this player's patches have come out at.
+     */
+    private void charge(Viewer v, List<Wire.MapPatch> made, List<Object> packets, long taken) {
+        long known = 0, knownRaw = 0, unknownRaw = 0;
+        for (int i = 0; i < made.size(); i++) {
+            Wire.MapPatch p = made.get(i);
+            long raw = (long) p.w() * p.h(), size = i < packets.size() ? wire.wireBytes(packets.get(i)) : -1;
+            if (size >= 0) {
+                known += size;
+                knownRaw += raw;
+            } else {
+                unknownRaw += raw;
+            }
+        }
+        long spent = known + estimate(v, unknownRaw);
+        if (knownRaw > 0) v.ratio = 0.7 * v.ratio + 0.3 * Math.min(1.0, (double) known / knownRaw);
+        v.budget = Math.min(burst, v.budget + taken - spent);
     }
 
     /**

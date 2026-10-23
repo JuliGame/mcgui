@@ -66,6 +66,11 @@ public final class ServerWire implements Wire, AutoCloseable {
     }
 
     @Override
+    public long wireBytes(Object packet) {
+        return packet instanceof SharedCompression.Compressed c ? c.frame.length : -1;
+    }
+
+    @Override
     public Object repoint(MapWall wall, int tile, int mapId) {
         int entity = wall.entityId(tile);
         return entity < 0 ? null : nms.frameShows(entity, mapId);

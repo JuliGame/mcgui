@@ -37,6 +37,14 @@ public interface Wire {
         return out;
     }
 
+    /**
+     * The bytes [packet] (made by {@link #patches}) takes on the wire, compressed, if the wire knows that before
+     * writing it; -1 if not (it is compressed later, by the connection).
+     */
+    default long wireBytes(Object packet) {
+        return -1;
+    }
+
     /** A packet that makes [wall]'s frame for [tile] show map [mapId], or null while the frame is not in the world. */
     Object repoint(MapWall wall, int tile, int mapId);
 

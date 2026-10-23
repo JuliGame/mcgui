@@ -41,7 +41,7 @@ public final class Settings {
         packPublicUrl = c.getString("resource-pack.public-url", "");
         packRequired = c.getBoolean("resource-pack.required", false);
         packPrompt = c.getString("resource-pack.prompt", "This server's screens need a small resource pack for full colour.");
-        bytesPerSecond = Math.max(64 * 1024, c.getInt("screens.max-bytes-per-second-per-player", 16_000_000));
+        bytesPerSecond = Math.max(64 * 1024, c.getInt("screens.max-bytes-per-second-per-player", 8_000_000));
         viewDistance = c.getDouble("screens.view-distance", 48);
         reach = c.getDouble("screens.reach", 8);
         sharedCompression = c.getBoolean("screens.shared-compression", true);
