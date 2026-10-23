@@ -103,6 +103,7 @@ whatever its shape and the player's FOV.
 | `data-close` | (with a command) closes the page after running it |
 | `data-sound="block.note_block.pling 1 1.5"` | the sound a click on it (or anything inside it) makes, even where nothing else happens: `<sound> [volume] [pitch]`, or `none` |
 | `data-hover-sound="ui.button.click 0.1 2"` | plays when the pointer comes onto it |
+| `data-key="1"` | pressing that key clicks it, fullscreen: `w a s d`, `space`, `sprint`, `f`, `q`, `1` to `9` (several with spaces). A page's own key wins over what the key does by default. The wheel moves the hotbar too, so a page can use any six of the number keys: the hotbar is rested away from the ones it uses |
 | `<img src="head:{player}">` | a player's face, with their hat layer, crisp at any size; any name or UUID works (`head:Notch`). Online players' skins come from the server (skin plugins included), anyone else's from Mojang by name; a plain face stands in until it arrives |
 | `href="https://..."` | sends the link to chat, where it can be clicked |
 | `:hover`, `:active`, `cursor: pointer` | work; the pointer turns into a hand |
@@ -127,7 +128,8 @@ your own: put an `.ogg` in `plugins/UIEngine/sounds/` and restart, and
 `sounds/door.ogg` is `uiengine:door`. Only the player who clicked hears it.
 
 Controls while a page is open: mouse moves the pointer, either button clicks,
-the wheel (or W/S) scrolls, F goes back, sneak closes.
+the wheel (or W/S) scrolls, F goes back, sneak closes; and any key the page
+gives a `data-key`.
 
 Pages load in the background, so a page that fetches from the web never holds
 up the server; it shows when it has loaded. With `allow-web`, a page can load

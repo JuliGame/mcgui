@@ -161,6 +161,8 @@ public final class Views implements Listener {
 
     public final class ViewImpl implements View {
         final UUID player;
+        /** The hotbar slot the player held before {@link #restSlot} moved it; -1 if it never did. */
+        int heldSlot = -1;
         final ViewContent content;
         final Canvas canvas;
         final MapWall wall;
@@ -278,6 +280,14 @@ public final class Views implements Listener {
         @Override public Pointer pointer() { return shape; }
         @Override public void pointer(Pointer shape) { this.shape = shape == null ? Pointer.ARROW : shape; }
         @Override public boolean shown() { return revealed; }
+
+        @Override
+        public void restSlot(int slot) {
+            Player p = player();
+            if (p == null || closed || slot < 0 || slot > 8 || p.getInventory().getHeldItemSlot() == slot) return;
+            if (heldSlot < 0) heldSlot = p.getInventory().getHeldItemSlot();
+            p.getInventory().setHeldItemSlot(slot);
+        }
         @Override public boolean open() { return !closed; }
 
         @Override
@@ -395,6 +405,7 @@ public final class Views implements Listener {
             @Override public void teleported() { view.awaitingTeleport = false; }
             @Override public void clicked() { Views.this.clicked(view); }
             @Override public void tickEnded() { Views.this.tickEnded(view); }
+            @Override public void dropped() { Views.this.dropped(view); }
         }, view.pointerId);
         // Hides the first-person arm; nobody else sees the seated player at all.
         player.addPotionEffect(new PotionEffect(PotionEffectType.INVISIBILITY, PotionEffect.INFINITE_DURATION, 0, false, false, false));
@@ -957,6 +968,7 @@ public final class Views implements Listener {
             own = left > 0 ? own.withDuration(left) : null;
         }
         restore(player, v.previousMode, own);
+        if (v.heldSlot >= 0 && player.isOnline()) player.getInventory().setHeldItemSlot(v.heldSlot);
         if (v.previousWeather != null) player.setPlayerWeather(v.previousWeather);
         else player.resetPlayerWeather();
         // Players still seated stay hidden from everyone (see open), whatever this view hid of them.
@@ -1107,8 +1119,9 @@ public final class Views implements Listener {
         ViewImpl v = of(e.getPlayer());
         if (v == null) return;
         int delta = Math.floorMod(e.getNewSlot() - e.getPreviousSlot() + 4, 9) - 4;
-        // The wheel moves one slot at a time; a bigger jump is a number key, which should not scroll.
+        // The wheel moves one slot at a time; a bigger jump is a number key.
         if (Math.abs(delta) == 1) atClick(v, (x, y) -> v.content.scroll(v, x, y, delta));
+        else if (delta != 0 && v.revealed) press(v, Key.hotbar(e.getNewSlot()));
     }
 
     @EventHandler
@@ -1143,8 +1156,20 @@ public final class Views implements Listener {
         e.setCancelled(true);
         ViewImpl v = of(e.getPlayer());
         if (v == null) return;
-        v.content.key(v, Key.SWAP_HANDS, true);
-        v.content.key(v, Key.SWAP_HANDS, false);
+        press(v, Key.SWAP_HANDS);
+    }
+
+    /** A key with no hold to it: down and up at once. */
+    private static void press(ViewImpl v, Key key) {
+        v.content.key(v, key, true);
+        v.content.key(v, key, false);
+    }
+
+    /** On the netty thread: the player pressed the drop key, which the client sends whatever their hand holds. */
+    private void dropped(ViewImpl v) {
+        nms.serverThread().execute(() -> {
+            if (!v.closed && v.revealed && views.get(v.player) == v) press(v, Key.DROP);
+        });
     }
 
     @EventHandler(priority = EventPriority.LOWEST)

@@ -81,6 +81,8 @@ public final class Nms {
     private final MethodHandle positionSyncId, teleportId;
     /** What a click or a wheel step sends, each before that client tick's rotation. */
     private final List<Class<?>> clickPackets;
+    private final Class<?> actionPacket;           // ServerboundPlayerActionPacket, whose actions include the drop key
+    private final MethodHandle actionOfPacket;
     /** What the client sends at the end of each of its ticks, after that tick's clicks and rotation. */
     private final Class<?> tickEndPacket;          // ServerboundClientTickEndPacket
     // A held player: flying, as far as their client knows, at a speed of nothing (see heldAbilities).
@@ -251,6 +253,17 @@ public final class Nms {
             }
         }
         clickPackets = List.copyOf(clicks);
+        // Leniently too: without it, the drop key is only not a key.
+        Class<?> action = null;
+        MethodHandle actionOf = null;
+        try {
+            action = Class.forName(game + "ServerboundPlayerActionPacket");
+            actionOf = L.unreflect(action.getMethod("getAction"));
+        } catch (ReflectiveOperationException ignored) {
+            action = null;
+        }
+        actionPacket = action;
+        actionOfPacket = actionOf;
         tickEndPacket = Class.forName(game + "ServerboundClientTickEndPacket");
         abilitiesPacket = Class.forName(game + "ClientboundPlayerAbilitiesPacket");
         abilitiesInvulnerable = L.unreflect(abilitiesPacket.getMethod("isInvulnerable"));
@@ -606,6 +619,16 @@ public final class Nms {
     public boolean isClick(Object msg) {
         for (Class<?> c : clickPackets) if (c.isInstance(msg)) return true;
         return false;
+    }
+
+    /** Whether [msg] is the drop key (Q, or Ctrl+Q for the stack), which the client sends whatever its hand holds. */
+    public boolean isDrop(Object msg) {
+        if (actionPacket == null || !actionPacket.isInstance(msg)) return false;
+        try {
+            return ((Enum<?>) actionOfPacket.invoke(msg)).name().startsWith("DROP_");
+        } catch (Throwable t) {
+            return false;
+        }
     }
 
     /** Whether [msg] is the client saying one of its ticks has ended (sent after that tick's clicks and rotation). */

@@ -67,6 +67,9 @@ public final class Pipeline {
 
         /** One of their client's ticks ended: whatever it sent that tick (clicks, a rotation) has arrived. */
         default void tickEnded() {}
+
+        /** They pressed the drop key. */
+        default void dropped() {}
     }
 
     private record Pending(UUID player, Runnable then) {}
@@ -338,6 +341,8 @@ public final class Pipeline {
                         mouse.clicked();
                     } else if (nms.isTickEnd(msg)) {
                         mouse.tickEnded();
+                    } else if (nms.isDrop(msg)) {
+                        mouse.dropped();
                     } else {
                         float[] turn = nms.rotation(msg);
                         if (turn != null) mouse.turned(turn[0], turn[1]);

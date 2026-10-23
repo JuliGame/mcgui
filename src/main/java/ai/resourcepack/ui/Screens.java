@@ -320,9 +320,32 @@ public final class Screens implements Listener {
         @Override public void click(View v, int x, int y, Click click) { session.click(x, y); }
         @Override public void scroll(View v, int x, int y, int notches) { session.scroll(notches); }
 
+        /** The page whose number keys the hotbar was last rested for. */
+        private Page restedFor;
+
+        /** Rests the hotbar away from the number keys the page listens for, once per page shown. */
+        void restHotbar() {
+            Page p = session.page();
+            if (view == null || p == null || p == restedFor) return;
+            restedFor = p;
+            java.util.Set<Integer> used = session.numberKeys();
+            if (used.isEmpty()) return;
+            int best = 8, fewest = Integer.MAX_VALUE;
+            for (int slot = 8; slot >= 0; slot--) {
+                int lost = 0;
+                for (int d = -1; d <= 1; d++) if (used.contains(Math.floorMod(slot + d, 9))) lost++;
+                if (lost < fewest) {
+                    fewest = lost;
+                    best = slot;
+                }
+            }
+            view.restSlot(best);
+        }
+
         @Override
         public void key(View v, Key key, boolean down) {
             if (!down) return;
+            if (session.key(Keys.name(key))) return;
             switch (key) {
                 case UP -> session.scroll(-1);
                 case DOWN -> session.scroll(1);
@@ -422,7 +445,10 @@ public final class Screens implements Listener {
 
         void tick(long now) {
         for (Wall w : walls.values()) for (Session s : w.all()) s.tick(now);
-        for (Seated s : views.values()) s.session.tick(now);
+        for (Seated s : views.values()) {
+            s.session.tick(now);
+            s.restHotbar();
+        }
     }
 
     void shutdown() {

@@ -154,6 +154,11 @@ public final class Session {
         this.lookAgain = () -> serverThread.execute(this::lookAhead);
     }
 
+    /** The page shown, or null before the first has loaded. */
+    Page page() {
+        return page;
+    }
+
     /** Whether the page shown draws pictures that can arrive after it is drawn (see {@link Page#schemed}). */
     boolean schemed() {
         Page p = page;
@@ -929,10 +934,41 @@ public final class Session {
         // The picture can be behind the session: the element clicked is found in the session's own copy.
         Element e = counterpart(at(x, y), doc);
         if (e == null) return;
-        Player p = clicker != null ? clicker : player();
-        Page on = page;
         double[] c = css(x, y);
-        clickAt = new double[]{c[0], c[1] + scrollY};
+        press(e, new double[]{c[0], c[1] + scrollY}, clicker != null ? clicker : player());
+    }
+
+    /**
+     * The key [name] was pressed (a letter, a digit, {@code space}...): clicks the page's element whose
+     * {@code data-key} names it, if there is one. False if none does.
+     */
+    public boolean key(String name) {
+        Document d = doc;
+        if (d == null || page == null || frame == null || frame.page() != page) return false;
+        for (Element e : d.select("[data-key]")) {
+            if (!Keys.names(e.attr("data-key")).contains(name)) continue;
+            java.awt.geom.Rectangle2D at = boundsInPicture(e);
+            press(e, at == null ? new double[]{0, 0} : new double[]{at.getCenterX(), at.getCenterY()}, player());
+            return true;
+        }
+        return false;
+    }
+
+    /** Every hotbar slot (0 to 8) whose number key the page shown listens for. */
+    java.util.Set<Integer> numberKeys() {
+        Document d = doc;
+        java.util.Set<Integer> out = new java.util.TreeSet<>();
+        if (d == null) return out;
+        for (Element e : d.select("[data-key]")) {
+            for (String k : Keys.names(e.attr("data-key"))) if (k.length() == 1 && k.charAt(0) >= '1' && k.charAt(0) <= '9') out.add(k.charAt(0) - '1');
+        }
+        return out;
+    }
+
+    /** [e] (an element of [doc]) clicked at [at] (CSS pixels of the page) by [p], with its sound and its press. */
+    private void press(Element e, double[] at, Player p) {
+        Page on = page;
+        clickAt = at;
         boolean acted = activate(e, p);
         clickSound(e, acted, p);
         if (page == on && page.styles.dynamic) {

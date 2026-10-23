@@ -20,6 +20,13 @@ public interface View {
 
     Pointer pointer();
 
+    /**
+     * Rests the player's hotbar on [slot] (0 to 8) while they sit; they hold the slot they had again when they
+     * get up. The wheel moves the hotbar one slot at a time, so the number keys of the resting slot and its two
+     * neighbours read as the wheel (or nothing): rest it away from the number keys you listen for.
+     */
+    void restSlot(int slot);
+
     /** Whether the picture is on the player's screen yet (the view waits until it has arrived). */
     boolean shown();
 
