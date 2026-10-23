@@ -29,6 +29,10 @@ keyboard.
   cabinet.
 - `/arcade remove` takes down the cabinet you look at; `/arcade scores [game]`
   lists the high scores (kept in `scores.yml`).
+- From the console or a script, give the place outright:
+  `/arcade cabinet <game> <cols> <rows> <x> <y> <z> <facing> [world]` (the
+  top-left block, and the way the screen faces), and
+  `/arcade remove <x> <y> <z> [world]` (any block the cabinet covers).
 
 Build with `../../gradlew build` from this directory; it builds UI Engine from
 the checkout two directories up. Install `build/libs/Arcade-*.jar` beside

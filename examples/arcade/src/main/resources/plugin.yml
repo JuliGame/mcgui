@@ -7,7 +7,7 @@ description: Arcade games, an example built on UI Engine. Play one fullscreen wi
 commands:
   arcade:
     description: Play an arcade game, or put up a cabinet.
-    usage: /arcade play [game] | cabinet [game] [cols] [rows] | remove | scores [game]
+    usage: /arcade play [game] | cabinet [game] [cols] [rows] [x y z facing [world]] | remove [x y z [world]] | scores [game]
 permissions:
   # One node per subcommand. arcade.admin is only a parent: nothing checks it.
   arcade.admin:

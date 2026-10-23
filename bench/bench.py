@@ -175,7 +175,8 @@ class Server:
         log(f'starting the server in {self.dir}')
         self.t0 = time.time()
         self.log = open(f'{self.dir}/console.log', 'w')
-        self.proc = subprocess.Popen([self.a.java, f'-Xms{self.a.heap}', f'-Xmx{self.a.heap}', f'-Dprobe.port={self.probe_port}',
+        # Heap grown as needed: the VPS's memory is shared, and its limit kills the biggest process (once, this server).
+        self.proc = subprocess.Popen([self.a.java, '-Xms512M', f'-Xmx{self.a.heap}', f'-Dprobe.port={self.probe_port}',
                                       '-jar', 'paper.jar', '--nogui'], cwd=self.dir, stdin=subprocess.PIPE,
                                      stdout=self.log, stderr=subprocess.STDOUT, text=True)
         while True:
@@ -508,21 +509,40 @@ def deadline(b):
     return out
 
 
+IDLE_CABINETS = ['breakout', 'racer', 'dungeon', 'tron']
+
+
 def arcade(b):
-    """Each arcade game on a 16x9 cabinet playing itself, one player watching: CPU and bytes a second."""
+    """Four cabinets with nobody in range (what a quiet arcade costs); then each game on a cabinet playing itself, one
+    player watching: CPU (the game loop, the render pool, the sender) and bytes a second. Cabinets are placed from the
+    console (`/arcade cabinet <game> <cols> <rows> <x> <y> <z> <facing>`): a fake can aim, but a command it runs
+    through `execute as` comes from the console."""
     s = b.srv
-    fakes(b, 1, where=(0.5, -60.0, -20.5), yaw=180.0, pitch=-45.0)
-    s.cmd(f'fill -50 -61 {WALL_Z - 1} 50 -40 {WALL_Z - 1} minecraft:barrier')
+    s.cmd(f'fill -90 -61 {WALL_Z - 1} 90 -40 {WALL_Z - 1} minecraft:barrier')
     res = {}
+    # Nobody near: the one player stands 120 blocks off, past every wall's view distance (48).
+    fakes(b, 1, where=(0.5, -60.0, 100.5))
+    xs = [-80 + 40 * i for i in range(len(IDLE_CABINETS))]
+    for x, g in zip(xs, IDLE_CABINETS):
+        s.cmd(f'arcade cabinet {g} 16 9 {x} -52 {WALL_Z} south world')
+    settle(b, 6)
+    w = window(b, W(b), 'arcade-idle')
+    res['idle_cpu_ms_s'] = w['arcade_ms_s'] + w['cpu_pool_ms_s'] + w['send_ms_s']
+    res['idle_loop_ms_s'] = w['arcade_ms_s']
+    for x in xs:
+        s.cmd(f'arcade remove {x} -52 {WALL_Z} world')
+    # One player watching, 10 blocks in front.
+    s.P(f'fakedo grid 0.5 -60 {WALL_Z + 10.5} 180 -10 1.5')
     games = ARCADE_GAMES if not b.a.quick else ['breakout', 'racer', 'dungeon']
     for g in games:
-        s.cmd(f'execute as Fake1 run arcade cabinet {g} 16 9')
+        s.cmd(f'arcade cabinet {g} 16 9 -8 -52 {WALL_Z} south world')
         settle(b, 4)
         w = window(b, 6 if b.a.quick else 10, f'arcade-{g}')
-        s.cmd('execute as Fake1 run arcade remove')
+        s.cmd(f'arcade remove -8 -52 {WALL_Z} world')
         time.sleep(1)
         res[f'cpu_ms_s.{g}'] = w['arcade_ms_s'] + w['cpu_pool_ms_s'] + w['send_ms_s']
         res[f'rx_mb_s.{g}'] = w['rx_mb_s']
+    res['games'] = len(games)
     return res
 
 
@@ -564,7 +584,8 @@ def main():
     p.add_argument('--quick', action='store_true')
     p.add_argument('--no-build', action='store_true', help='use the jars and classpath already built')
     p.add_argument('--jar', help='a UI Engine jar to bench instead of this checkout\'s (headless cells still use the checkout)')
-    p.add_argument('--heap', default='4G')
+    p.add_argument('--arcade', help='an arcade example jar to bench instead of this checkout\'s')
+    p.add_argument('--heap', default='2G')
     p.add_argument('--ports', default='25790', help='first of three ports: server, probe, pack')
     p.add_argument('--work', default=os.path.join(REPO, 'build/bench'))
     p.add_argument('--out', help='JSON file to write (default build/bench/<time>.json)')
@@ -591,6 +612,8 @@ def main():
         open(os.path.join(a.work, 'classpath.txt'), 'w').write(b.cp)
     if a.jar:
         jar = a.jar
+    if a.arcade:
+        arc = a.arcade
     commit = sh(['git', 'rev-parse', '--short', 'HEAD'], cwd=REPO, check=False).strip()
     dirty = bool(sh(['git', 'status', '--porcelain', '--untracked-files=no'], cwd=REPO, check=False).strip())
     results = {}
@@ -620,7 +643,14 @@ def main():
                     except Exception as e:
                         results[c] = {'error': repr(e)}
                         log(f'  {c} failed: {e!r}')
-                    log(f'  {time.time() - t:.0f} s')
+                    log(f'  {time.time() - t:.0f} s: ' + json.dumps(results[c]))
+                    if b.srv.proc.poll() is not None:
+                        # Kept for a look: the server's own words on why it stopped.
+                        dead = os.path.join(a.work, f'died-{time.strftime("%Y%m%d-%H%M%S")}.log')
+                        shutil.copy(f'{b.srv.dir}/console.log', dead)
+                        results[c]['server_died'] = dead
+                        log(f'  the server stopped during {c}: see {dead}')
+                        break
                     b.srv.P('fake 0')
             finally:
                 b.srv.stop()

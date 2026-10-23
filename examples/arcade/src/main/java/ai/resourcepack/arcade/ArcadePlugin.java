@@ -400,7 +400,7 @@ public final class ArcadePlugin extends JavaPlugin {
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         String sub = args.length == 0 ? "play" : args[0].toLowerCase(Locale.ROOT);
         if (!SUBCOMMANDS.contains(sub)) {
-            say(sender, "/arcade play [game] | cabinet [game] [cols] [rows] | remove | scores [game]", GREY);
+            say(sender, "/arcade play [game] | cabinet [game] [cols] [rows] [x y z facing [world]] | remove [x y z [world]] | scores [game]", GREY);
             return true;
         }
         if (!sender.hasPermission("arcade." + sub)) {
@@ -416,6 +416,42 @@ public final class ArcadePlugin extends JavaPlugin {
                 sender.sendMessage(Component.text(String.format(" %2d. ", i + 1), PINK)
                         .append(Component.text(e.name() + " ", NamedTextColor.WHITE))
                         .append(Component.text(e.score(), NamedTextColor.GOLD)));
+            }
+            return true;
+        }
+        // Where given outright, from anywhere (the console, a command block, a script): the block that is the
+        // screen's top-left corner, and the way it faces.
+        if (sub.equals("cabinet") && (args.length == 8 || args.length == 9)) {
+            String name = args[1].toLowerCase(Locale.ROOT);
+            try {
+                int cols = Integer.parseInt(args[2]), rows = Integer.parseInt(args[3]);
+                Location at = blockAt(sender, args, 4, 8);
+                BlockFace face = BlockFace.valueOf(args[7].toUpperCase(Locale.ROOT));
+                if (!gameNames().contains(name) || !WALL.contains(face) || cols < 4 || rows < 3 || cols > 32 || rows > 18) {
+                    throw new IllegalArgumentException();
+                }
+                putUp("cabinet-" + UUID.randomUUID().toString().substring(0, 8), at, face, cols, rows, name);
+                saveCabinets();
+                say(sender, "Cabinet up.", NamedTextColor.GREEN);
+            } catch (IllegalArgumentException e) {
+                say(sender, "/arcade cabinet <game> <cols> <rows> <x> <y> <z> <north|south|east|west> [world]", GREY);
+            }
+            return true;
+        }
+        if (sub.equals("remove") && (args.length == 4 || args.length == 5)) {
+            try {
+                Location at = blockAt(sender, args, 1, 4);
+                Cabinet hit = null;
+                for (Cabinet c : cabinets.values()) if (c.covers(at)) hit = c;
+                if (hit == null) {
+                    say(sender, "No cabinet covers that block.", NamedTextColor.RED);
+                    return true;
+                }
+                takeDown(hit);
+                saveCabinets();
+                say(sender, "Cabinet taken down.", NamedTextColor.GREEN);
+            } catch (IllegalArgumentException e) {
+                say(sender, "/arcade remove <x> <y> <z> [world]: the cabinet covering that block", GREY);
             }
             return true;
         }
@@ -477,6 +513,14 @@ public final class ArcadePlugin extends JavaPlugin {
             }
         }
         return true;
+    }
+
+    /** The block at x y z in args[from..], in the world named at args[world] if there is one, else the sender's (or the first). */
+    private static Location blockAt(CommandSender sender, String[] args, int from, int world) {
+        World w = args.length > world ? Bukkit.getWorld(args[world])
+                : sender instanceof org.bukkit.entity.Entity e ? e.getWorld() : Bukkit.getWorlds().getFirst();
+        if (w == null) throw new IllegalArgumentException("no world " + args[world]);
+        return new Location(w, Integer.parseInt(args[from]), Integer.parseInt(args[from + 1]), Integer.parseInt(args[from + 2]));
     }
 
     @Override
