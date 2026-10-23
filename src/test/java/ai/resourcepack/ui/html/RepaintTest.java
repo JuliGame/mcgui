@@ -167,4 +167,34 @@ class RepaintTest {
         check("stripes", Page.of("<html><head><style>" + ScrollCacheTest.STRIPES_CSS + "</style></head><body>" + ScrollCacheTest.STRIPES_BODY + "</body></html>",
                 Path.of("stripes.html").toAbsolutePath(), OFFLINE), 3);
     }
+
+    /**
+     * The vanilla example pages' shape: a blurred picture behind the whole page, slots that show a tooltip on hover
+     * ({@code display}, so boxes appear and go), and a strip with rounded corners and a tiled gradient under them
+     * at a fractional height, which a hover's rectangle cuts. Every hover was a whole picture before (TOO_BIG for
+     * the blur, LAYOUT_MOVED for the tooltip); cut by a clip, the strip's rounded edge drew a seam (56 levels).
+     */
+    static final String TOOLTIPS = "<html><head><style>html,body{margin:0;height:100%;overflow:hidden;background:#000}"
+            + ".pano{position:absolute;left:-24px;top:-24px;right:-24px;bottom:-24px;filter:blur(10px);"
+            + "background:linear-gradient(90deg,#000 0 30%,#fff 30% 60%,#f80 60%),linear-gradient(#08f,#0f8)}"
+            + ".shelf{position:absolute;left:40px;top:120.3px;width:900px;height:160.7px}"
+            + ".shelf::after{content:'';position:absolute;left:0;right:0;bottom:0;height:18px;border-radius:3px;"
+            + "background:repeating-linear-gradient(90deg,#a63 0 13px,#531 13px 32px);box-shadow:0 10px 14px rgba(0,0,0,.55)}"
+            + ".slot{position:relative;display:inline-block;width:120px;height:110px;margin:0 10px;border-radius:10px;"
+            + "background:linear-gradient(180deg,rgba(0,0,0,.45),rgba(0,0,0,.2));border:2px solid rgba(255,255,255,.07)}"
+            + ".slot:hover{z-index:5;border-color:rgba(255,181,71,.6)}"
+            + ".tip{display:none;position:absolute;left:60%;top:-14px;z-index:10;padding:6px 9px;white-space:nowrap;background:#100010;"
+            + "border:2px solid #5000ff;box-shadow:0 10px 22px rgba(0,0,0,.55);color:#fff;font-size:20px}"
+            + ".slot:hover .tip{display:block}"
+            + "</style></head><body><div class=pano></div><div class=shelf>"
+            + "<div class=slot><div class=tip>One<br>first</div></div><div class=slot><div class=tip>Two<br>second</div></div>"
+            + "<div class=slot><div class=tip>Three<br>third</div></div><div class=slot><div class=tip>Four<br>fourth</div></div>"
+            + "<div class=slot><div class=tip>Five<br>fifth</div></div></div></body></html>";
+
+    @Test
+    void tooltipsOverABlurredPictureArePartialAndMatch() {
+        Walk w = walk(Page.of(TOOLTIPS, Path.of("tooltips.html").toAbsolutePath(), OFFLINE));
+        assertTrue(w.worst <= 1, "tooltips: " + w.where);
+        assertEquals(w.steps, w.partials, "tooltip hovers that were not partial");
+    }
 }

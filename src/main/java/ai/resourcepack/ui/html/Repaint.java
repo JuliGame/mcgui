@@ -29,7 +29,9 @@ import java.util.function.Supplier;
  *
  * <p>Blurs are what make it hard. A {@code filter: blur()} blurs a layer of its own, which a repaint paints
  * only inside its rectangle, so a layer the rectangle cut would blur with a cut edge: the rectangle takes in
- * all of every such layer it meets, as far as its blur reads. A backdrop-filter blurs what was painted under
+ * all of every such layer it meets that something which changed is in (or round), as far as its blur reads. A
+ * blurred layer the change is apart from looks the same after (a blurred picture behind the whole page): it is
+ * only painted as far round the rectangle as its blur reads, and the rectangle stays as it was. A backdrop-filter blurs what was painted under
  * its box, from a little past its edges, so a rectangle painted on its own would blur the last picture's own
  * pixels (already blurred, with text on them) round its edge. Two things follow. A box with a backdrop that
  * meets the rectangle is painted again, so the rectangle is painted with a margin as deep as the blur reaches
@@ -303,23 +305,38 @@ public final class Repaint {
         // (HtmlRenderer.paintBands), and what it draws near those edges differs from a picture that stops there.
         if (pastEdge(f, wanted) && Painter.blurReach(f.styles().values(), f.scale()) > 0) return new Region(null, null, Why.PICTURE_EDGE);
 
-        // Every layer a filter blurs, as far as the blur reads round it; and every backdrop.
+        // Every layer a filter blurs, as far as the blur reads round it; and every backdrop. A blurred layer with
+        // nothing that changed inside it, and not itself inside something that changed, comes out the same: it is
+        // painted only as far round the rectangle as its blur reads, not whole (the vanilla pages' blurred panorama).
         List<Rectangle2D> layers = new ArrayList<>();
+        Map<Element, Rectangle2D> still = new IdentityHashMap<>();
+        Map<Element, Double> stillReach = new IdentityHashMap<>();
         List<Backdrop> backdrops = new ArrayList<>();
         for (int i = 0; i < hits.size(); i++) {
             Painter.Hit h = hits.get(i);
             Style s = f.style(h.element());
             if (s == null) continue;
             double blur = blurReach(s.filter, s);
-            if (blur > 0) {
+            if (blur > 0 && !still.containsKey(h.element())) {
                 Rectangle2D b = extent(f, h.element());
-                layers.add(new Rectangle2D.Double(b.getX() - blur, b.getY() - f.scrollY() - blur, b.getWidth() + 2 * blur, b.getHeight() + 2 * blur));
+                Rectangle2D layer = new Rectangle2D.Double(b.getX() - blur, b.getY() - f.scrollY() - blur, b.getWidth() + 2 * blur, b.getHeight() + 2 * blur);
+                if (apart(h.element(), changed)) {
+                    still.put(h.element(), layer);
+                    stillReach.put(h.element(), blur);
+                } else {
+                    layers.add(layer);
+                }
             }
             if (!s.backdropFilter.equals("none")) {
                 Rectangle2D b = h.shape().getBounds2D();
                 Rectangle2D box = new Rectangle2D.Double(b.getX(), b.getY() - f.scrollY(), b.getWidth(), b.getHeight());
                 if (box.intersects(view)) backdrops.add(new Backdrop(box, i));
             }
+        }
+        // A backdrop reads the margin as painted, still layers included: there they are painted whole, as before.
+        if (!backdrops.isEmpty()) {
+            layers.addAll(still.values());
+            still.clear();
         }
         // How far (CSS px) a blur reads past what it draws on: a pixel or so more than its three boxes, per backdrop.
         double pad = backdrops.isEmpty() ? 0 : Painter.blurReach(f.styles().values(), f.scale()) / f.scale() + 3 / f.scale();
@@ -374,7 +391,27 @@ public final class Repaint {
                 if (b.box.intersects(paint) && pastEdge(f, grow(b.box, pad))) return new Region(null, null, Why.PICTURE_EDGE);
             }
         }
+        // A still blurred layer the rectangle meets is painted round it as far as its blur reads (all of them added up,
+        // for one nested in another), so its pixels in the rectangle blur what a whole picture's do; the rest is put back.
+        double margin = 0;
+        for (Map.Entry<Element, Rectangle2D> e : still.entrySet()) {
+            if (e.getValue().intersects(commit)) margin += stillReach.get(e.getKey());
+        }
+        if (margin > 0) {
+            Rectangle2D reads = grow(commit, margin);
+            if (pastEdge(f, reads)) return new Region(null, null, Why.PICTURE_EDGE);
+            paint = reads.createIntersection(view);
+        }
         return new Region(whole(commit, f, view), whole(paint, f, view), Why.PARTIAL);
+    }
+
+    /** Whether [layer] and every element in [changed] are apart: none of them is [layer], inside it, or round it. */
+    private static boolean apart(Element layer, Set<Element> changed) {
+        for (Element e = layer; e != null; e = e.parent()) if (changed.contains(e)) return false;
+        for (Element c : changed) {
+            for (Element e = c; e != null; e = e.parent()) if (e == layer) return false;
+        }
+        return true;
     }
 
     /** The picture [f] is, in CSS pixels from its top: the view, or a ScrollCache's taller one. */
@@ -466,25 +503,37 @@ public final class Repaint {
     /**
      * Whether nothing outside [region] moved between two frames: if something did, a partial repaint is not enough.
      * Boxes are matched by element, not by place in the list: a hover that lifts a box (a transform) paints it later,
-     * which reorders the list without moving anything else.
+     * which reorders the list without moving anything else. A box that is in only one of the two (a tooltip that
+     * hovering shows, with {@code display}) must be inside [region] too.
      */
     private static boolean sameLayout(HtmlRenderer.Frame a, HtmlRenderer.Frame b, Rectangle2D region) {
-        if (a.hits().size() != b.hits().size()) return false;
         Map<Element, List<Rectangle2D>> before = new IdentityHashMap<>();
         for (Painter.Hit h : a.hits()) before.computeIfAbsent(h.element(), k -> new ArrayList<>()).add(h.shape().getBounds2D());
         Map<Element, Integer> seen = new IdentityHashMap<>();
         for (Painter.Hit h : b.hits()) {
             List<Rectangle2D> boxes = before.get(h.element());
             int n = seen.merge(h.element(), 1, Integer::sum) - 1;
-            if (boxes == null || n >= boxes.size()) return false;
-            Rectangle2D ra = boxes.get(n), rb = h.shape().getBounds2D();
+            Rectangle2D rb = h.shape().getBounds2D();
+            if (boxes == null || n >= boxes.size()) {
+                if (!inside(region, rb, b)) return false;
+                continue;
+            }
+            Rectangle2D ra = boxes.get(n);
             if (Math.abs(ra.getX() - rb.getX()) < 0.5 && Math.abs(ra.getY() - rb.getY()) < 0.5
                     && Math.abs(ra.getWidth() - rb.getWidth()) < 0.5 && Math.abs(ra.getHeight() - rb.getHeight()) < 0.5) continue;
-            Rectangle2D va = new Rectangle2D.Double(ra.getX(), ra.getY() - a.scrollY(), ra.getWidth(), ra.getHeight());
-            Rectangle2D vb = new Rectangle2D.Double(rb.getX(), rb.getY() - b.scrollY(), rb.getWidth(), rb.getHeight());
-            if (!region.contains(va) || !region.contains(vb)) return false;
+            if (!inside(region, ra, a) || !inside(region, rb, b)) return false;
+        }
+        // Boxes gone (a tooltip hidden again).
+        for (Map.Entry<Element, List<Rectangle2D>> e : before.entrySet()) {
+            List<Rectangle2D> boxes = e.getValue();
+            for (int n = seen.getOrDefault(e.getKey(), 0); n < boxes.size(); n++) if (!inside(region, boxes.get(n), a)) return false;
         }
         return true;
+    }
+
+    /** Whether [box] (page CSS pixels of [f]) is inside [region] (of [f]'s picture). */
+    private static boolean inside(Rectangle2D region, Rectangle2D box, HtmlRenderer.Frame f) {
+        return region.contains(new Rectangle2D.Double(box.getX(), box.getY() - f.scrollY(), box.getWidth(), box.getHeight()));
     }
 
     private static int[] pixels(BufferedImage img) {

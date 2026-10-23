@@ -129,8 +129,7 @@ public final class HtmlRenderer {
      * and laid out, so the frame's hit regions are whole; only the pixels outside the clip are skipped.
      * [base] may be taller than the view (a {@link ScrollCache}'s picture, from [scrollY] down).
      * [base] and [clip] are null for a whole new picture.
-     * Gives up with {@link RenderAbandoned} after [timeoutMs] (0 for never), with whatever part of
-     * [clip] it had got to already painted on [base].
+     * Gives up with {@link RenderAbandoned} after [timeoutMs] (0 for never), leaving [base] as it was.
      */
     public static Frame render(Page page, org.jsoup.nodes.Document document, int width, int height, double scale, double scrollY,
                                Selector.State state, BufferedImage base, java.awt.geom.Rectangle2D clip, long timeoutMs) {
@@ -140,7 +139,7 @@ public final class HtmlRenderer {
     /**
      * As above, but only [keep] (a rectangle inside [clip]) keeps what was painted: the rest of [clip] is painted
      * so that what is drawn inside [keep] (a backdrop-filter reads past its box) matches a whole picture's,
-     * and then put back as it was in [base], also when the render is given up.
+     * and [base] is left as it was there.
      */
     public static Frame render(Page page, org.jsoup.nodes.Document document, int width, int height, double scale, double scrollY,
                                Selector.State state, BufferedImage base, java.awt.geom.Rectangle2D clip, java.awt.geom.Rectangle2D keep,
@@ -159,36 +158,59 @@ public final class HtmlRenderer {
         // Premultiplied: Java2D blends onto it directly, where a plain ARGB surface costs a conversion of
         // every pixel both ways on every fill. The page is painted on opaque white, so nothing reads alpha.
         BufferedImage img = base != null ? base : new BufferedImage(width, rows, BufferedImage.TYPE_INT_ARGB_PRE);
-        int[] ring = null;
-        int rx0 = 0, ry0 = 0, rx1 = 0, ry1 = 0;
-        if (base != null && clip != null && keep != null && !keep.contains(clip)) {
-            // Out to a pixel past the clip, which Java2D may round outwards.
-            rx0 = Math.max(0, (int) Math.floor(clip.getX() * scale) - 1);
-            ry0 = Math.max(0, (int) Math.floor(clip.getY() * scale) - 1);
-            rx1 = Math.min(width, (int) Math.ceil(clip.getMaxX() * scale) + 1);
-            ry1 = Math.min(rows, (int) Math.ceil(clip.getMaxY() * scale) + 1);
-            ring = PixelPool.ints((rx1 - rx0) * (ry1 - ry0));
-            int[] px = ((DataBufferInt) img.getRaster().getDataBuffer()).getData();
-            for (int y = ry0; y < ry1; y++) System.arraycopy(px, y * width + rx0, ring, (y - ry0) * (rx1 - rx0), rx1 - rx0);
+        if (base != null && clip != null) {
+            List<Painter.Hit> hits = paintPart(page, laid.root, img, clip, keep != null ? keep : clip, scale, vw, vh, scroll, budget);
+            return new Frame(img, scale, vw, vh, laid.pageHeight, scroll, hits, new IdentityHashMap<>(laid.styler.styles), document, page);
         }
-        try {
-            return paint(page, laid, img, false, scale, vw, vh, scroll, base == null && clip == null, clip, document, budget);
-        } finally {
-            // Everything in the clip but [keep] goes back as it was, also when the render was given up: then
-            // only [keep] of [base] holds what it had got to, as for a repaint without a margin.
-            if (ring != null) {
-                int kx0 = Math.max(0, (int) Math.floor(keep.getX() * scale)), ky0 = Math.max(0, (int) Math.floor(keep.getY() * scale));
-                int kx1 = Math.min(width, (int) Math.ceil(keep.getMaxX() * scale)), ky1 = Math.min(rows, (int) Math.ceil(keep.getMaxY() * scale));
-                int[] px = ((DataBufferInt) img.getRaster().getDataBuffer()).getData();
-                for (int y = ry0; y < ry1; y++) {
-                    boolean rowKept = y >= ky0 && y < ky1;
-                    for (int x = rx0; x < rx1; x++) {
-                        if (rowKept && x >= kx0 && x < kx1) continue;
-                        px[y * width + x] = ring[(y - ry0) * (rx1 - rx0) + x - rx0];
-                    }
-                }
-                PixelPool.give(ring);
+        return paint(page, laid, img, false, scale, vw, vh, scroll, base == null && clip == null, clip, document, budget);
+    }
+
+    /**
+     * Paints [clip] of the picture on an image of its own, just that big, and copies [keep] of it into [img]; the rest
+     * of [img] is left as it was, also when the budget gives up. As for a band of a whole picture ({@link #paintBands}),
+     * no clip is in force: the image's edges stop the drawing. Java2D intersects a clip with the clip of a box with
+     * rounded corners (its background, its overflow) a pixel differently from that box's clip alone, which showed as a
+     * seam along the edge of every such box a hover's rectangle cut (up to 113 levels on the market page). Text can
+     * still land a glyph on another fraction of a pixel than in a whole picture does (Java2D adds up advances in floats
+     * from where the image starts): a glyph a pixel column over now and then, not a seam. Returns every hit region.
+     */
+    private static List<Painter.Hit> paintPart(Page page, Box root, BufferedImage img, java.awt.geom.Rectangle2D clip, java.awt.geom.Rectangle2D keep,
+                                               double scale, double vw, double vh, double scroll, RenderBudget budget) {
+        int width = img.getWidth(), rows = img.getHeight();
+        int y0 = Math.max(0, (int) Math.floor(clip.getY() * scale)), y1 = Math.min(rows, (int) Math.ceil(clip.getMaxY() * scale));
+        int x0 = Math.max(0, (int) Math.floor(clip.getX() * scale)), x1 = Math.min(width, (int) Math.ceil(clip.getMaxX() * scale));
+        if (x1 <= x0 || y1 <= y0) {
+            // Nothing of the picture to paint, only the hit regions to find: under an empty clip nothing is drawn.
+            Graphics2D g = img.createGraphics();
+            g.scale(scale, scale);
+            g.clip(new java.awt.geom.Rectangle2D.Double());
+            Painter painter = new Painter(page.shaper, page, vw, vh, scroll, budget).origin(0, row(scroll, scale));
+            try {
+                painter.paint(g, root, img, scale);
+            } finally {
+                g.dispose();
             }
+            return painter.hits;
+        }
+        BufferedImage part = PixelPool.image(x1 - x0, y1 - y0, BufferedImage.TYPE_INT_ARGB_PRE);
+        try {
+            Graphics2D g = part.createGraphics();
+            g.translate(-x0, -y0);
+            g.scale(scale, scale);
+            Painter painter = new Painter(page.shaper, page, vw, vh, scroll, budget).origin(x0, row(scroll, scale) + y0);
+            try {
+                painter.paint(g, root, part, scale);
+            } finally {
+                g.dispose();
+            }
+            int kx0 = Math.max(x0, (int) Math.floor(keep.getX() * scale)), ky0 = Math.max(y0, (int) Math.floor(keep.getY() * scale));
+            int kx1 = Math.min(x1, (int) Math.ceil(keep.getMaxX() * scale)), ky1 = Math.min(y1, (int) Math.ceil(keep.getMaxY() * scale));
+            int[] from = ((DataBufferInt) part.getRaster().getDataBuffer()).getData(), to = ((DataBufferInt) img.getRaster().getDataBuffer()).getData();
+            int stride = x1 - x0;
+            for (int y = ky0; y < ky1; y++) System.arraycopy(from, (y - y0) * stride + kx0 - x0, to, y * width + kx0, kx1 - kx0);
+            return painter.hits;
+        } finally {
+            PixelPool.give(part);
         }
     }
 
