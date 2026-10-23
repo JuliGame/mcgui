@@ -317,20 +317,20 @@ public final class MapSender implements AutoCloseable {
         if (spot == null || a.encoding != Canvas.Encoding.PLAIN || spot.shape == Pointer.HIDDEN) return base;
         int tx = (t % a.wall.cols) * 128, ty = (t / a.wall.cols) * 128;
         int left = spot.x - spot.shape.hotX, top = spot.y - spot.shape.hotY;
-        if (left >= tx + 128 || left + 16 <= tx || top >= ty + 128 || top + 16 <= ty) return base;
+        Pointer shape = spot.shape;
+        if (left >= tx + 128 || left + shape.width() <= tx || top >= ty + 128 || top + shape.height() <= ty) return base;
         int id = a.wall.mapId(t);
         Pointed cached = v.pointed.get(id);
         if (cached != null && cached.base == base && cached.spot.equals(spot)) return cached.tile;
         byte[] tile = base.clone();
-        byte black = palette.plain(0x000000), white = palette.plain(0xFFFFFF);
-        String[] art = spot.shape.art;
-        for (int y = 0; y < art.length; y++) {
-            for (int x = 0; x < art[y].length(); x++) {
-                char c = art[y].charAt(x);
-                if (c == ' ') continue;
+        // A map has no partial transparency: a pixel at least half covered is drawn, in the nearest map colour.
+        for (int y = 0; y < shape.height(); y++) {
+            for (int x = 0; x < shape.width(); x++) {
+                int c = shape.argb(x, y);
+                if ((c >>> 24) < 128) continue;
                 int px = left + x - tx, py = top + y - ty;
                 if (px < 0 || py < 0 || px >= 128 || py >= 128) continue;
-                tile[py * 128 + px] = c == 'o' ? white : black;
+                tile[py * 128 + px] = palette.plain(c & 0xFFFFFF);
             }
         }
         v.pointed.put(id, new Pointed(base, spot, tile));

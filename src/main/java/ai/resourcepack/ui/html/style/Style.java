@@ -99,6 +99,8 @@ public final class Style {
     public int lineClamp;
     public String listStyleType = "disc", listStylePosition = "outside";
     public String cursor = "auto";
+    /** cursor: url(...) x y: the picture's file name without .png, and its hot pixel ("sword 4 0"), or null. */
+    public String cursorImage;
     public String pointerEvents = "auto";
 
     // Flex and grid
@@ -143,6 +145,7 @@ public final class Style {
         whiteSpace = parent.whiteSpace;
         visibility = parent.visibility;
         cursor = parent.cursor;
+        cursorImage = parent.cursorImage;
         listStyleType = parent.listStyleType;
         listStylePosition = parent.listStylePosition;
         textShadow = parent.textShadow;
@@ -158,6 +161,37 @@ public final class Style {
         textDecorationStyle = parent.textDecorationStyle;
     }
 
+    /**
+     * The first picture in a cursor list ("url(cursors/sword.png) 4 0"), as its file name without the folder
+     * or .png and its hot pixel ("sword 4 0"), or null when there is none. The game's cursors are pictures
+     * the server has put in its pack (see the framework's Pointer), so only the name is kept.
+     */
+    private static String cursorImage(List<String> parts) {
+        for (String part : parts) {
+            String p = part.trim();
+            if (!p.startsWith("url(")) continue;
+            int close = p.indexOf(')');
+            if (close < 0) return null;
+            String url = p.substring(4, close).trim().replace("\"", "").replace("'", "");
+            String file = url.substring(url.lastIndexOf('/') + 1);
+            int dot = file.lastIndexOf('.');
+            String name = dot > 0 ? file.substring(0, dot) : file;
+            if (name.isEmpty()) return null;
+            String[] hot = p.substring(close + 1).trim().split("\\s+");
+            int x = 0, y = 0;
+            if (hot.length == 2) {
+                try {
+                    x = (int) Math.round(Double.parseDouble(hot[0]));
+                    y = (int) Math.round(Double.parseDouble(hot[1]));
+                } catch (NumberFormatException e) {
+                    x = y = 0;
+                }
+            }
+            return name + " " + Math.max(0, x) + " " + Math.max(0, y);
+        }
+        return null;
+    }
+
     public Style parent() {
         return parent;
     }
@@ -169,7 +203,7 @@ public final class Style {
      */
     private static final Set<String> PAINT_ONLY = Set.of("opacity", "visibility", "backgroundColor", "backgroundImages",
             "backgroundPositions", "backgroundSizes", "backgroundRepeats", "backgroundClips", "boxShadow", "filter", "backdropFilter",
-            "color", "textDecorationColor", "textShadow", "textFillColor", "cursor", "pointerEvents", "borderColor", "borderColorSet",
+            "color", "textDecorationColor", "textShadow", "textFillColor", "cursor", "cursorImage", "pointerEvents", "borderColor", "borderColorSet",
             "radius", "zIndex", "transform", "transformOrigin", "objectPosition");
     /** Every other field: what a layout reads. Not the parent, which is compared as an element of its own. */
     private static final java.lang.reflect.Field[] LAYOUT = layoutFields();
@@ -436,7 +470,11 @@ public final class Style {
             case "-webkit-line-clamp", "line-clamp" -> lineClamp = l.equals("none") ? 0 : (int) num(l);
             case "list-style-type" -> listStyleType = l;
             case "list-style-position" -> listStylePosition = l;
-            case "cursor" -> cursor = Values.splitCommas(l).get(Values.splitCommas(l).size() - 1).trim();
+            case "cursor" -> {
+                List<String> parts = Values.splitCommas(l);
+                cursor = parts.get(parts.size() - 1).trim();
+                cursorImage = cursorImage(parts);
+            }
             case "pointer-events" -> pointerEvents = l;
             case "flex-direction" -> flexDirection = l;
             case "flex-wrap" -> flexWrap = l;

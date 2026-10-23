@@ -74,6 +74,7 @@ final class PageImport {
                 .build();
         http.sendAsync(request, HttpResponse.BodyHandlers.ofByteArray()).whenComplete((res, error) -> {
             List<String> written = new ArrayList<>();
+            List<String> newCursors = new ArrayList<>();
             String problem = null;
             String entry = null;
             try {
@@ -95,6 +96,7 @@ final class PageImport {
                     Files.write(target, f.getValue());
                     written.add(f.getKey());
                 }
+                newCursors.addAll(cursors(files));
             } catch (Exception e) {
                 problem = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
             }
@@ -127,8 +129,47 @@ final class PageImport {
                     }
                     sender.sendMessage(line);
                 }
+                if (!newCursors.isEmpty()) {
+                    say(sender, "New cursor" + (newCursors.size() == 1 ? " " : "s ") + String.join(", ", newCursors)
+                            + ": restart the server to put " + (newCursors.size() == 1 ? "it" : "them") + " in the resource pack. Until then the page uses its fallback.", NamedTextColor.YELLOW);
+                }
             });
         });
+    }
+
+    /** A cursor picture a page or stylesheet asks for: cursor: url(name.png). */
+    private static final java.util.regex.Pattern CURSOR_URL = java.util.regex.Pattern.compile(
+            "cursor\\s*:[^;}]*?url\\(\\s*['\"]?([^'\")]+)", java.util.regex.Pattern.CASE_INSENSITIVE);
+
+    /**
+     * The pictures among [files] that one of its pages or stylesheets uses as a cursor, copied into the
+     * cursors folder, where the resource pack takes its cursors from. Returns the names of those that are
+     * not in the pack yet (it is built when the server starts) or have changed.
+     */
+    private List<String> cursors(Map<String, byte[]> files) throws IOException {
+        java.util.Set<String> asked = new java.util.HashSet<>();
+        for (Map.Entry<String, byte[]> f : files.entrySet()) {
+            if (!f.getKey().endsWith(".html") && !f.getKey().endsWith(".css")) continue;
+            java.util.regex.Matcher m = CURSOR_URL.matcher(new String(f.getValue(), StandardCharsets.UTF_8));
+            while (m.find()) {
+                String url = m.group(1).trim();
+                asked.add(url.substring(url.lastIndexOf('/') + 1).toLowerCase(java.util.Locale.ROOT));
+            }
+        }
+        List<String> added = new ArrayList<>();
+        if (asked.isEmpty()) return added;
+        Path dir = plugin.getDataFolder().toPath().resolve("cursors");
+        for (Map.Entry<String, byte[]> f : files.entrySet()) {
+            String file = f.getKey().toLowerCase(java.util.Locale.ROOT);
+            if (!file.endsWith(".png") || !asked.contains(file)) continue;
+            Files.createDirectories(dir);
+            Path target = dir.resolve(file);
+            boolean same = Files.isRegularFile(target) && java.util.Arrays.equals(Files.readAllBytes(target), f.getValue());
+            if (!same) Files.write(target, f.getValue());
+            String name = file.substring(0, file.length() - ".png".length());
+            if (!same || ai.resourcepack.ui.framework.api.Pointer.custom(name) == null) added.add(name);
+        }
+        return added;
     }
 
     /** The shared files by name, checked and decoded; anything off and nothing is written. */

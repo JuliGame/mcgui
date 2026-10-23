@@ -1253,6 +1253,11 @@ public final class Session {
         HtmlRenderer.Frame f = frame;
         for (Element p = e; p != null; p = p.parent()) {
             Style s = f == null ? null : f.style(p);
+            if (s != null && s.cursorImage != null) {
+                String[] image = s.cursorImage.split(" ");
+                Pointer custom = Pointer.custom(image[0]);
+                if (custom != null) return custom.at(Integer.parseInt(image[1]), Integer.parseInt(image[2]));
+            }
             if (s != null && !s.cursor.equals("auto")) {
                 return switch (s.cursor) {
                     case "pointer" -> Pointer.HAND;

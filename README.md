@@ -137,6 +137,30 @@ pointer is never slower than half the view's height per 75° of pitch. At the
 default speed that only makes a difference above about 120% sensitivity, where
 the pointer is faster than asked.
 
+## Custom cursors
+
+The pointer is an arrow, a hand over anything clickable, a text caret or
+nothing, as the page's CSS `cursor` says (`default`, `pointer`, `text`,
+`none`). For a cursor of your own, put a PNG in `plugins/UIEngine/cursors/`
+and restart the server: it goes into the resource pack, named by its file
+name. A page asks for it the way a browser page does:
+
+```css
+.shop-item { cursor: url(sword.png) 4 0, pointer; }
+```
+
+The two numbers are the pixel that points, in the picture's own pixels (the
+top left if left out). The keyword after it is what players see on a server
+without that cursor. A picture 16 pixels tall is the arrow's size; up to 32 is
+drawn bigger, and a taller one is scaled to 32 (128 a side at most, 64 cursors
+at most). Players without the resource pack see it drawn into the map, in the
+nearest map colours.
+
+`/ui import` copies any picture an imported page uses as a cursor into the
+cursors folder for you, and says when the server needs a restart to show it.
+Plugins can use them too: `Pointer.custom("sword")`, and `.at(x, y)` for
+another hot pixel.
+
 ## In a page
 
 | Write | In game |
@@ -153,7 +177,7 @@ the pointer is faster than asked.
 | `data-key="1"` | pressing that key clicks it, fullscreen: `w a s d`, `space`, `sprint`, `f`, `q`, `1` to `9` (several with spaces). A page's own key wins over what the key does by default. The wheel moves the hotbar too, so a page can use any six of the number keys: the hotbar is rested away from the ones it uses |
 | `<img src="head:{player}">` | a player's face, with their hat layer, crisp at any size; any name or UUID works (`head:Notch`). Online players' skins come from the server (skin plugins included), anyone else's from Mojang by name; a plain face stands in until it arrives |
 | `href="https://..."` | sends the link to chat, where it can be clicked |
-| `:hover`, `:active`, `cursor: pointer` | work; the pointer turns into a hand |
+| `:hover`, `:active`, `cursor` | work; `pointer` turns the pointer into a hand, and `url(name.png)` is a [custom cursor](#custom-cursors) |
 | `<details>`, checkboxes, radios | open and tick when clicked |
 | `<select>`, `<input type="range">`, `<input type="number">` | a click picks the next option, sets the slider where it lands, or steps the number down (left half) or up (right half) |
 | `<form data-command="buy {form.item} {form.amount}">` | a submit button in it runs the form's command (or `data-console`, `data-message`) with each field's value filled in; `<button type="reset">` puts the fields back. Any element's command can use `{form.<name>}` too, from the form it is in or the whole page |

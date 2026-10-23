@@ -26,6 +26,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -67,6 +68,9 @@ public final class ResourcePack implements AutoCloseable {
         this.logger = logger;
         Path sounds = dataFolder.resolve("sounds");
         Files.createDirectories(sounds);
+        Path cursors = dataFolder.resolve("cursors");
+        Files.createDirectories(cursors);
+        loadCursors(cursors, logger);
         this.bytes = build(palette, sounds, logger);
         this.sha1 = sha1(bytes);
         Files.createDirectories(dataFolder);
@@ -171,15 +175,74 @@ public final class ResourcePack implements AutoCloseable {
             e.put(OVERLAY_26_2 + "/assets/uiengine/shaders/post/overlay_blur.fsh", Shaders.overlayBlurFsh());
             // The pointer a seated player sees: one glyph per shape on a text display in front of the
             // view. Text, unlike an item, gets no directional shading, so the arrow stays white.
+            // The server's own cursors (Pointer.custom) are a provider each, as tall as they are drawn, with the
+            // same ascent, so their top is where the arrow's is and a hot pixel counts from the same corner.
             StringBuilder chars = new StringBuilder();
             for (Pointer p : Pointer.values()) chars.append("\\u").append(String.format("%04x", (int) p.glyph));
-            e.put("assets/uiengine/font/pointer.json", """
-                    {"providers": [{"type": "bitmap", "file": "uiengine:font/pointer.png", "ascent": 7, "height": 16, "chars": ["%s"]}]}
-                    """.formatted(chars));
+            List<String> providers = new ArrayList<>();
+            providers.add("""
+                    {"type": "bitmap", "file": "uiengine:font/pointer.png", "ascent": %d, "height": 16, "chars": ["%s"]}"""
+                    .formatted(Pointer.ASCENT, chars));
+            for (Pointer p : Pointer.customs()) {
+                providers.add("""
+                        {"type": "bitmap", "file": "uiengine:font/cursor/%s.png", "ascent": %d, "height": %d, "chars": ["\\u%04x"]}"""
+                        .formatted(p.name, Pointer.ASCENT, p.height(), (int) p.glyph));
+                e.put("assets/uiengine/textures/font/cursor/" + p.name + ".png", png(p.image()));
+            }
+            e.put("assets/uiengine/font/pointer.json", "{\"providers\": [\n  " + String.join(",\n  ", providers) + "\n]}\n");
             e.put("assets/uiengine/textures/font/pointer.png", png(pointerSheet()));
             soundFiles(e, sounds, logger);
         }
         return out.toByteArray();
+    }
+
+    /** A cursor's name: its file name in lower case, letters, digits, {@code _ -}: a texture path and a CSS name alike. */
+    private static final Pattern CURSOR_NAME = Pattern.compile("[a-z0-9_-]+");
+    /** The widest and tallest picture a cursor may be, in its own pixels. */
+    private static final int CURSOR_MAX_SIDE = 128;
+
+    /**
+     * Every .png directly in [dir] (the cursors folder), as {@link Pointer#custom} by its file name:
+     * {@code cursors/sword.png} is the cursor {@code sword}, which a page asks for with
+     * {@code cursor: url(sword.png)}. Sorted, so each has the same glyph while the folder is the same.
+     */
+    private static void loadCursors(Path dir, Logger logger) throws IOException {
+        List<Path> files;
+        try (Stream<Path> list = Files.list(dir)) {
+            files = list.filter(f -> Files.isRegularFile(f) && f.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".png")).sorted().toList();
+        }
+        List<String> loaded = new ArrayList<>();
+        for (Path f : files) {
+            String file = f.getFileName().toString();
+            String name = file.substring(0, file.length() - ".png".length()).toLowerCase(Locale.ROOT);
+            if (!CURSOR_NAME.matcher(name).matches()) {
+                logger.warning("Cursor " + file + " left out: a cursor's name may only have letters, digits, _ and -");
+                continue;
+            }
+            BufferedImage image;
+            try {
+                image = ImageIO.read(f.toFile());
+            } catch (IOException ex) {
+                image = null;
+            }
+            if (image == null) {
+                logger.warning("Cursor " + file + " left out: it is not a picture this server can read");
+                continue;
+            }
+            if (image.getWidth() > CURSOR_MAX_SIDE || image.getHeight() > CURSOR_MAX_SIDE) {
+                logger.warning("Cursor " + file + " left out: it is " + image.getWidth() + "x" + image.getHeight() + ", more than " + CURSOR_MAX_SIDE + " a side");
+                continue;
+            }
+            BufferedImage argb = new BufferedImage(image.getWidth(), image.getHeight(), BufferedImage.TYPE_INT_ARGB);
+            argb.getGraphics().drawImage(image, 0, 0, null);
+            if (Pointer.load(name, argb) == null) {
+                logger.warning("Cursor " + file + " left out: " + (image.getHeight() <= Pointer.ASCENT
+                        ? "a cursor must be at least " + (Pointer.ASCENT + 1) + " pixels tall" : "the pack holds " + Pointer.MAX_CUSTOM + " cursors at most"));
+                continue;
+            }
+            loaded.add(name);
+        }
+        if (!loaded.isEmpty()) logger.info("Cursors in the pack: " + String.join(", ", loaded) + " (a page asks for one with cursor: url(<name>.png))");
     }
 
     /** A sound's name: lower case, digits, {@code _ - . /}, as the game takes in a resource location. */
