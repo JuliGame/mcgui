@@ -427,6 +427,13 @@ wide for a default view). `/ui place <page> <cols> <rows> <name> <x> <y> <z>
   when a game packet would fail to encode, and the tile is sent again later.
   Who sees which canvas is still worked out once a tick on the server thread,
   and handed to the sender only when it changed.
+  The per-player budget (`screens.max-bytes-per-second-per-player`) is spent in
+  bytes on the wire: a patch is taken from it at its map bytes times the ratio
+  that player's patches have compressed at (`MapSender.estimate`), then settled
+  at its real compressed size where `Wire.wireBytes` knows it (`SharedCompression`
+  made it) (`MapSender.charge`). Counting map bytes held a moving arcade game of
+  scaled-up pixel art (1.9 MB of map bytes a frame, 136 KB compressed) to 8
+  frames a second. The in-flight window stays in map bytes (800 KB).
   Pointer reports reach `ViewContent.pointer` through
   `UIFramework.serverThread()`, the server's own task queue, which Paper
   drains while it waits for the next tick: still the server thread, but not up
@@ -447,7 +454,11 @@ wide for a default view). `/ui place <page> <cols> <rows> <name> <x> <y> <z>
 - **`Canvas.draw` converts on every core**, in bands of 32 rows on that
   pool. It reads `INT_RGB`, `INT_ARGB` and `INT_ARGB_PRE` rasters in place,
   sub-images included; any other type goes through `getRGB`, which is several
-  times slower. Only HI tiles are made when a picture is drawn: a PLAIN tile is
+  times slower. A row the same as the one above is not converted again, and runs
+  of one colour are converted once (a picture drawn small and scaled up).
+  `draw(image, x, y, areas)` converts only those areas and publishes them as one
+  change: the arcade's runner hands over only the tiles that differ from the last
+  frame. Only HI tiles are made when a picture is drawn: a PLAIN tile is
   made the first time somebody without the pack looks at it.
 - **A scroll by whole tiles moves maps, not pixels.** `Canvas.scroll(rows, ...)`
   rotates the picture and keeps each moved tile's arrays (and the HI_OWN and

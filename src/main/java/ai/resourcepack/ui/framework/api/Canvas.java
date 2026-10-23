@@ -2,6 +2,7 @@ package ai.resourcepack.ui.framework.api;
 
 import ai.resourcepack.ui.framework.render.Palette;
 
+import java.awt.Rectangle;
 import java.awt.image.BufferedImage;
 import java.awt.image.DataBufferInt;
 import java.awt.image.SinglePixelPackedSampleModel;
@@ -225,7 +226,17 @@ public final class Canvas {
      * one, is read in place.
      */
     public void draw(BufferedImage image, int x, int y) {
-        scroll(0, image, x, y);
+        paint(0, image, x, y, null);
+    }
+
+    /**
+     * Draw only [areas] of [image], which has its top-left at (x, y), as one change: the parts of a frame that
+     * changed, say. [areas] are in canvas pixels. Each pixel handed to a canvas is converted to map colours
+     * whether or not it changed, so a picture that is redrawn whole but changes in places (a game's frame) costs
+     * far less handed over this way. Nothing of [image] outside [areas] is read; an empty list changes nothing.
+     */
+    public void draw(BufferedImage image, int x, int y, List<Rectangle> areas) {
+        paint(0, image, x, y, areas);
     }
 
     /**
@@ -235,6 +246,11 @@ public final class Canvas {
      * out until [image] covers them (draw the whole new view, or at least the rows that came in).
      */
     public void scroll(int rows, BufferedImage image, int x, int y) {
+        paint(rows, image, x, y, null);
+    }
+
+    /** {@link #scroll}, drawing only [areas] (canvas pixels) of [image], or all of it for null. */
+    private void paint(int rows, BufferedImage image, int x, int y, List<Rectangle> areas) {
         int w = image.getWidth(), h = image.getHeight();
         int type = image.getType();
         boolean alpha = transparent && image.getColorModel().hasAlpha();
@@ -244,29 +260,40 @@ public final class Canvas {
             // A sub-image shares its parent's array: start where it does, and step by the parent's row length.
             int stride = sm.getScanlineStride();
             int offset = db.getOffset() - r.getSampleModelTranslateY() * stride - r.getSampleModelTranslateX();
-            apply(rows, db.getData(), offset, stride, w, h, x, y, alpha);
+            apply(rows, db.getData(), offset, stride, w, h, x, y, alpha, areas);
         } else {
-            apply(rows, image.getRGB(0, 0, w, h, null, 0, w), 0, w, w, h, x, y, alpha);
+            apply(rows, image.getRGB(0, 0, w, h, null, 0, w), 0, w, w, h, x, y, alpha, areas);
         }
     }
 
     /** Draw a [w] × [h] block of RGB pixels (row-major; the top byte is ignored) with its top-left at (x, y). */
     public void draw(int[] rgb, int w, int h, int x, int y) {
-        apply(0, rgb, 0, w, w, h, x, y, false);
+        apply(0, rgb, 0, w, w, h, x, y, false, null);
     }
 
     /** Rows per piece of work when converting a big drawing on several cores. */
     private static final int BAND = 32;
 
     /**
-     * Move by [shift] map rows, then draw: [rgb] holds the drawing's pixel (i, j) at [offset] + j × [stride] + i.
-     * [alpha]: its top byte is alpha, and a pixel under half is transparent.
+     * Move by [shift] map rows, then draw: [rgb] holds the drawing's pixel (i, j) at [offset] + j × [stride] + i,
+     * and it covers the [w] × [h] canvas pixels from (x, y). Only [areas] of it (canvas pixels) are drawn, or all of
+     * it for null. [alpha]: its top byte is alpha, and a pixel under half is transparent.
      */
-    private void apply(int shift, int[] rgb, int offset, int stride, int w, int h, int x, int y, boolean alpha) {
+    private void apply(int shift, int[] rgb, int offset, int stride, int w, int h, int x, int y, boolean alpha, List<Rectangle> areas) {
         int x0 = Math.max(0, x), y0 = Math.max(0, y);
         int x1 = Math.min(width, x + w), y1 = Math.min(height, y + h);
+        // What to convert, in canvas pixels, in bands of rows a core each: {left, top, right, bottom}.
+        List<int[]> bands = new ArrayList<>();
+        long pixels = 0;
+        if (areas == null) {
+            pixels += band(bands, x0, y0, x1, y1);
+        } else {
+            for (Rectangle a : areas) {
+                pixels += band(bands, Math.max(x0, a.x), Math.max(y0, a.y), Math.min(x1, a.x + a.width), Math.min(y1, a.y + a.height));
+            }
+        }
         boolean moves = shift != 0 && Math.abs(shift) < rows;
-        boolean draws = x0 < x1 && y0 < y1;
+        boolean draws = !bands.isEmpty();
         if (!moves && !draws) return;
         // Colours shared with another canvas (or none yet, all black) are copied before they are drawn into: here, on the drawing thread.
         detach();
@@ -277,13 +304,11 @@ public final class Canvas {
             List<Integer> changed = new ArrayList<>();
             if (draws) {
                 boolean[] dirty = new boolean[cols * rows];
-                int bands = (y1 - y0 + BAND - 1) / BAND;
                 // Rows are independent: a big drawing (a whole new page) is converted on several cores at once.
-                if (bands > 1 && (long) (x1 - x0) * (y1 - y0) >= 128 * 128) {
-                    run(() -> IntStream.range(0, bands).parallel().forEach(b ->
-                            convert(rgb, offset, stride, x, y, x0, x1, y0 + b * BAND, Math.min(y1, y0 + (b + 1) * BAND), dirty, alpha)));
+                if (bands.size() > 1 && pixels >= 128 * 128) {
+                    run(() -> bands.parallelStream().forEach(b -> convert(rgb, offset, stride, x, y, b[0], b[2], b[1], b[3], dirty, alpha)));
                 } else {
-                    convert(rgb, offset, stride, x, y, x0, x1, y0, y1, dirty, alpha);
+                    for (int[] b : bands) convert(rgb, offset, stride, x, y, b[0], b[2], b[1], b[3], dirty, alpha);
                 }
                 for (int t = 0; t < dirty.length; t++) if (dirty[t]) changed.add(t);
             }
@@ -296,6 +321,13 @@ public final class Canvas {
         tiles = next;
         version++;
         published.run();
+    }
+
+    /** Adds [x0, x1) × [y0, y1) to [bands], cut into {@link #BAND} rows each; its pixels (0 if it is empty). */
+    private static long band(List<int[]> bands, int x0, int y0, int x1, int y1) {
+        if (x0 >= x1 || y0 >= y1) return 0;
+        for (int b = y0; b < y1; b += BAND) bands.add(new int[]{x0, b, x1, Math.min(y1, b + BAND)});
+        return (long) (x1 - x0) * (y1 - y0);
     }
 
     /** The picture's rows, and [next]'s tiles with them, moved up by [shift] map rows, round to the other edge. */
@@ -324,14 +356,30 @@ public final class Canvas {
         if (row == null || row.length < n) ROW.set(row = new byte[Math.max(n, 2048 * 3)]);
         for (int py = from; py < to; py++) {
             int s = offset + (py - y) * stride + (x0 - x);
-            if (alpha) {
-                for (int i = 0; i < cw; i++) {
-                    int p = rgb[s + i];
-                    if (p >>> 24 < 128) row[i * 3] = row[i * 3 + 1] = row[i * 3 + 2] = 0; // Palette.isClear
-                    else Palette.rgbToYcc(p, row, i * 3);
+            // A row the same as the one above (a picture drawn small and scaled up, a flat background) is already in
+            // [row]: converting it again was most of a scaled-up game's frame.
+            if (py == from || !Arrays.equals(rgb, s, s + cw, rgb, s - stride, s - stride + cw)) {
+                if (alpha) {
+                    for (int i = 0; i < cw; i++) {
+                        int p = rgb[s + i];
+                        if (p >>> 24 < 128) row[i * 3] = row[i * 3 + 1] = row[i * 3 + 2] = 0; // Palette.isClear
+                        else Palette.rgbToYcc(p, row, i * 3);
+                    }
+                } else {
+                    // Runs of one colour are converted once.
+                    int last = ~rgb[s];
+                    for (int i = 0, o = 0; i < cw; i++, o += 3) {
+                        int p = rgb[s + i];
+                        if (p == last) {
+                            row[o] = row[o - 3];
+                            row[o + 1] = row[o - 2];
+                            row[o + 2] = row[o - 1];
+                        } else {
+                            Palette.rgbToYcc(p, row, o);
+                            last = p;
+                        }
+                    }
                 }
-            } else {
-                for (int i = 0; i < cw; i++) Palette.rgbToYcc(rgb[s + i], row, i * 3);
             }
             int d = (py * width + x0) * 3;
             if (Arrays.equals(row, 0, n, ycc, d, d + n)) continue;
