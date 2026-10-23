@@ -212,18 +212,19 @@ final class Blur {
     /**
      * How much smaller to work for a blur of [sigma] pixels. A wide blur leaves nothing finer than a
      * few pixels, so it is computed on a picture shrunk to keep sigma about 3 and scaled back up:
-     * the same look at a fraction of the cost.
+     * the same look at a fraction of the cost. From sigma 6 (a 12px box-shadow blur at 2x), at half size.
      */
     static double shrink(double sigma) {
-        return sigma > 6 ? Math.min(16, sigma / 3) : 1;
+        return sigma >= 6 ? Math.min(16, sigma / 3) : 1;
     }
 
     /**
      * The whole-pixel factor a backdrop's blur of [sigma] pixels is worked out smaller by (1: not at all). Whole, so that
-     * pictures painted apart (a band, a repaint of a rectangle, the whole thing) can share one sampling grid.
+     * pictures painted apart (a band, a repaint of a rectangle, the whole thing) can share one sampling grid. From sigma
+     * 6 (the market's {@code backdrop-filter: blur(6px)} at 2x), at half size: a quarter of the pixels to blur.
      */
     static int step(double sigma) {
-        return sigma > 6 ? (int) Math.min(16, Math.floor(sigma / 3)) : 1;
+        return sigma >= 6 ? (int) Math.min(16, Math.floor(sigma / 3)) : 1;
     }
 
     /**
