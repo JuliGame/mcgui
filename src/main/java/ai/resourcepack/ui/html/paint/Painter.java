@@ -466,7 +466,7 @@ public final class Painter {
 
     /** How far (device px) a blurred shadow spreads past its shape, as {@link Shadows#blurred} pads it. */
     private double shadowSpread(Shadows.Shadow sh) {
-        return sh.blur() <= 0.25 ? 0 : Math.ceil(sh.blur() / 2 * deviceScale * 3) + 2;
+        return sh.blur() <= Shadows.SHARP ? 0 : Math.ceil(sh.blur() / 2 * deviceScale * 3) + 2;
     }
 
     private void reachChildren(Box parent, double x, double y, Reach reach) {
@@ -633,10 +633,16 @@ public final class Painter {
             hit(new Rectangle2D.Double(tx, ty - m.ascent(), it.w, m.ascent() + m.descent()), s, it.box.owner);
             return;
         }
-        // text-shadow, first one on top.
+        // text-shadow, first one on top. One not blurred is the text itself again, in its colour, drawn as the text is
+        // (a glyph at a time, from the font's cache): filling the glyphs' outlines cost five times as much.
         for (int i = shadows.size() - 1; i >= 0; i--) {
             Shadows.Shadow sh = shadows.get(i);
-            Shadows.text(g, shaper, text, font, tx + sh.x(), ty + sh.y(), sh, deviceScale, surfaceBounds(), budget);
+            if (sh.blur() > Shadows.SHARP) {
+                Shadows.text(g, shaper, text, font, tx + sh.x(), ty + sh.y(), sh, deviceScale, surfaceBounds(), budget);
+            } else if ((sh.color() >>> 24) != 0) {
+                g.setColor(new Color(sh.color(), true));
+                glyphs(g, it, text, font, tx + sh.x(), ty + sh.y());
+            }
         }
         Integer fill = s.textFillColor;
         boolean clipText = s.backgroundClips.contains("text") && !s.backgroundImages.isEmpty();
@@ -650,20 +656,25 @@ public final class Painter {
             int color = fill != null ? fill : s.color;
             if ((color >>> 24) != 0) {
                 g.setColor(new Color(color, true));
-                if (it.spacing != 0) {
-                    double cx = tx;
-                    for (String word : text.split("(?<= )")) {
-                        shaper.draw(g, word, font, cx, ty);
-                        cx += shaper.width(word, font) + (word.endsWith(" ") ? it.spacing : 0);
-                    }
-                } else {
-                    shaper.draw(g, text, font, tx, ty);
-                }
+                glyphs(g, it, text, font, tx, ty);
             }
         }
         decorations(g, it, tx, ty);
         Fonts.Metrics m = shaper.fonts().metrics(font);
         hit(new Rectangle2D.Double(tx, ty - m.ascent(), it.w, m.ascent() + m.descent()), s, it.box.owner);
+    }
+
+    /** [it]'s [text] at ([tx], [ty]) in [g]'s colour, its letter-spacing between words. */
+    private void glyphs(Graphics2D g, Box.Item it, String text, Font font, double tx, double ty) {
+        if (it.spacing != 0) {
+            double cx = tx;
+            for (String word : text.split("(?<= )")) {
+                shaper.draw(g, word, font, cx, ty);
+                cx += shaper.width(word, font) + (word.endsWith(" ") ? it.spacing : 0);
+            }
+        } else {
+            shaper.draw(g, text, font, tx, ty);
+        }
     }
 
     private void gradientText(Graphics2D g, Style s, String text, Font font, double tx, double ty, Rectangle2D area) {

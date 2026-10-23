@@ -788,6 +788,9 @@ final class Backgrounds {
     /** conic-gradient(from angle at position, stops): a Paint that looks up each pixel's angle. */
     private static final class ConicPaint implements Paint {
         private final List<Stop> stops;
+        /** The stops' positions and colours, to search. */
+        private final double[] pos;
+        private final int[] colors;
         private final double cx, cy, from;
 
         ConicPaint(List<String> args, Style s, Rectangle2D r) {
@@ -816,6 +819,12 @@ final class Backgrounds {
                 rest.add(b.toString());
             }
             this.stops = clampStops(stops(rest, s, 1));
+            this.pos = new double[stops.size()];
+            this.colors = new int[stops.size()];
+            for (int i = 0; i < pos.length; i++) {
+                pos[i] = stops.get(i).pos;
+                colors[i] = stops.get(i).color;
+            }
             this.cx = r.getX() + c[0] * r.getWidth();
             this.cy = r.getY() + c[1] * r.getHeight();
             this.from = fromDeg;
@@ -849,25 +858,36 @@ final class Backgrounds {
                     }
                     int[] data = ((java.awt.image.DataBufferInt) raster.getDataBuffer()).getData();
                     int stride = ((java.awt.image.SinglePixelPackedSampleModel) raster.getSampleModel()).getScanlineStride();
-                    Point2D.Double p = new Point2D.Double();
-                    for (int j = 0; j < h; j++) for (int i = 0; i < w; i++) {
-                        p.setLocation(x + i + 0.5, y + j + 0.5);
-                        toUser.transform(p, p);
-                        double ang = Math.toDegrees(Math.atan2(p.x - cx, -(p.y - cy))) - from;
-                        double t = ((ang % 360) + 360) % 360 / 360;
-                        data[j * stride + i] = colorAt(t);
+                    // A row's pixel centres mapped to user space at once, as Point2D would one at a time.
+                    double[] row = new double[2 * w];
+                    for (int j = 0; j < h; j++) {
+                        for (int i = 0; i < w; i++) {
+                            row[2 * i] = x + i + 0.5;
+                            row[2 * i + 1] = y + j + 0.5;
+                        }
+                        toUser.transform(row, 0, row, 0, w);
+                        for (int i = 0; i < w; i++) {
+                            double ang = Math.toDegrees(Math.atan2(row[2 * i] - cx, -(row[2 * i + 1] - cy))) - from;
+                            double t = ((ang % 360) + 360) % 360 / 360;
+                            data[j * stride + i] = colorAt(t);
+                        }
                     }
                     return raster;
                 }
             };
         }
 
+        /** The colour at [t] of a turn: between the first stop at or past it and the one before (stops never go back). */
         private int colorAt(double t) {
-            for (int i = 1; i < stops.size(); i++) {
-                Stop a = stops.get(i - 1), b = stops.get(i);
-                if (t <= b.pos) return mix(a, b, t);
+            int hi = pos.length - 1;
+            if (hi == 0 || t > pos[hi]) return colors[hi];
+            int lo = 1;
+            while (lo < hi) {
+                int mid = (lo + hi) >>> 1;
+                if (t <= pos[mid]) hi = mid;
+                else lo = mid + 1;
             }
-            return stops.get(stops.size() - 1).color;
+            return colors[lo - 1] == colors[lo] ? colors[lo] : mix(stops.get(lo - 1), stops.get(lo), t);
         }
 
         @Override

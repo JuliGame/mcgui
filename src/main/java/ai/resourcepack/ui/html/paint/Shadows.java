@@ -32,6 +32,9 @@ final class Shadows {
      */
     static final double MAX_BLUR = 300;
 
+    /** Blurs this small (CSS px) or less are no blur: the shape is filled as it is. */
+    static final double SHARP = 0.25;
+
     static List<Shadow> parse(String value, Style s) {
         List<Shadow> out = new ArrayList<>();
         if (value == null || value.isBlank() || value.trim().equalsIgnoreCase("none")) return out;
@@ -67,9 +70,9 @@ final class Shadows {
         Shape shape = Shapes.rect(x + sh.x - sh.spread, y + sh.y - sh.spread, w + 2 * sh.spread, h + 2 * sh.spread, r);
         Shape old = g.getClip();
         // Browsers cut the box itself out of its outer shadow, so a translucent box shows no shadow through it.
-        Area outside = new Area(new Rectangle2D.Double(-1e5, -1e5, 2e5, 2e5));
-        outside.subtract(new Area(Shapes.rect(x, y, w, h, radii)));
-        g.clip(outside);
+        Rectangle2D all = new Rectangle2D.Double(-1e5, -1e5, 2e5, 2e5);
+        Shape box = Shapes.rect(x, y, w, h, radii);
+        g.clip(box instanceof Rectangle2D ? minus(all, box) : subtract(all, box));
         blurred(g, shape, sh.color, sh.blur, scale, surface, budget);
         g.setClip(old);
     }
@@ -78,14 +81,34 @@ final class Shadows {
     static void inner(Graphics2D g, Shape padding, Shadow sh, double scale, java.awt.Rectangle surface, RenderBudget budget) {
         if ((sh.color >>> 24) == 0) return;
         Rectangle2D b = padding.getBounds2D();
-        Area ring = new Area(new Rectangle2D.Double(b.getX() - sh.blur * 3 - Math.abs(sh.x) - 10, b.getY() - sh.blur * 3 - Math.abs(sh.y) - 10,
-                b.getWidth() + sh.blur * 6 + Math.abs(sh.x) * 2 + 20, b.getHeight() + sh.blur * 6 + Math.abs(sh.y) * 2 + 20));
+        Rectangle2D outside = new Rectangle2D.Double(b.getX() - sh.blur * 3 - Math.abs(sh.x) - 10, b.getY() - sh.blur * 3 - Math.abs(sh.y) - 10,
+                b.getWidth() + sh.blur * 6 + Math.abs(sh.x) * 2 + 20, b.getHeight() + sh.blur * 6 + Math.abs(sh.y) * 2 + 20);
         Shape hole = AffineTransform.getTranslateInstance(sh.x, sh.y).createTransformedShape(shrink(padding, sh.spread));
-        ring.subtract(new Area(hole));
+        Shape ring = padding instanceof Rectangle2D ? minus(outside, hole) : subtract(outside, hole);
         Shape old = g.getClip();
         g.clip(padding);
         blurred(g, ring, sh.color, sh.blur, scale, surface, budget);
         g.setClip(old);
+    }
+
+    /** [outside] less [hole], as an {@link Area} works it out (exactly, for any shapes, but slowly). */
+    private static Shape subtract(Rectangle2D outside, Shape hole) {
+        Area a = new Area(outside);
+        a.subtract(new Area(hole));
+        return a;
+    }
+
+    /**
+     * [outside] less [hole], a shape of straight edges: the two as one path, even-odd. Filled or clipped to, it covers
+     * exactly the pixels {@link #subtract} does (the same edges, no curves for an Area to split), without its cost. A
+     * hole reaching past [outside] is left to {@link #subtract}.
+     */
+    private static Shape minus(Rectangle2D outside, Shape hole) {
+        if (!outside.contains(hole.getBounds2D())) return subtract(outside, hole);
+        java.awt.geom.Path2D.Double p = new java.awt.geom.Path2D.Double(java.awt.geom.Path2D.WIND_EVEN_ODD);
+        p.append(outside, false);
+        p.append(hole, false);
+        return p;
     }
 
     private static Shape shrink(Shape s, double d) {
@@ -105,7 +128,7 @@ final class Shadows {
      * the device bounds of what [g] draws on: only the part of the blur that can land there is worked out.
      */
     static void blurred(Graphics2D g, Shape shape, int color, double blur, double scale, java.awt.Rectangle surface, RenderBudget budget) {
-        if (blur <= 0.25) {
+        if (blur <= SHARP) {
             g.setColor(new Color(color, true));
             g.fill(shape);
             return;
