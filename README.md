@@ -108,8 +108,8 @@ Minecraft mouse sensitivity. `views.pointer-speed` in `config.yml` sets it:
 
 | `views.pointer-speed` | Counts to cross the view | At 800 DPI | At 1600 DPI |
 |---|---|---|---|
-| 1.0 (a desktop pointer at Windows' default speed on a 1920-pixel-wide screen) | 1920 | 6.1 cm | 3.0 cm |
-| **1.5 (default)** | 1280 | 4.1 cm | 2.0 cm |
+| **1.0 (default)**: a desktop pointer at Windows' default speed on a 1920-pixel-wide screen | 1920 | 6.1 cm | 3.0 cm |
+| 1.5 | 1280 | 4.1 cm | 2.0 cm |
 | 2.0 | 960 | 3.0 cm | 1.5 cm |
 
 Each player can scale it for themselves with `/ui pointer <0.25 to 4>`.

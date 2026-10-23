@@ -46,7 +46,7 @@ public final class Settings {
         reach = c.getDouble("screens.reach", 8);
         sharedCompression = c.getBoolean("screens.shared-compression", true);
         defaultFov = c.getInt("views.default-fov", 70);
-        pointerSpeed = Math.max(0.05, c.getDouble("views.pointer-speed", 1.5));
+        pointerSpeed = Math.max(0.05, c.getDouble("views.pointer-speed", 1.0));
         clientPointer = c.getBoolean("views.client-pointer", true);
         debugPointer = c.getBoolean("views.debug-pointer", false);
         mapIdBase = c.getInt("map-id-base", 2_000_000_000);
