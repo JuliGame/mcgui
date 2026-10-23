@@ -19,9 +19,10 @@ allow-private-hosts: false
 # default: the cores minus one), the same threads that encode the pictures for the maps. There is no
 # separate number of render threads: one budget keeps the game's own thread from waiting for a core.
 
-# Seconds one picture of a page may take to draw. A page that takes longer is given up and reported
-# like one that cannot be drawn (the screen goes back to the page it showed), so that it cannot hold a
-# render thread for good. 0 for no limit.
+# Seconds of CPU time one picture of a page may take to draw (time on a busy server's clock doesn't
+# count, up to 5 times this). A page that takes longer is given up and reported like one that cannot
+# be drawn (the screen goes back to the page it showed), so that it cannot hold a render thread for
+# good. 0 for no limit.
 render-timeout: 2
 
 # The sound of a click on a link or button that does something: true for the game's own button click,

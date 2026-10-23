@@ -193,9 +193,11 @@ stylesheets, fonts and images from the web, but not from the server's own
 machine or private network unless `allow-private-hosts` is on. Files are read
 from the pages folder only.
 
-A picture that takes longer than `render-timeout` (2 s) to draw is given up and
+A picture that uses more than `render-timeout` (2 s) of CPU time to draw is given up and
 reported like a page that cannot be drawn, so one heavy page cannot hold a render
-thread for good. Raise it (or set 0) for very large pages.
+thread for good. It counts CPU time, not the clock, so a picture that is only slow because
+the server is busy is not given up; one that has run five times the limit on the clock is,
+however little CPU it got. Raise it (or set 0) for very large pages.
 
 `/ui stats` shows what the plugin costs the server right now: its share of the
 server thread each tick (time and bytes allocated, over the last 10 seconds),

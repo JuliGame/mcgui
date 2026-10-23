@@ -105,6 +105,10 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
   picture, a hover worked out again, a fragment scroll) goes through UI
   Framework's `serverThread()`, which runs between ticks, rather than
   `runTask`, which would wait for the next one.
+- **`render-timeout` counts the drawing thread's CPU, not the clock** (`RenderBudget`): a picture slowed only by a
+  busy machine is not a page that cannot be drawn. A render still gives up at 5 times the limit on the clock
+  (`RenderBudget.WALL_TIMES`), so bands painted on other threads cannot run unbounded. The budget must be made on
+  the thread that draws (`HtmlRenderer.render` does, inside the job), as it reads that thread's CPU time.
 - **So does loading pages.** `PageStore.load` hands back a future (one per
   page, however many ask) completed on a loader thread; sessions and views
   show the page when it completes, back on the server thread, and a session
