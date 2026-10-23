@@ -101,6 +101,7 @@ whatever its shape and the player's FOV.
 | `data-message="<gold>Hi {player}"` | sends the player a chat message (MiniMessage) |
 | `data-action="close"` | closes the page; also `back`, `reload`, `top`, `page:shop` |
 | `data-close` | (with a command) closes the page after running it |
+| `data-event="buy"` | does nothing itself: it is for plugins, which get a `PageClickEvent` (see [For plugin developers](#for-plugin-developers)) |
 | `data-sound="block.note_block.pling 1 1.5"` | the sound a click on it (or anything inside it) makes, even where nothing else happens: `<sound> [volume] [pitch]`, or `none` |
 | `data-hover-sound="ui.button.click 0.1 2"` | plays when the pointer comes onto it |
 | `data-key="1"` | pressing that key clicks it, fullscreen: `w a s d`, `space`, `sprint`, `f`, `q`, `1` to `9` (several with spaces). A page's own key wins over what the key does by default. The wheel moves the hotbar too, so a page can use any six of the number keys: the hotbar is rested away from the ones it uses |
@@ -188,7 +189,24 @@ Pages, from `plugins/UIEngine/pages/`:
 ```java
 UIEngine.open(player, "menu");   // menu.html, fullscreen
 UIEngine.close(player);
+UIEngine.page(player);           // the page they have open, or null
 UIEngine.exists("menu");
+```
+
+What players do on pages comes as Bukkit events: `PageClickEvent` (cancellable,
+before a click acts, with the element's attributes and the form's values),
+`PageOpenEvent` and `PageCloseEvent`. An element with a `data-event` does
+nothing but fire the click, so a page can hand a button to your plugin:
+
+```html
+<button data-event="buy" data-item="bread">Buy bread</button>
+```
+
+```java
+@EventHandler
+public void onClick(PageClickEvent e) {
+    if ("buy".equals(e.getEvent())) shop.buy(e.getPlayer(), e.getAttribute("data-item"));
+}
 ```
 
 Your own pictures, drawn with anything that makes a `BufferedImage`:

@@ -14,6 +14,7 @@ import ai.resourcepack.ui.framework.api.WallScreen;
 import ai.resourcepack.ui.html.Page;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
+import ai.resourcepack.ui.event.PageCloseEvent;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.World;
@@ -99,6 +100,7 @@ public final class Screens implements Listener {
             // Called inside the framework's tick: the page loads elsewhere and shows when it has.
             Canvas canvas = UIFramework.get().canvas(cols, rows);
             Session s = new Session(plugin, renderers, canvas, id, height > 0 ? height : plugin.wallHeight(rows));
+            s.screen = name;
             s.close = () -> {
                 if (s.pageName() != null && !s.pageName().equals(plugin.pages().normalise(page))) s.open(page, null, false);
             };
@@ -358,6 +360,8 @@ public final class Screens implements Listener {
 
         @Override
         public void closed(View v, CloseReason reason) {
+            Player p = v.player();
+            if (p != null) Bukkit.getPluginManager().callEvent(new PageCloseEvent(p, session.pageName(), reason));
             session.dispose();
             // Only if it is still this view's: one opening in its place closes this one after taking the slot.
             views.remove(session.viewer, this);
@@ -428,6 +432,12 @@ public final class Screens implements Listener {
         if (s == null || s.view == null) return wasOpening;
         s.view.close();
         return true;
+    }
+
+    /** The page [player] has open fullscreen, by name; null if they have none (or it has not loaded yet). */
+    String pageOf(Player player) {
+        Seated s = views.get(player.getUniqueId());
+        return s == null ? null : s.session.pageName();
     }
 
     /** Every session on a page, for a reload. */

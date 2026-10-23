@@ -9,6 +9,8 @@ import ai.resourcepack.ui.html.Page;
 import ai.resourcepack.ui.html.PooledPicture;
 import ai.resourcepack.ui.html.RenderAbandoned;
 import ai.resourcepack.ui.html.ScrollCache;
+import ai.resourcepack.ui.event.PageClickEvent;
+import ai.resourcepack.ui.event.PageOpenEvent;
 import ai.resourcepack.ui.html.style.Style;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.event.ClickEvent;
@@ -238,7 +240,9 @@ public final class Session {
         nextRefresh = Bukkit.getCurrentTick() + refreshTicks;
         pendingFragment = fragment;
         hoverSoundAt = null;
-        Sounds.play(player(), p.meta("ui:open-sound"));
+        Player viewerNow = player();
+        Sounds.play(viewerNow, p.meta("ui:open-sound"));
+        if (viewerNow != null) Bukkit.getPluginManager().callEvent(new PageOpenEvent(viewerNow, n, screen));
         render();
     }
 
@@ -871,7 +875,7 @@ public final class Session {
     }
 
     private static boolean actionable(Element e) {
-        if (e.hasAttr("data-command") || e.hasAttr("data-console") || e.hasAttr("data-action") || e.hasAttr("data-message")) return true;
+        if (e.hasAttr("data-command") || e.hasAttr("data-console") || e.hasAttr("data-action") || e.hasAttr("data-message") || e.hasAttr("data-event")) return true;
         return switch (e.normalName()) {
             case "a" -> e.hasAttr("href");
             case "button", "summary", "select", "label" -> true;
@@ -1005,66 +1009,90 @@ public final class Session {
         Sounds.play(p, own != null ? own : plugin.clickSound());
     }
 
+    /** The wall screen this session is on, by name, for plugins' events; null for a fullscreen page. */
+    String screen;
+
     /** Where the click being handled landed, in CSS pixels of the page (not the viewport). */
     private double[] clickAt;
 
-    /** [target] (an element of [doc]) or the nearest ancestor that does something, clicked by [p]. */
+    /**
+     * [target] (an element of [doc]) or the nearest ancestor that does something, clicked by [p]: false if
+     * nothing does, or a plugin cancelled the click ({@link PageClickEvent}).
+     */
     private boolean activate(Element target, Player p) {
         for (Element e = target; e != null; e = e.parent()) {
-            // A form's own commands run when it is sent, not on any click inside it.
-            if ((e.hasAttr("data-command") || e.hasAttr("data-console") || e.hasAttr("data-message")) && !e.normalName().equals("form")) {
-                run(e, Forms.values(e, null), p);
-                return true;
-            }
             Element form = Forms.submitted(e);
-            if (form != null) {
-                if (Forms.isReset(e)) reset(form);
-                else run(form, Forms.values(form, e), p);
-                return true;
-            }
-            if (Forms.isSelect(e)) {
-                Element select = editable(e);
-                if (select != null) Forms.next(select);
-                render();
-                return true;
-            }
-            if (Forms.isSlider(e)) {
-                java.awt.geom.Rectangle2D at = boundsInPicture(e);
-                Element input = at == null ? null : editable(e);
-                if (input != null) Forms.slide(input, (clickAt[0] - at.getX()) / at.getWidth());
-                render();
-                return true;
-            }
-            if (e.hasAttr("data-action")) {
-                action(e.attr("data-action"), p);
-                return true;
-            }
-            String tag = e.normalName();
-            if (tag.equals("a") && e.hasAttr("href")) {
-                link(original(e, "href"), p);
-                return true;
-            }
-            if (tag.equals("summary") && e.parent() != null && e.parent().normalName().equals("details")) {
-                Element details = editable(e.parent());
-                if (details == null) return true;
-                if (details.hasAttr("open")) details.removeAttr("open");
-                else details.attr("open", "");
-                render();
-                return true;
-            }
-            if (tag.equals("input") && (e.attr("type").equalsIgnoreCase("checkbox") || e.attr("type").equalsIgnoreCase("radio"))) {
-                toggle(e);
-                return true;
-            }
-            if (tag.equals("label")) {
-                Element input = e.hasAttr("for") ? doc.getElementById(e.attr("for")) : e.selectFirst("input");
-                if (input != null) {
-                    toggle(input);
-                    return true;
-                }
-            }
+            if (form == null && !acts(e)) continue;
+            if (!allowed(form != null && !Forms.isReset(e) ? form : e, form != null ? Forms.values(form, e) : Forms.values(e, null), p)) return false;
+            act(e, form, p);
+            return true;
         }
         return false;
+    }
+
+    /** Whether a click on [e] does something of its own (a form's submit button aside: see {@link Forms#submitted}). */
+    private boolean acts(Element e) {
+        String tag = e.normalName();
+        if (commands(e) && !tag.equals("form")) return true;
+        if (Forms.isSelect(e) || Forms.isSlider(e) || e.hasAttr("data-action")) return true;
+        if (tag.equals("a")) return e.hasAttr("href");
+        if (tag.equals("summary")) return e.parent() != null && e.parent().normalName().equals("details");
+        if (tag.equals("input")) return e.attr("type").equalsIgnoreCase("checkbox") || e.attr("type").equalsIgnoreCase("radio");
+        if (tag.equals("label")) return labelled(e) != null;
+        return false;
+    }
+
+    /** Whether [e] has something to run when clicked, or a {@code data-event} for plugins. */
+    private static boolean commands(Element e) {
+        return e.hasAttr("data-command") || e.hasAttr("data-console") || e.hasAttr("data-message") || e.hasAttr("data-event");
+    }
+
+    private Element labelled(Element label) {
+        return label.hasAttr("for") ? doc.getElementById(label.attr("for")) : label.selectFirst("input");
+    }
+
+    /** Asks plugins whether [p]'s click on [e], with the fields [values], may go ahead. */
+    private boolean allowed(Element e, java.util.Map<String, String> values, Player p) {
+        if (p == null) return true;
+        java.util.Map<String, String> attributes = new java.util.LinkedHashMap<>();
+        for (org.jsoup.nodes.Attribute a : e.attributes()) attributes.put(a.getKey(), a.getValue());
+        PageClickEvent event = new PageClickEvent(p, pageName, screen, e.normalName(), attributes, e.text(), values);
+        Bukkit.getPluginManager().callEvent(event);
+        return !event.isCancelled();
+    }
+
+    /** Does what a click on [e] does; [form] is the form it sends, if it is a submit or reset button. */
+    private void act(Element e, Element form, Player p) {
+        String tag = e.normalName();
+        if (commands(e) && !tag.equals("form")) {
+            run(e, Forms.values(e, null), p);
+        } else if (form != null) {
+            if (Forms.isReset(e)) reset(form);
+            else run(form, Forms.values(form, e), p);
+        } else if (Forms.isSelect(e)) {
+            Element select = editable(e);
+            if (select != null) Forms.next(select);
+            render();
+        } else if (Forms.isSlider(e)) {
+            java.awt.geom.Rectangle2D at = boundsInPicture(e);
+            Element input = at == null ? null : editable(e);
+            if (input != null) Forms.slide(input, (clickAt[0] - at.getX()) / at.getWidth());
+            render();
+        } else if (e.hasAttr("data-action")) {
+            action(e.attr("data-action"), p);
+        } else if (tag.equals("a")) {
+            link(original(e, "href"), p);
+        } else if (tag.equals("summary")) {
+            Element details = editable(e.parent());
+            if (details == null) return;
+            if (details.hasAttr("open")) details.removeAttr("open");
+            else details.attr("open", "");
+            render();
+        } else if (tag.equals("input")) {
+            toggle(e);
+        } else if (tag.equals("label")) {
+            toggle(labelled(e));
+        }
     }
 
     /**

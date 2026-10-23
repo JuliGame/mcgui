@@ -5,7 +5,10 @@ import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.entity.Player;
 
 /**
- * UI Engine for other plugins: open a page from the pages folder for a player.
+ * UI Engine for other plugins: open a page from the pages folder for a player. What players do on pages
+ * comes as events: {@link ai.resourcepack.ui.event.PageClickEvent}, {@link ai.resourcepack.ui.event.PageOpenEvent}
+ * and {@link ai.resourcepack.ui.event.PageCloseEvent}. To draw pictures of your own, see
+ * {@link ai.resourcepack.ui.framework.api.UIFramework}.
  *
  * <pre>{@code
  * UIEngine.open(player, "menu");          // plugins/UIEngine/pages/menu.html, fullscreen
@@ -34,6 +37,11 @@ public final class UIEngine {
     /** Closes [player]'s page, if they have one open. */
     public static boolean close(Player player) {
         return plugin().screens().close(player);
+    }
+
+    /** The page [player] has open fullscreen, by name; null if none. */
+    public static String page(Player player) {
+        return plugin().screens().pageOf(player);
     }
 
     /** Whether the pages folder has a page called [name]. */
