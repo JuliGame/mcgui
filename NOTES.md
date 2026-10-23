@@ -194,6 +194,15 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
   `filter: blur()` that is the filter's only function (`Filters.gridBlur`,
   `Painter.gridBlurred`): worked out `Blur.step` times smaller, as a backdrop
   is. The vanilla pages' blurred panorama was most of every hover repaint there.
+- **A blur reads and writes in memory order** (`Blur`): each of its three boxes
+  sums along the rows, then down the columns with a running sum per column, two
+  channels to an int and the division looked up. Exactly the old pixels, at up
+  to 2.5 times the speed on a big picture (the old way wrote each pass
+  transposed). A shadow, one colour, blurs only its alpha (`Blur.shadow`), and
+  a text-shadow that is not blurred is the text drawn again in its colour
+  (`Painter.glyphs`): filling its glyphs' outlines cost five times as much.
+  The ring of an inset shadow and the cut-out of an outer one are even-odd paths
+  for a box without rounded corners (the same pixels as an `Area`, without its cost).
 - **A steep gradient is not Java2D's** (`Backgrounds.StopPaint`): Java2D
   samples pixel corners in float, so a hard stop on a whole device pixel
   landed on a sample and a stripe's edge came out differently in a strip, a
