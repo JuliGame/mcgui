@@ -18,6 +18,7 @@ import io.papermc.paper.event.player.AsyncChatEvent;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
+import net.kyori.adventure.util.TriState;
 import org.bukkit.Bukkit;
 import org.bukkit.Fluid;
 import org.bukkit.GameMode;
@@ -32,6 +33,7 @@ import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.attribute.AttributeModifier;
 import org.bukkit.block.BlockFace;
 import org.bukkit.entity.ArmorStand;
+import org.bukkit.entity.Creeper;
 import org.bukkit.entity.Display;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
@@ -333,8 +335,11 @@ public final class Views implements Listener {
         Location cam = wall.cameraLocation(fov);
         // Where a client-placed picture really is no longer matters, only that the camera is flagged: so a
         // spot by the player's own eye where they can be held (see clientEye). Without one, the server pointer.
-        Location eye = withPack && settings.clientPointer ? clientEye(player, wall.facing) : null;
-        if (withPack && settings.clientPointer && eye == null) debug("no room to hold " + player.getName() + " still: the server places their pointer");
+        // A blurred view always has the server's: the game blurs only a camera that is another entity (spawnCamera), a
+        // creeper, which Paper will not spawn on peaceful: there the view is tinted but not blurred.
+        boolean blurred = withPack && options.blur() && world.getDifficulty() != org.bukkit.Difficulty.PEACEFUL;
+        Location eye = withPack && settings.clientPointer && !blurred ? clientEye(player, wall.facing) : null;
+        if (withPack && settings.clientPointer && !blurred && eye == null) debug("no room to hold " + player.getName() + " still: the server places their pointer");
         boolean clientPointer = eye != null;
         Location seat = null;
         if (clientPointer) {
@@ -349,7 +354,7 @@ public final class Views implements Listener {
         // With a client-placed pointer the camera is the player's own eye, which turns with the mouse:
         // they are held where it is on the flagged spot (see reveal). Otherwise a camera entity looks at
         // the wall and they sit out of the way.
-        LivingEntity camera = clientPointer ? null : spawnCamera(cam);
+        LivingEntity camera = clientPointer ? null : spawnCamera(cam, blurred);
         ArmorStand vehicle = clientPointer ? null : world.spawn(cam.clone().subtract(cam.getDirection().multiply(1.5)).subtract(0, 1.6, 0), ArmorStand.class, a -> {
             a.setMarker(true);
             a.setInvisible(true);
@@ -420,9 +425,31 @@ public final class Views implements Listener {
      * half each tick, so from a player to an armour stand (eyes at its feet) the picture slid into place
      * for most of a second, off the flagged position the whole time. Mannequins came in 1.21.9; before
      * that an armour stand is the nearest thing.
+     *
+     * <p>A [blurred] view's camera is a creeper instead, scaled to the same eye height: the game runs
+     * {@code post_effect/creeper.json} over everything a creeper camera sees, which the pack makes the blur
+     * round the view's panel ({@code Shaders.overlayBlurChain}). It has no AI, stays on peaceful and is
+     * shown to nobody else.
      */
-    private LivingEntity spawnCamera(Location eyes) {
+    private LivingEntity spawnCamera(Location eyes, boolean blurred) {
         World world = eyes.getWorld();
+        if (blurred) {
+            return world.spawn(eyes.clone().subtract(0, EYE_HEIGHT, 0), Creeper.class, c -> {
+                // Its own eye height (1.445) times the scale is a player's: no glide, and the camera is on the flagged spot.
+                AttributeInstance scale = c.getAttribute(Attribute.SCALE);
+                if (scale != null) scale.setBaseValue(EYE_HEIGHT / c.getEyeHeight());
+                c.setAI(false);
+                c.setInvisible(true);
+                c.setGravity(false);
+                c.setPersistent(false);
+                c.setSilent(true);
+                c.setInvulnerable(true);
+                c.setCollidable(false);
+                c.setVisibleByDefault(false);
+                c.setRotation(eyes.getYaw(), eyes.getPitch());
+                invoke(c, "setDespawnInPeacefulOverride", TriState.class, TriState.FALSE);
+            });
+        }
         if (mannequin != null && mannequin.getEntityClass() != null) {
             Entity e = world.spawn(eyes.clone().subtract(0, EYE_HEIGHT, 0), mannequin.getEntityClass(), m -> {
                 LivingEntity l = (LivingEntity) m;
@@ -454,7 +481,7 @@ public final class Views implements Listener {
         try {
             target.getClass().getMethod(method, type).invoke(target, arg);
         } catch (ReflectiveOperationException | RuntimeException ignored) {
-            // Cosmetic on newer servers only.
+            // Only on newer servers: cosmetic, but for a blurred view's creeper camera, which peaceful removes without it.
         }
     }
 
@@ -943,7 +970,8 @@ public final class Views implements Listener {
             // Nothing to show yet (the content is still drawing it): nothing is sent, and the switch waits for it.
             if (canvas == null) continue;
             if (canvas.cols() != v.wall.cols || canvas.rows() != v.wall.rows) canvas = v.canvas;
-            if (v.withPack) out.add(new MapSender.Assignment(p, v.wall, canvas, v.clientPointer ? Canvas.Encoding.HI_TILED : Canvas.Encoding.HI_OWN, null));
+            Canvas.Encoding hi = v.clientPointer ? Canvas.Encoding.HI_TILED : v.camera instanceof Creeper ? Canvas.Encoding.HI_OWN_BLUR : Canvas.Encoding.HI_OWN;
+            if (v.withPack) out.add(new MapSender.Assignment(p, v.wall, canvas, hi, null));
             else out.add(new MapSender.Assignment(p, v.wall, canvas, Canvas.Encoding.PLAIN,
                     v.revealed ? new MapSender.PointerSpot((int) v.cursorX, (int) v.cursorY, v.shape) : null));
         }

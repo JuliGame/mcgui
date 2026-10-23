@@ -11,9 +11,13 @@ import java.util.regex.Pattern;
  * <ol>
  *   <li>{@code text.fsh} decodes hi-colour maps (every item-frame map is drawn with the text
  *       pipeline), and draws a seated player's own view and pointer in front of the world;
- *       {@code text.vsh} stretches that view to fill their window.</li>
+ *       {@code text.vsh} stretches that view to fill their window. Where a map is transparent (map
+ *       colours 0-3) the world behind shows, and on a seated player's own view under the view's tint
+ *       (the text pipeline blends: {@code BlendFunction.TRANSLUCENT}).</li>
  *   <li>{@code position_tex_color} hides the hotbar, hearts, crosshair and vignette, but only for a
  *       seated player.</li>
+ *   <li>A post effect, {@code post_effect/creeper.json}, blurs the world round a blurred view's panel
+ *       ({@link #overlayBlurChain}; 26.2 only).</li>
  * </ol>
  *
  * <p>"Seated" is read from {@code Globals.CameraOffset}: the engine puts a seated player's camera at a
@@ -68,6 +72,13 @@ public final class Shaders {
 
     /** The fastest pointer {@link #clientPointerDistance} can carry. */
     public static final double CLIENT_POINTER_MAX_SPEED = 255;
+
+    /**
+     * A blurred view's signature (see {@code mcb_signature} in text.fsh and {@link #overlayBlurFsh}): the RGB of the
+     * window's bottom-left pixel, and the blue of the fourth pixel along. Colours the world is all but certain never to
+     * put in both places at once.
+     */
+    static final int SIGNATURE_0 = 0x5AC396, SIGNATURE_3 = 0x69;
 
     private static String f6(double v) {
         return String.format(Locale.ROOT, "%.6f", v);
@@ -344,7 +355,7 @@ public final class Shaders {
                             mcbPointer = 2.0;
                             mcbTint = vec4(1.0, 1.0, 1.0, Color.a);
                             gl_Position = mcb_flat(mcb_client_pointer(vec2(mcbRgb.gb) * 128.0));
-                        } else if (mcbMap == 2) {
+                        } else if (mcbMap == 2 || mcbMap == 4) {
                             // Their own view's maps carry its columns and rows next to the marker.
                             mcbGrid = vec2(float(mcb_symbol(ivec2(2, 0))), float(mcb_symbol(ivec2(3, 0))));
                         } else if (mcbMap == 3) {
@@ -402,6 +413,7 @@ public final class Shaders {
 
                 // 0: not ours. 1: a screen. 2: the view of whoever is seated at it (bottom markers swapped).
                 // 3: such a view whose pointer their client places, each map carrying its place (both the fourth).
+                // 4: a view as 2 whose client blurs the world round its panel, each map carrying the panel (both the third).
                 int mcb_screen_map() {
                     if (textureSize(Sampler0, 0) != ivec2(128, 128)
                         || mcb_fetch(ivec2(0, 0)) != @M0@ || mcb_fetch(ivec2(1, 0)) != @M1@) return 0;
@@ -410,6 +422,7 @@ public final class Shaders {
                     if (a == @M2@ && b == @M3@) return 1;
                     if (a == @M3@ && b == @M2@) return 2;
                     if (a == @M3@ && b == @M3@) return 3;
+                    if (a == @M2@ && b == @M2@) return 4;
                     return 0;
                 }
                 """
@@ -471,8 +484,10 @@ public final class Shaders {
                 // nearest pixel (uneven, shimmering text), average the map pixels under this window
                 // pixel's footprint, weighted by overlap. Averaging in YCbCr is exact: the conversion to
                 // RGB is linear. Pixels come in 2x2 blocks that share one chroma value. The first [info]
-                // + 1 blocks of the top row are the marker (and a view's size): they show the next one.
-                vec3 mcb_sample(vec2 t, vec2 fw, int info) {
+                // + 1 blocks of the top row are the marker (and a view's size and tint): they show the next
+                // one. A transparent block (map colours 0-3, alpha 0) adds no colour: alpha is how much of
+                // the footprint the opaque blocks cover, so a picture's edge against the world is smooth.
+                vec4 mcb_sample(vec2 t, vec2 fw, int info) {
                     vec2 halfFw = clamp(fw, vec2(0.02), vec2(2.0)) * 0.5;
                     vec2 lo = clamp(t - halfFw, vec2(0.0), vec2(128.0));
                     vec2 hi = clamp(t + halfFw, vec2(0.0), vec2(128.0));
@@ -480,10 +495,18 @@ public final class Shaders {
                     ivec2 b1 = clamp(ivec2(floor((hi - 0.0001) * 0.5)), ivec2(0), ivec2(63));
                     vec3 acc = vec3(0.0);
                     float total = 0.0;
+                    float covered = 0.0;
                     for (int by = b0.y; by <= b1.y; by++) {
                         for (int bx = b0.x; bx <= b1.x; bx++) {
                             ivec2 base = ivec2(bx, by) * 2;
                             ivec2 src = (by == 0 && bx <= info) ? ivec2(2 * info + 2, 0) : base;
+                            vec2 p0 = vec2(base);
+                            vec2 ov0 = max(min(hi, p0 + 1.0) - max(lo, p0), 0.0);
+                            vec2 ov1 = max(min(hi, p0 + 2.0) - max(lo, p0 + 1.0), 0.0);
+                            vec4 w = vec4(ov0.x * ov0.y, ov1.x * ov0.y, ov0.x * ov1.y, ov1.x * ov1.y);
+                            float ws = w.x + w.y + w.z + w.w;
+                            total += ws;
+                            if (texelFetch(Sampler0, src, 0).a < 0.5) continue;
                             int s00 = mcb_symbol(src);
                             int s10 = mcb_symbol(src + ivec2(1, 0));
                             int s01 = mcb_symbol(src + ivec2(0, 1));
@@ -491,24 +514,49 @@ public final class Shaders {
                             vec4 luma = vec4(float(s00 / @DIGITS@), float(s10 / @DIGITS@), float(s01 / @DIGITS@), float(s11 / @DIGITS@)) / @LUMAMAX@;
                             vec2 chroma = vec2(float((s00 % @DIGITS@) * @DIGITS@ + (s10 % @DIGITS@) - 32),
                                                float((s01 % @DIGITS@) * @DIGITS@ + (s11 % @DIGITS@) - 32)) / 63.0;
-                            vec2 p0 = vec2(base);
-                            vec2 ov0 = max(min(hi, p0 + 1.0) - max(lo, p0), 0.0);
-                            vec2 ov1 = max(min(hi, p0 + 2.0) - max(lo, p0 + 1.0), 0.0);
-                            vec4 w = vec4(ov0.x * ov0.y, ov1.x * ov0.y, ov0.x * ov1.y, ov1.x * ov1.y);
-                            float ws = w.x + w.y + w.z + w.w;
                             acc += vec3(dot(w, luma), chroma * ws);
-                            total += ws;
+                            covered += ws;
                         }
                     }
-                    vec3 ycc = acc / max(total, 1e-6);
-                    return clamp(vec3(ycc.x + 1.402 * ycc.z, ycc.x - 0.344136 * ycc.y - 0.714136 * ycc.z, ycc.x + 1.772 * ycc.y), 0.0, 1.0);
+                    if (covered <= 0.0) return vec4(0.0);
+                    vec3 ycc = acc / covered;
+                    return vec4(clamp(vec3(ycc.x + 1.402 * ycc.z, ycc.x - 0.344136 * ycc.y - 0.714136 * ycc.z, ycc.x + 1.772 * ycc.y), 0.0, 1.0),
+                                covered / max(total, 1e-6));
+                }
+
+                // What someone's own view lays over the world where it is transparent (Palette.markTint): red,
+                // green, blue and alpha in the 2x2 block after its size.
+                vec4 mcb_tint() {
+                    return vec4(float(mcb_symbol(ivec2(4, 0))), float(mcb_symbol(ivec2(5, 0))),
+                                float(mcb_symbol(ivec2(4, 1))), float(mcb_symbol(ivec2(5, 1)))) / @SYMMAX@;
+                }
+
+                // One edge of a blurred view's panel in canvas pixels (Palette.markBlurred): two symbols, high and low.
+                float mcb_edge(ivec2 p) { return float(mcb_symbol(p) * @SYMBOLS@ + mcb_symbol(p + ivec2(1, 0))); }
+
+                // Where a blurred view's panel is, for the post effect that blurs the world round it (Shaders.overlayBlurFsh),
+                // written as the window's four bottom-left pixels: a check, the panel's left and top edges, its right and
+                // bottom ones (fractions of the view, 16 bits each), and a second check.
+                vec3 mcb_signature(int i) {
+                    vec2 size = vec2(float(mcb_symbol(ivec2(2, 0))), float(mcb_symbol(ivec2(3, 0)))) * 128.0;
+                    vec4 edges = vec4(mcb_edge(ivec2(6, 0)), mcb_edge(ivec2(6, 1)), mcb_edge(ivec2(8, 0)), mcb_edge(ivec2(8, 1))) / size.xyxy;
+                    ivec4 e = ivec4(round(clamp(edges, 0.0, 1.0) * 65535.0));
+                    ivec3 c = i == 0 ? ivec3(@SIG0@)
+                            : i == 1 ? ivec3(e.x >> 8, e.x & 255, e.y >> 8)
+                            : i == 2 ? ivec3(e.y & 255, e.z >> 8, e.z & 255)
+                            : ivec3(e.w >> 8, e.w & 255, @SIG3@);
+                    return vec3(c) / 255.0;
                 }
                 // ---- end decoder ----
 
                 bool mcb_in(vec2 p, vec2 a, vec2 b) { return p.x >= a.x && p.x <= b.x && p.y >= a.y && p.y <= b.y; }
                 """
                 .replace("@DIGITS@", String.valueOf(Palette.DIGITS))
-                .replace("@LUMAMAX@", String.format(Locale.ROOT, "%.1f", (float) (Palette.LUMA_LEVELS - 1)));
+                .replace("@LUMAMAX@", String.format(Locale.ROOT, "%.1f", (float) (Palette.LUMA_LEVELS - 1)))
+                .replace("@SYMMAX@", String.format(Locale.ROOT, "%.1f", (float) (Palette.SYMBOLS - 1)))
+                .replace("@SYMBOLS@", String.valueOf(Palette.SYMBOLS))
+                .replace("@SIG0@", (SIGNATURE_0 >> 16) + "," + (SIGNATURE_0 >> 8 & 255) + "," + (SIGNATURE_0 & 255))
+                .replace("@SIG3@", String.valueOf(SIGNATURE_3));
 
         String mainHead = """
 
@@ -534,7 +582,20 @@ public final class Shaders {
                     int mcbMap = mcb_screen_map();
                     if (mcbMap > 0) {
                         // A screen emits its own light: no lightmap, tint or fog, so colours are exact day and night.
-                        vec4 mcbColor = vec4(mcb_sample(texCoord0 * 128.0, mcbFootprint, mcbMap >= 2 ? 1 : 0), 1.0);
+                        // Someone's own view carries its size and tint in a second and third block (info 2), a blurred
+                        // one its panel in a fourth and fifth (info 4).
+                        vec4 mcbPicture = mcb_sample(texCoord0 * 128.0, mcbFootprint, mcbMap == 4 ? 4 : mcbMap >= 2 ? 2 : 0);
+                        // Where the picture is transparent the world behind shows, on someone's own view under its
+                        // tint: the picture over the tint over the world, as one colour blended over the world.
+                        vec4 mcbTint = mcbMap >= 2 && mcbPicture.a < 1.0 ? mcb_tint() : vec4(0.0);
+                        float mcbAlpha = 1.0 - (1.0 - mcbPicture.a) * (1.0 - mcbTint.a);
+                        bool mcbSignature = false;
+                #ifndef IS_GUI
+                        mcbSignature = mcbMap == 4 && mcbSeated > 0.5 && gl_FragCoord.y < 1.0 && gl_FragCoord.x < 4.0;
+                #endif
+                        if (mcbAlpha < 0.002 && !mcbSignature) discard;
+                        vec4 mcbColor = mcbSignature ? vec4(mcb_signature(int(gl_FragCoord.x)), 1.0)
+                            : vec4((mcbPicture.rgb * mcbPicture.a + mcbTint.rgb * (mcbTint.a * (1.0 - mcbPicture.a))) / max(mcbAlpha, 0.002), mcbAlpha);
                 #ifndef IS_GUI
                         if (mcbMap >= 2 && mcbSeated > 0.5) {
                             // A view the client places (3) is just behind its pointer, in front of all else: its
@@ -547,7 +608,7 @@ public final class Shaders {
 
         String tail = d == Dialect.V26_3 ? """
                 #ifdef OIT_ALPHA_ONLY
-                        executeAlphaOnlyPhase(mcbDepth, 1.0);
+                        executeAlphaOnlyPhase(mcbDepth, mcbColor.a);
                 #else
                 #ifdef OIT_ACCUMULATE
                         mcbColor = sampleColorForAccumulation(mcbColor);
@@ -613,6 +674,108 @@ public final class Shaders {
                 }
                 """;
         return emit(head + decoder + mainHead + tail, d);
+    }
+
+    // ---------------------------------------------------------------- the blur round a blurred view's panel
+
+    /**
+     * The post effect a blurred view's player sees: its camera is an invisible creeper ({@code Views}), and the game
+     * runs {@code post_effect/creeper.json} over the whole frame for a creeper camera ({@code GameRenderer
+     * .checkEntityPostEffect}), after the world and before the HUD and menus. This one is the menu blur's three
+     * rounds of a horizontal and a vertical box blur, at the player's own menu blur setting, but only outside the
+     * panel, which the view's own maps say where it is ({@code mcb_signature}). Without that signature (anyone
+     * spectating a real creeper) it passes the picture through. 26.2 only: the pack ships it in the 26.2 overlay.
+     */
+    public static String overlayBlurChain() {
+        StringBuilder passes = new StringBuilder();
+        for (int round = 0; round < 3; round++) {
+            for (int vertical = 0; vertical < 2; vertical++) {
+                boolean last = round == 2 && vertical == 1;
+                if (passes.length() > 0) passes.append(",\n");
+                passes.append("""
+                            {
+                              "vertex_shader": "minecraft:core/screenquad",
+                              "fragment_shader": "uiengine:post/overlay_blur",
+                              "inputs": [{"sampler_name": "In", "target": "%s"}],
+                              "output": "%s",
+                              "uniforms": {"OverlayConfig": [
+                                {"name": "BlurDir", "type": "vec2", "value": [%s]},
+                                {"name": "Last", "type": "float", "value": %s}
+                              ]}
+                            }""".formatted(vertical == 0 ? "minecraft:main" : "swap", vertical == 0 ? "swap" : "minecraft:main",
+                        vertical == 0 ? "1.0, 0.0" : "0.0, 1.0", last ? "1.0" : "0.0"));
+            }
+        }
+        return "{\n  \"targets\": {\"swap\": {}},\n  \"passes\": [\n" + passes + "\n  ]\n}\n";
+    }
+
+    /** The fragment shader of {@link #overlayBlurChain}, in the 26.2 dialect. */
+    public static String overlayBlurFsh() {
+        return emit("""
+                #version 330
+
+                #moj_import <minecraft:globals.glsl>
+
+                uniform sampler2D InSampler;
+
+                layout(std140) uniform SamplerInfo {
+                    vec2 OutSize;
+                    vec2 InSize;
+                };
+
+                layout(std140) uniform OverlayConfig {
+                    vec2 BlurDir;
+                    float Last;
+                };
+
+                in vec2 texCoord;
+
+                out vec4 fragColor;
+
+                ivec3 ov_signature(int x) { return ivec3(round(texelFetch(InSampler, ivec2(x, 0), 0).rgb * 255.0)); }
+
+                // Whether texel [p] is world to blur: outside the panel [lo, hi), and not one of the signature's four.
+                bool ov_world(ivec2 p, vec2 lo, vec2 hi) {
+                    if (p.y == 0 && p.x < 4) return false;
+                    vec2 c = vec2(p) + 0.5;
+                    return any(lessThan(c, lo)) || any(greaterThanEqual(c, hi));
+                }
+
+                void main() {
+                    ivec2 at = ivec2(gl_FragCoord.xy);
+                    vec4 here = texelFetch(InSampler, at, 0);
+                    ivec3 s0 = ov_signature(0), s1 = ov_signature(1), s2 = ov_signature(2), s3 = ov_signature(3);
+                    if (s0 != ivec3(@SIG0@) || s3.b != @SIG3@) {
+                        fragColor = here;
+                        return;
+                    }
+                    // The panel's left, top, right and bottom as fractions of the view, from its top-left; rows count up here.
+                    vec4 e = vec4(s1.r * 256 + s1.g, s1.b * 256 + s2.r, s2.g * 256 + s2.b, s3.r * 256 + s3.g) / 65535.0;
+                    vec2 lo = vec2(e.x, 1.0 - e.w) * InSize, hi = vec2(e.z, 1.0 - e.y) * InSize;
+                    if (at.y == 0 && at.x < 4) {
+                        // The signature itself: kept for the next pass, and the row above it once the last is done.
+                        fragColor = Last > 0.5 ? texelFetch(InSampler, ivec2(at.x, 1), 0) : here;
+                        return;
+                    }
+                    if (!ov_world(at, lo, hi)) {
+                        fragColor = here;
+                        return;
+                    }
+                    // A box blur along BlurDir of the world alone: the panel never bleeds into it.
+                    ivec2 dir = ivec2(BlurDir);
+                    ivec2 edge = ivec2(InSize) - 1;
+                    vec4 sum = vec4(0.0);
+                    float n = 0.0;
+                    for (int k = -MenuBlurRadius; k <= MenuBlurRadius; k++) {
+                        ivec2 p = clamp(at + dir * k, ivec2(0), edge);
+                        if (!ov_world(p, lo, hi)) continue;
+                        sum += texelFetch(InSampler, p, 0);
+                        n += 1.0;
+                    }
+                    fragColor = n > 0.0 ? sum / n : here;
+                }
+                """.replace("@SIG0@", (SIGNATURE_0 >> 16) + ", " + (SIGNATURE_0 >> 8 & 255) + ", " + (SIGNATURE_0 & 255))
+                .replace("@SIG3@", String.valueOf(SIGNATURE_3)), Dialect.V26_2);
     }
 
     private static String ints(int[] values) {

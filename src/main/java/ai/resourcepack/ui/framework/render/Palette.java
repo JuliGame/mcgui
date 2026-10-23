@@ -20,6 +20,12 @@ import java.util.function.IntUnaryOperator;
  *
  * <p><b>PLAIN</b> (vanilla clients): the nearest real map colour through a 32×32×32 lookup, with
  * ordered dithering.
+ *
+ * <p><b>Transparency.</b> Map colours 0 to 3 are the client's only transparent ones (alpha 0, all four
+ * alike): through an invisible frame the world behind shows. A picture marks a transparent pixel with
+ * the YCbCr bytes (0, 0, 0) ({@link #isClear}), which no RGB colour converts to (Cb only reaches 0 at pure
+ * yellow, Cr only at pure cyan). HI makes a whole 2×2 block transparent when at least two of its
+ * pixels are (a block shares one chroma, so it is the smallest unit), PLAIN each pixel.
  */
 public final class Palette {
     public static final int LUMA_LEVELS = 30;
@@ -32,6 +38,8 @@ public final class Palette {
     public final int[] symbolRgb = new int[SYMBOLS];
     public final byte[] markerId = new byte[4];
     public final int[] markerRgb = new int[4];
+    /** The transparent map colour. */
+    public static final byte CLEAR_ID = 0;
     private final byte[] plainLut = new byte[32 * 32 * 32];
     /** Luma level (times DIGITS) for each Bayer cell (16) and Y byte (256), dither included. */
     private final int[] lumaRow = new int[16 * 256];
@@ -91,11 +99,23 @@ public final class Palette {
         }
     }
 
+    /** {@link #encodeHi}'s bounds of a map with no opaque block, and of a map that is all opaque. */
+    public static final int NO_BOUNDS = -1, FULL_BOUNDS = boundsOf(0, 0, 63, 63);
+
+    /** Packed bounds of 2×2 blocks [bx0, bx1] × [by0, by1], each 0..63. */
+    public static int boundsOf(int bx0, int by0, int bx1, int by1) {
+        return bx0 | by0 << 6 | bx1 << 12 | by1 << 18;
+    }
+
     /**
      * Encode the 128×128 region at (ox, oy) of an interleaved YCbCr image (JFIF full range, 3 bytes per
-     * pixel, [stride] pixels per row) into one map's colour bytes.
+     * pixel, [stride] pixels per row) into one map's colour bytes. With [clear], pixels marked transparent
+     * ({@link #isClear}) are honoured: a block with two or more is transparent, and a lone one in a block takes
+     * an opaque neighbour's colour; without, there are none, and nothing is checked. Returns the bounds of the
+     * opaque blocks ({@link #boundsOf}; {@link #NO_BOUNDS} if none, {@link #FULL_BOUNDS} without [clear]).
      */
-    public void encodeHi(byte[] ycc, int stride, int ox, int oy, byte[] out) {
+    public int encodeHi(byte[] ycc, int stride, int ox, int oy, byte[] out, boolean clear) {
+        int bx0 = 64, by0 = 64, bx1 = -1, by1 = -1;
         for (int by = 0; by < 128; by += 2) {
             int r0 = ((oy + by) * stride + ox) * 3;
             int r1 = r0 + stride * 3;
@@ -103,9 +123,30 @@ public final class Palette {
             int cellBottom = (((by + 1) & 3) * 4) << 8;
             for (int bx = 0; bx < 128; bx += 2) {
                 int a = r0 + bx * 3, b = a + 3, c = r1 + bx * 3, d = c + 3;
+                int o = by * 128 + bx;
+                if (clear) {
+                    boolean ca = isClear(ycc, a), cb = isClear(ycc, b), cc = isClear(ycc, c), cd = isClear(ycc, d);
+                    int n = (ca ? 1 : 0) + (cb ? 1 : 0) + (cc ? 1 : 0) + (cd ? 1 : 0);
+                    if (n >= 2) {
+                        out[o] = out[o + 1] = out[o + 128] = out[o + 129] = CLEAR_ID;
+                        continue;
+                    }
+                    if (n == 1) {
+                        // [a] if it is opaque, else [d] (then the only clear one is [a]).
+                        int opaque = ca ? d : a;
+                        if (ca) a = opaque;
+                        else if (cb) b = opaque;
+                        else if (cc) c = opaque;
+                        else d = opaque;
+                    }
+                    int x = bx >> 1, y = by >> 1;
+                    if (x < bx0) bx0 = x;
+                    if (x > bx1) bx1 = x;
+                    if (y < by0) by0 = y;
+                    by1 = y;
+                }
                 int qcb = chromaLevel[(ycc[a + 1] & 255) + (ycc[b + 1] & 255) + (ycc[c + 1] & 255) + (ycc[d + 1] & 255)];
                 int qcr = chromaLevel[(ycc[a + 2] & 255) + (ycc[b + 2] & 255) + (ycc[c + 2] & 255) + (ycc[d + 2] & 255)];
-                int o = by * 128 + bx;
                 int col = (bx & 3) << 8;
                 out[o] = symbolId[lumaRow[cellTop + col + (ycc[a] & 255)] + (qcb >> 3)];
                 out[o + 1] = symbolId[lumaRow[cellTop + col + (1 << 8) + (ycc[b] & 255)] + (qcb & 7)];
@@ -117,29 +158,54 @@ public final class Palette {
         out[1] = markerId[1];
         out[128] = markerId[2];
         out[129] = markerId[3];
+        if (!clear) return FULL_BOUNDS;
+        return bx1 < 0 ? NO_BOUNDS : boundsOf(bx0, by0, bx1, by1);
+    }
+
+    /** Whether the YCbCr pixel at ycc[i] is the transparent mark: Cb and Cr both 0, which no RGB colour gives. */
+    public static boolean isClear(byte[] ycc, int i) {
+        return (ycc[i + 1] | ycc[i + 2]) == 0;
+    }
+
+    /**
+     * The four symbols an own view carries for [tint] (ARGB), in the 2×2 block after its size: red, green,
+     * blue and alpha, each 0..255 as 0..{@code SYMBOLS - 1}. The shader lays the tint over the world wherever
+     * the picture is transparent.
+     */
+    private void markTint(byte[] own, int tint) {
+        own[4] = symbolId[tintLevel(tint >> 16)];
+        own[5] = symbolId[tintLevel(tint >> 8)];
+        own[132] = symbolId[tintLevel(tint)];
+        own[133] = symbolId[tintLevel(tint >>> 24)];
+    }
+
+    private static int tintLevel(int channel) {
+        return Math.round((channel & 255) * (SYMBOLS - 1) / 255f);
     }
 
     /**
      * A copy of a HI tile marked as somebody's own fullscreen view of [cols] × [rows] maps: its bottom two
-     * marker colours swapped, and the two pixels right of the marker the symbols for its columns and
-     * rows, from which the shader stretches the view to the window. That 2×2 block shows the next one.
+     * marker colours swapped, the two pixels right of the marker the symbols for its columns and rows, from
+     * which the shader stretches the view to the window, and the 2×2 block after that its [tint] (see
+     * {@link #markTint}). Those two 2×2 blocks show the next one.
      */
-    public byte[] markOwn(byte[] hi, int cols, int rows) {
+    public byte[] markOwn(byte[] hi, int cols, int rows, int tint) {
         byte[] own = hi.clone();
         own[128] = markerId[3];
         own[129] = markerId[2];
         own[2] = symbolId[Math.min(SYMBOLS - 1, cols)];
         own[3] = symbolId[Math.min(SYMBOLS - 1, rows)];
+        markTint(own, tint);
         return own;
     }
 
     /**
      * A copy of a HI tile marked as tile ([col], [row]) of somebody's own fullscreen view of [cols] × [rows]
      * maps whose pointer their client draws: both bottom marker colours the fourth, the view's columns
-     * and rows right of the marker as in {@link #markOwn}, and the tile's own column and row below those.
-     * The shader places the tile in the window from these alone, wherever its frame is.
+     * and rows right of the marker and its tint after them as in {@link #markOwn}, and the tile's own column
+     * and row below the size. The shader places the tile in the window from these alone, wherever its frame is.
      */
-    public byte[] markTiled(byte[] hi, int cols, int rows, int col, int row) {
+    public byte[] markTiled(byte[] hi, int cols, int rows, int col, int row, int tint) {
         byte[] own = hi.clone();
         own[128] = markerId[3];
         own[129] = markerId[3];
@@ -147,13 +213,42 @@ public final class Palette {
         own[3] = symbolId[Math.min(SYMBOLS - 1, rows)];
         own[130] = symbolId[Math.min(SYMBOLS - 1, col)];
         own[131] = symbolId[Math.min(SYMBOLS - 1, row)];
+        markTint(own, tint);
         return own;
     }
 
-    public void encodePlain(byte[] ycc, int stride, int ox, int oy, byte[] out) {
+    /**
+     * A copy of a HI tile marked as somebody's own fullscreen view whose world, round its panel, their client blurs: as
+     * {@link #markOwn}, but both bottom marker colours the third, and the 2×2 blocks after the tint the panel's
+     * left, top, right and bottom edges in canvas pixels, two symbols each (240 × high + low): left and top in the first,
+     * right and bottom in the second. Those four 2×2 blocks show the next one.
+     */
+    public byte[] markBlurred(byte[] hi, int cols, int rows, int tint, int left, int top, int right, int bottom) {
+        byte[] own = markOwn(hi, cols, rows, tint);
+        own[128] = markerId[2];
+        own[129] = markerId[2];
+        edge(own, 6, left);
+        edge(own, 134, top);
+        edge(own, 8, right);
+        edge(own, 136, bottom);
+        return own;
+    }
+
+    private void edge(byte[] own, int at, int v) {
+        own[at] = symbolId[Math.min(SYMBOLS - 1, v / SYMBOLS)];
+        own[at + 1] = symbolId[v % SYMBOLS];
+    }
+
+    /** As {@link #encodeHi}, in plain colours, one pixel at a time: a transparent pixel is the transparent colour. */
+    public void encodePlain(byte[] ycc, int stride, int ox, int oy, byte[] out, boolean clear) {
         for (int y = 0; y < 128; y++) {
             int i = ((oy + y) * stride + ox) * 3;
             for (int x = 0; x < 128; x++) {
+                if (clear && isClear(ycc, i)) {
+                    out[y * 128 + x] = CLEAR_ID;
+                    i += 3;
+                    continue;
+                }
                 int yy = ycc[i] & 255;
                 int cb = (ycc[i + 1] & 255) - 128;
                 int cr = (ycc[i + 2] & 255) - 128;

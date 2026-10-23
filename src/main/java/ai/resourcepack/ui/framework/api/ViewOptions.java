@@ -6,11 +6,21 @@ package ai.resourcepack.ui.framework.api;
  * with {@code /ui fov}, for a 16:9 window.
  *
  * @param pointerSize the pointer's height in canvas pixels; 0 picks one from the canvas height.
+ * @param blur        blur the world the player sees through the canvas's transparent pixels (see
+ *                    {@link Canvas#transparency}), round the panel of everything opaque in it, with the game's own
+ *                    menu blur at the player's own menu blur setting. Needs the resource pack (26.2), and makes the
+ *                    server place the pointer, whose camera then stays still: the game blurs only a camera that is
+ *                    another entity (a creeper), which the mouse cannot turn.
  */
-public record ViewOptions(int pointerSize) {
-    public static final ViewOptions DEFAULT = new ViewOptions(0);
+public record ViewOptions(int pointerSize, boolean blur) {
+    public static final ViewOptions DEFAULT = new ViewOptions(0, false);
 
     public ViewOptions {
         pointerSize = Math.max(0, pointerSize);
+    }
+
+    /** These options with [blur]. */
+    public ViewOptions blur(boolean blur) {
+        return new ViewOptions(pointerSize, blur);
     }
 }

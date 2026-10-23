@@ -59,6 +59,15 @@ public final class Canvas {
      */
     private final AtomicReferenceArray<Own> hiTiled;
     private volatile long version;
+    /** Drawings' pixels less than half opaque are transparent (see {@link #transparency(boolean)}). */
+    private volatile boolean transparent;
+    /**
+     * What a view lays over the world where the picture is transparent (ARGB; see {@link #tint(int)}): as published,
+     * always written just before [tiles], so whoever reads [tiles] first sees the tint that came with them.
+     */
+    private volatile int tint;
+    /** The tint the next drawing publishes; only the drawing thread uses it. */
+    private int nextTint;
     /** Told whenever new tiles are published, so they go out at once (the engine's sender). */
     private final Runnable published;
 
@@ -95,8 +104,7 @@ public final class Canvas {
     private static Tile blank(Palette palette, int cols, int rows) {
         return BLANK.computeIfAbsent(palette, p -> new ConcurrentHashMap<>()).computeIfAbsent(cols << 16 | rows, k -> {
             byte[] h = new byte[TILE];
-            palette.encodeHi(BLACK, 128, 0, 0, h);
-            return new Tile(h);
+            return new Tile(h, palette.encodeHi(BLACK, 128, 0, 0, h, false));
         });
     }
 
@@ -121,6 +129,9 @@ public final class Canvas {
         this.hiTiled = new AtomicReferenceArray<>(cols * rows);
         this.tiles = from.tiles;
         this.version = from.version;
+        this.transparent = from.transparent;
+        this.tint = from.tint;
+        this.nextTint = from.tint;
     }
 
     /**
@@ -151,9 +162,42 @@ public final class Canvas {
         } finally {
             changing++;
         }
+        transparent = from.transparent;
+        tint = nextTint = from.tint;
         tiles = from.tiles;
         version++;
         published.run();
+    }
+
+    /**
+     * Whether later drawings may be transparent. With it on, a pixel of an image with alpha that is less than
+     * half opaque is transparent, and one at least half opaque is drawn as its colour, as without (so a
+     * premultiplied image's edges are flattened onto black). Through a transparent pixel the world behind
+     * shows: behind a wall's invisible frames on a wall, and on a view the world behind the player's window,
+     * under the {@link #tint(int)}. Hi-colour maps are transparent in 2×2 blocks (a block with two transparent
+     * pixels or more), plain ones pixel by pixel. Off by default; images without alpha are always opaque.
+     */
+    public void transparency(boolean on) {
+        transparent = on;
+    }
+
+    public boolean transparency() {
+        return transparent;
+    }
+
+    /**
+     * What a view of this canvas lays over the world where its picture is transparent: an ARGB colour (alpha
+     * 0, the default, for none: the world as it is). Seen only by players with the resource pack, at 240
+     * levels a channel; walls are never tinted. It is published with the next drawing (or scroll), together
+     * with its tiles, so a viewer never gets a picture with another picture's tint. From the thread that draws.
+     */
+    public void tint(int argb) {
+        nextTint = argb;
+    }
+
+    /** The tint the next drawing publishes. */
+    public int tint() {
+        return nextTint;
     }
 
     /** Makes [ycc] this canvas's own before it is drawn into: a copy of the shared colours, or black. On the drawing thread. */
@@ -175,9 +219,10 @@ public final class Canvas {
     public long version() { return version; }
 
     /**
-     * Draw [image] with its top-left at (x, y). Alpha is ignored: pixels replace what was there, so
-     * flatten a translucent picture onto a background first (a premultiplied image's colours are already
-     * flattened onto black). An int RGB or ARGB image, or a sub-image of one, is read in place.
+     * Draw [image] with its top-left at (x, y). Pixels replace what was there, so flatten a translucent
+     * picture onto a background first (a premultiplied image's colours are already flattened onto black);
+     * alpha only counts with {@link #transparency(boolean)} on. An int RGB or ARGB image, or a sub-image of
+     * one, is read in place.
      */
     public void draw(BufferedImage image, int x, int y) {
         scroll(0, image, x, y);
@@ -192,28 +237,32 @@ public final class Canvas {
     public void scroll(int rows, BufferedImage image, int x, int y) {
         int w = image.getWidth(), h = image.getHeight();
         int type = image.getType();
+        boolean alpha = transparent && image.getColorModel().hasAlpha();
         WritableRaster r = image.getRaster();
         if ((type == BufferedImage.TYPE_INT_RGB || type == BufferedImage.TYPE_INT_ARGB || type == BufferedImage.TYPE_INT_ARGB_PRE)
                 && r.getSampleModel() instanceof SinglePixelPackedSampleModel sm && r.getDataBuffer() instanceof DataBufferInt db) {
             // A sub-image shares its parent's array: start where it does, and step by the parent's row length.
             int stride = sm.getScanlineStride();
             int offset = db.getOffset() - r.getSampleModelTranslateY() * stride - r.getSampleModelTranslateX();
-            apply(rows, db.getData(), offset, stride, w, h, x, y);
+            apply(rows, db.getData(), offset, stride, w, h, x, y, alpha);
         } else {
-            apply(rows, image.getRGB(0, 0, w, h, null, 0, w), 0, w, w, h, x, y);
+            apply(rows, image.getRGB(0, 0, w, h, null, 0, w), 0, w, w, h, x, y, alpha);
         }
     }
 
     /** Draw a [w] × [h] block of RGB pixels (row-major; the top byte is ignored) with its top-left at (x, y). */
     public void draw(int[] rgb, int w, int h, int x, int y) {
-        apply(0, rgb, 0, w, w, h, x, y);
+        apply(0, rgb, 0, w, w, h, x, y, false);
     }
 
     /** Rows per piece of work when converting a big drawing on several cores. */
     private static final int BAND = 32;
 
-    /** Move by [shift] map rows, then draw: [rgb] holds the drawing's pixel (i, j) at [offset] + j × [stride] + i. */
-    private void apply(int shift, int[] rgb, int offset, int stride, int w, int h, int x, int y) {
+    /**
+     * Move by [shift] map rows, then draw: [rgb] holds the drawing's pixel (i, j) at [offset] + j × [stride] + i.
+     * [alpha]: its top byte is alpha, and a pixel under half is transparent.
+     */
+    private void apply(int shift, int[] rgb, int offset, int stride, int w, int h, int x, int y, boolean alpha) {
         int x0 = Math.max(0, x), y0 = Math.max(0, y);
         int x1 = Math.min(width, x + w), y1 = Math.min(height, y + h);
         boolean moves = shift != 0 && Math.abs(shift) < rows;
@@ -232,17 +281,18 @@ public final class Canvas {
                 // Rows are independent: a big drawing (a whole new page) is converted on several cores at once.
                 if (bands > 1 && (long) (x1 - x0) * (y1 - y0) >= 128 * 128) {
                     run(() -> IntStream.range(0, bands).parallel().forEach(b ->
-                            convert(rgb, offset, stride, x, y, x0, x1, y0 + b * BAND, Math.min(y1, y0 + (b + 1) * BAND), dirty)));
+                            convert(rgb, offset, stride, x, y, x0, x1, y0 + b * BAND, Math.min(y1, y0 + (b + 1) * BAND), dirty, alpha)));
                 } else {
-                    convert(rgb, offset, stride, x, y, x0, x1, y0, y1, dirty);
+                    convert(rgb, offset, stride, x, y, x0, x1, y0, y1, dirty, alpha);
                 }
                 for (int t = 0; t < dirty.length; t++) if (dirty[t]) changed.add(t);
             }
-            if (!moves && changed.isEmpty()) return;
+            if (!moves && changed.isEmpty() && tint == nextTint) return;
             encode(changed, next);
         } finally {
             changing++;
         }
+        tint = nextTint;
         tiles = next;
         version++;
         published.run();
@@ -265,7 +315,7 @@ public final class Canvas {
     private static final ThreadLocal<byte[]> ROW = new ThreadLocal<>();
 
     /** Rows [from, to) of the canvas: convert, compare with what is there, store, and mark changed tiles. */
-    private void convert(int[] rgb, int offset, int stride, int x, int y, int x0, int x1, int from, int to, boolean[] dirty) {
+    private void convert(int[] rgb, int offset, int stride, int x, int y, int x0, int x1, int from, int to, boolean[] dirty, boolean alpha) {
         int cw = x1 - x0;
         byte[] ycc = this.ycc;
         // Only this call uses it until it returns (nothing in here runs another task on this thread). It may be longer than a row.
@@ -274,7 +324,15 @@ public final class Canvas {
         if (row == null || row.length < n) ROW.set(row = new byte[Math.max(n, 2048 * 3)]);
         for (int py = from; py < to; py++) {
             int s = offset + (py - y) * stride + (x0 - x);
-            for (int i = 0; i < cw; i++) Palette.rgbToYcc(rgb[s + i], row, i * 3);
+            if (alpha) {
+                for (int i = 0; i < cw; i++) {
+                    int p = rgb[s + i];
+                    if (p >>> 24 < 128) row[i * 3] = row[i * 3 + 1] = row[i * 3 + 2] = 0; // Palette.isClear
+                    else Palette.rgbToYcc(p, row, i * 3);
+                }
+            } else {
+                for (int i = 0; i < cw; i++) Palette.rgbToYcc(rgb[s + i], row, i * 3);
+            }
             int d = (py * width + x0) * 3;
             if (Arrays.equals(row, 0, n, ycc, d, d + n)) continue;
             // Only the 128-pixel spans that differ mark their tiles dirty.
@@ -290,7 +348,7 @@ public final class Canvas {
         }
     }
 
-    /** The picture shrunk to [w] × [h] RGB pixels, each the average of the area it covers. */
+    /** The picture shrunk to [w] × [h] RGB pixels, each the average of the area it covers (black where all of it is transparent). */
     public int[] thumbnail(int w, int h) {
         int[] out = new int[w * h];
         byte[] ycc = this.ycc;
@@ -302,17 +360,18 @@ public final class Canvas {
             int y0 = oy * height / h, y1 = Math.max(y0 + 1, (oy + 1) * height / h);
             for (int ox = 0; ox < w; ox++) {
                 int x0 = ox * width / w, x1 = Math.max(x0 + 1, (ox + 1) * width / w);
-                long sy = 0, sb = 0, sr = 0;
+                long sy = 0, sb = 0, sr = 0, n = 0;
                 for (int py = y0; py < y1; py++) {
                     int i = (py * width + x0) * 3;
                     for (int px = x0; px < x1; px++, i += 3) {
+                        if (Palette.isClear(ycc, i)) continue;
                         sy += ycc[i] & 255;
                         sb += ycc[i + 1] & 255;
                         sr += ycc[i + 2] & 255;
+                        n++;
                     }
                 }
-                long n = (long) (y1 - y0) * (x1 - x0);
-                out[oy * w + ox] = Palette.yccToRgb((int) (sy / n), (int) (sb / n), (int) (sr / n));
+                out[oy * w + ox] = n == 0 ? 0 : Palette.yccToRgb((int) (sy / n), (int) (sb / n), (int) (sr / n));
             }
         }
         return out;
@@ -325,14 +384,20 @@ public final class Canvas {
 
     /** The tiles as published now: one whole drawing, whatever is drawn after. */
     public Snapshot snapshot() {
-        return new Snapshot(tiles);
+        // [tiles] first: the tint written before them is at least as new.
+        Tile[] at = tiles;
+        return new Snapshot(at, tint);
     }
 
     /** The tiles of one published drawing. */
     public final class Snapshot {
         private final Tile[] at;
+        private final int tint;
+        /** {@link #panel}, once worked out. */
+        private Panel panel;
 
-        private Snapshot(Tile[] at) {
+        private Snapshot(Tile[] at, int tint) {
+            this.tint = tint;
             this.at = at;
         }
 
@@ -341,26 +406,53 @@ public final class Canvas {
             return other != null && other.at == at;
         }
 
+        /**
+         * The bounds of everything opaque in the picture, in canvas pixels ([left, right) × [top, bottom)): the panel a
+         * blurred view keeps sharp. The whole canvas for a picture with nothing transparent; empty for one that is all.
+         */
+        public Panel panel() {
+            Panel p = panel;
+            if (p != null) return p;
+            int x0 = width, y0 = height, x1 = 0, y1 = 0;
+            for (int i = 0; i < at.length; i++) {
+                int b = at[i].bounds;
+                if (b == Palette.NO_BOUNDS) continue;
+                int ox = (i % cols) * 128, oy = (i / cols) * 128;
+                x0 = Math.min(x0, ox + (b & 63) * 2);
+                y0 = Math.min(y0, oy + (b >> 6 & 63) * 2);
+                x1 = Math.max(x1, ox + (b >> 12 & 63) * 2 + 2);
+                y1 = Math.max(y1, oy + (b >> 18 & 63) * 2 + 2);
+            }
+            p = x1 <= x0 ? new Panel(0, 0, 0, 0) : new Panel(x0, y0, x1, y1);
+            panel = p;
+            return p;
+        }
+
         /** Tile [index]'s map colour bytes in [encoding]. The array is never changed after it is returned. */
         public byte[] tile(int index, Encoding encoding) {
             Tile t = at[index];
+            int tint = this.tint;
             return switch (encoding) {
                 case HI -> t.hi;
-                case HI_OWN -> t.own(palette, cols, rows);
+                case HI_OWN -> t.own(palette, cols, rows, tint);
                 case HI_TILED -> {
                     Own own = hiTiled.get(index);
-                    if (own == null || own.base != t.hi) {
-                        own = new Own(t.hi, palette.markTiled(t.hi, cols, rows, index % cols, index / cols));
+                    if (own == null || own.base != t.hi || own.tint != tint) {
+                        own = new Own(t.hi, tint, palette.markTiled(t.hi, cols, rows, index % cols, index / cols, tint));
                         hiTiled.set(index, own);
                     }
                     yield own.tile;
                 }
+                case HI_OWN_BLUR -> t.blurred(palette, cols, rows, tint, panel());
                 case PLAIN -> t.plain(Canvas.this, index, at);
             };
         }
     }
 
-    private record Own(byte[] base, byte[] tile) {}
+    /** A rectangle of canvas pixels, [left, right) × [top, bottom). */
+    public record Panel(int left, int top, int right, int bottom) {}
+
+    private record Own(byte[] base, int tint, byte[] tile) {}
 
     /**
      * One encoded tile, with what is made from it on demand. Moves with the picture when it scrolls, so
@@ -368,16 +460,34 @@ public final class Canvas {
      */
     private static final class Tile {
         final byte[] hi;
-        private byte[] own, plain;
+        /** Where its opaque 2×2 blocks are ({@link Palette#encodeHi}'s bounds). */
+        final int bounds;
+        private byte[] own, plain, blurred;
+        private int ownTint, blurredTint;
+        private Panel blurredPanel;
 
-        Tile(byte[] hi) {
+        Tile(byte[] hi, int bounds) {
             this.hi = hi;
+            this.bounds = bounds;
         }
 
-        /** Made once, the first time a view needs it; one array whichever thread asks first. */
-        synchronized byte[] own(Palette palette, int cols, int rows) {
-            if (own == null) own = palette.markOwn(hi, cols, rows);
+        /** Made once for each tint, the first time a view needs it; one array whichever thread asks first. */
+        synchronized byte[] own(Palette palette, int cols, int rows, int tint) {
+            if (own == null || ownTint != tint) {
+                own = palette.markOwn(hi, cols, rows, tint);
+                ownTint = tint;
+            }
             return own;
+        }
+
+        /** As {@link #own}, for a blurred view: made again when the tint or the picture's panel changes. */
+        synchronized byte[] blurred(Palette palette, int cols, int rows, int tint, Panel panel) {
+            if (blurred == null || blurredTint != tint || !panel.equals(blurredPanel)) {
+                blurred = palette.markBlurred(hi, cols, rows, tint, panel.left(), panel.top(), panel.right(), panel.bottom());
+                blurredTint = tint;
+                blurredPanel = panel;
+            }
+            return blurred;
         }
 
         /** Made from the picture the first time somebody without the pack looks, while this tile is at [index] in [at]. */
@@ -389,8 +499,8 @@ public final class Canvas {
             byte[] out = new byte[TILE];
             byte[] ycc = canvas.ycc;
             // No colours yet: the canvas is blank, and so is every tile of it.
-            if (ycc == null) canvas.palette.encodePlain(BLACK, 128, 0, 0, out);
-            else canvas.palette.encodePlain(ycc, canvas.width, (index % canvas.cols) * 128, (index / canvas.cols) * 128, out);
+            if (ycc == null) canvas.palette.encodePlain(BLACK, 128, 0, 0, out, false);
+            else canvas.palette.encodePlain(ycc, canvas.width, (index % canvas.cols) * 128, (index / canvas.cols) * 128, out, canvas.transparent);
             // Kept only if the picture did not change under it and this tile is still where it was read from;
             // otherwise it may be of other pixels, and is made again next time.
             if ((before & 1) != 0 || canvas.changing != before || canvas.tiles != at) return out;
@@ -431,8 +541,8 @@ public final class Canvas {
     private void encode(int t, Tile[] into) {
         // A fresh array each time: the sender may still hold the old one. PLAIN is made from it when asked for.
         byte[] h = new byte[TILE];
-        palette.encodeHi(ycc, width, (t % cols) * 128, (t / cols) * 128, h);
-        into[t] = new Tile(h);
+        int bounds = palette.encodeHi(ycc, width, (t % cols) * 128, (t / cols) * 128, h, transparent);
+        into[t] = new Tile(h, bounds);
     }
 
     /** How a tile is sent: which colours mean what to the player's client. */
@@ -443,6 +553,11 @@ public final class Canvas {
         HI_OWN,
         /** HI_OWN, carrying each tile's place too, for a view whose pointer the viewer's client draws. */
         HI_TILED,
+        /**
+         * HI_OWN for a view whose client blurs the world round the picture's panel ({@link Snapshot#panel}): every tile
+         * carries the panel too.
+         */
+        HI_OWN_BLUR,
         /** Plain map colours, for players without the pack. */
         PLAIN
     }

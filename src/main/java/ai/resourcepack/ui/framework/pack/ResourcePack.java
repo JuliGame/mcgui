@@ -165,6 +165,10 @@ public final class ResourcePack implements AutoCloseable {
                 e.put(root + "position_tex_color.vsh", Shaders.positionTexColorVsh(d));
                 e.put(root + "position_tex_color.fsh", Shaders.positionTexColorFsh(d));
             }
+            // A blurred view's camera is a creeper, whose post effect blurs the world round the view's panel. Only in the
+            // 26.2 overlay: it is written in that dialect alone.
+            e.put(OVERLAY_26_2 + "/assets/minecraft/post_effect/creeper.json", Shaders.overlayBlurChain());
+            e.put(OVERLAY_26_2 + "/assets/uiengine/shaders/post/overlay_blur.fsh", Shaders.overlayBlurFsh());
             // The pointer a seated player sees: one glyph per shape on a text display in front of the
             // view. Text, unlike an item, gets no directional shading, so the arrow stays white.
             StringBuilder chars = new StringBuilder();
