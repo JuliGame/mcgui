@@ -6,6 +6,7 @@ import ai.resourcepack.ui.framework.api.WallScreen;
 import org.bukkit.Bukkit;
 import org.bukkit.FluidCollisionMode;
 import org.bukkit.Location;
+import org.bukkit.World;
 import org.bukkit.block.BlockFace;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
@@ -48,11 +49,8 @@ public final class Walls implements Listener {
     private final double reach;
     private final Predicate<Player> seated;
     private final List<Wall> walls = new CopyOnWriteArrayList<>();
-    /** This tick's viewers of each wall, and the tick they are from (see {@link #viewers}). */
-    private final Map<Wall, List<Player>> viewersNow = new HashMap<>();
+    /** The tick every wall's {@link Wall#viewers} are from (see {@link #viewers}). */
     private int viewersTick = -1;
-    /** Read into by {@link #viewersOf}, on the server thread only. */
-    private final Location scratch = new Location(null, 0, 0, 0);
     private int nextMapId;
 
     /** A player's crosshair on a wall. */
@@ -76,6 +74,12 @@ public final class Walls implements Listener {
         final MapWall map;
         final WallContent content;
         volatile boolean removed;
+        /**
+         * Players in range as of [viewersTick], and those {@code inRange} was last worked out from. Kept and
+         * refilled, so a tick in which nobody comes or goes allocates nothing. Server thread.
+         */
+        private final List<Player> viewers = new ArrayList<>(), counted = new ArrayList<>();
+        private int viewersTick = -1;
 
         Wall(MapWall map, WallContent content) {
             this.map = map;
@@ -128,11 +132,19 @@ public final class Walls implements Listener {
     /**
      * Players in range of [wall], seated players included (their own view may be beside it), as of this tick:
      * worked out for every wall at once, the first time any is asked about in a tick (see {@link #collectViewers}).
+     * The list is the wall's own and refilled next tick: read it, never keep it.
      */
     public List<Player> viewers(Wall wall) {
-        if (viewersTick != Bukkit.getCurrentTick()) collectViewers();
-        List<Player> out = viewersNow.get(wall);
-        return out != null ? out : viewersOf(wall, Bukkit.getOnlinePlayers().toArray(new Player[0]));
+        int tick = Bukkit.getCurrentTick();
+        if (viewersTick != tick) collectViewers();
+        // A wall placed since: its own.
+        if (wall.viewersTick != tick) {
+            wall.viewersTick = tick;
+            wall.viewers.clear();
+            double max = viewDistance * viewDistance;
+            for (Player p : Bukkit.getOnlinePlayers()) if (within(p, p.getWorld(), wall.map, max)) wall.viewers.add(p);
+        }
+        return wall.viewers;
     }
 
     /**
@@ -140,23 +152,40 @@ public final class Walls implements Listener {
      * reach of every player, and the screens' tick and the sender both want the answer.
      */
     private void collectViewers() {
-        viewersTick = Bukkit.getCurrentTick();
-        viewersNow.clear();
-        Player[] players = Bukkit.getOnlinePlayers().toArray(new Player[0]);
-        for (Wall wall : walls) viewersNow.put(wall, viewersOf(wall, players));
+        int tick = Bukkit.getCurrentTick();
+        viewersTick = tick;
+        if (walls.isEmpty()) return;
+        for (Wall wall : walls) {
+            wall.viewersTick = tick;
+            wall.viewers.clear();
+        }
+        double max = viewDistance * viewDistance;
+        for (Player p : Bukkit.getOnlinePlayers()) {
+            World world = p.getWorld();
+            for (Wall wall : walls) if (within(p, world, wall.map, max)) wall.viewers.add(p);
+        }
     }
 
-    private List<Player> viewersOf(Wall wall, Player[] players) {
-        Location c = wall.map.centre();
-        double max = viewDistance * viewDistance;
-        List<Player> out = new ArrayList<>();
-        for (Player p : players) {
-            if (p.getWorld() != wall.map.world) continue;
-            Location at = p.getLocation(scratch);
-            double dx = at.getX() - c.getX(), dy = at.getY() - c.getY(), dz = at.getZ() - c.getZ();
-            if (dx * dx + dy * dy + dz * dz <= max) out.add(p);
+    /** Whether [p], in [world], stands within the square root of [squared] blocks of [map]'s centre. Read straight off the entity: no Location made. */
+    private static boolean within(Player p, World world, MapWall map, double squared) {
+        return map.world == world && map.distanceSquared(p.getX(), p.getY(), p.getZ()) <= squared;
+    }
+
+    /** Whether [player] is near enough a wall to aim at it, from where they stand: no eye, ray or vector made. */
+    private boolean nearAny(Player player) {
+        World world = player.getWorld();
+        for (Wall wall : walls) {
+            // The eye is under 2 blocks above the feet.
+            double r = reach + wall.map.radius() + 2;
+            if (within(player, world, wall.map, r * r)) return true;
         }
-        return out;
+        return false;
+    }
+
+    private static boolean same(List<Player> a, List<Player> b) {
+        if (a.size() != b.size()) return false;
+        for (int i = 0; i < a.size(); i++) if (a.get(i) != b.get(i)) return false;
+        return true;
     }
 
     /** Every tick: who is in range of what, and where each player's crosshair is. */
@@ -165,8 +194,13 @@ public final class Walls implements Listener {
         for (Wall wall : walls) {
             // A frame can vanish (a /kill, another plugin); put it back.
             if (!wall.map.spawned() && wall.map.placeable()) wall.map.spawn(plugin);
+            // Usually nobody came or went, and who is in range stands.
+            List<Player> viewers = viewers(wall);
+            if (same(viewers, wall.counted)) continue;
+            wall.counted.clear();
+            wall.counted.addAll(viewers);
             Set<UUID> now = new HashSet<>();
-            for (Player p : viewers(wall)) now.add(p.getUniqueId());
+            for (Player p : viewers) now.add(p.getUniqueId());
             Set<UUID> before = inRange.put(wall, now);
             if (before != null) for (UUID id : before) {
                 if (now.contains(id)) continue;
@@ -174,8 +208,10 @@ public final class Walls implements Listener {
                 if (p != null) left(wall, p);
             }
         }
+        // No walls and nobody looking at one: nothing to aim at, and nothing to look away from.
+        if (walls.isEmpty() && looks.isEmpty()) return;
         for (Player p : Bukkit.getOnlinePlayers()) {
-            Look now = seated.test(p) ? null : aim(p);
+            Look now = seated.test(p) || !nearAny(p) ? null : aim(p);
             Look before = now == null ? looks.remove(p.getUniqueId()) : looks.put(p.getUniqueId(), now);
             // Each guarded: a content that throws must not cost every later wall and player their turn.
             try {

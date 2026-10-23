@@ -117,6 +117,17 @@ public final class MapWall {
         return new Location(world, centreX, centreY, centreZ);
     }
 
+    /** The square of the distance from (x, y, z) to the picture's centre: what every player's range and aim test, every tick. */
+    public double distanceSquared(double x, double y, double z) {
+        double dx = x - centreX, dy = y - centreY, dz = z - centreZ;
+        return dx * dx + dy * dy + dz * dz;
+    }
+
+    /** How far the picture's corners are from its centre, in blocks. */
+    public double radius() {
+        return Math.hypot(cols, rows) / 2;
+    }
+
     /** The world point at surface pixel (px, py), 128 pixels to a block, from the top-left. */
     public Vector pointAt(double px, double py) {
         return new Vector(centreX + rightX * (px / 128 - cols / 2.0), centreY + rows / 2.0 - py / 128, centreZ + rightZ * (px / 128 - cols / 2.0));

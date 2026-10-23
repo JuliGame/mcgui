@@ -243,6 +243,15 @@ wide for a default view). `/ui place <page> <cols> <rows> <name> <x> <y> <z>
   a task, nothing allocated. `Renders` keeps, per kind of job (a picture somebody waits for, a hover drawn ahead,
   the warm-up), how long the last 512 waited for a pool thread and ran. `RenderBudget` counts the renders it gave
   up. Anything new that runs every tick on the server thread belongs inside the metered tasks.
+- **Nothing runs at rest, and a quiet tick allocates next to nothing.** With nobody at a screen the send loop sleeps,
+  the arcade's loop is stopped, a cabinet nobody is in range of pauses, and the page loader threads time out.
+  A tick in which nobody comes, goes or changes what they look at reuses the last tick's lists: `Walls.viewers`
+  hands out the wall's own list (read it, never keep it), a player is tested against a wall from `Entity.getX`
+  and friends (a `Location` or `getEyeLocation` allocates, and `getLocation(Location)` makes a `WeakReference`),
+  `Walls.aim` runs only for players within reach of a wall, and `Framework.work` hands the sender a new list only
+  when it differs. The `idle`, `walls` and `views` cells show `uie_tick_bytes`: about 380 bytes a tick with
+  no screens at 0 to 100 players; still about 25 KB with 8 walls near 100 players (a `MapSender.Assignment` per
+  viewer per tick) and 34 KB with 50 idle views (mostly `Views.keepStill`'s entity lookup per view per tick).
 - **`python3 bench/bench.py` gives every part's headline numbers in one run** (`--quick` for a shorter one,
   `--only <cells>`, `--compare <earlier json>`; `--help` for the rest). It builds the plugin and the arcade
   example, waits for the machine to be quiet (`gate.sh`), and holds the timing lock throughout. Then it runs the
@@ -264,7 +273,7 @@ wide for a default view). `/ui place <page> <cols> <rows> <name> <x> <y> <z>
   | `latency` | one player at the market, the pointer moved by `/ui debug point` | ms until the hover's map patches reach them: cold, and after resting next to it |
   | `anim` | 1 and 10 players at `bench/pages/bench-anim.html` (a spinner, cards that fade) | cores, pool CPU, pictures a second, MB/s |
   | `deadline` | 40 hovering the market, 10 at the spinner, a busy loop on every core but one, while 10 more open a market with their name in it (a whole first picture each) | pictures given up, pictures' wait and run p50/p99/max |
-  | `arcade` | each game on a 16x9 cabinet playing itself, one player watching | CPU (game loop, pool, sender) and MB/s per game |
+  | `arcade` | four cabinets with nobody in range; then each game on a 16x9 cabinet playing itself, one player watching | CPU (game loop, pool, sender) at rest and per game, and MB/s per game |
 
   Client-side numbers (frame time, hover to screen in the real client) are not in it: they need Josh's PC and
   the probe agent (outside this repository).
@@ -340,13 +349,16 @@ wide for a default view). `/ui place <page> <cols> <rows> <name> <x> <y> <z>
   (20 a second, whatever the server's tick rate): raising the server's TPS
   would not make it send more often.
 - **Pictures skip the tick too.** `MapSender` runs on its own thread
-  (`UIEngine-send`). It wakes when a canvas publishes a drawing, or every
-  8 ms, and writes each player's patches straight to their channel with one
+  (`UIEngine-send`). It wakes when a canvas publishes a drawing, when who sees
+  what changes, or when a write lands; every 8 ms only while a picture is
+  still part sent (out of budget, or the connection full), and otherwise it
+  sleeps. It writes each player's patches straight to their channel with one
   flush (`Nms.writeNow`). `Connection.send` would not do: off the server
   thread it queues the packet until the next tick. `writeNow` drops the write
   while the player is being reconfigured (`isAcceptingMessages()` is false),
   when a game packet would fail to encode, and the tile is sent again later.
-  Who sees which canvas is still worked out once a tick on the server thread.
+  Who sees which canvas is still worked out once a tick on the server thread,
+  and handed to the sender only when it changed.
   Pointer reports reach `ViewContent.pointer` through
   `UIFramework.serverThread()`, the server's own task queue, which Paper
   drains while it waits for the next tick: still the server thread, but not up

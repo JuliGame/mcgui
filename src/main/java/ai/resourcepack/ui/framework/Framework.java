@@ -57,6 +57,9 @@ public final class Framework implements UIFramework, Listener {
     private Views views;
     private final List<BukkitTask> tasks = new ArrayList<>();
     private final TickMeter meter = new TickMeter();
+    /** This tick's assignments, made into a list kept for it; and the last handed to the sender, never changed after. Server thread. */
+    private final List<MapSender.Assignment> assigning = new ArrayList<>();
+    private List<MapSender.Assignment> assigned = List.of();
 
     public Framework(JavaPlugin plugin) {
         this.plugin = plugin;
@@ -137,7 +140,8 @@ public final class Framework implements UIFramework, Listener {
         walls.tick();
         // Views first: the sender spends each player's budget in this order, and a seated player sees
         // nothing but their view, so it must not wait behind walls.
-        List<MapSender.Assignment> out = new ArrayList<>();
+        List<MapSender.Assignment> out = assigning;
+        out.clear();
         views.assignments(out);
         for (Walls.Wall wall : walls.all()) {
             for (Player viewer : walls.viewers(wall)) {
@@ -152,7 +156,10 @@ public final class Framework implements UIFramework, Listener {
                 out.add(new MapSender.Assignment(viewer, wall.map(), canvas, hasPack(viewer) ? Canvas.Encoding.HI : Canvas.Encoding.PLAIN, null));
             }
         }
-        sender.update(out);
+        // Usually the same as last tick: the sender has it, and a canvas that publishes wakes it by itself.
+        if (out.equals(assigned)) return;
+        assigned = List.copyOf(out);
+        sender.update(assigned);
     }
 
     // ---------------------------------------------------------------- API

@@ -455,7 +455,11 @@ public final class Screens implements Listener {
     }
 
     void tick(long now) {
-        for (Wall w : walls.values()) for (Session s : w.all()) s.tick(now);
+        // Not through Wall.all(), which makes a list: this runs every tick.
+        for (Wall w : walls.values()) {
+            for (Session s : w.sessions.values()) s.tick(now);
+            if (w.sharedSession != null) w.sharedSession.tick(now);
+        }
         for (Seated s : views.values()) {
             s.session.tick(now);
             s.restHotbar();
