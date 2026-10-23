@@ -24,6 +24,10 @@ plugins draw into it. UI Engine, which shows HTML pages, is the first.
 - **Colour.** With the pack, maps carry YCbCr 4:2:0 in 240 map colours and the
   pack's text shader decodes them, smoothly scaled, unlit and unfogged. Without
   it, players get dithered vanilla map colours.
+- **Sounds.** Every `.ogg` in `plugins/UIFramework/sounds/` goes into the pack
+  as a sound named after its path: `sounds/menu/open.ogg` plays as
+  `uiframework:menu/open`, from `/playsound` or any plugin. Names are lower
+  case. Restart after adding one, so the pack is built again.
 
 ## Commands
 

@@ -13,6 +13,7 @@ import org.bukkit.entity.Player;
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
@@ -22,7 +23,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -31,11 +34,14 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Logger;
+import java.util.regex.Pattern;
+import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
 /**
- * Builds the resource pack (the map decoder, the seated-only HUD hiding, the pointer font), serves it
+ * Builds the resource pack (the map decoder, the seated-only HUD hiding, the pointer font, the server's
+ * own sounds), serves it
  * over plain HTTP if asked, and tracks which players have it loaded, so screens know whether to send
  * them hi-colour maps or plain ones.
  */
@@ -59,7 +65,9 @@ public final class ResourcePack implements AutoCloseable {
     public ResourcePack(Settings settings, Palette palette, Path dataFolder, Logger logger) throws IOException {
         this.settings = settings;
         this.logger = logger;
-        this.bytes = build(palette);
+        Path sounds = dataFolder.resolve("sounds");
+        Files.createDirectories(sounds);
+        this.bytes = build(palette, sounds, logger);
         this.sha1 = sha1(bytes);
         Files.createDirectories(dataFolder);
         Files.write(dataFolder.resolve("pack.zip"), bytes);
@@ -140,7 +148,7 @@ public final class ResourcePack implements AutoCloseable {
         executor = null;
     }
 
-    private static byte[] build(Palette palette) throws IOException {
+    private static byte[] build(Palette palette, Path sounds, Logger logger) throws IOException {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         try (ZipOutputStream zip = new ZipOutputStream(out)) {
             Entries e = new Entries(zip);
@@ -165,8 +173,39 @@ public final class ResourcePack implements AutoCloseable {
                     {"providers": [{"type": "bitmap", "file": "uiframework:font/pointer.png", "ascent": 7, "height": 16, "chars": ["%s"]}]}
                     """.formatted(chars));
             e.put("assets/uiframework/textures/font/pointer.png", png(pointerSheet()));
+            soundFiles(e, sounds, logger);
         }
         return out.toByteArray();
+    }
+
+    /** A sound's name: lower case, digits, {@code _ - . /}, as the game takes in a resource location. */
+    private static final Pattern SOUND_NAME = Pattern.compile("[a-z0-9_./-]+");
+
+    /**
+     * Every .ogg under [dir] (the sounds folder), as a sound event of its path without ".ogg":
+     * {@code sounds/menu/open.ogg} is {@code uiframework:menu/open}, for /playsound and for any plugin.
+     * Sorted, so the pack is the same bytes while the folder is.
+     */
+    private static void soundFiles(Entries e, Path dir, Logger logger) throws IOException {
+        List<Path> files;
+        try (Stream<Path> walk = Files.walk(dir)) {
+            files = walk.filter(f -> Files.isRegularFile(f) && f.getFileName().toString().endsWith(".ogg")).sorted().toList();
+        }
+        if (files.isEmpty()) return;
+        List<String> events = new ArrayList<>();
+        for (Path f : files) {
+            String name = dir.relativize(f).toString().replace(File.separatorChar, '/');
+            name = name.substring(0, name.length() - ".ogg".length());
+            if (!SOUND_NAME.matcher(name).matches()) {
+                logger.warning("Sound " + name + ".ogg left out: a sound's name may only have lower case letters, digits and _ - . /");
+                continue;
+            }
+            e.put("assets/uiframework/sounds/" + name + ".ogg", Files.readAllBytes(f));
+            events.add("  \"" + name + "\": {\"sounds\": [\"uiframework:" + name + "\"]}");
+        }
+        if (events.isEmpty()) return;
+        e.put("assets/uiframework/sounds.json", "{\n" + String.join(",\n", events) + "\n}\n");
+        logger.info("Sounds in the pack: " + events.size() + " (uiframework:<name>)");
     }
 
     /** Every pointer glyph side by side, the font's one row. */
