@@ -105,8 +105,11 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
   first band, which paints every box of the page; the other bands make none. Partial (hover) repaints are
   one painter, worked out by `html/Repaint` (which also grows the painted area by a backdrop's reach and
   keeps only the changed part: `RepaintTest` compares every hover with a fresh picture), painting on an
-  image of their own the size of the area, also unclipped (`HtmlRenderer.paintPart`): a clip cutting a
-  rounded box drew a seam along its edge. The new state is laid out first (`HtmlRenderer.layOver`), so a
+  image of their own, also unclipped (`HtmlRenderer.paintPart`): a clip cutting a rounded box drew a seam
+  along its edge. That image starts at the picture's left edge, not the area's: Java2D adds up a run's glyph
+  advances in floats from where it starts on the image, so text drawn from elsewhere could land a glyph a
+  pixel column over. A layer's filter is still only worked out round the area (`Painter.keeping`), unless
+  the page has a backdrop-filter. The new state is laid out first (`HtmlRenderer.layOver`), so a
   hover that shows a tooltip is painted once, over the old and new areas together (`paintOver`), not
   painted, found to reach further, and painted again. `sh gradlew renderBench` times a page's full render, its
   `Canvas.draw` and a hover repaint.

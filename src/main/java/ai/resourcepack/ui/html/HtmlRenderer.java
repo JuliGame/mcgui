@@ -190,13 +190,17 @@ public final class HtmlRenderer {
     }
 
     /**
-     * Paints [clip] of the picture on an image of its own, just that big, and copies [keep] of it into [img]; the rest
-     * of [img] is left as it was, also when the budget gives up. As for a band of a whole picture ({@link #paintBands}),
-     * no clip is in force: the image's edges stop the drawing. Java2D intersects a clip with the clip of a box with
-     * rounded corners (its background, its overflow) a pixel differently from that box's clip alone, which showed as a
-     * seam along the edge of every such box a hover's rectangle cut (up to 113 levels on the market page). Text can
-     * still land a glyph on another fraction of a pixel than in a whole picture does (Java2D adds up advances in floats
-     * from where the image starts): a glyph a pixel column over now and then, not a seam. Returns every hit region.
+     * Paints [clip] of the picture on an image of its own and copies [keep] of it into [img]; the rest of [img] is left
+     * as it was, also when the budget gives up. As for a band of a whole picture ({@link #paintBands}), no clip is in
+     * force: the image's edges stop the drawing. Java2D intersects a clip with the clip of a box with rounded corners
+     * (its background, its overflow) a pixel differently from that box's clip alone, which showed as a seam along the
+     * edge of every such box a hover's rectangle cut (up to 113 levels on the market page). The image starts at the
+     * picture's left edge, as a band does, not at the clip's: Java2D adds up a run of text's glyph advances in floats
+     * from where the run starts on the image, so text in an image starting elsewhere landed a glyph a pixel column over
+     * now and then (the market page's pixel font, by 255). The columns left of the clip are painted too, but a layer's
+     * filter is only worked out round the clip ({@link Painter#keeping}): a quarter more CPU than painting the clip alone
+     * on the vanilla pages. A page with a backdrop-filter reads them as painted, which costs twice as much (the market
+     * page: 115 ms of CPU against 49), mostly while drawing ahead. Returns every hit region.
      */
     private static List<Painter.Hit> paintPart(Page page, Box root, BufferedImage img, java.awt.geom.Rectangle2D clip, java.awt.geom.Rectangle2D keep,
                                                double scale, double vw, double vh, double scroll, RenderBudget budget) {
@@ -216,12 +220,13 @@ public final class HtmlRenderer {
             }
             return painter.hits;
         }
-        BufferedImage part = PixelPool.image(x1 - x0, y1 - y0, BufferedImage.TYPE_INT_ARGB_PRE);
+        BufferedImage part = PixelPool.image(x1, y1 - y0, BufferedImage.TYPE_INT_ARGB_PRE);
         try {
             Graphics2D g = part.createGraphics();
-            g.translate(-x0, -y0);
+            g.translate(0, -y0);
             g.scale(scale, scale);
-            Painter painter = new Painter(page.shaper, page, vw, vh, scroll, budget).origin(x0, row(scroll, scale) + y0);
+            Painter painter = new Painter(page.shaper, page, vw, vh, scroll, budget).origin(0, row(scroll, scale) + y0);
+            if (!Painter.backdrops(root)) painter.keeping(new java.awt.Rectangle(x0, 0, x1 - x0, y1 - y0));
             try {
                 painter.paint(g, root, part, scale);
             } finally {
@@ -230,8 +235,7 @@ public final class HtmlRenderer {
             int kx0 = Math.max(x0, (int) Math.floor(keep.getX() * scale)), ky0 = Math.max(y0, (int) Math.floor(keep.getY() * scale));
             int kx1 = Math.min(x1, (int) Math.ceil(keep.getMaxX() * scale)), ky1 = Math.min(y1, (int) Math.ceil(keep.getMaxY() * scale));
             int[] from = ((DataBufferInt) part.getRaster().getDataBuffer()).getData(), to = ((DataBufferInt) img.getRaster().getDataBuffer()).getData();
-            int stride = x1 - x0;
-            for (int y = ky0; y < ky1; y++) System.arraycopy(from, (y - y0) * stride + kx0 - x0, to, y * width + kx0, kx1 - kx0);
+            for (int y = ky0; y < ky1; y++) System.arraycopy(from, (y - y0) * x1 + kx0, to, y * width + kx0, kx1 - kx0);
             return painter.hits;
         } finally {
             PixelPool.give(part);
