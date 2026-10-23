@@ -231,6 +231,40 @@ are bundled, all under the SIL Open Font License (`fonts/*-OFL.txt`).
 Not supported: JavaScript, WOFF fonts, WebP images, video, iframes, floats
 (floated boxes stay in the flow), typing into inputs.
 
+## Fast pages
+
+A hover is quick when the engine can redraw only the part of the page that
+changed, and quicker still when it drew that hover before the pointer got there
+(`hover-ahead`, the four hovers nearest where the pointer rests). Then a hover
+shows in about 40 ms in game, most of it the client's own 50 ms wait between
+reports of where the player is looking. A page that loses both is redrawn whole
+on every hover: 100 to 300 ms on a busy page, which players feel as the pointer
+arriving before the highlight does. What decides it:
+
+- **Any `transition` or `animation` turns both off, for the whole page**, used or
+  not: one `transition: opacity .2s` on one button is enough (`Page.moves`). The
+  page is then drawn whole on every hover and every animation frame. Leave hovers
+  instant on a page with a lot on it, and put what animates on a page of its own.
+- **`:hover` with `+` or `~` turns drawing ahead off** (`.card:hover + .label`),
+  as the hover can then change things outside the hovered element. Put the part
+  that changes inside it instead (`.card:hover .label`).
+- **Tooltips, lifts and highlights are cheap.** Showing a hidden element
+  (`display: none` to shown), `z-index`, colours, borders and shadows on hover all
+  redraw only round the change. Give a tooltip `pointer-events: none`, or one that
+  covers its neighbours stops the pointer from reaching them.
+- **Blur is the costliest thing there is to draw.** `filter: blur()` or
+  `backdrop-filter` over a large area makes every redraw near it slower, and a
+  `backdrop-filter` widens each hover's redraw to its reach. Drawing ahead hides
+  that cost, so it bites on pages that have also lost drawing ahead. A background
+  that is only ever blurred is cheaper as an image that is blurred already.
+- **Keep targets a reasonable size.** Only four hovers are drawn ahead, so in a
+  dense grid of small targets fewer of the pointer's next stops are ready.
+
+`sh gradlew hoverCost -Ppages=path/to/page.html` prints what each hover on a
+page costs to redraw and how many fell back to a whole redraw (`not partial`). It
+calls the redraw directly, so it does not see the two switches above: check for
+those by eye.
+
 ## For plugin developers
 
 Add `depend: [UIEngine]` to your `plugin.yml` and compile against the plugin

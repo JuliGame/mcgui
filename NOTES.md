@@ -123,6 +123,9 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
   hover that shows a tooltip is painted once, over the old and new areas together (`paintOver`), not
   painted, found to reach further, and painted again. `sh gradlew renderBench` times a page's full render, its
   `Canvas.draw` and a hover repaint.
+  What page authors can do about all this (and the two switches that turn partial repaints or drawing ahead
+  off for a whole page, `Page.moves` and `Page.siblingStates`, checked in `Session` and not by `hoverCost`,
+  which calls `Repaint.partial` directly) is in the README's "Fast pages".
 - **A scroll is cut from a taller picture** (`html/ScrollCache`): the first
   notch paints up to four views of the page round the view (more ahead of the
   scroll than behind), and later notches copy the view's rows out of it, since
