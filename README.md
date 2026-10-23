@@ -49,8 +49,9 @@ it. See [For plugin developers](#for-plugin-developers).
 | `/ui list` · `/ui reload` | Pages and screens · read the config and every page again |
 | `/ui test wall\|view [cols] [rows] [player]` | Puts a test picture on the wall you look at, or opens one fullscreen: the framework working with no page at all |
 | `/ui fov <degrees>` | Fits views to your FOV setting, for players without the pack (the server cannot read it) |
+| `/ui pointer [speed]` | Your pointer speed in views, 0.25 to 4 times the server's (`views.pointer-speed`); without a number, shows it and the mouse sensitivity read from your turning |
 | `/ui pack` · `stats` · `clear` | Re-send the pack · walls and bytes sent · remove test walls |
-| `/ui debug <player> point <x> <y>` · `click` · `scroll <n>` · `close` | Drive a player's view from the console |
+| `/ui debug <player> point <x> <y>` · `click` · `scroll <n>` · `speed` · `close` | Drive a player's view from the console; `speed` shows its pointer speed and where it came from |
 
 ### Permissions
 
@@ -74,6 +75,7 @@ node as well.
 | `uiengine.debug` | `/ui debug` on your own view | op |
 | `uiengine.debug.others` | `/ui debug` on another player's view | op |
 | `uiengine.fov` | `/ui fov` | everyone |
+| `uiengine.pointer` | `/ui pointer` | everyone |
 | `uiengine.pack` | `/ui pack` | everyone |
 | `uiengine.admin` | all of the above, in one line | op |
 
@@ -90,6 +92,41 @@ placeholders filled in for them. Left-click a wall screen to click the
 page; right-click it to sit down at that page fullscreen
 (`walls.right-click-fullscreen`). Fullscreen pages fill the whole window,
 whatever its shape and the player's FOV.
+
+## Pointer speed
+
+A fullscreen page's pointer moves a fixed distance for each step the mouse
+reports (a *count*), the way a desktop pointer does, whatever the player's
+Minecraft mouse sensitivity. `views.pointer-speed` in `config.yml` sets it:
+
+| `views.pointer-speed` | Counts to cross the view | At 800 DPI | At 1600 DPI |
+|---|---|---|---|
+| 1.0 (a desktop pointer at Windows' default speed on a 1920-pixel-wide screen) | 1920 | 6.1 cm | 3.0 cm |
+| **1.5 (default)** | 1280 | 4.1 cm | 2.0 cm |
+| 2.0 | 960 | 3.0 cm | 1.5 cm |
+
+Each player can scale it for themselves with `/ui pointer <0.25 to 4>`.
+
+Minecraft never tells the server a player's sensitivity, and no mouse ever
+tells anybody its DPI, so neither can be asked for. But the client turns the
+head by a whole number of counts times a step that depends only on the
+sensitivity: `1.2 × (0.6 s + 0.2)³` degrees, for the option's `s` from 0 to 1
+(shown in the game as 0 to 200%). Every change of pitch the client sends is a
+whole multiple of that step, so UI Engine reads the step off the pitch of
+every online player as they play, in a fraction of a second of looking around,
+and remembers it on the player. Turns the server makes (teleports, respawns,
+a view turning the player back inside the picture) are left out. Until it
+knows, it assumes the game's default sensitivity (100%). It cannot read a
+sensitivity while the turns are not whole counts (smooth camera on, a trackpad
+sending fractions), and then keeps the last one it read. DPI stays the
+player's own: like a desktop pointer, a higher DPI mouse moves it further for
+the same hand movement.
+
+With the pack the pointer is wherever the player looks (their client places
+it every frame), so the view has to fit inside the turn a head can make: the
+pointer is never slower than half the view's height per 75° of pitch. At the
+default speed that only makes a difference above about 120% sensitivity, where
+the pointer is faster than asked.
 
 ## In a page
 

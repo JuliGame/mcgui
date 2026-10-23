@@ -30,7 +30,7 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * The framework's part of /ui: test wall [cols] [rows] · test view [cols] [rows] · fov &lt;degrees&gt; · pack · stats · clear
+ * The framework's part of /ui: test wall [cols] [rows] · test view [cols] [rows] · fov &lt;degrees&gt; · pointer [speed] · pack · stats · clear
  *
  * <p>The test picture is drawn with plain Java2D: a gradient, some text and one button that lights up
  * under the pointer and counts clicks. It is how to see the engine working without any other plugin.
@@ -44,7 +44,7 @@ public final class FrameworkCommand implements TabExecutor {
     private final List<WallScreen> testWalls = new ArrayList<>();
 
     /** Every subcommand, in the order help and tab completion list them. */
-    public static final List<String> SUBCOMMANDS = List.of("test", "fov", "pack", "stats", "clear", "debug");
+    public static final List<String> SUBCOMMANDS = List.of("test", "fov", "pointer", "pack", "stats", "clear", "debug");
 
     public FrameworkCommand(Framework plugin) {
         this.plugin = plugin;
@@ -85,6 +85,7 @@ public final class FrameworkCommand implements TabExecutor {
                     say(sender, "FOV is a whole number from 30 to 110.", NamedTextColor.RED);
                 }
             }
+            case "pointer" -> pointer(sender, args);
             case "pack" -> {
                 if (sender instanceof Player p && plugin.pack() != null) plugin.pack().send(p);
             }
@@ -96,9 +97,33 @@ public final class FrameworkCommand implements TabExecutor {
                 say(sender, "Removed " + testWalls.size() + " test wall(s).", NamedTextColor.GREEN);
                 testWalls.clear();
             }
-            default -> say(sender, "/ui test wall|view [cols] [rows] · fov <degrees> · pack · stats · clear", NamedTextColor.GRAY);
+            default -> say(sender, "/ui test wall|view [cols] [rows] · fov <degrees> · pointer [speed] · pack · stats · clear", NamedTextColor.GRAY);
         }
         return true;
+    }
+
+    /** /ui pointer [speed]: how fast the pointer moves in your views, as a multiple of the server's speed. */
+    private void pointer(CommandSender sender, String[] args) {
+        if (!(sender instanceof Player p)) {
+            say(sender, "Only players have a mouse.", NamedTextColor.RED);
+            return;
+        }
+        if (args.length < 2) {
+            double sensitivity = plugin.views().sensitivityOf(p);
+            String read = Double.isNaN(sensitivity) ? "Your mouse sensitivity is not known yet: look up and down a little."
+                    : "Your mouse sensitivity reads as " + Math.round(sensitivity * 200) + "%, so a view moves the pointer as far per bit of mouse travel whatever it is.";
+            say(sender, String.format(Locale.ROOT, "Your pointer speed is %.2f. %s Set it with /ui pointer <0.25 to 4> (1 is the server's).",
+                    plugin.views().pointerSpeedOf(p), read), NamedTextColor.GRAY);
+            return;
+        }
+        try {
+            double speed = Double.parseDouble(args[1]);
+            if (!(speed >= 0.25 && speed <= 4)) throw new NumberFormatException();
+            plugin.views().setPointerSpeed(p, speed);
+            say(sender, String.format(Locale.ROOT, "Your pointer speed is now %.2f, from the next view you open.", speed), NamedTextColor.GREEN);
+        } catch (NumberFormatException e) {
+            say(sender, "Pointer speed is a number from 0.25 to 4.", NamedTextColor.RED);
+        }
     }
 
     private void test(CommandSender sender, String[] args) {
@@ -131,14 +156,14 @@ public final class FrameworkCommand implements TabExecutor {
     }
 
     /**
-     * /ui debug &lt;player&gt; point &lt;x&gt; &lt;y&gt; | click [right] | scroll &lt;notches&gt; | close: drive a
+     * /ui debug &lt;player&gt; point &lt;x&gt; &lt;y&gt; | click [right] | scroll &lt;notches&gt; | speed | close: drive a
      * player's view from the console, for testing without anybody at the mouse.
      */
     private void debug(CommandSender sender, String[] args) {
         Player p = args.length > 1 ? org.bukkit.Bukkit.getPlayerExact(args[1]) : null;
         View view = p == null ? null : plugin.viewOf(p);
         if (view == null || args.length < 3) {
-            say(sender, "/ui debug <player> point <x> <y> | click [right] | scroll <n> | close (the player needs an open view)", NamedTextColor.RED);
+            say(sender, "/ui debug <player> point <x> <y> | click [right] | scroll <n> | speed | close (the player needs an open view)", NamedTextColor.RED);
             return;
         }
         if (p != sender && !permitted(sender, othersPermissionFor("debug"))) return;
@@ -146,8 +171,9 @@ public final class FrameworkCommand implements TabExecutor {
             case "point" -> plugin.views().debugPoint(p, parse(args, 3, 0, 1 << 14), parse(args, 4, 0, 1 << 14));
             case "click" -> view.content().click(view, view.pointerX(), view.pointerY(), args.length > 3 ? Click.RIGHT : Click.LEFT);
             case "scroll" -> view.content().scroll(view, view.pointerX(), view.pointerY(), parse(args, 3, 1, 64));
+            case "speed" -> say(sender, plugin.views().pointerSpeedReport(p), NamedTextColor.GRAY);
             case "close" -> view.close();
-            default -> say(sender, "point, click, scroll or close", NamedTextColor.RED);
+            default -> say(sender, "point, click, scroll, speed or close", NamedTextColor.RED);
         }
         say(sender, "pointer " + view.pointerX() + "," + view.pointerY() + " shown=" + view.shown(), NamedTextColor.GRAY);
     }
