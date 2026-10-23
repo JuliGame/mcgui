@@ -234,26 +234,47 @@ public final class Painter {
         } else {
             bordersOnly(g, box, x, y);
         }
+        // The positioned children are found first, without painting, so that those with a negative
+        // z-index go under the normal flow, as CSS stacks them (a backdrop behind a page's own text).
         List<Deferred> deferred = new ArrayList<>();
         Shape clip = g.getClip();
-        flow(g, box, x, y, deferred);
+        collecting = true;
+        try {
+            flow(g, box, x, y, deferred);
+        } finally {
+            collecting = false;
+        }
         g.setClip(clip);
         deferred.sort((a, b) -> {
-            int za = a.box.style.zIndex == null ? 0 : a.box.style.zIndex, zb = b.box.style.zIndex == null ? 0 : b.box.style.zIndex;
+            int za = zIndex(a), zb = zIndex(b);
             return za != zb ? Integer.compare(za, zb) : Integer.compare(a.order, b.order);
         });
-        // Negative z-index first would belong under the flow; painting them here in order is close enough
-        // for pages, which use negative z-index for decorations behind their own siblings.
-        for (Deferred d : deferred) {
-            Shape old = g.getClip();
-            Shape oldPage = pageClip;
-            g.setClip(d.clip);
-            pageClip = d.pageClip;
-            context(g, d.box, d.x, d.y);
-            g.setClip(old);
-            pageClip = oldPage;
-        }
+        int i = 0;
+        for (; i < deferred.size() && zIndex(deferred.get(i)) < 0; i++) paintDeferred(g, deferred.get(i));
+        flow(g, box, x, y, null);
+        g.setClip(clip);
+        for (; i < deferred.size(); i++) paintDeferred(g, deferred.get(i));
     }
+
+    private static int zIndex(Deferred d) {
+        return d.box.style.zIndex == null ? 0 : d.box.style.zIndex;
+    }
+
+    private void paintDeferred(Graphics2D g, Deferred d) {
+        Shape old = g.getClip();
+        Shape oldPage = pageClip;
+        g.setClip(d.clip);
+        pageClip = d.pageClip;
+        context(g, d.box, d.x, d.y);
+        g.setClip(old);
+        pageClip = oldPage;
+    }
+
+    /**
+     * True while {@link #flow} is only finding a stacking context's positioned children: it walks the
+     * same boxes with the same clips, and paints and records nothing.
+     */
+    private boolean collecting;
 
     /**
      * Layers nested deeper than this are not made: such a box is painted straight onto the layer
@@ -645,7 +666,10 @@ public final class Painter {
         return c.style.isPositioned() || c.style.createsStackingContext();
     }
 
-    /** The normal flow inside [box]: block children, then lines, collecting positioned ones. */
+    /**
+     * The normal flow inside [box]: block children, then lines. While {@link #collecting} it paints
+     * nothing and adds the positioned boxes to [deferred]; otherwise it paints and skips them.
+     */
     private void flow(Graphics2D g, Box box, double x, double y, List<Deferred> deferred) {
         Shape savedClip = g.getClip();
         Shape savedPageClip = pageClip;
@@ -655,24 +679,24 @@ public final class Painter {
             Shape pageShape = pageTx.createTransformedShape(inner);
             pageClip = pageClip == null ? pageShape : intersect(pageClip, pageShape);
         }
-        if (box.marker != null) marker(g, box, x, y);
+        if (box.marker != null && !collecting) marker(g, box, x, y);
         for (Box c : box.children) {
             if (c.isText() || c.inner == Box.Inner.BREAK) continue;
             if (c.isInline()) {
-                collectInline(g, c, x, y, deferred);
+                if (collecting) collectInline(g, c, x, y, deferred);
                 continue;
             }
             if (c.atomic && box.lines != null && !deferredBox(c)) continue; // painted with its line
             double cx = x + c.x, cy = y + c.y;
             if (deferredBox(c)) {
-                deferred.add(new Deferred(c, cx, cy, g.getClip(), pageClip, deferred.size()));
+                if (collecting) deferred.add(new Deferred(c, cx, cy, g.getClip(), pageClip, deferred.size()));
                 continue;
             }
             if (c.style.hidden() && c.children.isEmpty()) continue;
-            background(g, c, cx, cy);
+            if (!collecting) background(g, c, cx, cy);
             flow(g, c, cx, cy, deferred);
         }
-        if (box.lines != null) lines(g, box, x, y, deferred);
+        if (box.lines != null && !collecting) lines(g, box, x, y);
         g.setClip(savedClip);
         pageClip = savedPageClip;
     }
@@ -697,7 +721,7 @@ public final class Painter {
 
     // ---------------------------------------------------------------- lines
 
-    private void lines(Graphics2D g, Box block, double x, double y, List<Deferred> deferred) {
+    private void lines(Graphics2D g, Box block, double x, double y) {
         // Inline boxes' backgrounds and borders under the text.
         inlineDecorations(g, block, x, y);
         for (Box.Line line : block.lines) {
