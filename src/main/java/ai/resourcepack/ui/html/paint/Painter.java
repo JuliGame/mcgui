@@ -328,15 +328,56 @@ public final class Painter {
             ox += part.x;
             oy += part.y;
         }
+        double grid = Filters.gridBlur(box.style.filter, box.style, deviceScale);
+        if (grid > 0) {
+            BufferedImage small = gridBlurred(img, ox, oy, grid);
+            PixelPool.give(img);
+            int k = Blur.step(grid), gx = Math.floorDiv(originX + ox, k) * k - originX, gy = Math.floorDiv(originY + oy, k) * k - originY;
+            blend(g, small, gx, gy, small.getWidth() * k, small.getHeight() * k, (float) box.style.opacity);
+            PixelPool.give(small);
+            return;
+        }
         Filters.apply(img, box.style.filter, deviceScale, box.style, budget);
+        blend(g, img, ox, oy, img.getWidth(), img.getHeight(), (float) box.style.opacity);
+        PixelPool.give(img);
+    }
+
+    /** Draws [img] at ([x], [y]) on the surface, [w] x [h] (scaled up smoothly if bigger), at [opacity]. */
+    private static void blend(Graphics2D g, BufferedImage img, int x, int y, int w, int h, float opacity) {
         AffineTransform saved = g.getTransform();
         g.setTransform(new AffineTransform());
         Composite old = g.getComposite();
-        g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, (float) box.style.opacity));
-        g.drawImage(img, ox, oy, null);
+        g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, opacity));
+        if (w == img.getWidth() && h == img.getHeight()) {
+            g.drawImage(img, x, y, null);
+        } else {
+            Object interpolation = g.getRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION);
+            g.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION, java.awt.RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+            g.drawImage(img, x, y, w, h, null);
+            if (interpolation != null) g.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION, interpolation);
+        }
         g.setComposite(old);
         g.setTransform(saved);
-        PixelPool.give(img);
+    }
+
+    /**
+     * [img], a layer whose top-left is at ([ox], [oy]) on the surface, blurred by [sigma] on a grid fixed to the page
+     * ({@link Filters#gridBlur}): out to whole cells of the grid (the edge pixels carrying on), worked out [k] times
+     * smaller ({@link Blur#blurredCopy}), to draw [k] times bigger from the cell its top-left falls in. So a band, a
+     * rectangle repaint and a whole picture blur alike wherever they start, as a backdrop does.
+     */
+    private BufferedImage gridBlurred(BufferedImage img, int ox, int oy, double sigma) {
+        int k = Blur.step(sigma), w = img.getWidth(), h = img.getHeight();
+        int px = originX + ox, py = originY + oy;
+        int gx = Math.floorDiv(px, k) * k - px, gy = Math.floorDiv(py, k) * k - py;
+        int gw = Math.floorDiv(px + w + k - 1, k) * k - px - gx, gh = Math.floorDiv(py + h + k - 1, k) * k - py - gy;
+        BufferedImage cells = PixelPool.image(gw, gh, img.getType());
+        int[] from = pixels(img), to = pixels(cells);
+        for (int y = 0; y < h; y++) System.arraycopy(from, y * w, to, (y - gy) * gw - gx, w);
+        Filters.extend(to, gw, gh, -gx, -gy, w, h);
+        BufferedImage small = Blur.blurredCopy(cells, sigma, k, budget);
+        PixelPool.give(cells);
+        return small;
     }
 
     /** The [part] of [img], as an image of its own of the same type (Blur and Filters work on a whole pixel array), from this thread's pool. */
@@ -416,9 +457,9 @@ public final class Painter {
         reach.backdrop |= own.backdrop;
         reach.add(own.area, 0);
         // A filter blur (sigma, device px) spreads everything inside, blurs included, about three sigma further;
-        // Blur's three boxes reach a pixel or so more each.
+        // Blur's three boxes reach a pixel or so more each, and a grid blur a cell or two more.
         double filter = Filters.blurRadius(s.filter, s) * deviceScale;
-        reach.blur = Math.max(reach.blur, own.blur + (filter > 0 ? 3 * filter + 4 : 0));
+        reach.blur = Math.max(reach.blur, own.blur + (filter > 0 ? Math.max(3 * filter + 4, Filters.reach(s.filter, s, deviceScale) + 2) : 0));
     }
 
     /** How far (device px) a blurred shadow spreads past its shape, as {@link Shadows#blurred} pads it. */
@@ -954,9 +995,14 @@ public final class Painter {
         int reach = 0;
         for (Style s : styles) {
             if (!s.backdropFilter.equals("none")) reach = Math.max(reach, Filters.backdropPad(Filters.backdropBlur(s), scale));
-            if (!s.filter.equals("none")) reach = Math.max(reach, (int) Math.ceil(3 * Filters.blurRadius(s.filter, s) * scale) + 2);
+            if (!s.filter.equals("none")) reach = Math.max(reach, Filters.reach(s.filter, s, scale));
         }
         return reach;
+    }
+
+    /** How far (CSS px) [s]'s filter blurs reach past what they draw, and read past what they make, at [scale]. */
+    public static double filterReach(Style s, double scale) {
+        return s.filter.equals("none") ? 0 : Filters.reach(s.filter, s, scale) / scale;
     }
 
     static int[] pixels(BufferedImage img) {

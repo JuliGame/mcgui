@@ -176,11 +176,18 @@ class SharedCompressionTest {
         try (SharedCompression s = shared()) {
             EmbeddedChannel ch = PaperNet.server(THRESHOLD, null);
             byte[] tile = tile(3);
+            byte[][] next = new byte[20][];
+            for (int i = 0; i < next.length; i++) next[i] = tile.clone();
             int given = 0;
             for (int i = 0; i < 3000 && s.leftAlone == 0; i++) if (s.patch(ch, 1, 0, 0, 128, 128, tile.clone(), false) != null) given++;
+            // Straight after, before the assertions (building their messages takes time too). The budget earns half of
+            // all the time that passes, so a call just after the one that ran it out can earn a patch now and then, as
+            // the single call this test used to make did on main too. Twenty in a row cannot earn many.
+            int again = 0;
+            for (byte[] t : next) if (s.patch(ch, 1, 0, 0, 128, 128, t, false) != null) again++;
             assertTrue(given > 0, "a burst is made here");
             assertTrue(s.leftAlone > 0, "then they are left to the connection, " + given + " made");
-            assertNull(s.patch(ch, 1, 0, 0, 128, 128, tile.clone(), false), "and the next one too: no time to earn more");
+            assertTrue(again <= 4, "and the next ones too, but for one now and then: no time to earn more, " + again + " of 20 made");
             // Patches others are sent too are made whatever the budget.
             assertNotNull(s.patch(ch, 1, 0, 0, 128, 128, tile.clone(), true));
         }

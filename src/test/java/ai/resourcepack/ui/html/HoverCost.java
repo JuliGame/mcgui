@@ -23,7 +23,7 @@ import java.util.Set;
  * changed rectangle (what is left). For each hover target of each page (LoadBench's list, at its 2048 x 1152
  * view), from the picture with nothing hovered: on (none to the target) and off (the target to none).
  * CPU and allocation are the calling thread's (ThreadMXBean), so a busy machine does not move them.
- * Args: page specs as LoadBench takes them (default pages:menu, pages:shop and every sample); -Druns=<n>.
+ * Args: page specs as LoadBench takes them, or paths of page files (default pages:menu, pages:shop and every sample); -Druns=<n>.
  */
 public final class HoverCost {
     public static void main(String[] args) throws Exception {
@@ -38,12 +38,14 @@ public final class HoverCost {
         System.out.println("page targets | repaint cpu ms p50/p90/max | lay-only cpu ms p50 | repaint alloc MB p50 | draw wall ms p50/p90 | tiles p50 | not partial"
                 + " | drawn ahead: cpu ms p50, alloc MB p50/p90, apply wall ms p50/max");
         for (String spec : specs) {
-            Path file = spec.startsWith("samples:") ? samples.resolve(spec.substring(8) + ".html") : shipped.resolve(spec.substring(6) + ".html");
+            Path file = spec.startsWith("samples:") ? samples.resolve(spec.substring(8) + ".html")
+                    : spec.startsWith("pages:") ? shipped.resolve(spec.substring(6) + ".html") : Path.of(spec);
             Page page = Page.load(file, loader);
             LoadBench.Prep prep = new LoadBench.Prep(page);
             List<Double> cpu = new ArrayList<>(), lay = new ArrayList<>(), alloc = new ArrayList<>(), draw = new ArrayList<>(), tiles = new ArrayList<>(),
                     pcpu = new ArrayList<>(), palloc = new ArrayList<>(), apply = new ArrayList<>();
             int failed = 0;
+            java.util.Map<Repaint.Why, Integer> whys = new java.util.EnumMap<>(Repaint.Why.class);
             Canvas canvas = new Canvas(palette, LoadBench.W / 128, LoadBench.H / 128, () -> {});
             for (int round = 0; round < runs + 2; round++) {
                 boolean count = round >= 2;
@@ -66,7 +68,10 @@ public final class HoverCost {
                         Repaint.Result r = Repaint.partial(page, d, LoadBench.W, LoadBench.H, LoadBench.SCALE, 0, state, before, moved, 0);
                         long c1 = mx.getThreadCpuTime(me), a1 = mx.getThreadAllocatedBytes(me);
                         if (r.frame() == null) {
-                            if (count) failed++;
+                            if (count) {
+                                failed++;
+                                whys.merge(r.why(), 1, Integer::sum);
+                            }
                             break;
                         }
                         Rectangle2D ch = r.changed();
@@ -105,8 +110,9 @@ public final class HoverCost {
                     }
                 }
             }
-            System.out.printf("%-20s %3d | %6.1f %6.1f %6.1f | %6.1f | %5.1f | %5.1f %5.1f | %3.0f | %d | %6.1f %5.1f %5.1f %5.2f %5.2f%n", spec, prep.targets.size(), q(cpu, .5), q(cpu, .9), q(cpu, 1),
-                    q(lay, .5), q(alloc, .5), q(draw, .5), q(draw, .9), q(tiles, .5), failed, q(pcpu, .5), q(palloc, .5), q(palloc, .9), q(apply, .5), q(apply, 1));
+            String name = spec.contains("/") ? Path.of(spec).getFileName().toString() : spec;
+            System.out.printf("%-20s %3d | %6.1f %6.1f %6.1f | %6.1f | %5.1f | %5.1f %5.1f | %3.0f | %d %s | %6.1f %5.1f %5.1f %5.2f %5.2f%n", name, prep.targets.size(), q(cpu, .5), q(cpu, .9), q(cpu, 1),
+                    q(lay, .5), q(alloc, .5), q(draw, .5), q(draw, .9), q(tiles, .5), failed, whys, q(pcpu, .5), q(palloc, .5), q(palloc, .9), q(apply, .5), q(apply, 1));
         }
         System.exit(0);
     }

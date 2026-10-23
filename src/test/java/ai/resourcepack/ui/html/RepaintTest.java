@@ -172,4 +172,181 @@ class RepaintTest {
         check("stripes", Page.of("<html><head><style>" + ScrollCacheTest.STRIPES_CSS + "</style></head><body>" + ScrollCacheTest.STRIPES_BODY + "</body></html>",
                 Path.of("stripes.html").toAbsolutePath(), OFFLINE), 3);
     }
+
+    /**
+     * The vanilla example pages' shape: a blurred picture behind the whole page, slots that show a tooltip on hover
+     * ({@code display}, so boxes appear and go), and a strip with rounded corners and a tiled gradient under them
+     * at a fractional height, which a hover's rectangle cuts. Every hover was a whole picture before (TOO_BIG for
+     * the blur, LAYOUT_MOVED for the tooltip); cut by a clip, the strip's rounded edge drew a seam (56 levels).
+     */
+    static final String TOOLTIPS = "<html><head><style>html,body{margin:0;height:100%;overflow:hidden;background:#000}"
+            + ".pano{position:absolute;left:-24px;top:-24px;right:-24px;bottom:-24px;filter:blur(10px);"
+            + "background:linear-gradient(90deg,#000 0 30%,#fff 30% 60%,#f80 60%),linear-gradient(#08f,#0f8)}"
+            + ".shelf{position:absolute;left:40px;top:120.3px;width:900px;height:160.7px}"
+            + ".shelf::after{content:'';position:absolute;left:0;right:0;bottom:0;height:18px;border-radius:3px;"
+            + "background:repeating-linear-gradient(90deg,#a63 0 13px,#531 13px 32px);box-shadow:0 10px 14px rgba(0,0,0,.55)}"
+            + ".slot{position:relative;display:inline-block;width:120px;height:110px;margin:0 10px;border-radius:10px;"
+            + "background:linear-gradient(180deg,rgba(0,0,0,.45),rgba(0,0,0,.2));border:2px solid rgba(255,255,255,.07)}"
+            + ".slot:hover{z-index:5;border-color:rgba(255,181,71,.6)}"
+            + ".tip{display:none;position:absolute;left:60%;top:-14px;z-index:10;padding:6px 9px;white-space:nowrap;background:#100010;"
+            + "border:2px solid #5000ff;box-shadow:0 10px 22px rgba(0,0,0,.55);color:#fff;font-size:20px}"
+            + ".slot:hover .tip{display:block}"
+            + "</style></head><body><div class=pano></div><div class=shelf>"
+            + "<div class=slot><div class=tip>One<br>first</div></div><div class=slot><div class=tip>Two<br>second</div></div>"
+            + "<div class=slot><div class=tip>Three<br>third</div></div><div class=slot><div class=tip>Four<br>fourth</div></div>"
+            + "<div class=slot><div class=tip>Five<br>fifth</div></div></div></body></html>";
+
+    @Test
+    void tooltipsOverABlurredPictureArePartialAndMatch() {
+        Walk w = walk(Page.of(TOOLTIPS, Path.of("tooltips.html").toAbsolutePath(), OFFLINE));
+        assertTrue(w.worst <= 1, "tooltips: " + w.where);
+        assertEquals(w.steps, w.partials, "tooltip hovers that were not partial");
+    }
+
+    /** Hovers [hovers] in turn (null: nothing), straight from one to the next, checking each partial repaint against a fresh picture. */
+    private static Walk path(Page page, Document doc, List<Element> hovers, double[] largest) {
+        HtmlRenderer.Frame cur = HtmlRenderer.render(page, doc, W, H, SCALE, 0, Selector.State.NONE);
+        List<Element> drawn = List.of();
+        int steps = 0, partials = 0, worst = 0;
+        String where = "";
+        java.util.Map<Repaint.Why, Integer> whys = new java.util.TreeMap<>();
+        for (Element hover : hovers) {
+            List<Element> key = page.styles.stateKey(hover, false);
+            Set<Element> moved = Collections.newSetFromMap(new IdentityHashMap<>());
+            for (Element e : drawn) if (!key.contains(e)) moved.add(e);
+            for (Element e : key) if (!drawn.contains(e)) moved.add(e);
+            var state = HtmlRenderer.state(hover, null);
+            if (moved.isEmpty()) continue;
+            Repaint.Result r = Repaint.partial(page, doc, W, H, SCALE, 0, state, cur, moved, 0);
+            HtmlRenderer.Frame fresh = HtmlRenderer.render(page, doc, W, H, SCALE, 0, state);
+            steps++;
+            whys.merge(r.why(), 1, Integer::sum);
+            if (r.frame() != null) {
+                partials++;
+                largest[0] = Math.max(largest[0], r.changed().getWidth() * r.changed().getHeight());
+                int[] a = pixels(r.frame()), b = pixels(fresh);
+                for (int i = 0; i < a.length; i++) {
+                    if (a[i] == b[i]) continue;
+                    int d = 0;
+                    for (int shift = 0; shift < 32; shift += 8) d = Math.max(d, Math.abs(((a[i] >> shift) & 255) - ((b[i] >> shift) & 255)));
+                    if (d > worst) {
+                        worst = d;
+                        where = "hovering " + (hover == null ? "nothing" : hover.className()) + " at pixel (" + i % W + ", " + i / W + ") by " + d;
+                    }
+                }
+                cur = r.frame();
+            } else {
+                cur = fresh;
+            }
+            drawn = key;
+        }
+        System.out.printf("RepaintTest: %d hover steps, %s, worst difference %d, largest repaint %.0f CSS px²%n", steps, whys, worst, largest[0]);
+        return new Walk(steps, partials, worst, where);
+    }
+
+    /** Every element [css] picks, each followed by [then] (an element, or null for nothing), in document order. */
+    private static List<Element> each(Document doc, String css, java.util.function.Function<Element, Element> then) {
+        List<Element> out = new ArrayList<>();
+        for (Element e : doc.select(css)) {
+            out.add(e);
+            out.add(then.apply(e));
+        }
+        return out;
+    }
+
+    /**
+     * The crates page's shape: a card lifted on hover ({@code .card:hover { z-index: 2 }}) only so the tooltip of a
+     * reward in it shows over the next card. The lift changes no pixel of the card itself, so hovering a reward repaints
+     * the reward and its tooltip, not the whole card (85 ms on the vanilla crates page).
+     */
+    static final String LIFTED = "<html><head><style>html,body{margin:0;height:100%;overflow:hidden;background:#000}"
+            + ".pano{position:absolute;left:-24px;top:-24px;right:-24px;bottom:-24px;filter:blur(10px);"
+            + "background:linear-gradient(90deg,#000 0 30%,#fff 30% 60%,#f80 60%),linear-gradient(#08f,#0f8)}"
+            + ".cards{position:absolute;top:60px;left:40px;display:flex;gap:16px}"
+            + ".card{position:relative;width:220px;height:420px;padding:14px;background:rgba(40,40,40,.85);box-shadow:inset 2px 2px #171717}"
+            + ".card:hover{z-index:2}"
+            + ".reward{position:relative;height:60px;margin:8px 0;background:#555;border:2px solid #222}"
+            + ".reward:hover{z-index:5;border-color:#fff}"
+            + ".tip{display:none;position:absolute;left:150px;top:-10px;z-index:10;padding:6px 9px;white-space:nowrap;background:#100010;"
+            + "border:2px solid #5000ff;color:#fff;font-size:20px}"
+            + ".reward:hover .tip{display:block}"
+            + "</style></head><body><div class=pano></div><div class=cards>"
+            + ("<div class=card>" + "<div class=reward><div class=tip>A reward<br>with a long tooltip line</div></div>".repeat(4) + "</div>").repeat(3)
+            + "</div></body></html>";
+
+    @Test
+    void liftedCardsRepaintOnlyTheReward() {
+        Page page = Page.of(LIFTED, Path.of("lifted.html").toAbsolutePath(), OFFLINE);
+        Document doc = page.document.clone();
+        // In and out of every reward: each repaints the reward and its tooltip, not its card.
+        double[] largest = {0};
+        Walk w = path(page, doc, each(doc, ".reward", e -> null), largest);
+        assertTrue(w.worst <= 1, "lifted cards: " + w.where);
+        assertEquals(w.steps, w.partials, "reward hovers that were not partial");
+        // A card is 248 x 448, so lifted whole it was a repaint of 344 x 544 with the margin round it.
+        assertTrue(largest[0] < 0.5 * 344 * 544, "a reward hover repainted " + largest[0] + " CSS px², as much as its card");
+        // Straight from each reward to the next.
+        w = path(page, doc, each(doc, ".reward", e -> e.nextElementSibling()), largest);
+        assertTrue(w.worst <= 1, "lifted cards, reward to reward: " + w.where);
+        assertEquals(w.steps, w.partials, "reward to reward hovers that were not partial");
+    }
+
+    /**
+     * Cards that overlap, lifted on hover: the lift does change pixels where a card overlaps its neighbours, and only
+     * there, entering, leaving and going straight from one card's button to the next card's.
+     */
+    static final String OVERLAPPING = "<html><head><style>html,body{margin:0;height:100%;overflow:hidden;background:#123}"
+            + ".cards{position:absolute;top:80px;left:60px;display:flex}"
+            + ".card{position:relative;width:240px;height:320px;margin-right:-60px;border-radius:14px;background:linear-gradient(#468,#246);"
+            + "border:3px solid #9bd;box-shadow:0 8px 20px rgba(0,0,0,.6)}"
+            + ".card:nth-child(2n){top:30px}"
+            + ".card:hover{z-index:3}"
+            + ".card b{display:block;margin:20px;height:50px;background:#333;color:#fff}"
+            + ".card b:hover{background:#c33}"
+            + "</style></head><body><div class=cards>"
+            + "<div class=card><b>one</b></div><div class=card><b>two</b></div><div class=card><b>three</b></div><div class=card><b>four</b></div>"
+            + "</div></body></html>";
+
+    @Test
+    void overlappingLiftedCardsRepaintWhereTheyOverlap() {
+        Page page = Page.of(OVERLAPPING, Path.of("overlapping.html").toAbsolutePath(), OFFLINE);
+        Document doc = page.document.clone();
+        double[] largest = {0};
+        List<Element> hovers = each(doc, ".card b", e -> null);
+        List<Element> bs = doc.select(".card b");
+        for (int i = 0; i < bs.size(); i++) hovers.add(bs.get(i));
+        for (int i = bs.size() - 1; i >= 0; i--) hovers.add(bs.get(i));
+        hovers.add(null);
+        // The cards alone (only the lift changes), in and out, then straight from one to the next and back.
+        List<Element> cards = doc.select(".card");
+        hovers.addAll(each(doc, ".card", e -> null));
+        hovers.addAll(cards);
+        for (int i = cards.size() - 1; i >= 0; i--) hovers.add(cards.get(i));
+        hovers.add(null);
+        Walk w = path(page, doc, hovers, largest);
+        assertTrue(w.worst <= 1, "overlapping cards: " + w.where);
+        assertEquals(w.steps, w.partials, "card hovers that were not partial");
+    }
+
+    /** The vanilla crates page itself: a reward's hover (its crate lifted) repaints the reward and its tooltip. */
+    @Test
+    void vanillaCratesHoversArePartialAndMatch() throws IOException {
+        Page page = file("examples/vanilla/pages/crates.html");
+        Document doc = page.document.clone();
+        double[] largest = {0};
+        Walk w = path(page, doc, each(doc, ".reward", e -> null), largest);
+        assertTrue(w.worst <= 1, "crates: " + w.where);
+        assertEquals(w.steps, w.partials, "crates hovers that were not partial");
+        // A crate is 316 x 442: lifted whole, 412 x 538 with the margin round it.
+        assertTrue(largest[0] < 0.5 * 412 * 538, "a reward hover repainted " + largest[0] + " CSS px², as much as its crate");
+        w = path(page, doc, each(doc, ".reward", e -> e.nextElementSibling()), largest);
+        assertTrue(w.worst <= 1, "crates, reward to reward: " + w.where);
+        assertEquals(w.steps, w.partials, "crates reward to reward hovers that were not partial");
+        // A crate's own header: only the lift changes, which changes no pixel; a token repaint stands for it.
+        double[] head = {0};
+        w = path(page, doc, each(doc, ".crate-head", e -> null), head);
+        assertTrue(w.worst <= 1, "crates, header: " + w.where);
+        assertEquals(w.steps, w.partials, "crate header hovers that were not partial");
+        assertTrue(head[0] < 200 * 200, "a crate header hover repainted " + head[0] + " CSS px²");
+    }
 }

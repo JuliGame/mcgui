@@ -41,6 +41,9 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
   the benches) nothing moves. A page that moves (`Page.moves()`) is drawn whole
   every time: no partial repaint, scroll cache, drawing ahead or kept first
   picture, all of which assume a picture stays true until the state changes.
+  So a hover that starts a transition shows its first moment, never its end
+  drawn ahead (`TransitionHoverTest`), and a grid blur (below) under a moving
+  page is the same in every band at every moment (`BandsTest`).
   Elements are keyed by their place in document order, as the Styler's memo
   is, so a transition survives the session's copy of the document changing.
 
@@ -109,9 +112,16 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
   with a margin above and below as deep as the furthest blur can reach.
   The bands are deliberately not clipped: an extra clip changes how Java2D
   rounds overflow clips, by a pixel at their edges. Hit regions come from the
-  first band, which paints every box of the page; the other bands make none. Partial (hover) repaints are still
+  first band, which paints every box of the page; the other bands make none. Partial (hover) repaints are
   one painter, worked out by `html/Repaint` (which also grows the painted area by a backdrop's reach and
-  keeps only the changed part: `RepaintTest` compares every hover with a fresh picture). `sh gradlew renderBench` times a page's full render, its
+  keeps only the changed part: `RepaintTest` compares every hover with a fresh picture), painting on an
+  image of their own, also unclipped (`HtmlRenderer.paintPart`): a clip cutting a rounded box drew a seam
+  along its edge. That image starts at the picture's left edge, not the area's: Java2D adds up a run's glyph
+  advances in floats from where it starts on the image, so text drawn from elsewhere could land a glyph a
+  pixel column over. A layer's filter is still only worked out round the area (`Painter.keeping`), unless
+  the page has a backdrop-filter. The new state is laid out first (`HtmlRenderer.layOver`), so a
+  hover that shows a tooltip is painted once, over the old and new areas together (`paintOver`), not
+  painted, found to reach further, and painted again. `sh gradlew renderBench` times a page's full render, its
   `Canvas.draw` and a hover repaint.
 - **A scroll is cut from a taller picture** (`html/ScrollCache`): the first
   notch paints up to four views of the page round the view (more ahead of the
@@ -162,14 +172,25 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
   `sh gradlew firstPictureBench` gives the CPU per new session both ways, and
   `sh gradlew sessionBench` the server thread's CPU and allocation per new
   viewer and the live heap per watching session.
-- **A partial repaint takes in every blurred layer its region meets**
-  (`Repaint.region`): a `filter: blur()` layer that the clip cuts would blur
-  with a cut edge. A backdrop is painted again with a margin instead (see
-  above). A blur that reads past the picture's top or bottom where the page
-  goes on means a full picture, which paints the page there.
+- **A partial repaint takes in every blurred layer its region meets** that
+  something which changed is inside or round (`Repaint.region`): a `filter:
+  blur()` layer that the clip cuts would blur with a cut edge. A blurred layer
+  the change is apart from (a blurred picture behind the whole page) is only
+  painted as far round the region as its blur reads. A backdrop is painted
+  again with a margin instead (see above). A blur that reads past the picture's
+  top or bottom where the page goes on means a full picture, which paints the
+  page there. A box that appears or goes on hover (a tooltip by `display`) is
+  fine as long as it is inside the region (`Repaint.sameLayout`). An element
+  whose hover only sets its own z-index (`.crate:hover { z-index: 2 }`, which
+  lifts a card so a tooltip in it shows over its neighbours) is not repainted
+  whole: only where its boxes overlap something they now come before or after
+  in the painting order (`Stylesheet.orderOnly`, `Repaint.swapped`).
 - **Backdrops blur on a grid fixed to the page** (`Painter.origin`, in device
   pixels from the page's top-left), so a band, a rectangle repaint, a whole
-  view and a view cut from a taller picture all blur alike.
+  view and a view cut from a taller picture all blur alike. So does a wide
+  `filter: blur()` that is the filter's only function (`Filters.gridBlur`,
+  `Painter.gridBlurred`): worked out `Blur.step` times smaller, as a backdrop
+  is. The vanilla pages' blurred panorama was most of every hover repaint there.
 - **A steep gradient is not Java2D's** (`Backgrounds.StopPaint`): Java2D
   samples pixel corners in float, so a hard stop on a whole device pixel
   landed on a sample and a stripe's edge came out differently in a strip, a
@@ -302,7 +323,10 @@ wide for a default view). `/ui place <page> <cols> <rows> <name> <x> <y> <z>
   that waits runs queued work, or hands its place to a spare, so a wait cannot use
   the budget up), but must not wait on the network or on the server thread.
   `MapSender` (one thread of its own), the pack's web server and netty are not
-  part of the budget.
+  part of the budget, but the sender compresses one pass's map patches for a
+  player on the pool too (`SharedCompression.patches`, each thread with a
+  compressor of its own): one at a time, a hover changing 24 tiles took 10 to
+  16 ms on the sender's thread.
 - **`Canvas.draw` converts on every core**, in bands of 32 rows on that
   pool. It reads `INT_RGB`, `INT_ARGB` and `INT_ARGB_PRE` rasters in place,
   sub-images included; any other type goes through `getRGB`, which is several

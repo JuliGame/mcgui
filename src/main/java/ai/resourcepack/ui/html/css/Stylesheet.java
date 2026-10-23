@@ -27,6 +27,10 @@ public final class Stylesheet {
     public boolean dynamic;
     /** The selector parts that say :hover (or :active): what decides whether a move of the pointer changes anything. */
     private final List<Selector.Compound> hoverParts = new ArrayList<>(), activeParts = new ArrayList<>();
+    /** Of those, the parts that are a rule's subject and whose rule sets nothing but z-index: see {@link #orderOnly}. */
+    private final Set<Selector.Compound> orderParts = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+    /** Whether some :hover or :active is inside another pseudo-class ({@code :not(:hover)}), which no part lists. */
+    private boolean nestedStates;
 
     /** One step of a {@code @keyframes}: where it is (0 to 1) and the values there, shorthands expanded. */
     public record Keyframe(double offset, Map<String, String> values) {}
@@ -57,10 +61,14 @@ public final class Stylesheet {
             all.add(r);
             if (s.dynamic) dynamic = true;
             for (Selector.Compound c : s.compounds) {
+                boolean state = false;
                 for (Selector.Pseudo p : c.pseudos) {
                     if (p.name().equals("hover") && !hoverParts.contains(c)) hoverParts.add(c);
                     if (p.name().equals("active") && !activeParts.contains(c)) activeParts.add(c);
+                    state |= p.name().equals("hover") || p.name().equals("active");
+                    if (p.args() != null) for (Selector a : p.args()) nestedStates |= a.dynamic;
                 }
+                if (state && c == s.subject() && s.pseudoElement == null && onlyZIndex(declarations)) orderParts.add(c);
             }
             int kind = kind(s.pseudoElement);
             // One that can never match is kept in the list of rules (its urls still load) but not indexed.
@@ -151,6 +159,37 @@ public final class Stylesheet {
             }
         }
         return out;
+    }
+
+    /**
+     * Whether a change of [e]'s own :hover or :active state changes only where it comes in the painting order: every
+     * hover and active part that picks [e] in that state is the subject of a rule that sets z-index and nothing else
+     * ({@code .card:hover { z-index: 2 }}, which lifts a card so its tooltip shows over its neighbours). Nothing in
+     * [e] or round it is restyled, so only where it overlaps something it is now painted over (or under) can change.
+     */
+    public boolean orderOnly(Element e) {
+        if (e == null || nestedStates || orderParts.isEmpty()) return false;
+        org.jsoup.nodes.Document doc = e.ownerDocument();
+        boolean quirks = doc != null && doc.quirksMode() == org.jsoup.nodes.Document.QuirksMode.quirks;
+        boolean any = false;
+        Selector.State hovered = new Selector.State(Set.of(e), Set.of()), active = new Selector.State(Set.of(), Set.of(e));
+        for (Selector.Compound c : hoverParts) {
+            if (!Selector.matchCompound(c, e, hovered, quirks)) continue;
+            if (!orderParts.contains(c)) return false;
+            any = true;
+        }
+        for (Selector.Compound c : activeParts) {
+            if (!Selector.matchCompound(c, e, active, quirks)) continue;
+            if (!orderParts.contains(c)) return false;
+            any = true;
+        }
+        return any;
+    }
+
+    private static boolean onlyZIndex(List<Declaration> declarations) {
+        if (declarations.isEmpty()) return false;
+        for (Declaration d : declarations) if (!d.property().equals("z-index")) return false;
+        return true;
     }
 
     /** Every rule, in order. */

@@ -1,5 +1,6 @@
 package ai.resourcepack.ui.framework.net;
 
+import ai.resourcepack.ui.framework.api.Cpu;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
@@ -24,7 +25,7 @@ import java.util.function.Consumer;
 import java.util.logging.Logger;
 
 /**
- * Map patches encoded and compressed once, on the sender's thread, and the same bytes written to every
+ * Map patches encoded and compressed once, off the connections' threads, and the same bytes written to every
  * connection that would have made exactly those bytes itself. Without this each viewer's connection encodes
  * and deflates its own copy of every patch on Paper's netty threads, which also read every player's
  * movement: about 0.17 ms a full tile, so 50 players watching one wall change cost 50 times that.
@@ -123,15 +124,19 @@ public final class SharedCompression implements AutoCloseable {
     private final Object play;
     /** The last game protocol seen and its delimiter: {protocol info, delimiter}. */
     private volatile Object[] delimiter = {null, null};
-    private final Object compressor;
+    /** Makes a compressor: the factory Paper's connections use, at their level. Each thread compressing has its own. */
+    private final Object factory;
+    private final MethodHandle createCompressor;
+    private final int level;
     private final String compressorName;
+    /** Every compressor made, to close: one per thread that has compressed (the sender's, the {@link Cpu} pool's). */
+    private final List<Worker> workers = new ArrayList<>();
+    private final ThreadLocal<Worker> worker = new ThreadLocal<>();
 
     // The rest only under this object's lock: the sender's thread, and close().
     private final LinkedHashMap<Key, Compressed> kept = new LinkedHashMap<>(256, 0.75f, true);
     private long retained;
     private final Map<Channel, Checked> checked = new WeakHashMap<>();
-    private final ByteBuf raw = Unpooled.directBuffer(32 * 1024);
-    private final ByteBuf out = Unpooled.directBuffer(32 * 1024);
     private boolean closed;
     private final Set<String> said = new HashSet<>();
     private double aloneBudget = ALONE_BURST_NANOS;
@@ -171,13 +176,15 @@ public final class SharedCompression implements AutoCloseable {
         // The compressor Paper's own connections use (libdeflate where Velocity has it for the platform, else
         // java.util.zip), at the server's level, so a patch costs here what it cost there.
         Object loader = Class.forName("com.velocitypowered.natives.util.Natives").getField("compress").get(null);
-        Object factory = loader.getClass().getMethod("get").invoke(loader);
+        factory = loader.getClass().getMethod("get").invoke(loader);
         Class<?> compressorType = Class.forName("com.velocitypowered.natives.compression.VelocityCompressor");
-        compressor = Class.forName("com.velocitypowered.natives.compression.VelocityCompressorFactory")
-                .getMethod("create", int.class).invoke(factory, level);
+        createCompressor = l.unreflect(Class.forName("com.velocitypowered.natives.compression.VelocityCompressorFactory").getMethod("create", int.class));
+        this.level = level;
         compressorName = String.valueOf(loader.getClass().getMethod("getLoadedVariant").invoke(loader));
         deflate = l.unreflect(compressorType.getMethod("deflate", ByteBuf.class, ByteBuf.class));
         closeCompressor = l.unreflect(compressorType.getMethod("close"));
+        // One now, so a server whose natives cannot make one says so at start, as before.
+        worker();
     }
 
     /**
@@ -219,34 +226,173 @@ public final class SharedCompression implements AutoCloseable {
      * false (nobody else is sent it) and the budget for those is spent: then send a packet as before. Must not
      * be called on a connection's own thread: this is the work kept off it.
      */
-    public synchronized Object patch(Channel channel, int mapId, int x, int y, int w, int h, byte[] tile, boolean shared) {
-        if (closed) return null;
+    public Object patch(Channel channel, int mapId, int x, int y, int w, int h, byte[] tile, boolean shared) {
+        return patches(channel, List.of(new Wire.MapPatch(mapId, x, y, w, h, tile, shared))).get(0);
+    }
+
+    /**
+     * {@link #patch} for each of [list] (one pass's patches for one player), in order, null where that gives
+     * null. Those not kept already are compressed at once on the {@link Cpu} pool's threads, each with a
+     * compressor of its own: one at a time, a hover that changes 24 tiles took 10 to 16 ms on the sender's thread.
+     */
+    public List<Object> patches(Channel channel, List<Wire.MapPatch> list) {
+        int n = list.size();
+        Object[] out = new Object[n];
         long now = System.nanoTime();
-        Route route = cachedRoute(channel, now);
-        if (route == null) return null;
-        Key key = new Key(tile, x, y, w, h, mapId, route.threshold);
-        Compressed c = kept.get(key);
-        if (c != null) {
-            reused++;
-        } else {
-            if (!shared) {
-                aloneBudget = Math.min(ALONE_BURST_NANOS, aloneBudget + (now - aloneAt) * ALONE_SHARE);
-                aloneAt = now;
-                if (aloneBudget <= 0) {
-                    leftAlone++;
-                    return null;
+        Route route;
+        int[] todo = new int[n];
+        int count = 0;
+        synchronized (this) {
+            if (closed) return java.util.Arrays.asList(out);
+            route = cachedRoute(channel, now);
+            if (route == null) return java.util.Arrays.asList(out);
+            boolean refilled = false;
+            for (int i = 0; i < n; i++) {
+                Wire.MapPatch p = list.get(i);
+                Compressed c = kept.get(key(p, route));
+                if (c != null) {
+                    reused++;
+                    c.used = now;
+                    out[i] = c;
+                    continue;
+                }
+                if (!p.shared()) {
+                    if (!refilled) {
+                        aloneBudget = Math.min(ALONE_BURST_NANOS, aloneBudget + (now - aloneAt) * ALONE_SHARE);
+                        aloneAt = now;
+                        refilled = true;
+                    }
+                    if (aloneBudget <= 0) {
+                        leftAlone++;
+                        continue;
+                    }
+                }
+                todo[count++] = i;
+            }
+        }
+        if (count == 0) return java.util.Arrays.asList(out);
+        Compressed[] done = new Compressed[n];
+        long[] nanos = new long[n];
+        int k = count;
+        java.util.function.IntConsumer one = j -> {
+            int i = todo[j];
+            long start = System.nanoTime();
+            done[i] = worker().compress(route, list.get(i));
+            nanos[i] = System.nanoTime() - start;
+        };
+        // This thread takes patches one after another, and so does each pool thread that is free meanwhile: busy
+        // painting a picture, the pool only means it is all done here, as it was before.
+        java.util.concurrent.atomic.AtomicInteger next = new java.util.concurrent.atomic.AtomicInteger();
+        java.util.concurrent.CountDownLatch left = new java.util.concurrent.CountDownLatch(k);
+        Runnable take = () -> {
+            for (int j; (j = next.getAndIncrement()) < k; ) {
+                try {
+                    one.accept(j);
+                } finally {
+                    left.countDown();
                 }
             }
-            long start = shared ? 0 : System.nanoTime();
-            c = compress(route, mapId, x, y, w, h, tile);
-            if (!shared) aloneBudget -= System.nanoTime() - start;
-            if (c == null) return null;
-            kept.put(key, c);
-            retained += cost(c);
+        };
+        if (k > 1 && !(Thread.currentThread() instanceof java.util.concurrent.ForkJoinWorkerThread)) {
+            java.util.concurrent.ForkJoinPool pool = Cpu.pool();
+            for (int h = Math.min(k, pool.getParallelism()) - 1; h > 0; h--) pool.execute(take);
         }
-        c.used = now;
-        trim(now);
-        return c;
+        take.run();
+        try {
+            left.await();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        synchronized (this) {
+            if (closed) return java.util.Arrays.asList(new Object[n]);
+            for (int j = 0; j < k; j++) {
+                int i = todo[j];
+                Wire.MapPatch p = list.get(i);
+                if (!p.shared()) aloneBudget -= nanos[i];
+                Compressed c = done[i];
+                if (c == null) continue;
+                made++;
+                madeBytes += c.frame.length;
+                c.used = now;
+                if (kept.put(key(p, route), c) == null) retained += cost(c);
+                out[i] = c;
+            }
+            trim(now);
+        }
+        return java.util.Arrays.asList(out);
+    }
+
+    private static Key key(Wire.MapPatch p, Route route) {
+        return new Key(p.tile(), p.x(), p.y(), p.w(), p.h(), p.mapId(), route.threshold);
+    }
+
+    /** This thread's compressor, made the first time it compresses. */
+    private Worker worker() {
+        Worker w = worker.get();
+        if (w == null) {
+            w = new Worker();
+            synchronized (workers) {
+                workers.add(w);
+            }
+            worker.set(w);
+        }
+        return w;
+    }
+
+    /** One thread's compressor and buffers. */
+    private final class Worker {
+        private final Object compressor;
+        private final ByteBuf raw = Unpooled.directBuffer(32 * 1024);
+        private final ByteBuf out = Unpooled.directBuffer(32 * 1024);
+        private boolean closed;
+
+        Worker() {
+            try {
+                compressor = createCompressor.invoke(factory, level);
+            } catch (Throwable t) {
+                raw.release();
+                out.release();
+                throw Nms.rethrow(t);
+            }
+        }
+
+        /** [p] as [route]'s connections pass it on, or null if too big for them or this compressor is closed. */
+        synchronized Compressed compress(Route route, Wire.MapPatch p) {
+            if (closed) return null;
+            Object packet = packets.patch(p.mapId(), p.x(), p.y(), p.w(), p.h(), rectangle(p.tile(), p.x(), p.y(), p.w(), p.h()));
+            raw.clear();
+            out.clear();
+            try {
+                encode.invoke(route.codec, raw, packet);
+                int length = raw.readableBytes();
+                if (length > MAX_PACKET) return null; // the connection's own compression refuses it, loudly
+                if (length < route.threshold) {
+                    writeVarInt(out, 0);
+                    out.writeBytes(raw);
+                } else {
+                    writeVarInt(out, length);
+                    out.ensureWritable(length + 64);
+                    deflate.invoke(compressor, raw, out);
+                }
+            } catch (Throwable t) {
+                throw Nms.rethrow(t);
+            }
+            byte[] frame = new byte[out.readableBytes()];
+            out.getBytes(out.readerIndex(), frame);
+            return new Compressed(frame, route.threshold, p.mapId(), p.x(), p.y(), p.w(), p.h(), p.tile());
+        }
+
+        synchronized void close() {
+            if (closed) return;
+            closed = true;
+            raw.release();
+            out.release();
+            try {
+                closeCompressor.invoke(compressor);
+            } catch (Throwable t) {
+                throw Nms.rethrow(t);
+            }
+        }
     }
 
     /** Whether [packets] holds anything {@link #patch} made, which only {@link #write} can write. */
@@ -284,17 +430,17 @@ public final class SharedCompression implements AutoCloseable {
     }
 
     @Override
-    public synchronized void close() {
-        if (closed) return;
-        closed = true;
-        kept.clear();
-        checked.clear();
-        raw.release();
-        out.release();
-        try {
-            closeCompressor.invoke(compressor);
-        } catch (Throwable t) {
-            throw Nms.rethrow(t);
+    public void close() {
+        synchronized (this) {
+            if (closed) return;
+            closed = true;
+            kept.clear();
+            checked.clear();
+        }
+        // A compression running on another thread finishes first (each compressor is closed under its own lock).
+        synchronized (workers) {
+            for (Worker w : workers) w.close();
+            workers.clear();
         }
     }
 
@@ -374,32 +520,6 @@ public final class SharedCompression implements AutoCloseable {
             if (first) log.info("Map pictures are compressed by the player's own connection where " + why + ".");
         }
         return null;
-    }
-
-    private Compressed compress(Route route, int mapId, int x, int y, int w, int h, byte[] tile) {
-        Object packet = packets.patch(mapId, x, y, w, h, rectangle(tile, x, y, w, h));
-        raw.clear();
-        out.clear();
-        try {
-            encode.invoke(route.codec, raw, packet);
-            int length = raw.readableBytes();
-            if (length > MAX_PACKET) return null; // the connection's own compression refuses it, loudly
-            if (length < route.threshold) {
-                writeVarInt(out, 0);
-                out.writeBytes(raw);
-            } else {
-                writeVarInt(out, length);
-                out.ensureWritable(length + 64);
-                deflate.invoke(compressor, raw, out);
-            }
-        } catch (Throwable t) {
-            throw Nms.rethrow(t);
-        }
-        byte[] frame = new byte[out.readableBytes()];
-        out.getBytes(out.readerIndex(), frame);
-        made++;
-        madeBytes += frame.length;
-        return new Compressed(frame, route.threshold, mapId, x, y, w, h, tile);
     }
 
     /** Drops the patches nobody asked for lately, and the oldest while over the limit. */
