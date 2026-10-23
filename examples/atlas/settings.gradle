@@ -1,0 +1,4 @@
+rootProject.name = 'atlas'
+
+// UI Engine, built from this checkout (the directory two up).
+includeBuild('../..')

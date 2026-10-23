@@ -1,6 +1,8 @@
 package ai.resourcepack.ui;
 
-import ai.resourcepack.uiframework.api.UIFramework;
+import ai.resourcepack.ui.framework.Framework;
+import ai.resourcepack.ui.framework.FrameworkCommand;
+import ai.resourcepack.ui.framework.api.UIFramework;
 import ai.resourcepack.ui.html.HtmlRenderer;
 import ai.resourcepack.ui.html.Page;
 import org.bukkit.Bukkit;
@@ -20,14 +22,16 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * UI Engine: HTML pages from {@code plugins/UIEngine/pages/}, shown in game on wall screens and in
- * fullscreen views, through UI Framework. No browser: the pages are laid out and painted by the
- * plugin's own renderer, so what works is static HTML and CSS (no JavaScript), with links,
- * commands and hover states made to work in game.
+ * fullscreen views. No browser: the pages are laid out and painted by the plugin's own renderer, so
+ * what works is static HTML and CSS (no JavaScript), with links, commands and hover states made to
+ * work in game. Underneath is the {@link Framework}, which puts pictures on walls and in views and is
+ * there for other plugins to draw with too ({@link UIFramework#get()}).
  */
 public final class UIEnginePlugin extends JavaPlugin {
     /** The example pages copied into a new pages folder. */
     private static final String[] EXAMPLES = {"menu.html", "rules.html", "shop.html", "style.css"};
 
+    private Framework framework;
     private volatile PageStore pages;
     private Screens screens;
     private Renders renderers;
@@ -41,6 +45,12 @@ public final class UIEnginePlugin extends JavaPlugin {
     public void onEnable() {
         saveDefaultConfig();
         cfg = getConfig();
+        framework = new Framework(this);
+        if (!framework.enable()) {
+            framework = null;
+            getServer().getPluginManager().disablePlugin(this);
+            return;
+        }
         Executor main = UIFramework.get().serverThread();
         serverThread = task -> main.execute(() -> {
             if (isEnabled()) task.run();
@@ -58,7 +68,7 @@ public final class UIEnginePlugin extends JavaPlugin {
             warmUp();
         });
         screens.load();
-        UiCommand command = new UiCommand(this);
+        UiCommand command = new UiCommand(this, new FrameworkCommand(framework));
         getCommand("ui").setExecutor(command);
         getCommand("ui").setTabCompleter(command);
         tasks.add(Bukkit.getScheduler().runTaskTimer(this, () -> screens.tick(Bukkit.getCurrentTick()), 1, 1));
@@ -81,6 +91,8 @@ public final class UIEnginePlugin extends JavaPlugin {
                 Thread.currentThread().interrupt();
             }
         }
+        // Last: the pages above draw through it to the end.
+        if (framework != null) framework.disable();
         HandlerList.unregisterAll(this);
     }
 

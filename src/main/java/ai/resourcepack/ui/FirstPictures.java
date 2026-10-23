@@ -3,7 +3,7 @@ package ai.resourcepack.ui;
 import ai.resourcepack.ui.html.HtmlRenderer;
 import ai.resourcepack.ui.html.Page;
 import ai.resourcepack.ui.html.paint.Painter;
-import ai.resourcepack.uiframework.api.Canvas;
+import ai.resourcepack.ui.framework.api.Canvas;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 

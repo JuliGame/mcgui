@@ -1,5 +1,6 @@
 plugins {
     id 'java'
+    id 'maven-publish'
     id 'com.gradleup.shadow' version '8.3.5'
 }
 
@@ -10,6 +11,7 @@ java {
     toolchain {
         languageVersion = JavaLanguageVersion.of(21)
     }
+    withSourcesJar()
 }
 
 tasks.withType(JavaCompile).configureEach {
@@ -24,34 +26,47 @@ repositories {
 
 dependencies {
     compileOnly 'io.papermc.paper:paper-api:1.21.8-R0.1-SNAPSHOT'
-    // A plugin of its own on the server (it owns the pack, the map ids and the seats), so never shaded.
-    compileOnly 'ai.resourcepack:ui-framework:0.1.0'
+    // The server ships netty; the map sender and the packet filters are netty handlers.
+    compileOnly 'io.netty:netty-transport:4.2.7.Final'
 
     // HTML parsing, and SVG drawing for <svg> and .svg images. Shaded and relocated below.
     implementation 'org.jsoup:jsoup:1.23.2'
     implementation 'com.github.weisj:jsvg:2.2.0'
 
     testImplementation 'org.junit.jupiter:junit-jupiter:5.11.0'
-    // The benchmark measures the canvas step too.
-    testImplementation 'ai.resourcepack:ui-framework:0.1.0'
-    // TileScrollTest drives the framework's map sender, whose assignments name a Bukkit player and wall.
+    // Tests that drive the map sender need the API's types (a wall, a player) on the classpath, as the server provides them.
     testImplementation 'io.papermc.paper:paper-api:1.21.8-R0.1-SNAPSHOT'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
 shadowJar {
-    archiveBaseName.set('UIEngine')
     archiveClassifier.set('')
     relocate 'org.jsoup', 'ai.resourcepack.ui.libs.jsoup'
     relocate 'com.github.weisj.jsvg', 'ai.resourcepack.ui.libs.jsvg'
 }
 
+base { archivesName = 'UIEngine' }
+
+// The classes alone, without the libraries: what the examples here (and anything else built in the same
+// Gradle run) compile against. The plugin is the shadow jar, UIEngine-<version>.jar.
 jar {
-    enabled = false
+    archiveClassifier.set('dev')
 }
 
 build {
     dependsOn shadowJar
+}
+
+// For plugins that build against UI Engine: the plugin jar itself, with its sources. JitPack builds it
+// from a tag of this repository (see the README).
+publishing {
+    publications {
+        plugin(MavenPublication) {
+            artifactId = 'ui-engine'
+            from components.shadow
+            artifact sourcesJar
+        }
+    }
 }
 
 test {
@@ -196,4 +211,52 @@ tasks.register('hoverCost', JavaExec) {
     systemProperty 'shipped', file('src/main/resources/pages').absolutePath
     systemProperty 'runs', project.findProperty('runs') ?: '5'
     maxHeapSize = '2g'
+}
+
+// Tests and a benchmark against a real Paper server's own classes (its netty pipeline handlers, packet
+// codecs and compressor), for what reflection reaches on a running server. Only with a server directory
+// that has run once (versions/ and libraries/), and a Java 25 toolchain, which Paper 26 is built for:
+//   sh gradlew paperTest -PpaperServer=/path/to/server
+//   sh gradlew paperBench -PpaperServer=/path/to/server
+def paperServer = findProperty('paperServer')
+if (paperServer != null) {
+    sourceSets {
+        paperTest {
+            compileClasspath += sourceSets.main.output
+            runtimeClasspath += sourceSets.main.output
+        }
+    }
+    dependencies {
+        paperTestImplementation fileTree("$paperServer/versions") { include '**/*.jar' }
+        paperTestImplementation fileTree("$paperServer/libraries") { include '**/*.jar' }
+        paperTestImplementation 'org.junit.jupiter:junit-jupiter:5.11.0'
+        paperTestRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    }
+    def java25 = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(25) }
+    tasks.named('compilePaperTestJava') {
+        javaCompiler = javaToolchains.compilerFor { languageVersion = JavaLanguageVersion.of(25) }
+        options.release = 25
+    }
+    def paperJvmArgs = ['--enable-native-access=ALL-UNNAMED', '-Xmx2g']
+    // The game's bootstrap writes logs/ where it runs: keep that in build/, not in the checkout.
+    def paperDir = layout.buildDirectory.dir('paper').get().asFile
+    tasks.register('paperTest', Test) {
+        testClassesDirs = sourceSets.paperTest.output.classesDirs
+        classpath = sourceSets.paperTest.runtimeClasspath
+        javaLauncher = java25
+        jvmArgs paperJvmArgs
+        workingDir = paperDir
+        doFirst { paperDir.mkdirs() }
+        useJUnitPlatform()
+        testLogging { showStandardStreams = true; events 'passed', 'failed'; exceptionFormat 'full' }
+    }
+    tasks.register('paperBench', JavaExec) {
+        classpath = sourceSets.paperTest.runtimeClasspath
+        mainClass = 'ai.resourcepack.ui.framework.net.SharedCompressionBench'
+        javaLauncher = java25
+        jvmArgs paperJvmArgs + ['-Xlog:gc:file=gc.log']
+        workingDir = paperDir
+        doFirst { paperDir.mkdirs() }
+        args((findProperty('benchArgs') ?: '').toString().tokenize())
+    }
 }

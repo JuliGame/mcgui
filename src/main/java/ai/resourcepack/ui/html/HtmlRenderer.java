@@ -8,7 +8,7 @@ import ai.resourcepack.ui.html.paint.Painter;
 import ai.resourcepack.ui.html.paint.PixelPool;
 import ai.resourcepack.ui.html.style.Style;
 import ai.resourcepack.ui.html.style.Styler;
-import ai.resourcepack.uiframework.api.Cpu;
+import ai.resourcepack.ui.framework.api.Cpu;
 import org.jsoup.nodes.Element;
 
 import java.awt.Graphics2D;

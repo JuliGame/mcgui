@@ -1,0 +1,546 @@
+package ai.resourcepack.ui.framework.net;
+
+import ai.resourcepack.ui.framework.api.Canvas;
+import ai.resourcepack.ui.framework.api.Pointer;
+import ai.resourcepack.ui.framework.render.Palette;
+import ai.resourcepack.ui.framework.world.MapWall;
+import org.bukkit.entity.Player;
+
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.IdentityHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.LockSupport;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+
+/**
+ * Sends each player only the rectangle of each map that changed since what their client last
+ * received, within a per-player byte budget and only as fast as their connection drains: a slow link
+ * gets fewer pictures, never a growing backlog, so what they see stays current.
+ *
+ * <p>Pictures go out whole: the changed tiles of one moment are snapshotted and all sent before
+ * anything newer is looked at, so a change never arrives as mismatched squares. Runs on its own thread,
+ * woken the moment a canvas publishes new tiles (and every few milliseconds regardless, for budgets),
+ * and writes straight to each player's connection with one flush per pass, so a new picture goes out as
+ * soon as it is drawn rather than with the next tick. The tile arrays it compares are immutable once a
+ * {@link Canvas} publishes them.
+ *
+ * <p>When a tile a frame should show is one the client already holds in another of the wall's maps (the
+ * canvas scrolled by whole tiles, {@link Canvas#scroll}), the frame is pointed at that map instead of being
+ * sent the tile again: each frame's map is per player ({@link Wire.Frames}), the wall's maps are shuffled
+ * between its frames, and the maps nobody shows any more take the tiles that are new. The re-pointing and
+ * those tiles go in one bundle, so the client shows the whole new picture in one frame.
+ */
+public final class MapSender implements AutoCloseable {
+    /**
+     * One player looking at one wall, showing [canvas] in [encoding]. [pointer] is drawn into PLAIN tiles
+     * only (players with the pack see a smooth pointer entity instead); null for none.
+     */
+    public record Assignment(Player player, MapWall wall, Canvas canvas, Canvas.Encoding encoding, PointerSpot pointer) {}
+
+    /** A pointer drawn into plain maps: where its hot pixel is, in canvas pixels, and its shape. */
+    public record PointerSpot(int x, int y, Pointer shape) {}
+
+    private static final class Viewer {
+        final Map<Integer, byte[]> sent = new ConcurrentHashMap<>(); // map id -> exact array the client last got
+        long budget;
+        final Map<MapWall, Frame> frames = new HashMap<>();
+        /** The walls this pass assigned them; frames for any other are dropped. */
+        final Set<MapWall> walls = new HashSet<>();
+        /** Bytes queued and not yet written, all walls together: what back-pressure goes by. */
+        final AtomicLong inFlight = new AtomicLong();
+        /** The same for each wall, so delivered() for one wall never waits on another that keeps changing. */
+        final Map<MapWall, AtomicLong> wallInFlight = new ConcurrentHashMap<>();
+        /** Plain tiles with the pointer drawn in, by map id, with what each was made from. */
+        final Map<Integer, Pointed> pointed = new ConcurrentHashMap<>(); // also read by delivered(), on the main thread
+        /** Which map each frame shows on their client; null until the wire can keep it, and until then each shows its own. */
+        volatile Wire.Frames pointing;
+        /** This pass's patches, written together with one flush. */
+        final List<Object> packets = new ArrayList<>();
+        final List<Patch> patches = new ArrayList<>();
+        long batchCost;
+        /** Bumped whenever patches are forgotten (a failed write), which no snapshot or pointing would show. */
+        final AtomicInteger forgets = new AtomicInteger();
+    }
+
+    /** One patch on its way: the tile it brings map [id] up to, and the wall's in-flight count it is in. */
+    private record Patch(int id, byte[] tile, int cost, AtomicLong wallInFlight) {}
+
+    private record Pointed(byte[] base, PointerSpot spot, byte[] tile) {}
+
+    /** The tiles of one snapshot of a canvas still to send, in order. */
+    private static final class Frame {
+        final Canvas canvas;
+        final byte[][] tile;
+        /** The map each tile is sent to: what each frame showed when the snapshot was taken. */
+        int[] maps;
+        final ArrayDeque<Integer> queue = new ArrayDeque<>();
+        /**
+         * The last time every tile was found on the client already: that drawing, pointing, pointer and forget
+         * count. While all four stay the same nothing can differ, and the tile by tile check is skipped: with
+         * dozens of walls in range of dozens of players, that check was most of this thread's time.
+         */
+        Canvas.Snapshot settled;
+        int[] settledMaps;
+        PointerSpot settledPointer;
+        int settledForgets;
+
+        Frame(Canvas canvas, int tiles) {
+            this.canvas = canvas;
+            this.tile = new byte[tiles][];
+        }
+    }
+
+    private final Wire wire;
+    private final Palette palette;
+    private final int bytesPerSecond;
+    /** Bytes a player may have queued but unwritten: about 50 ms at the full rate. */
+    private final long maxInFlight;
+    private final Map<UUID, Viewer> viewers = new ConcurrentHashMap<>();
+    private final AtomicReference<List<Assignment>> latest = new AtomicReference<>(List.of());
+    private final AtomicLong bytesSent = new AtomicLong();
+    private final Logger log;
+    private final Thread loop = new Thread(this::run, "UIEngine-send");
+    private volatile boolean closed;
+    private long lastRun = System.nanoTime();
+    /** The most a player's budget can build up to: a quarter of a second, so a burst after a quiet moment goes out at once. */
+    private final long burst;
+    /**
+     * Budgets of players dropped in the last quarter second ({budget, when}). One who comes straight back carries on
+     * from there, so stepping out of range and back cannot earn a fresh burst; anyone else starts with a full one.
+     */
+    private final Map<UUID, long[]> left = new ConcurrentHashMap<>();
+    private long lastWarning;
+    /** This pass: how many viewers each canvas has in each encoding, so a tile more than one is sent is made once. */
+    private final Map<Watch, Integer> watching = new HashMap<>();
+    /** This pass: by tile, the last tile it was compared with and the rectangle that differs (null for none). */
+    private final IdentityHashMap<byte[], Object[]> diffs = new IdentityHashMap<>();
+
+    private record Watch(Canvas canvas, Canvas.Encoding encoding) {}
+
+    public MapSender(Wire wire, Palette palette, int bytesPerSecond, Logger log) {
+        this.wire = wire;
+        this.palette = palette;
+        this.bytesPerSecond = bytesPerSecond;
+        this.maxInFlight = Math.max(512 * 1024L, bytesPerSecond / 20L);
+        this.burst = bytesPerSecond / 4L;
+        this.log = log;
+        loop.setDaemon(true);
+    }
+
+    public void update(List<Assignment> assignments) {
+        latest.set(assignments);
+        wake();
+    }
+
+    /** Something may have changed (a canvas published tiles): look now rather than at the next poll. */
+    public void wake() {
+        LockSupport.unpark(loop);
+    }
+
+    public long bytesSent() {
+        return bytesSent.get();
+    }
+
+    /** Whether [player]'s connection has written out every tile of [wall]'s current picture. */
+    public boolean delivered(UUID player, MapWall wall) {
+        Assignment a = null;
+        for (Assignment x : latest.get()) {
+            if (x.player.getUniqueId().equals(player) && x.wall == wall) {
+                a = x;
+                break;
+            }
+        }
+        Viewer v = viewers.get(player);
+        if (a == null || v == null) return false;
+        AtomicLong flying = v.wallInFlight.get(wall);
+        if (flying != null && flying.get() > 0) return false;
+        int[] maps = maps(v, wall);
+        Canvas.Snapshot snap = a.canvas.snapshot();
+        for (int t = 0; t < wall.tiles(); t++) {
+            if (v.sent.get(maps[t]) != tileFor(a, v, snap, t)) return false;
+        }
+        return true;
+    }
+
+    /** Forget what a player has, so everything is resent (new world, rejoin, pack change). */
+    public void reset(UUID player) {
+        Viewer v = viewers.remove(player);
+        if (v != null) left.put(player, new long[]{v.budget, System.nanoTime()});
+    }
+
+    /**
+     * A player new to the screens. They start with the full burst: a view opened or a wall walked up to is the
+     * quietest moment there is, and starting from nothing made a 16x9 picture trickle out over 150 ms.
+     */
+    private Viewer fresh(UUID id, long now) {
+        Viewer v = new Viewer();
+        long[] was = left.remove(id);
+        v.budget = was == null ? burst : Math.min(burst, was[0] + bytesPerSecond * (now - was[1]) / 1_000_000_000L);
+        return v;
+    }
+
+    public void start() {
+        loop.start();
+    }
+
+    private void run() {
+        while (!closed) {
+            try {
+                pass();
+            } catch (Throwable e) {
+                // Errors too (out of memory, a broken reflective call): this thread is all that sends pictures,
+                // so it must never die, and an exception that ended it would be lost without a word.
+                warn(e);
+            }
+            // Woken early by wake(); otherwise every 8 ms, so budgets refill and a full connection is retried.
+            LockSupport.parkNanos(8_000_000L);
+        }
+    }
+
+    @Override
+    public void close() {
+        closed = true;
+        wake();
+    }
+
+    /** Usually a player leaving mid-send, which the next run gets past; said at most once a minute if it keeps happening. */
+    private void warn(Throwable e) {
+        long now = System.nanoTime();
+        if (now - lastWarning > 60_000_000_000L) {
+            lastWarning = now;
+            log.log(Level.WARNING, "Sending map pictures failed (shown at most once a minute)", e);
+        }
+    }
+
+    /**
+     * One pass of the send loop: what {@link #start} runs on its own thread every few milliseconds. Call it
+     * yourself only where that thread is not started (a test or a benchmark driving the sender by hand).
+     */
+    public void pass() {
+        List<Assignment> assignments = latest.get();
+        long now = System.nanoTime();
+        long refill = bytesPerSecond * (now - lastRun) / 1_000_000_000L;
+        lastRun = now;
+        Set<UUID> seen = new HashSet<>();
+        watching.clear();
+        diffs.clear();
+        for (Assignment a : assignments) watching.merge(new Watch(a.canvas, a.encoding), 1, Integer::sum);
+        for (Assignment a : assignments) {
+            Viewer v = viewers.computeIfAbsent(a.player.getUniqueId(), k -> fresh(k, now));
+            if (seen.add(a.player.getUniqueId())) {
+                v.budget = Math.min(v.budget + refill, burst);
+                if (v.pointing == null) v.pointing = wire.frames(a.player);
+            }
+            v.walls.add(a.wall);
+            // Each on its own: one that fails must not hold up every assignment after it.
+            try {
+                send(a, v);
+            } catch (RuntimeException e) {
+                warn(e);
+            }
+        }
+        for (Assignment a : assignments) {
+            try {
+                flush(a.player, viewers.get(a.player.getUniqueId()));
+            } catch (RuntimeException e) {
+                warn(e);
+            }
+        }
+        // Players who left every screen: drop their state so walking back resends everything, keeping their budget a moment.
+        for (var it = viewers.entrySet().iterator(); it.hasNext(); ) {
+            var e = it.next();
+            if (seen.contains(e.getKey())) continue;
+            left.put(e.getKey(), new long[]{e.getValue().budget, now});
+            it.remove();
+        }
+        left.values().removeIf(was -> now - was[1] > 250_000_000L); // refilled to the full burst by now anyway
+        // And each player's frames for walls they are no longer near, even where others still are.
+        for (Viewer v : viewers.values()) {
+            v.frames.keySet().retainAll(v.walls);
+            v.wallInFlight.entrySet().removeIf(e -> !v.walls.contains(e.getKey()) && e.getValue().get() == 0);
+            v.walls.clear();
+        }
+    }
+
+    /** The map each of [wall]'s frames shows [v]'s client. Never changed: a new pointing is a new array. */
+    private static int[] maps(Viewer v, MapWall wall) {
+        Wire.Frames f = v.pointing;
+        int[] p = f == null ? null : f.pointing(wall);
+        if (p != null && p.length == wall.tiles()) return p;
+        return wall.ownMaps();
+    }
+
+    /** The tile [a]'s viewer should have: the canvas's, with the pointer drawn in for plain viewers. */
+    private byte[] tileFor(Assignment a, Viewer v, Canvas.Snapshot snap, int t) {
+        byte[] base = snap.tile(t, a.encoding);
+        PointerSpot spot = a.pointer;
+        if (spot == null || a.encoding != Canvas.Encoding.PLAIN || spot.shape == Pointer.HIDDEN) return base;
+        int tx = (t % a.wall.cols) * 128, ty = (t / a.wall.cols) * 128;
+        int left = spot.x - spot.shape.hotX, top = spot.y - spot.shape.hotY;
+        if (left >= tx + 128 || left + 16 <= tx || top >= ty + 128 || top + 16 <= ty) return base;
+        int id = a.wall.mapId(t);
+        Pointed cached = v.pointed.get(id);
+        if (cached != null && cached.base == base && cached.spot.equals(spot)) return cached.tile;
+        byte[] tile = base.clone();
+        byte black = palette.plain(0x000000), white = palette.plain(0xFFFFFF);
+        String[] art = spot.shape.art;
+        for (int y = 0; y < art.length; y++) {
+            for (int x = 0; x < art[y].length(); x++) {
+                char c = art[y].charAt(x);
+                if (c == ' ') continue;
+                int px = left + x - tx, py = top + y - ty;
+                if (px < 0 || py < 0 || px >= 128 || py >= 128) continue;
+                tile[py * 128 + px] = c == 'o' ? white : black;
+            }
+        }
+        v.pointed.put(id, new Pointed(base, spot, tile));
+        return tile;
+    }
+
+    private void send(Assignment a, Viewer v) {
+        int tiles = a.wall.tiles();
+        if (a.canvas.cols() != a.wall.cols || a.canvas.rows() != a.wall.rows) return;
+        Frame frame = v.frames.get(a.wall);
+        if (frame == null || frame.canvas != a.canvas) {
+            frame = new Frame(a.canvas, tiles);
+            v.frames.put(a.wall, frame);
+        }
+        if (frame.queue.isEmpty()) {
+            // Snapshot every tile that differs from what the client has; this set is what goes next.
+            Canvas.Snapshot snap = a.canvas.snapshot();
+            int[] maps = maps(v, a.wall);
+            int forgets = v.forgets.get();
+            if (snap.sameAs(frame.settled) && maps == frame.settledMaps && forgets == frame.settledForgets
+                    && java.util.Objects.equals(a.pointer, frame.settledPointer)) return;
+            boolean changed = false;
+            for (int t = 0; t < tiles; t++) {
+                frame.tile[t] = tileFor(a, v, snap, t);
+                changed |= frame.tile[t] != v.sent.get(maps[t]);
+            }
+            if (!changed) {
+                frame.settled = snap;
+                frame.settledMaps = maps;
+                frame.settledPointer = a.pointer;
+                frame.settledForgets = forgets;
+                return;
+            }
+            // Sending again: the client is no longer known to hold this drawing (a canvas can take back an
+            // earlier drawing's very tiles, see Canvas#show), until a check finds every tile there once more.
+            frame.settled = null;
+            int[] to = v.pointing == null ? null : repointed(maps, frame.tile, v.sent);
+            // Pointing never changes while a snapshot is part sent, so its tiles all go where it was taken.
+            if (to != null && shift(a, v, frame, maps, to)) return;
+            frame.maps = maps;
+            for (int t = 0; t < tiles; t++) if (frame.tile[t] != v.sent.get(maps[t])) frame.queue.add(t);
+        }
+        while (true) {
+            Integer t = frame.queue.peekFirst();
+            if (t == null) return;
+            int id = frame.maps[t];
+            byte[] current = frame.tile[t];
+            int[] rect = changed(v.sent.get(id), current);
+            if (rect == null) {
+                v.sent.put(id, current);
+                frame.queue.pollFirst();
+                continue;
+            }
+            int cost = rect[2] * rect[3];
+            if (v.budget <= 0 || v.inFlight.get() >= maxInFlight) return; // carry on from here next run
+            AtomicLong wallInFlight = v.wallInFlight.computeIfAbsent(a.wall, w -> new AtomicLong());
+            // Counted in flight from now, so delivered() never sees the tile as sent before it is written.
+            v.inFlight.addAndGet(cost);
+            wallInFlight.addAndGet(cost);
+            v.packets.add(patch(a, id, rect, current));
+            v.patches.add(new Patch(id, current, cost, wallInFlight));
+            v.batchCost += cost;
+            v.budget -= cost;
+            v.sent.put(id, current);
+            frame.queue.pollFirst();
+        }
+    }
+
+    /** The packet for [rect] of [tile] to map [id]: the same one for every viewer the wire can give it to. */
+    private Object patch(Assignment a, int id, int[] rect, byte[] tile) {
+        Integer viewers = watching.get(new Watch(a.canvas, a.encoding));
+        return wire.patch(a.player, id, rect[0], rect[1], rect[2], rect[3], tile, viewers != null && viewers > 1);
+    }
+
+    /**
+     * {@link #diff}, worked out once a pass for each pair of tiles: viewers of one wall who are in step all
+     * compare the same two, and a 16x9 wall is 2.4 MB to compare for each of them.
+     */
+    private int[] changed(byte[] previous, byte[] current) {
+        if (previous == null) return diff(null, current);
+        Object[] last = diffs.get(current);
+        if (last != null && last[0] == previous) return (int[]) last[1];
+        int[] rect = diff(previous, current);
+        diffs.put(current, new Object[]{previous, rect});
+        return rect;
+    }
+
+    /**
+     * Where to point each frame so that as many as possible show a tile the client already has: [maps] is what
+     * each shows now, [want] what each should, [sent] what each map holds. A frame that already shows its tile
+     * keeps its map; one whose tile is in another map of the wall that no frame keeps is pointed at that map; the
+     * rest take the maps left over (their own first) and are sent their tile. Null if no frame would move.
+     */
+    static int[] repointed(int[] maps, byte[][] want, Map<Integer, byte[]> sent) {
+        int n = maps.length;
+        Map<byte[], Integer> holder = new IdentityHashMap<>();
+        for (int id : maps) {
+            byte[] s = sent.get(id);
+            if (s != null) holder.put(s, id);
+        }
+        int[] to = new int[n];
+        Arrays.fill(to, -1);
+        Set<Integer> used = new HashSet<>();
+        for (int t = 0; t < n; t++) {
+            if (sent.get(maps[t]) == want[t]) {
+                to[t] = maps[t];
+                used.add(maps[t]);
+            }
+        }
+        boolean moved = false;
+        for (int t = 0; t < n; t++) {
+            if (to[t] >= 0) continue;
+            Integer id = holder.get(want[t]);
+            if (id != null && used.add(id)) {
+                to[t] = id;
+                moved = true;
+            }
+        }
+        if (!moved) return null;
+        for (int t = 0; t < n; t++) {
+            if (to[t] < 0 && used.add(maps[t])) to[t] = maps[t];
+        }
+        ArrayDeque<Integer> free = new ArrayDeque<>();
+        for (int id : maps) if (!used.contains(id)) free.add(id);
+        for (int t = 0; t < n; t++) if (to[t] < 0) to[t] = free.poll();
+        return to;
+    }
+
+    /**
+     * Points [a]'s frames at [to] (they show [maps] now) and sends the tiles the maps they then show lack, all in
+     * one bundle, so the client never draws a frame with some moved and some not. Goes whole or not at all: false
+     * if a frame is not in the world (then send as usual); true once written, or when it must wait for room.
+     */
+    private boolean shift(Assignment a, Viewer v, Frame frame, int[] maps, int[] to) {
+        List<Object> packets = new ArrayList<>();
+        for (int t = 0; t < to.length; t++) {
+            if (to[t] == maps[t]) continue;
+            Object p = wire.repoint(a.wall, t, to[t]);
+            if (p == null) return false;
+            packets.add(p);
+        }
+        if (v.budget <= 0 || v.inFlight.get() >= maxInFlight) return true; // all of it next run, from a fresh snapshot
+        AtomicLong wallInFlight = v.wallInFlight.computeIfAbsent(a.wall, w -> new AtomicLong());
+        List<Patch> patches = new ArrayList<>();
+        long cost = 0;
+        for (int t = 0; t < to.length; t++) {
+            int id = to[t];
+            byte[] current = frame.tile[t];
+            int[] rect = changed(v.sent.get(id), current);
+            if (rect == null) {
+                v.sent.put(id, current);
+                continue;
+            }
+            int c = rect[2] * rect[3];
+            packets.add(patch(a, id, rect, current));
+            patches.add(new Patch(id, current, c, wallInFlight));
+            cost += c;
+        }
+        // Before the write: a frame the client is sent afresh from now on must show where these point it.
+        v.pointing.point(a.wall, to);
+        v.inFlight.addAndGet(cost);
+        wallInFlight.addAndGet(cost);
+        v.budget -= cost;
+        for (Patch p : patches) v.sent.put(p.id, p.tile);
+        write(a.player, v, packets, patches, cost, true);
+        return true;
+    }
+
+    /** Writes [v]'s patches from this pass to [player] together, with one flush. */
+    private void flush(Player player, Viewer v) {
+        if (v == null || v.packets.isEmpty()) return;
+        List<Object> packets = List.copyOf(v.packets);
+        List<Patch> patches = List.copyOf(v.patches);
+        long cost = v.batchCost;
+        v.packets.clear();
+        v.patches.clear();
+        v.batchCost = 0;
+        write(player, v, packets, patches, cost, false);
+    }
+
+    /** Writes [packets], which carry [patches] costing [cost], to [player]; [together]: as one bundle. */
+    private void write(Player player, Viewer v, List<Object> packets, List<Patch> patches, long cost, boolean together) {
+        boolean queued = false;
+        try {
+            // Completes once netty has compressed the last packet and the socket took it.
+            queued = wire.write(player, packets, together, ok -> {
+                if (ok) bytesSent.addAndGet(cost);
+                else forget(v, patches);
+                landed(v, patches, cost);
+            });
+        } finally {
+            // Never queued (no connection, or the write threw): nothing else will ever settle them.
+            if (!queued) {
+                forget(v, patches);
+                landed(v, patches, cost);
+            }
+        }
+    }
+
+    /**
+     * Patches that never reached the client: forget that it has them, so they are sent again. Before
+     * they stop counting as in flight, so delivered() never sees them as both written and sent.
+     */
+    private static void forget(Viewer v, List<Patch> patches) {
+        for (Patch p : patches) v.sent.remove(p.id, p.tile);
+        v.forgets.incrementAndGet();
+    }
+
+    /** Patches written (or given up on): no longer in flight. */
+    private void landed(Viewer v, List<Patch> patches, long cost) {
+        v.inFlight.addAndGet(-cost);
+        for (Patch p : patches) p.wallInFlight.addAndGet(-p.cost);
+        // Room in flight again: send the rest of a picture now, not at the next 8 ms run. A 16x9 picture is
+        // several times the in-flight limit, so without this each remaining slice waited out a timer
+        // (measured: whole picture on screen 83.6 -> 66.6 ms median).
+        wake();
+    }
+
+    /** The smallest rectangle {x, y, w, h} covering every byte that differs, or null if none does. */
+    static int[] diff(byte[] previous, byte[] current) {
+        if (previous == null) return new int[]{0, 0, 128, 128};
+        int minX = 128, minY = 128, maxX = -1, maxY = -1;
+        for (int y = 0; y < 128; y++) {
+            int row = y * 128;
+            // Whole rows at a time (the JIT compares these many bytes at once), then only the bytes that can widen it.
+            int first = Arrays.mismatch(previous, row, row + 128, current, row, row + 128);
+            if (first < 0) continue;
+            if (first < minX) minX = first;
+            for (int x = 127; x > maxX && x > first; x--) {
+                if (previous[row + x] != current[row + x]) {
+                    maxX = x;
+                    break;
+                }
+            }
+            if (first > maxX) maxX = first;
+            if (minY == 128) minY = y;
+            maxY = y;
+        }
+        return maxX < 0 ? null : new int[]{minX, minY, maxX - minX + 1, maxY - minY + 1};
+    }
+}

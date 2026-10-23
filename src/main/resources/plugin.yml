@@ -2,14 +2,13 @@ name: UIEngine
 version: ${version}
 main: ai.resourcepack.ui.UIEnginePlugin
 api-version: '1.21'
-depend: [UIFramework]
 softdepend: [PlaceholderAPI]
-description: Put HTML pages in plugins/UIEngine/pages/ and see them in game, on walls and fullscreen.
+description: HTML pages in game, on walls of maps and fullscreen, for vanilla clients; and a framework for other plugins to draw on them.
 website: https://resourcepack.ai
 commands:
   ui:
-    description: Open, place and reload HTML pages.
-    usage: /ui open <page> [player] | close | place <page> [cols] [rows] [name] [shared] | remove [name] | list | reload
+    description: Open, place and reload HTML pages; test screens, set your field of view, re-send the pack.
+    usage: /ui open <page> [player] | close | place <page> [cols] [rows] [name] [shared] | remove [name] | list | reload | test wall|view [cols] [rows] | fov <degrees> | pack | stats | clear
 permissions:
   # One node per subcommand, checked as uiengine.<subcommand>, and a separate
   # .others node for pointing one at somebody else. uiengine.admin is only a
@@ -26,6 +25,14 @@ permissions:
       uiengine.remove: true
       uiengine.list: true
       uiengine.reload: true
+      uiengine.test: true
+      uiengine.test.others: true
+      uiengine.stats: true
+      uiengine.clear: true
+      uiengine.debug: true
+      uiengine.debug.others: true
+      uiengine.fov: true
+      uiengine.pack: true
   uiengine.open:
     description: Open a page fullscreen for yourself with /ui open.
     default: op
@@ -49,3 +56,27 @@ permissions:
   uiengine.reload:
     description: Read the config and every page again with /ui reload.
     default: op
+  uiengine.test:
+    description: Put a test picture on a wall or open one as a view, with /ui test.
+    default: op
+  uiengine.test.others:
+    description: Open a test view or place a test wall for another player, with /ui test ... <player>.
+    default: op
+  uiengine.stats:
+    description: See how many walls there are and how much map data has been sent, with /ui stats.
+    default: op
+  uiengine.clear:
+    description: Remove every test wall, whoever placed it, with /ui clear.
+    default: op
+  uiengine.debug:
+    description: Drive your own open view with /ui debug (point, click, scroll, close), for testing.
+    default: op
+  uiengine.debug.others:
+    description: Drive another player's open view with /ui debug <player>.
+    default: op
+  uiengine.fov:
+    description: Fit views to your field of view with /ui fov.
+    default: true
+  uiengine.pack:
+    description: Have the resource pack sent to you again with /ui pack.
+    default: true

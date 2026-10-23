@@ -1,16 +1,16 @@
 package ai.resourcepack.ui;
 
-import ai.resourcepack.uiframework.api.Canvas;
-import ai.resourcepack.uiframework.api.Click;
-import ai.resourcepack.uiframework.api.CloseReason;
-import ai.resourcepack.uiframework.api.Key;
-import ai.resourcepack.uiframework.api.Pointer;
-import ai.resourcepack.uiframework.api.UIFramework;
-import ai.resourcepack.uiframework.api.View;
-import ai.resourcepack.uiframework.api.ViewContent;
-import ai.resourcepack.uiframework.api.ViewOptions;
-import ai.resourcepack.uiframework.api.WallContent;
-import ai.resourcepack.uiframework.api.WallScreen;
+import ai.resourcepack.ui.framework.api.Canvas;
+import ai.resourcepack.ui.framework.api.Click;
+import ai.resourcepack.ui.framework.api.CloseReason;
+import ai.resourcepack.ui.framework.api.Key;
+import ai.resourcepack.ui.framework.api.Pointer;
+import ai.resourcepack.ui.framework.api.UIFramework;
+import ai.resourcepack.ui.framework.api.View;
+import ai.resourcepack.ui.framework.api.ViewContent;
+import ai.resourcepack.ui.framework.api.ViewOptions;
+import ai.resourcepack.ui.framework.api.WallContent;
+import ai.resourcepack.ui.framework.api.WallScreen;
 import ai.resourcepack.ui.html.Page;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -96,7 +96,7 @@ public final class Screens implements Listener {
         }
 
         private Session newSession(UUID id) {
-            // Called inside UI Framework's tick: the page loads elsewhere and shows when it has.
+            // Called inside the framework's tick: the page loads elsewhere and shows when it has.
             Canvas canvas = UIFramework.get().canvas(cols, rows);
             Session s = new Session(plugin, renderers, canvas, id, height > 0 ? height : plugin.wallHeight(rows));
             s.close = () -> {

@@ -1,10 +1,10 @@
 package ai.resourcepack.ui.html;
 
 import ai.resourcepack.ui.html.css.Selector;
-import ai.resourcepack.uiframework.api.Canvas;
-import ai.resourcepack.uiframework.net.MapSender;
-import ai.resourcepack.uiframework.render.Palette;
-import ai.resourcepack.uiframework.world.MapWall;
+import ai.resourcepack.ui.framework.api.Canvas;
+import ai.resourcepack.ui.framework.net.MapSender;
+import ai.resourcepack.ui.framework.render.Palette;
+import ai.resourcepack.ui.framework.world.MapWall;
 import org.bukkit.block.BlockFace;
 import org.jsoup.nodes.Element;
 import org.junit.jupiter.api.BeforeEach;

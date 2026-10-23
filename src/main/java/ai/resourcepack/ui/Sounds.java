@@ -8,8 +8,8 @@ import java.util.regex.Pattern;
 
 /**
  * A page's sounds, written {@code <sound> [volume] [pitch]}: any sound the game knows
- * ({@code block.note_block.pling}, {@code minecraft:ui.button.click}) or one of UI Framework's own
- * ({@code uiframework:<file>}), or {@code none}. Heard by one player only.
+ * ({@code block.note_block.pling}, {@code minecraft:ui.button.click}) or one of the server's own
+ * ({@code uiengine:<file>}), or {@code none}. Heard by one player only.
  */
 final class Sounds {
     /** The game's own button click, as loud as the game plays it. */

@@ -1,5 +1,6 @@
 package ai.resourcepack.ui;
 
+import ai.resourcepack.ui.framework.FrameworkCommand;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
@@ -17,7 +18,7 @@ import java.util.Set;
 
 /**
  * /ui open &lt;page&gt; [player] · close [player] · place &lt;page&gt; [cols] [rows] [name] [shared] ·
- * remove [name] · list · reload
+ * remove [name] · list · reload, and the framework's own, which {@link FrameworkCommand} answers.
  *
  * <p>Each subcommand checks its own node, {@code uiengine.<subcommand>}, and one pointed at another
  * player also needs {@code uiengine.<subcommand>.others}. {@code uiengine.admin} is only a parent in
@@ -26,9 +27,12 @@ import java.util.Set;
 final class UiCommand implements TabExecutor {
     private static final Set<BlockFace> WALL = Set.of(BlockFace.NORTH, BlockFace.SOUTH, BlockFace.EAST, BlockFace.WEST);
     private final UIEnginePlugin plugin;
+    /** The framework's own subcommands (test, fov, pack, stats, clear, debug), handed on as they are. */
+    private final FrameworkCommand framework;
 
-    UiCommand(UIEnginePlugin plugin) {
+    UiCommand(UIEnginePlugin plugin, FrameworkCommand framework) {
         this.plugin = plugin;
+        this.framework = framework;
     }
 
     /** The node a subcommand needs: {@code uiengine.<subcommand>}. */
@@ -61,6 +65,7 @@ final class UiCommand implements TabExecutor {
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         String sub = args.length == 0 ? "help" : args[0].toLowerCase(Locale.ROOT);
+        if (FrameworkCommand.SUBCOMMANDS.contains(sub)) return framework.onCommand(sender, command, label, args);
         switch (sub) {
             case "open" -> open(sender, args);
             case "close" -> {
@@ -85,8 +90,8 @@ final class UiCommand implements TabExecutor {
                 plugin.reload();
                 say(sender, "Reloaded the config and every page.", NamedTextColor.GREEN);
             }
-            default -> say(sender, "/ui open <page> [player] · close [player] · place <page> [cols] [rows] [name] [shared] · remove [name] · list · reload",
-                    NamedTextColor.GRAY);
+            default -> say(sender, "/ui open <page> [player] · close [player] · place <page> [cols] [rows] [name] [shared] · remove [name] · list · reload"
+                    + " · test wall|view [cols] [rows] · fov <degrees> · pack · stats · clear", NamedTextColor.GRAY);
         }
         return true;
     }
@@ -207,9 +212,11 @@ final class UiCommand implements TabExecutor {
         if (args.length == 1) {
             List<String> subs = new ArrayList<>();
             for (String sub : List.of("open", "close", "place", "remove", "list", "reload")) if (mayRun(sender, sub)) subs.add(sub);
+            subs.addAll(framework.onTabComplete(sender, command, label, args));
             return filter(subs, args[0]);
         }
         String sub = args[0].toLowerCase(Locale.ROOT);
+        if (FrameworkCommand.SUBCOMMANDS.contains(sub)) return framework.onTabComplete(sender, command, label, args);
         if (!mayRun(sender, sub)) return List.of();
         boolean playerArg = (args.length == 3 && sub.equals("open")) || (args.length == 2 && sub.equals("close"));
         if (playerArg && !sender.hasPermission(othersPermissionFor(sub))) {

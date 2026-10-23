@@ -1,0 +1,256 @@
+package ai.resourcepack.ui.framework.pack;
+
+import ai.resourcepack.ui.framework.Settings;
+import ai.resourcepack.ui.framework.api.Pointer;
+import ai.resourcepack.ui.framework.render.Palette;
+import com.sun.net.httpserver.HttpServer;
+import net.kyori.adventure.key.Key;
+import net.kyori.adventure.resource.ResourcePackInfo;
+import net.kyori.adventure.resource.ResourcePackRequest;
+import net.kyori.adventure.text.Component;
+import org.bukkit.entity.Player;
+
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.net.InetSocketAddress;
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
+import java.util.HexFormat;
+import java.util.List;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.logging.Logger;
+import java.util.regex.Pattern;
+import java.util.stream.Stream;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
+
+/**
+ * Builds the resource pack (the map decoder, the seated-only HUD hiding, the pointer font, the server's
+ * own sounds), serves it
+ * over plain HTTP if asked, and tracks which players have it loaded, so screens know whether to send
+ * them hi-colour maps or plain ones.
+ */
+public final class ResourcePack implements AutoCloseable {
+    public static final UUID PACK_ID = UUID.nameUUIDFromBytes("uiengine:pack".getBytes(StandardCharsets.UTF_8));
+    public static final Key POINTER_FONT = Key.key("uiengine", "pointer");
+    /** 26.2's pack format; 26.3 is 97.1, and an integer max_format of 97 covers every 97.x. */
+    static final int FORMAT_26_2 = 88;
+    static final int FORMAT_26_3 = 97;
+    static final String OVERLAY_26_2 = "uiengine_26_2";
+
+    private final Settings settings;
+    private final Logger logger;
+    public final byte[] bytes;
+    public final String sha1;
+    private final Set<UUID> loaded = ConcurrentHashMap.newKeySet();
+    private HttpServer http;
+    /** The server's threads: HttpServer.stop() leaves an executor it was given running. */
+    private ExecutorService executor;
+
+    public ResourcePack(Settings settings, Palette palette, Path dataFolder, Logger logger) throws IOException {
+        this.settings = settings;
+        this.logger = logger;
+        Path sounds = dataFolder.resolve("sounds");
+        Files.createDirectories(sounds);
+        this.bytes = build(palette, sounds, logger);
+        this.sha1 = sha1(bytes);
+        Files.createDirectories(dataFolder);
+        Files.write(dataFolder.resolve("pack.zip"), bytes);
+        logger.info("Resource pack built: " + bytes.length + " bytes, sha1 " + sha1 + " (also written to pack.zip)");
+    }
+
+    public void start() throws IOException {
+        if (settings.packMode != Settings.PackMode.SERVE) return;
+        HttpServer server = HttpServer.create(new InetSocketAddress(settings.packBind, settings.packPort), 16);
+        server.createContext("/", ex -> {
+            try (ex) {
+                // Only one file exists; anything else is a probe.
+                if (!"GET".equals(ex.getRequestMethod()) || !"/pack.zip".equals(ex.getRequestURI().getPath())) {
+                    ex.sendResponseHeaders(404, -1);
+                    return;
+                }
+                ex.getResponseHeaders().add("Content-Type", "application/zip");
+                ex.getResponseHeaders().add("Cache-Control", "no-store");
+                ex.sendResponseHeaders(200, bytes.length);
+                try (OutputStream out = ex.getResponseBody()) {
+                    out.write(bytes);
+                }
+            }
+        });
+        // The server reads each request on one of these threads, so a few connections that stall
+        // part-way must not take every one: up to 8 at once, each ending after 30 s idle. A pool only
+        // grows past its core size once its queue is full, so the core size is the cap.
+        ThreadPoolExecutor pool = new ThreadPoolExecutor(8, 8, 30, TimeUnit.SECONDS, new LinkedBlockingQueue<>(), r -> {
+            Thread t = new Thread(r, "UIEngine-pack");
+            t.setDaemon(true);
+            return t;
+        });
+        pool.allowCoreThreadTimeOut(true);
+        executor = pool;
+        server.setExecutor(pool);
+        server.start();
+        http = server;
+        logger.info("Serving the resource pack on " + settings.packBind + ":" + settings.packPort);
+    }
+
+    private String url() {
+        return switch (settings.packMode) {
+            case OFF -> null;
+            case EXTERNAL -> settings.packPublicUrl.isBlank() ? null : settings.packPublicUrl;
+            case SERVE -> settings.packPublicUrl.isBlank() ? "http://127.0.0.1:" + settings.packPort + "/pack.zip" : settings.packPublicUrl;
+        };
+    }
+
+    public void send(Player player) {
+        String url = url();
+        if (url == null) return;
+        // The sha1 in the query defeats any cache between the client and the server.
+        String sep = url.contains("?") ? "&" : "?";
+        player.sendResourcePacks(ResourcePackRequest.resourcePackRequest()
+                .packs(ResourcePackInfo.resourcePackInfo(PACK_ID, URI.create(url + sep + "v=" + sha1), sha1))
+                .required(settings.packRequired)
+                .prompt(Component.text(settings.packPrompt))
+                .replace(false));
+    }
+
+    public boolean has(UUID player) {
+        return loaded.contains(player);
+    }
+
+    public void markLoaded(UUID player) {
+        loaded.add(player);
+    }
+
+    public void forget(UUID player) {
+        loaded.remove(player);
+    }
+
+    @Override
+    public void close() {
+        if (http != null) http.stop(0);
+        http = null;
+        if (executor != null) executor.shutdownNow();
+        executor = null;
+    }
+
+    private static byte[] build(Palette palette, Path sounds, Logger logger) throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        try (ZipOutputStream zip = new ZipOutputStream(out)) {
+            Entries e = new Entries(zip);
+            e.put("pack.mcmeta", """
+                    {
+                      "pack": {"description": "UI Engine", "min_format": %d, "max_format": %d},
+                      "overlays": {"entries": [{"directory": "%s", "min_format": %d, "max_format": %d}]}
+                    }
+                    """.formatted(FORMAT_26_2, FORMAT_26_3, OVERLAY_26_2, FORMAT_26_2, FORMAT_26_3 - 1));
+            for (Shaders.Dialect d : Shaders.Dialect.values()) {
+                String root = (d == Shaders.Dialect.V26_3 ? "" : OVERLAY_26_2 + "/") + "assets/minecraft/shaders/core/";
+                e.put(root + "text.vsh", Shaders.textVsh(d, palette));
+                e.put(root + "text.fsh", Shaders.textFsh(d, palette));
+                e.put(root + "position_tex_color.vsh", Shaders.positionTexColorVsh(d));
+                e.put(root + "position_tex_color.fsh", Shaders.positionTexColorFsh(d));
+            }
+            // The pointer a seated player sees: one glyph per shape on a text display in front of the
+            // view. Text, unlike an item, gets no directional shading, so the arrow stays white.
+            StringBuilder chars = new StringBuilder();
+            for (Pointer p : Pointer.values()) chars.append("\\u").append(String.format("%04x", (int) p.glyph));
+            e.put("assets/uiengine/font/pointer.json", """
+                    {"providers": [{"type": "bitmap", "file": "uiengine:font/pointer.png", "ascent": 7, "height": 16, "chars": ["%s"]}]}
+                    """.formatted(chars));
+            e.put("assets/uiengine/textures/font/pointer.png", png(pointerSheet()));
+            soundFiles(e, sounds, logger);
+        }
+        return out.toByteArray();
+    }
+
+    /** A sound's name: lower case, digits, {@code _ - . /}, as the game takes in a resource location. */
+    private static final Pattern SOUND_NAME = Pattern.compile("[a-z0-9_./-]+");
+
+    /**
+     * Every .ogg under [dir] (the sounds folder), as a sound event of its path without ".ogg":
+     * {@code sounds/menu/open.ogg} is {@code uiengine:menu/open}, for /playsound and for any plugin.
+     * Sorted, so the pack is the same bytes while the folder is.
+     */
+    private static void soundFiles(Entries e, Path dir, Logger logger) throws IOException {
+        List<Path> files;
+        try (Stream<Path> walk = Files.walk(dir)) {
+            files = walk.filter(f -> Files.isRegularFile(f) && f.getFileName().toString().endsWith(".ogg")).sorted().toList();
+        }
+        if (files.isEmpty()) return;
+        List<String> events = new ArrayList<>();
+        for (Path f : files) {
+            String name = dir.relativize(f).toString().replace(File.separatorChar, '/');
+            name = name.substring(0, name.length() - ".ogg".length());
+            if (!SOUND_NAME.matcher(name).matches()) {
+                logger.warning("Sound " + name + ".ogg left out: a sound's name may only have lower case letters, digits and _ - . /");
+                continue;
+            }
+            e.put("assets/uiengine/sounds/" + name + ".ogg", Files.readAllBytes(f));
+            events.add("  \"" + name + "\": {\"sounds\": [\"uiengine:" + name + "\"]}");
+        }
+        if (events.isEmpty()) return;
+        e.put("assets/uiengine/sounds.json", "{\n" + String.join(",\n", events) + "\n}\n");
+        logger.info("Sounds in the pack: " + events.size() + " (uiengine:<name>)");
+    }
+
+    /** Every pointer glyph side by side, the font's one row. */
+    static BufferedImage pointerSheet() {
+        Pointer[] all = Pointer.values();
+        BufferedImage sheet = new BufferedImage(16 * all.length, 16, BufferedImage.TYPE_INT_ARGB);
+        for (int i = 0; i < all.length; i++) {
+            String[] art = all[i].art;
+            for (int y = 0; y < art.length; y++) {
+                for (int x = 0; x < art[y].length(); x++) {
+                    char c = art[y].charAt(x);
+                    if (c == 'X') sheet.setRGB(i * 16 + x, y, 0xFF000000);
+                    else if (c == 'o') sheet.setRGB(i * 16 + x, y, 0xFFFFFFFF);
+                }
+            }
+        }
+        return sheet;
+    }
+
+    private static byte[] png(BufferedImage image) throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        ImageIO.write(image, "png", out);
+        return out.toByteArray();
+    }
+
+    private static String sha1(byte[] bytes) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-1").digest(bytes));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /** Zip entries with a fixed timestamp, so the zip (and its sha1) is identical across restarts and clients keep their copy. */
+    private record Entries(ZipOutputStream zip) {
+        void put(String name, byte[] data) throws IOException {
+            ZipEntry entry = new ZipEntry(name);
+            entry.setTime(0);
+            zip.putNextEntry(entry);
+            zip.write(data);
+            zip.closeEntry();
+        }
+
+        void put(String name, String text) throws IOException {
+            put(name, text.getBytes(StandardCharsets.UTF_8));
+        }
+    }
+}

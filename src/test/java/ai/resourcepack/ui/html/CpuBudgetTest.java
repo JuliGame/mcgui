@@ -1,9 +1,9 @@
 package ai.resourcepack.ui.html;
 
 import ai.resourcepack.ui.html.css.Selector;
-import ai.resourcepack.uiframework.api.Canvas;
-import ai.resourcepack.uiframework.api.Cpu;
-import ai.resourcepack.uiframework.render.Palette;
+import ai.resourcepack.ui.framework.api.Canvas;
+import ai.resourcepack.ui.framework.api.Cpu;
+import ai.resourcepack.ui.framework.render.Palette;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 

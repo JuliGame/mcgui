@@ -1,9 +1,9 @@
 package ai.resourcepack.ui;
 
 import ai.resourcepack.ui.html.Page;
-import ai.resourcepack.uiframework.api.Canvas;
-import ai.resourcepack.uiframework.api.Cpu;
-import ai.resourcepack.uiframework.render.Palette;
+import ai.resourcepack.ui.framework.api.Canvas;
+import ai.resourcepack.ui.framework.api.Cpu;
+import ai.resourcepack.ui.framework.render.Palette;
 import org.bukkit.Bukkit;
 import org.bukkit.Server;
 import org.bukkit.configuration.file.YamlConfiguration;

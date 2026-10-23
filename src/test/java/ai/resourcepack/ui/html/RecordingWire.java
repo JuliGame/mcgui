@@ -1,7 +1,7 @@
 package ai.resourcepack.ui.html;
 
-import ai.resourcepack.uiframework.net.Wire;
-import ai.resourcepack.uiframework.world.MapWall;
+import ai.resourcepack.ui.framework.net.Wire;
+import ai.resourcepack.ui.framework.world.MapWall;
 import org.bukkit.entity.Player;
 
 import java.lang.reflect.Proxy;

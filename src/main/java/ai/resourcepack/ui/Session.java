@@ -1,7 +1,7 @@
 package ai.resourcepack.ui;
 
-import ai.resourcepack.uiframework.api.Canvas;
-import ai.resourcepack.uiframework.api.Pointer;
+import ai.resourcepack.ui.framework.api.Canvas;
+import ai.resourcepack.ui.framework.api.Pointer;
 import ai.resourcepack.ui.html.HoverAhead;
 import ai.resourcepack.ui.html.HtmlRenderer;
 import ai.resourcepack.ui.html.Repaint;

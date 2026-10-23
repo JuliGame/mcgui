@@ -2,9 +2,9 @@ package ai.resourcepack.ui.html;
 
 import ai.resourcepack.ui.html.css.Selector;
 import ai.resourcepack.ui.html.paint.Painter;
-import ai.resourcepack.uiframework.api.Canvas;
-import ai.resourcepack.uiframework.api.Cpu;
-import ai.resourcepack.uiframework.render.Palette;
+import ai.resourcepack.ui.framework.api.Canvas;
+import ai.resourcepack.ui.framework.api.Cpu;
+import ai.resourcepack.ui.framework.render.Palette;
 import com.sun.management.OperatingSystemMXBean;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
@@ -37,7 +37,7 @@ import java.util.zip.Deflater;
 
 /**
  * What many players at once cost: N sessions in one process, the way the plugin runs them. Each has its
- * own copy of the page's document and its own UI Framework {@link Canvas} (2048 x 1152, drawn at 2x),
+ * own copy of the page's document and its own {@link Canvas} (2048 x 1152, drawn at 2x),
  * renders, their bands and the canvas's encoders run on {@link Cpu}'s one pool of R threads (the framework's {@code cpu-threads}), at most one in
  * flight per session with the newest request winning (as {@code Session.render} coalesces), and every
  * finished frame is handed to {@code Canvas.draw}. Inputs run on one "server thread".
@@ -350,7 +350,7 @@ public final class LoadBench {
             long c = mx.getThreadCpuTime(t.getId());
             if (c < 0) continue;
             String n = t.getName();
-            int g = n.startsWith("UIFramework-cpu-") ? 0
+            int g = n.startsWith("UIEngine-cpu-") ? 0
                     : n.equals("LoadBench-send") ? 3 : n.equals("LoadBench-server") ? 4 : -1;
             if (g < 0) continue;
             out[g] += c;

@@ -2,18 +2,41 @@
 
 Put an HTML page in `plugins/UIEngine/pages/` and it is in the game: on a wall,
 or fullscreen in front of the player, who points with their mouse and clicks.
-Vanilla clients, no mods. Edit the file and it updates in game within a second.
+Vanilla clients, no mods: a Paper plugin and a small resource pack it builds and
+serves itself. Edit the file and it updates in game within a second.
 
 No browser runs. UI Engine has its own HTML and CSS renderer, so what works is
-**static** HTML and CSS: no JavaScript. Links, commands, hover states, scrolling
-and a few form bits are made to work in game instead (below).
+**static** HTML and CSS: no JavaScript. Links, commands, hover states, scrolling,
+sounds and a few form bits are made to work in game instead (below).
 
-**Needs** [UI Framework](https://github.com/resourcepack-ai/ui-framework) (it draws the pictures) on Paper
-26.2 or 26.3. PlaceholderAPI is optional. Build with a clone of
-[ui-framework](https://github.com/resourcepack-ai/ui-framework) beside this one
-(`../ui-framework`), then `./gradlew build` (JDK 17 or 21 to run Gradle); `./gradlew
-renderSamples` renders `samples/*.html` to `build/samples/` to check the
-renderer by eye.
+Under the pages is a framework any plugin can draw with: full-colour pictures on
+walls and in fullscreen views, with the player's mouse, clicks and keys. The
+[examples](examples/) include an arcade of games and a live world map built on
+it. See [For plugin developers](#for-plugin-developers).
+
+**Needs** Paper 26.2 or 26.3 (Java 25). PlaceholderAPI is optional. Build with
+`./gradlew build` (JDK 17 or 21 to run Gradle); the plugin is
+`build/libs/UIEngine-<version>.jar`. `./gradlew renderSamples` renders
+`samples/*.html` to `build/samples/` to check the renderer by eye.
+
+## How it works
+
+- **Walls.** A wall of invisible glow item frames holding maps nobody else owns.
+  Each player is sent only the rectangle of each map that changed since what
+  their client last got, within a per-player byte budget. Players can point at a
+  wall with their crosshair, click it and scroll it.
+- **Views.** A player sits: their camera locks onto a picture only they can
+  see, their mouse moves a pointer across it, the attack and use keys click, the
+  wheel scrolls, movement keys are keys and sneaking gets up. They are put back
+  exactly where they stood. With the pack the picture fills the whole window,
+  whatever its shape and their FOV.
+- **Colour.** With the pack, maps carry YCbCr 4:2:0 in 240 map colours and the
+  pack's text shader decodes them, smoothly scaled, unlit and unfogged. Without
+  it, players get dithered vanilla map colours.
+- **Sounds.** Every `.ogg` in `plugins/UIEngine/sounds/` goes into the pack
+  as a sound named after its path: `sounds/menu/open.ogg` plays as
+  `uiengine:menu/open`, from a page, `/playsound` or any plugin. Names are lower
+  case. Restart after adding one, so the pack is built again.
 
 ## Commands
 
@@ -24,23 +47,35 @@ renderer by eye.
 | `/ui place <page> [cols] [rows] [name] [shared]` | Puts a page on the wall you look at (the block becomes the top-left corner) |
 | `/ui remove [name]` | Takes a wall screen down (or the one you look at) |
 | `/ui list` · `/ui reload` | Pages and screens · read the config and every page again |
+| `/ui test wall\|view [cols] [rows] [player]` | Puts a test picture on the wall you look at, or opens one fullscreen: the framework working with no page at all |
+| `/ui fov <degrees>` | Fits views to your FOV setting, for players without the pack (the server cannot read it) |
+| `/ui pack` · `stats` · `clear` | Re-send the pack · walls and bytes sent · remove test walls |
+| `/ui debug <player> point <x> <y>` · `click` · `scroll <n>` · `close` | Drive a player's view from the console |
 
 ### Permissions
 
 Each subcommand has its own node, so a server can hand out one tool without
 the rest. Pointing a command at another player needs that command's `.others`
-node as well. All are op by default.
+node as well.
 
-| Node | Allows |
-|---|---|
-| `uiengine.open` | `/ui open <page>` for yourself |
-| `uiengine.open.others` | `/ui open <page> <player>`; also grants `uiengine.close.others` |
-| `uiengine.close.others` | `/ui close <player>` |
-| `uiengine.place` | `/ui place` |
-| `uiengine.remove` | `/ui remove` |
-| `uiengine.list` | `/ui list` (pages, and where every screen is) |
-| `uiengine.reload` | `/ui reload` |
-| `uiengine.admin` | all of the above, in one line |
+| Node | Allows | Default |
+|---|---|---|
+| `uiengine.open` | `/ui open <page>` for yourself | op |
+| `uiengine.open.others` | `/ui open <page> <player>`; also grants `uiengine.close.others` | op |
+| `uiengine.close.others` | `/ui close <player>` | op |
+| `uiengine.place` | `/ui place` | op |
+| `uiengine.remove` | `/ui remove` | op |
+| `uiengine.list` | `/ui list` (pages, and where every screen is) | op |
+| `uiengine.reload` | `/ui reload` | op |
+| `uiengine.test` | `/ui test` for yourself | op |
+| `uiengine.test.others` | `/ui test ... <player>` for somebody else | op |
+| `uiengine.stats` | `/ui stats` | op |
+| `uiengine.clear` | `/ui clear` (removes every test wall, whoever placed it) | op |
+| `uiengine.debug` | `/ui debug` on your own view | op |
+| `uiengine.debug.others` | `/ui debug` on another player's view | op |
+| `uiengine.fov` | `/ui fov` | everyone |
+| `uiengine.pack` | `/ui pack` | everyone |
+| `uiengine.admin` | all of the above, in one line | op |
 
 Closing your own page needs no permission, just as sneaking out of it needs
 none. `uiengine.admin` is only a parent: the plugin checks the nodes it grants,
@@ -85,8 +120,8 @@ Page settings, all optional:
 ```
 
 A sound is any the game has, by its id (`entity.experience_orb.pickup`), or
-your own: put an `.ogg` in `plugins/UIFramework/sounds/` and restart, and
-`sounds/door.ogg` is `uiframework:door`. Only the player who clicked hears it.
+your own: put an `.ogg` in `plugins/UIEngine/sounds/` and restart, and
+`sounds/door.ogg` is `uiengine:door`. Only the player who clicked hears it.
 
 Controls while a page is open: mouse moves the pointer, either button clicks,
 the wheel (or W/S) scrolls, F goes back, sneak closes.
@@ -130,3 +165,43 @@ are bundled, all under the SIL Open Font License (`fonts/*-OFL.txt`).
 Not supported: JavaScript, WOFF fonts, WebP images, video, iframes, CSS
 animations and transitions, floats (floated boxes stay in the flow), typing into
 inputs.
+
+## For plugin developers
+
+Add `depend: [UIEngine]` to your `plugin.yml` and compile against the plugin
+(`compileOnly`, never shaded: it is one plugin on the server, which owns the
+pack, the map ids and the seats). From a tag of this repository with
+[JitPack](https://jitpack.io):
+
+```groovy
+repositories { maven { url 'https://jitpack.io' } }
+dependencies { compileOnly 'com.github.resourcepack-ai:ui-engine:<tag>' }
+```
+
+Pages, from `plugins/UIEngine/pages/`:
+
+```java
+UIEngine.open(player, "menu");   // menu.html, fullscreen
+UIEngine.close(player);
+UIEngine.exists("menu");
+```
+
+Your own pictures, drawn with anything that makes a `BufferedImage`:
+
+```java
+UIFramework engine = UIFramework.get();
+Canvas canvas = engine.canvas(4, 3);               // 512 x 384 pixels
+canvas.draw(image, 0, 0);                          // only changed tiles are re-sent
+other.show(canvas.copy());                         // same picture, same tiles: nothing re-encoded or re-sent
+engine.placeWall(topLeft, BlockFace.SOUTH, 4, 3, viewer -> canvas);
+engine.openView(player, () -> canvas, ViewOptions.DEFAULT);
+```
+
+`WallContent` and `ViewContent` have default methods for looking, pointing,
+clicking, scrolling, keys and chat; implement the ones you need. Every callback
+runs on the server thread. A wall can show each viewer their own canvas.
+
+The [examples](examples/) are whole plugins built this way:
+[arcade](examples/arcade/) (thirteen games, on cabinets and fullscreen),
+[atlas](examples/atlas/) (a live world map) and [vanilla](examples/vanilla/)
+(pages in the game's own look).

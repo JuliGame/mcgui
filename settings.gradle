@@ -1,5 +1,1 @@
 rootProject.name = 'ui-engine'
-
-// UI Framework, the framework UI Engine draws through, built from a clone of
-// github.com/resourcepack-ai/ui-framework beside this one (-Pframework=<path> for another checkout).
-includeBuild(providers.gradleProperty('framework').getOrElse('../ui-framework'))
