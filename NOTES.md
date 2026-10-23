@@ -435,9 +435,32 @@ wide for a default view). `/ui place <page> <cols> <rows> <name> <x> <y> <z>
   nothing: a whole 2×2 block in HI when two or more of its pixels are. A
   transparent area is the same bytes from one drawing to the next, so it is
   never sent again. A view's tint travels in its maps (the 2×2 block after its
-  size, `Palette.markTint`) and `text.fsh` blends it over the world. The
-  shader shows the next block in place of those, which leaves faint dots in
-  the top-left corner of some maps.
+  size, `Palette.markTint`) and `text.fsh` blends it over the world.
+- **A map's top-left blocks are data, not picture** (the marker, a view's size
+  and place, its tint, a blurred view's panel), so the shader paints them from
+  a neighbour: the block right of the data when an edge runs between the top
+  two block rows just past it (`mcb_fill_right`, worked out once per map in
+  `text.vsh`), else each the block below it. Always copying the block to the
+  right (the old rule) drew a dash wherever a vertical line crossed a map's top
+  edge: the "faint dots" on overlay pages. Measured on the market pages' maps,
+  the choice cuts fills that differ visibly from the picture they cover from
+  13 % (always right) or 8 % (always below) to 4–5 % on overlays, and from 5 %
+  to 3 % on opaque pages. Anything that puts more data in the top row must
+  widen `mcb_info` to match.
+- **The text shaders are the hot path of every frame with a view open**, and
+  every bit of text in the game runs through them too. `text.vsh` does each
+  map's fixed work once per vertex (four a map): which of ours it is
+  (`mcb_screen_map`), the fill choice above and the view's tint, handed on as
+  flat varyings (`mcbMapInfo`, `mcbViewTint`). `text.fsh` only decodes: at most
+  2×2 blocks under a pixel's footprint, four texel reads and four lookups a
+  block, and a symbol is one read of a 4,096-slot perfect hash packed four to a
+  uint (`SymbolHash`). Ordinary text costs one flat compare more than vanilla.
+  Measured on Josh's PC (720p, uncapped): world alone 0.53 ms a frame; the
+  market at 16×9 2.5 ms, of which about 1.3 ms is the 144 maps' draw calls (a
+  map is its own texture, so its own render pass: nothing the pack does can
+  batch them) and about 0.4 ms the decode. Map count is the lever (see the
+  README's "Frame rate"); moving per-pixel tint decoding to the vertex shader
+  made overlay views about 6 % faster.
 - **A blurred view's camera is an invisible creeper** (`ViewOptions.blur`):
   the game runs `post_effect/creeper.json` over a creeper camera's whole frame,
   and the pack's (26.2 overlay only, in that dialect) is the menu blur outside

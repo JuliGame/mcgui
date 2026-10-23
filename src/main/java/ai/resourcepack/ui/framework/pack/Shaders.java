@@ -32,6 +32,11 @@ import java.util.regex.Pattern;
 public final class Shaders {
     private Shaders() {}
 
+    static {
+        // text.fsh splits a symbol into luma and digit with >> 3 and & 7.
+        if (Palette.DIGITS != 8) throw new AssertionError("text.fsh assumes 8 digits a symbol");
+    }
+
     public enum Dialect { V26_2, V26_3 }
 
     /** A seated camera's coordinate along its view's normal is always k/16 + 3/128 of a block. */
@@ -295,6 +300,10 @@ public final class Shaders {
                 layout(location = 6) flat out float mcbSeated;
                 layout(location = 7) flat out float mcbPointer;
                 layout(location = 8) flat out float mcbReversed;
+                // Which of our maps this is (mcb_screen_map) and how its data blocks are filled (mcb_fill_right), and
+                // for someone's own view its tint: worked out here once per vertex rather than in every pixel.
+                layout(location = 9) flat out vec2 mcbMapInfo;
+                layout(location = 10) flat out vec4 mcbViewTint;
 
                 """ + helpers(VERTEX_HELPERS) + decoderCore(palette) + """
 
@@ -335,6 +344,13 @@ public final class Shaders {
                     mcbPos = (ModelViewMat * vec4(Position, 1.0)).xy;
                     mcbSize = mcb_gui_size();
                     mcbPointer = 0.0;
+                #ifdef IS_GRAYSCALE
+                    int mcbMap = 0;
+                #else
+                    int mcbMap = mcb_screen_map();
+                #endif
+                    mcbMapInfo = vec2(float(mcbMap), mcbMap > 0 ? mcb_fill_right(mcb_info(mcbMap)) : 0.0);
+                    mcbViewTint = mcbMap >= 2 ? mcb_tint() : vec4(0.0);
                 #ifdef IS_GUI
                     mcbSeated = mcb_seated_now();
                     vertexColor = Color;
@@ -345,7 +361,6 @@ public final class Shaders {
                         // The pointer: text in the pointer's red, its view's columns and rows in green and blue. Drawn white.
                         ivec3 mcbRgb = ivec3(round(Color.rgb * 255.0));
                         vec2 mcbGrid = vec2(0.0);
-                        int mcbMap = mcb_screen_map();
                         if (mcbRgb.r == @PR@ && mcbRgb.g > 0 && mcbRgb.b > 0) {
                             mcbPointer = 1.0;
                             mcbGrid = vec2(mcbRgb.gb);
@@ -389,27 +404,28 @@ public final class Shaders {
     }
 
     /**
-     * Map colour to symbol, and which maps are ours: both text shaders need it, the vertex one to find a
-     * seated player's own view (and its size), the fragment one to decode every screen.
+     * Map colour to symbol, and which maps are ours: both text shaders need it, the vertex one to find
+     * every map's kind (and a seated player's own view's size, place and tint) once per vertex, the
+     * fragment one to decode the picture.
      */
     private static String decoderCore(Palette palette) {
         SymbolHash hash = new SymbolHash(palette.symbolRgb);
         return """
 
                 // ---- UI Engine hi-colour map decoder ----
-                // Colour -> symbol in two table reads (SymbolHash builds these tables).
-                const int MCB_D[@BUCKETS@] = @DISPLACE@;
-                const int MCB_S[@SLOTS@] = @SLOTTABLE@;
+                // Colour -> symbol in one table read: a perfect hash into @SLOTS@ byte slots, four to a uint, each
+                // holding its symbol plus one (SymbolHash builds the table).
+                const uint MCB_T[@WORDS@] = @TABLE@;
 
                 ivec3 mcb_fetch(ivec2 p) { return ivec3(round(texelFetch(Sampler0, p, 0).rgb * 255.0)); }
 
-                int mcb_symbol(ivec2 p) {
-                    uvec3 c = uvec3(mcb_fetch(p));
-                    uint k = (c.r << 16u) | (c.g << 8u) | c.b;
-                    uint b = ((k * @MULA@u) >> 16u) % @BUCKETS@u;
-                    uint slot = (((k * @MULB@u) >> 16u) + uint(MCB_D[b])) % @SLOTS@u;
-                    return max(MCB_S[slot], 0);
+                int mcb_symbol_of(vec3 rgb) {
+                    uvec3 c = uvec3(round(rgb * 255.0));
+                    uint slot = (((c.r << 16u) | (c.g << 8u) | c.b) * @MUL@u) >> @SHIFT@u;
+                    return max(int((MCB_T[slot >> 2u] >> ((slot & 3u) << 3u)) & 255u) - 1, 0);
                 }
+
+                int mcb_symbol(ivec2 p) { return mcb_symbol_of(texelFetch(Sampler0, p, 0).rgb); }
 
                 // 0: not ours. 1: a screen. 2: the view of whoever is seated at it (bottom markers swapped).
                 // 3: such a view whose pointer their client places, each map carrying its place (both the fourth).
@@ -425,13 +441,47 @@ public final class Shaders {
                     if (a == @M2@ && b == @M2@) return 4;
                     return 0;
                 }
+
+                // What someone's own view lays over the world where it is transparent (Palette.markTint): red,
+                // green, blue and alpha in the 2x2 block after its size.
+                vec4 mcb_tint() {
+                    return vec4(float(mcb_symbol(ivec2(4, 0))), float(mcb_symbol(ivec2(5, 0))),
+                                float(mcb_symbol(ivec2(4, 1))), float(mcb_symbol(ivec2(5, 1)))) / @SYMMAX@;
+                }
+
+                // How many 2x2 blocks after the marker hold data, not picture: a view's size, place and tint (2), and a
+                // blurred view's panel too (4).
+                int mcb_info(int kind) { return kind == 4 ? 4 : kind >= 2 ? 2 : 0; }
+
+                // A 2x2 block's mean luma and its chroma, and 1 (0 for all four when it is transparent).
+                vec4 mcb_block(ivec2 b) {
+                    ivec2 p = b * 2;
+                    if (texelFetch(Sampler0, p, 0).a < 0.5) return vec4(0.0);
+                    ivec4 s = ivec4(mcb_symbol(p), mcb_symbol(p + ivec2(1, 0)), mcb_symbol(p + ivec2(0, 1)), mcb_symbol(p + ivec2(1, 1)));
+                    ivec4 digit = s & 7;
+                    return vec4(dot(vec4(s >> 3), vec4(0.25)) / @LUMAMAX@, float(digit.x * 8 + digit.y - 32) / 63.0,
+                                float(digit.z * 8 + digit.w - 32) / 63.0, 1.0);
+                }
+
+                // 1 if a map's data blocks (row 0, up to block [info]) are best shown as the block right of them, 0 if as
+                // the blocks below them: right when an edge runs between the top two block rows just past the data, so
+                // likely through the data too, below otherwise (nearer, and right for anything that changes along the
+                // row). Measured on the market pages' maps, this halves how often the fill differs visibly from the
+                // picture it covers, against always right or always below.
+                float mcb_fill_right(int info) {
+                    vec4 a = mcb_block(ivec2(info + 1, 0)), b = mcb_block(ivec2(info + 1, 1));
+                    if (a.w != b.w) return 1.0;
+                    vec4 d = abs(a - b);
+                    return d.x + 0.5 * (d.y + d.z) > 0.06 ? 1.0 : 0.0;
+                }
                 """
-                .replace("@BUCKETS@", String.valueOf(SymbolHash.BUCKETS))
                 .replace("@SLOTS@", String.valueOf(SymbolHash.SLOTS))
-                .replace("@DISPLACE@", ints(hash.displace))
-                .replace("@SLOTTABLE@", ints(hash.slots))
-                .replace("@MULA@", Integer.toUnsignedString(hash.mulA))
-                .replace("@MULB@", Integer.toUnsignedString(hash.mulB))
+                .replace("@WORDS@", String.valueOf(hash.packed.length))
+                .replace("@TABLE@", uints(hash.packed))
+                .replace("@MUL@", Integer.toUnsignedString(hash.mul))
+                .replace("@SHIFT@", String.valueOf(32 - SymbolHash.BITS))
+                .replace("@SYMMAX@", String.format(Locale.ROOT, "%.1f", (float) (Palette.SYMBOLS - 1)))
+                .replace("@LUMAMAX@", String.format(Locale.ROOT, "%.1f", (float) (Palette.LUMA_LEVELS - 1)))
                 .replace("@M0@", ivec3(palette.markerRgb[0]))
                 .replace("@M1@", ivec3(palette.markerRgb[1]))
                 .replace("@M2@", ivec3(palette.markerRgb[2]))
@@ -464,6 +514,8 @@ public final class Shaders {
                 layout(location = 6) flat in float mcbSeated;
                 layout(location = 7) flat in float mcbPointer;
                 layout(location = 8) flat in float mcbReversed;
+                layout(location = 9) flat in vec2 mcbMapInfo;
+                layout(location = 10) flat in vec4 mcbViewTint;
 
                 """ + (d == Dialect.V26_3 ? """
                 #ifndef OIT_ALPHA_ONLY
@@ -483,11 +535,13 @@ public final class Shaders {
                 // The screen is almost never drawn at one map pixel per window pixel. Instead of the
                 // nearest pixel (uneven, shimmering text), average the map pixels under this window
                 // pixel's footprint, weighted by overlap. Averaging in YCbCr is exact: the conversion to
-                // RGB is linear. Pixels come in 2x2 blocks that share one chroma value. The first [info]
-                // + 1 blocks of the top row are the marker (and a view's size and tint): they show the next
-                // one. A transparent block (map colours 0-3, alpha 0) adds no colour: alpha is how much of
-                // the footprint the opaque blocks cover, so a picture's edge against the world is smooth.
-                vec4 mcb_sample(vec2 t, vec2 fw, int info) {
+                // RGB is linear. Pixels come in 2x2 blocks that share one chroma value; a footprint at most
+                // two pixels across touches at most 2x2 of them. The first [info] + 1 blocks of the top row
+                // hold data, not picture (the marker, a view's size and place, its tint, a blurred view's
+                // panel): they show the block right of them, or each the block below it, as [fillRight] says
+                // (mcb_fill_right). A transparent block (map colours 0-3, alpha 0) adds no colour: alpha is how
+                // much of the footprint the opaque blocks cover, so a picture's edge against the world is smooth.
+                vec4 mcb_sample(vec2 t, vec2 fw, int info, bool fillRight) {
                     vec2 halfFw = clamp(fw, vec2(0.02), vec2(2.0)) * 0.5;
                     vec2 lo = clamp(t - halfFw, vec2(0.0), vec2(128.0));
                     vec2 hi = clamp(t + halfFw, vec2(0.0), vec2(128.0));
@@ -496,39 +550,31 @@ public final class Shaders {
                     vec3 acc = vec3(0.0);
                     float total = 0.0;
                     float covered = 0.0;
-                    for (int by = b0.y; by <= b1.y; by++) {
-                        for (int bx = b0.x; bx <= b1.x; bx++) {
-                            ivec2 base = ivec2(bx, by) * 2;
-                            ivec2 src = (by == 0 && bx <= info) ? ivec2(2 * info + 2, 0) : base;
-                            vec2 p0 = vec2(base);
-                            vec2 ov0 = max(min(hi, p0 + 1.0) - max(lo, p0), 0.0);
-                            vec2 ov1 = max(min(hi, p0 + 2.0) - max(lo, p0 + 1.0), 0.0);
-                            vec4 w = vec4(ov0.x * ov0.y, ov1.x * ov0.y, ov0.x * ov1.y, ov1.x * ov1.y);
-                            float ws = w.x + w.y + w.z + w.w;
-                            total += ws;
-                            if (texelFetch(Sampler0, src, 0).a < 0.5) continue;
-                            int s00 = mcb_symbol(src);
-                            int s10 = mcb_symbol(src + ivec2(1, 0));
-                            int s01 = mcb_symbol(src + ivec2(0, 1));
-                            int s11 = mcb_symbol(src + ivec2(1, 1));
-                            vec4 luma = vec4(float(s00 / @DIGITS@), float(s10 / @DIGITS@), float(s01 / @DIGITS@), float(s11 / @DIGITS@)) / @LUMAMAX@;
-                            vec2 chroma = vec2(float((s00 % @DIGITS@) * @DIGITS@ + (s10 % @DIGITS@) - 32),
-                                               float((s01 % @DIGITS@) * @DIGITS@ + (s11 % @DIGITS@) - 32)) / 63.0;
-                            acc += vec3(dot(w, luma), chroma * ws);
-                            covered += ws;
-                        }
+                    for (int i = 0; i < 4; i++) {
+                        ivec2 b = b0 + ivec2(i & 1, i >> 1);
+                        if (b.x > b1.x || b.y > b1.y) continue;
+                        ivec2 base = b * 2;
+                        vec2 p0 = vec2(base);
+                        vec2 ov0 = max(min(hi, p0 + 1.0) - max(lo, p0), 0.0);
+                        vec2 ov1 = max(min(hi, p0 + 2.0) - max(lo, p0 + 1.0), 0.0);
+                        vec4 w = vec4(ov0.x * ov0.y, ov1.x * ov0.y, ov0.x * ov1.y, ov1.x * ov1.y);
+                        float ws = w.x + w.y + w.z + w.w;
+                        total += ws;
+                        ivec2 src = b.y > 0 || b.x > info ? base : fillRight ? ivec2(2 * info + 2, 0) : ivec2(base.x, 2);
+                        vec4 c00 = texelFetch(Sampler0, src, 0);
+                        if (c00.a < 0.5) continue;
+                        ivec4 s = ivec4(mcb_symbol_of(c00.rgb), mcb_symbol(src + ivec2(1, 0)),
+                                        mcb_symbol(src + ivec2(0, 1)), mcb_symbol(src + ivec2(1, 1)));
+                        vec4 luma = vec4(s >> 3) / @LUMAMAX@;
+                        ivec4 digit = s & 7;
+                        vec2 chroma = vec2(float(digit.x * 8 + digit.y - 32), float(digit.z * 8 + digit.w - 32)) / 63.0;
+                        acc += vec3(dot(w, luma), chroma * ws);
+                        covered += ws;
                     }
                     if (covered <= 0.0) return vec4(0.0);
                     vec3 ycc = acc / covered;
                     return vec4(clamp(vec3(ycc.x + 1.402 * ycc.z, ycc.x - 0.344136 * ycc.y - 0.714136 * ycc.z, ycc.x + 1.772 * ycc.y), 0.0, 1.0),
                                 covered / max(total, 1e-6));
-                }
-
-                // What someone's own view lays over the world where it is transparent (Palette.markTint): red,
-                // green, blue and alpha in the 2x2 block after its size.
-                vec4 mcb_tint() {
-                    return vec4(float(mcb_symbol(ivec2(4, 0))), float(mcb_symbol(ivec2(5, 0))),
-                                float(mcb_symbol(ivec2(4, 1))), float(mcb_symbol(ivec2(5, 1)))) / @SYMMAX@;
                 }
 
                 // One edge of a blurred view's panel in canvas pixels (Palette.markBlurred): two symbols, high and low.
@@ -551,9 +597,7 @@ public final class Shaders {
 
                 bool mcb_in(vec2 p, vec2 a, vec2 b) { return p.x >= a.x && p.x <= b.x && p.y >= a.y && p.y <= b.y; }
                 """
-                .replace("@DIGITS@", String.valueOf(Palette.DIGITS))
                 .replace("@LUMAMAX@", String.format(Locale.ROOT, "%.1f", (float) (Palette.LUMA_LEVELS - 1)))
-                .replace("@SYMMAX@", String.format(Locale.ROOT, "%.1f", (float) (Palette.SYMBOLS - 1)))
                 .replace("@SYMBOLS@", String.valueOf(Palette.SYMBOLS))
                 .replace("@SIG0@", (SIGNATURE_0 >> 16) + "," + (SIGNATURE_0 >> 8 & 255) + "," + (SIGNATURE_0 & 255))
                 .replace("@SIG3@", String.valueOf(SIGNATURE_3));
@@ -579,15 +623,13 @@ public final class Shaders {
                     }
                 #endif
                 #ifndef IS_GRAYSCALE
-                    int mcbMap = mcb_screen_map();
+                    int mcbMap = int(mcbMapInfo.x + 0.5);
                     if (mcbMap > 0) {
                         // A screen emits its own light: no lightmap, tint or fog, so colours are exact day and night.
-                        // Someone's own view carries its size and tint in a second and third block (info 2), a blurred
-                        // one its panel in a fourth and fifth (info 4).
-                        vec4 mcbPicture = mcb_sample(texCoord0 * 128.0, mcbFootprint, mcbMap == 4 ? 4 : mcbMap >= 2 ? 2 : 0);
+                        vec4 mcbPicture = mcb_sample(texCoord0 * 128.0, mcbFootprint, mcb_info(mcbMap), mcbMapInfo.y > 0.5);
                         // Where the picture is transparent the world behind shows, on someone's own view under its
                         // tint: the picture over the tint over the world, as one colour blended over the world.
-                        vec4 mcbTint = mcbMap >= 2 && mcbPicture.a < 1.0 ? mcb_tint() : vec4(0.0);
+                        vec4 mcbTint = mcbMap >= 2 && mcbPicture.a < 1.0 ? mcbViewTint : vec4(0.0);
                         float mcbAlpha = 1.0 - (1.0 - mcbPicture.a) * (1.0 - mcbTint.a);
                         bool mcbSignature = false;
                 #ifndef IS_GUI
@@ -778,11 +820,11 @@ public final class Shaders {
                 .replace("@SIG3@", String.valueOf(SIGNATURE_3)), Dialect.V26_2);
     }
 
-    private static String ints(int[] values) {
-        StringBuilder sb = new StringBuilder("int[").append(values.length).append("](");
+    private static String uints(int[] values) {
+        StringBuilder sb = new StringBuilder("uint[").append(values.length).append("](");
         for (int i = 0; i < values.length; i++) {
             if (i > 0) sb.append(',');
-            sb.append(values[i]);
+            sb.append(Integer.toUnsignedString(values[i])).append('u');
         }
         return sb.append(')').toString();
     }
