@@ -1024,8 +1024,9 @@ public final class Painter {
         if (same) {
             g.setColor(new Color(shade(s.borderColor[0], style, 0), true));
             if (outer instanceof Rectangle2D outerRect && inner instanceof Rectangle2D innerRect && Shapes.fillPixels(g, outerRect, innerRect)) return;
-            Area ring = new Area(outer);
-            ring.subtract(new Area(inner));
+            java.awt.geom.Path2D.Double ring = new java.awt.geom.Path2D.Double(java.awt.geom.Path2D.WIND_EVEN_ODD);
+            ring.append(outer, false);
+            ring.append(inner, false);
             g.fill(ring);
             return;
         }

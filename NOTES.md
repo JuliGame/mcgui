@@ -210,8 +210,8 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
   transposed). A shadow, one colour, blurs only its alpha (`Blur.shadow`), and
   a text-shadow that is not blurred is the text drawn again in its colour
   (`Painter.glyphs`): filling its glyphs' outlines cost five times as much.
-  The ring of an inset shadow and the cut-out of an outer one are even-odd paths
-  for a box without rounded corners (the same pixels as an `Area`, without its cost), and on
+  The ring of an inset shadow, the cut-out of an outer one and a border of one colour are even-odd
+  paths (the same pixels as an `Area`, without its cost), and on
   whole device pixels (boxes at 2x) a square border or sharp box shadow is filled as up to four
   rectangles, not rasterised (`Shapes.fillPixels`): the vanilla pages' bevels were a third of a picture.
 - **A steep gradient is not Java2D's** (`Backgrounds.StopPaint`): Java2D

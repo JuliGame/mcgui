@@ -76,7 +76,7 @@ final class Shadows {
         Shape old = g.getClip();
         // Browsers cut the box itself out of its outer shadow, so a translucent box shows no shadow through it.
         Rectangle2D all = new Rectangle2D.Double(-1e5, -1e5, 2e5, 2e5);
-        g.clip(box instanceof Rectangle2D ? minus(all, box) : subtract(all, box));
+        g.clip(minus(all, box));
         blurred(g, shape, sh.color, sh.blur, scale, surface, budget);
         g.setClip(old);
     }
@@ -93,7 +93,7 @@ final class Shadows {
             g.setColor(new Color(sh.color, true));
             if (Shapes.fillPixels(g, p, hole.getBounds2D())) return;
         }
-        Shape ring = padding instanceof Rectangle2D ? minus(outside, hole) : subtract(outside, hole);
+        Shape ring = minus(outside, hole);
         Shape old = g.getClip();
         g.clip(padding);
         blurred(g, ring, sh.color, sh.blur, scale, surface, budget);
@@ -108,9 +108,10 @@ final class Shadows {
     }
 
     /**
-     * [outside] less [hole], a shape of straight edges: the two as one path, even-odd. Filled or clipped to, it covers
-     * exactly the pixels {@link #subtract} does (the same edges, no curves for an Area to split), without its cost. A
-     * hole reaching past [outside] is left to {@link #subtract}.
+     * [outside] less [hole] (a box, square or rounded): the two as one path, even-odd. Filled or clipped to, it covers
+     * exactly the pixels {@link #subtract} does (the same edges: an Area keeps a rounded corner's quarter circle as it
+     * is), without its cost (checked on every shipped and vanilla page). A hole reaching past [outside] is left to
+     * {@link #subtract}.
      */
     private static Shape minus(Rectangle2D outside, Shape hole) {
         if (!outside.contains(hole.getBounds2D())) return subtract(outside, hole);
