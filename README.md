@@ -205,3 +205,9 @@ The [examples](examples/) are whole plugins built this way:
 [arcade](examples/arcade/) (thirteen games, on cabinets and fullscreen),
 [atlas](examples/atlas/) (a live world map) and [vanilla](examples/vanilla/)
 (pages in the game's own look).
+
+## Licence
+
+AGPL-3.0-or-later, with extra terms. See [`LICENSE`](LICENSE) and
+[`NOTICE.md`](NOTICE.md). The bundled fonts keep their own
+licence, the SIL Open Font License (`src/main/resources/fonts/*-OFL.txt`).
