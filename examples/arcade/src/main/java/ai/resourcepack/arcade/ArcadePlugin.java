@@ -574,6 +574,7 @@ public final class ArcadePlugin extends JavaPlugin {
         }
         File out = new File(getDataFolder(), "trace.json");
         try {
+            java.nio.file.Files.createDirectories(getDataFolder().toPath());
             java.nio.file.Files.writeString(out.toPath(), b.append("}}").toString());
             say(sender, "Wrote " + out.getPath(), GREY);
         } catch (IOException e) {
