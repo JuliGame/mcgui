@@ -82,10 +82,14 @@ final class Game implements Loop.Ticker {
     private final Host host;
     private final Random rng = new Random();
 
-    /** Where the player's pointer is, in playfield units; NaN until it has moved. Written by the server thread. */
+    /** Where the player's pointer is, in playfield units; NaN until it has moved. Written by the server thread ({@link #aim}). */
     volatile double aim = Double.NaN;
+    /** When [aim] and the last press came (System.nanoTime), for {@link FrameLog}. */
+    private volatile long aimAt, pressAt;
+    private long aimSeen;
     private final AtomicInteger presses = new AtomicInteger();
     private final ConcurrentLinkedQueue<Runnable> posted = new ConcurrentLinkedQueue<>();
+    final FrameLog log = new FrameLog();
 
     // The game.
     private String player;
@@ -133,7 +137,14 @@ final class Game implements Loop.Ticker {
     // ---- Input, from the server thread ----
 
     void press() {
+        pressAt = System.nanoTime();
         presses.incrementAndGet();
+    }
+
+    /** The player's pointer is at [x] playfield units: from the server thread. */
+    void aim(double x) {
+        aimAt = System.nanoTime();
+        aim = x;
     }
 
     /** Runs [task] on the loop thread at the start of the next frame. */
@@ -171,8 +182,15 @@ final class Game implements Loop.Ticker {
 
     @Override
     public void tick(double dt) {
+        log.begin();
         for (Runnable r; (r = posted.poll()) != null; ) r.run();
         int clicks = presses.getAndSet(0);
+        long at = aimAt;
+        if (at != aimSeen) {
+            aimSeen = at;
+            log.input(at, 'p');
+        }
+        if (clicks > 0) log.input(pressAt, 'c');
         clock += dt;
         modeTime += dt;
         movePaddle(dt);
@@ -194,6 +212,7 @@ final class Game implements Loop.Ticker {
             }
         }
         effects(dt);
+        log.ticked();
         render();
     }
 
@@ -507,7 +526,10 @@ final class Game implements Loop.Ticker {
             paintMoving(gf);
             paintOverlay(gf);
         }
+        log.drawn();
+        long handed = System.nanoTime();
         for (Rectangle r : rects) canvas.draw(frame.getSubimage(r.x, r.y, r.width, r.height), r.x, r.y);
+        log.shown(System.nanoTime() - handed);
     }
 
     private Rectangle device(Rectangle2D r) {

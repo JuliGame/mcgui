@@ -7,17 +7,18 @@ description: Arcade games, an example built on UI Engine. Play one fullscreen wi
 commands:
   arcade:
     description: Play an arcade game, or put up a cabinet.
-    usage: /arcade play [game] | cabinet [game] [cols] [rows] [x y z facing [world]] | remove [x y z [world]] | scores [game]
+    usage: /arcade play [game] [player] | cabinet [game] [cols] [rows] [x y z facing [world]] | remove [x y z [world]] | scores [game] | stats [trace]
 permissions:
-  # One node per subcommand. arcade.admin is only a parent: nothing checks it.
+  # One node per subcommand, and arcade.admin, which also lets /arcade play seat somebody else.
   arcade.admin:
-    description: Everything below.
+    description: Everything below, and /arcade play <game> <player>.
     default: op
     children:
       arcade.play: true
       arcade.cabinet: true
       arcade.remove: true
       arcade.scores: true
+      arcade.stats: true
   arcade.play:
     description: Play a game of your own with /arcade play, or sit down at a cabinet by clicking it.
     default: true
@@ -30,3 +31,6 @@ permissions:
   arcade.scores:
     description: See the high scores with /arcade scores.
     default: true
+  arcade.stats:
+    description: See how smoothly each running game runs with /arcade stats (trace writes every frame to trace.json).
+    default: op

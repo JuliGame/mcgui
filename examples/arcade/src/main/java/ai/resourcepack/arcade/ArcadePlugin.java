@@ -43,7 +43,7 @@ import java.util.logging.Level;
  */
 public final class ArcadePlugin extends JavaPlugin {
     private static final TextColor PINK = TextColor.color(0xFF2E88), GREY = TextColor.color(0xB9B3C9);
-    private static final List<String> SUBCOMMANDS = List.of("play", "cabinet", "remove", "scores");
+    private static final List<String> SUBCOMMANDS = List.of("play", "cabinet", "remove", "scores", "stats");
     private static final Set<BlockFace> WALL = Set.of(BlockFace.NORTH, BlockFace.SOUTH, BlockFace.EAST, BlockFace.WEST);
 
     private UIFramework ui;
@@ -91,7 +91,7 @@ public final class ArcadePlugin extends JavaPlugin {
 
         @Override
         public void pointer(View view, int x, int y) {
-            game.aim = x / game.scale;
+            game.aim(x / game.scale);
         }
 
         @Override
@@ -399,7 +399,7 @@ public final class ArcadePlugin extends JavaPlugin {
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         String sub = args.length == 0 ? "play" : args[0].toLowerCase(Locale.ROOT);
         if (!SUBCOMMANDS.contains(sub)) {
-            say(sender, "/arcade play [game] | cabinet [game] [cols] [rows] [x y z facing [world]] | remove [x y z [world]] | scores [game]", GREY);
+            say(sender, "/arcade play [game] [player] | cabinet [game] [cols] [rows] [x y z facing [world]] | remove [x y z [world]] | scores [game] | stats [trace]", GREY);
             return true;
         }
         if (!sender.hasPermission("arcade." + sub)) {
@@ -416,6 +416,17 @@ public final class ArcadePlugin extends JavaPlugin {
                         .append(Component.text(e.name() + " ", NamedTextColor.WHITE))
                         .append(Component.text(e.score(), NamedTextColor.GOLD)));
             }
+            return true;
+        }
+        if (sub.equals("stats")) {
+            stats(sender, args.length > 1 && args[1].equalsIgnoreCase("trace"));
+            return true;
+        }
+        // Sit somebody else down (from the console, a script): the game's view opens for them as if they had typed it.
+        if (sub.equals("play") && args.length == 3 && sender.hasPermission("arcade.admin")) {
+            Player who = Bukkit.getPlayerExact(args[2]);
+            if (who == null) say(sender, "Nobody called " + args[2] + " is online.", NamedTextColor.RED);
+            else play(who, args[1].toLowerCase(Locale.ROOT));
             return true;
         }
         // Where given outright, from anywhere (the console, a command block, a script): the block that is the
@@ -531,6 +542,43 @@ public final class ArcadePlugin extends JavaPlugin {
             for (String g : gameNames()) if (g.startsWith(args[1].toLowerCase(Locale.ROOT))) out.add(g);
         }
         return out;
+    }
+
+    /** Each running game: how smoothly it runs (to [sender]), or with [trace] every frame and input kept, to trace.json. */
+    private void stats(CommandSender sender, boolean trace) {
+        Map<String, FrameLog> logs = new LinkedHashMap<>();
+        for (Player p : Bukkit.getOnlinePlayers()) {
+            View v = ui.viewOf(p);
+            if (v == null) continue;
+            if (v.content() instanceof SceneRunner.SceneView s) logs.putIfAbsent(s.runner().id + " (" + p.getName() + ")", s.runner().log);
+            else if (v.content() instanceof Seat s) logs.putIfAbsent("breakout (" + p.getName() + ")", s.game.log);
+        }
+        for (Cabinet c : cabinets.values()) {
+            FrameLog log = c.runner != null ? c.runner.log : c.game.log;
+            if (!logs.containsValue(log)) logs.put((c.runner != null ? c.runner.id : "breakout") + " (" + c.id + ")", log);
+        }
+        if (logs.isEmpty()) {
+            say(sender, "No games are running.", GREY);
+            return;
+        }
+        if (!trace) {
+            for (var e : logs.entrySet()) say(sender, e.getKey() + ": " + e.getValue().summary(5), NamedTextColor.WHITE);
+            return;
+        }
+        StringBuilder b = new StringBuilder("{\"now\":").append(System.nanoTime()).append(",\"games\":{");
+        boolean first = true;
+        for (var e : logs.entrySet()) {
+            if (!first) b.append(',');
+            first = false;
+            b.append('"').append(e.getKey().replace("\"", "'")).append("\":").append(e.getValue().json());
+        }
+        File out = new File(getDataFolder(), "trace.json");
+        try {
+            java.nio.file.Files.writeString(out.toPath(), b.append("}}").toString());
+            say(sender, "Wrote " + out.getPath(), GREY);
+        } catch (IOException e) {
+            say(sender, "Could not write " + out.getPath() + ": " + e.getMessage(), NamedTextColor.RED);
+        }
     }
 
     private static void say(CommandSender to, String text, TextColor colour) {

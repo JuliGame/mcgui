@@ -45,7 +45,8 @@ final class SceneRunner implements Loop.Ticker, Host {
     final boolean cabinet;
     private final Room room;
     private final BufferedImage frame;
-    private final ConcurrentLinkedQueue<Consumer<Scene>> input = new ConcurrentLinkedQueue<>();
+    private final ConcurrentLinkedQueue<Input> input = new ConcurrentLinkedQueue<>();
+    final FrameLog log = new FrameLog();
     private final List<Seat> seats = new CopyOnWriteArrayList<>();
     private double carry;
     private int sounds;
@@ -72,7 +73,7 @@ final class SceneRunner implements Loop.Ticker, Host {
         sorted.sort((a, b) -> Integer.compare(a.index(), b.index()));
         seats.clear();
         seats.addAll(sorted);
-        input.add(s -> s.joined(seat));
+        input.add(new Input(System.nanoTime(), 'j', s -> s.joined(seat)));
         return seat;
     }
 
@@ -83,7 +84,7 @@ final class SceneRunner implements Loop.Ticker, Host {
 
     synchronized void leave(Seat seat) {
         seats.remove(seat);
-        input.add(s -> s.left(seat));
+        input.add(new Input(System.nanoTime(), 'l', s -> s.left(seat)));
         if (seats.isEmpty() && !cabinet) room.empty(this);
     }
 
@@ -104,8 +105,13 @@ final class SceneRunner implements Loop.Ticker, Host {
         double elapsed = Math.min(carry, 0.1);
         carry = 0;
         sounds = 0;
-        for (Consumer<Scene> e; (e = input.poll()) != null; ) e.accept(scene);
+        log.begin();
+        for (Input e; (e = input.poll()) != null; ) {
+            log.input(e.at, e.kind);
+            e.action.accept(scene);
+        }
         scene.tick(elapsed);
+        log.ticked();
         Graphics2D g = frame.createGraphics();
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
@@ -115,8 +121,14 @@ final class SceneRunner implements Loop.Ticker, Host {
         } finally {
             g.dispose();
         }
+        log.drawn();
+        long handed = System.nanoTime();
         canvas.draw(frame, 0, 0);
+        log.shown(System.nanoTime() - handed);
     }
+
+    /** Something a player did, for the scene's next frame: when it arrived, and what it was (for {@link FrameLog}). */
+    private record Input(long at, char kind, Consumer<Scene> action) {}
 
     // ---- Host ----
 
@@ -173,23 +185,23 @@ final class SceneRunner implements Loop.Ticker, Host {
 
         @Override
         public void pointer(View view, int x, int y) {
-            input.add(s -> s.pointer(seat, x, y));
+            input.add(new Input(System.nanoTime(), 'p', s -> s.pointer(seat, x, y)));
         }
 
         @Override
         public void click(View view, int x, int y, Click click) {
-            input.add(s -> s.click(seat, x, y, click == Click.RIGHT));
+            input.add(new Input(System.nanoTime(), 'c', s -> s.click(seat, x, y, click == Click.RIGHT)));
         }
 
         @Override
         public void scroll(View view, int x, int y, int notches) {
-            input.add(s -> s.scroll(seat, notches));
+            input.add(new Input(System.nanoTime(), 's', s -> s.scroll(seat, notches)));
         }
 
         @Override
         public void key(View view, ai.resourcepack.ui.framework.api.Key key, boolean down) {
             Key k = Key.valueOf(key.name());
-            input.add(s -> s.key(seat, k, down));
+            input.add(new Input(System.nanoTime(), down ? 'k' : 'u', s -> s.key(seat, k, down)));
         }
 
         @Override
