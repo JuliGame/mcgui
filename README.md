@@ -107,6 +107,8 @@ whatever its shape and the player's FOV.
 | `href="https://..."` | sends the link to chat, where it can be clicked |
 | `:hover`, `:active`, `cursor: pointer` | work; the pointer turns into a hand |
 | `<details>`, checkboxes, radios | open and tick when clicked |
+| `<select>`, `<input type="range">`, `<input type="number">` | a click picks the next option, sets the slider where it lands, or steps the number down (left half) or up (right half) |
+| `<form data-command="buy {form.item} {form.amount}">` | a submit button in it runs the form's command (or `data-console`, `data-message`) with each field's value filled in; `<button type="reset">` puts the fields back. Any element's command can use `{form.<name>}` too, from the form it is in or the whole page |
 | `{player}` `{uuid}` `{world}` `{x}` `{y}` `{z}` `{online}` `{max}` `{health}` `{level}` | filled in per player, in text and attributes; PlaceholderAPI's `%...%` too |
 
 Page settings, all optional:

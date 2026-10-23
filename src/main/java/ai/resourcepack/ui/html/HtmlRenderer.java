@@ -59,6 +59,12 @@ public final class HtmlRenderer {
             return Math.max(0, pageHeight - viewportHeight);
         }
 
+        /** Where [e] was painted (its first piece), in CSS pixels of the page, not the viewport; null if it was not. */
+        public java.awt.geom.Rectangle2D boundsOf(Element e) {
+            for (Painter.Hit h : hits) if (h.element() == e) return h.shape().getBounds2D();
+            return null;
+        }
+
         /** Where [e] starts on the page (its first painted piece), in CSS pixels from the page's top; NaN if not drawn. */
         public double topOf(Element e) {
             for (Painter.Hit h : hits) if (h.element() == e) return h.shape().getBounds2D().getY();

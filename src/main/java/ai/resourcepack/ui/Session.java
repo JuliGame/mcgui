@@ -869,7 +869,11 @@ public final class Session {
         if (e.hasAttr("data-command") || e.hasAttr("data-console") || e.hasAttr("data-action") || e.hasAttr("data-message")) return true;
         return switch (e.normalName()) {
             case "a" -> e.hasAttr("href");
-            case "button", "summary" -> true;
+            case "button", "summary", "select", "label" -> true;
+            case "input" -> switch (e.attr("type").toLowerCase(Locale.ROOT)) {
+                case "checkbox", "radio", "range", "number", "submit", "reset", "image", "button" -> true;
+                default -> false;
+            };
             default -> false;
         };
     }
@@ -927,6 +931,8 @@ public final class Session {
         if (e == null) return;
         Player p = clicker != null ? clicker : player();
         Page on = page;
+        double[] c = css(x, y);
+        clickAt = new double[]{c[0], c[1] + scrollY};
         boolean acted = activate(e, p);
         clickSound(e, acted, p);
         if (page == on && page.styles.dynamic) {
@@ -963,16 +969,34 @@ public final class Session {
         Sounds.play(p, own != null ? own : plugin.clickSound());
     }
 
+    /** Where the click being handled landed, in CSS pixels of the page (not the viewport). */
+    private double[] clickAt;
+
     /** [target] (an element of [doc]) or the nearest ancestor that does something, clicked by [p]. */
     private boolean activate(Element target, Player p) {
         for (Element e = target; e != null; e = e.parent()) {
-            if (e.hasAttr("data-command") || e.hasAttr("data-console") || e.hasAttr("data-message")) {
-                if (e.hasAttr("data-message") && p != null) {
-                    p.sendMessage(net.kyori.adventure.text.minimessage.MiniMessage.miniMessage().deserialize(Placeholders.apply(original(e, "data-message"), p)));
-                }
-                if (e.hasAttr("data-command") && p != null) runAs(p, Placeholders.apply(original(e, "data-command"), p));
-                if (e.hasAttr("data-console")) console(original(e, "data-console"), p);
-                if (e.hasAttr("data-close")) close.run();
+            // A form's own commands run when it is sent, not on any click inside it.
+            if ((e.hasAttr("data-command") || e.hasAttr("data-console") || e.hasAttr("data-message")) && !e.normalName().equals("form")) {
+                run(e, Forms.values(e, null), p);
+                return true;
+            }
+            Element form = Forms.submitted(e);
+            if (form != null) {
+                if (Forms.isReset(e)) reset(form);
+                else run(form, Forms.values(form, e), p);
+                return true;
+            }
+            if (Forms.isSelect(e)) {
+                Element select = editable(e);
+                if (select != null) Forms.next(select);
+                render();
+                return true;
+            }
+            if (Forms.isSlider(e)) {
+                java.awt.geom.Rectangle2D at = boundsInPicture(e);
+                Element input = at == null ? null : editable(e);
+                if (input != null) Forms.slide(input, (clickAt[0] - at.getX()) / at.getWidth());
+                render();
                 return true;
             }
             if (e.hasAttr("data-action")) {
@@ -1005,6 +1029,35 @@ public final class Session {
             }
         }
         return false;
+    }
+
+    /**
+     * Does what [e] says when clicked, for [p]: its data-message, data-command and data-console, with
+     * {@code {form.<name>}} filled from [form] and placeholders for [p]; then data-close.
+     */
+    private void run(Element e, java.util.Map<String, String> form, Player p) {
+        if (e.hasAttr("data-message") && p != null) {
+            p.sendMessage(net.kyori.adventure.text.minimessage.MiniMessage.miniMessage().deserialize(Placeholders.apply(Forms.fill(original(e, "data-message"), form), p)));
+        }
+        if (e.hasAttr("data-command") && p != null) runAs(p, Placeholders.apply(Forms.fill(original(e, "data-command"), form), p));
+        if (e.hasAttr("data-console")) console(Forms.fill(original(e, "data-console"), form), p);
+        if (e.hasAttr("data-close")) close.run();
+    }
+
+    /** Where [e] (an element of [doc]) was drawn in the last picture, in CSS pixels of the page; null if it was not. */
+    private java.awt.geom.Rectangle2D boundsInPicture(Element e) {
+        HtmlRenderer.Frame f = frame;
+        Element drawn = f == null || f.page() != page ? null : counterpart(e, f.document());
+        return drawn == null ? null : f.boundsOf(drawn);
+    }
+
+    /** Puts every field of [form] back as the page has it. */
+    private void reset(Element form) {
+        Element mine = editable(form);
+        if (mine == null) return;
+        Element original = counterpart(mine, page.document);
+        if (original != null) Forms.reset(mine, original);
+        render();
     }
 
     /**
