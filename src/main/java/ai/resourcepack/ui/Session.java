@@ -593,7 +593,11 @@ public final class Session {
         AnimFrames.Shared sharing = share;
         // Real work first: drawings ahead, of every session, give way.
         HoverAhead.makeRoom();
-        renderers.execute(() -> {
+        // The picture's urgency, for the queue it waits in: a page not yet shown first, then what a player's own action
+        // asks for, and an animation's next moment (which differs from the last by time alone) after the rest.
+        Renders.Kind kind = frame == null || frame.page() != p ? Renders.Kind.SHOW
+                : animating && sameView(p, held, s, fragment, scale, hoverKey, pressKey) ? Renders.Kind.MOTION : Renders.Kind.PICTURE;
+        renderers.execute(kind, () -> {
             boolean published = false, drawnAhead = false;
             Motion m = moving;
             if (m != null) {
@@ -847,12 +851,17 @@ public final class Session {
      * state, at the place and size its last picture shows. Else null.
      */
     private AnimFrames.Key frameKey(Page p, Document d, double s, String fragment, double scale, List<Element> hoverKey, List<Element> pressKey) {
+        return sameView(p, d, s, fragment, scale, hoverKey, pressKey)
+                ? new AnimFrames.Key(d, p, canvas.width(), canvas.height(), scale, frame.scrollY(), hoverKey, pressKey) : null;
+    }
+
+    /** Whether the next picture is of the same document, scale, place and hover and press state as the last one drawn: it differs, if at all, by time. */
+    private boolean sameView(Page p, Document d, double s, String fragment, double scale, List<Element> hoverKey, List<Element> pressKey) {
         HtmlRenderer.Frame f = frame;
-        if (d == null || f == null || fragment != null || f.document() != d || f.page() != p || f.scale() != scale) return null;
-        if (Math.abs(f.scrollY() - Math.max(0, Math.min(s, f.maxScroll()))) >= 0.01) return null;
+        if (d == null || f == null || fragment != null || f.document() != d || f.page() != p || f.scale() != scale) return false;
+        if (Math.abs(f.scrollY() - Math.max(0, Math.min(s, f.maxScroll()))) >= 0.01) return false;
         // The render thread's, settled: no picture is being drawn.
-        if (!hoverKey.equals(drawnHover) || !pressKey.equals(drawnPress)) return null;
-        return new AnimFrames.Key(d, p, canvas.width(), canvas.height(), scale, f.scrollY(), hoverKey, pressKey);
+        return hoverKey.equals(drawnHover) && pressKey.equals(drawnPress);
     }
 
     /**

@@ -109,6 +109,14 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
   busy machine is not a page that cannot be drawn. A render still gives up at 5 times the limit on the clock
   (`RenderBudget.WALL_TIMES`), so bands painted on other threads cannot run unbounded. The budget must be made on
   the thread that draws (`HtmlRenderer.render` does, inside the job), as it reads that thread's CPU time.
+- **Render jobs queue in `Renders`, not in the pool, most urgent first.** The pool's own queue is first come first
+  served, so a page somebody had just opened waited behind every hover and animation frame already queued (4 s
+  median on a loaded server). `Renders` hands the pool at most one job per pool thread, from the most urgent
+  `Renders.Kind` that has one waiting: `SHOW` (a page's first picture) > `PICTURE` (hover, click, scroll, refresh) >
+  `WARM` (start-up warm-up) > `MOTION` (an animation's next frame; late, it is a dropped frame) > `AHEAD` (a
+  hover drawn ahead, a guess). First come first served within a kind. `Session.submit` picks the kind; give every
+  new kind of render job one, and add it to the enum in its place, not at the end. `idle()` is false while
+  anything waits, so drawing ahead never starts then.
 - **So does loading pages.** `PageStore.load` hands back a future (one per
   page, however many ask) completed on a loader thread; sessions and views
   show the page when it completes, back on the server thread, and a session
@@ -294,9 +302,10 @@ wide for a default view). `/ui place <page> <cols> <rows> <name> <x> <y> <z>
 - **`/ui stats` is what the plugin costs a live server** (`Stats`; `/ui stats json` for scripts).
   `framework/TickMeter` times the plugin's two tick tasks (the framework's and the screens') and reads the server
   thread's allocation counter round them, per tick, over the last 200 ticks: two clock reads and two counter reads
-  a task, nothing allocated. `Renders` keeps, per kind of job (a picture somebody waits for, a hover drawn ahead,
-  the warm-up), how long the last 512 waited for a pool thread and ran. `RenderBudget` counts the renders it gave
-  up. Anything new that runs every tick on the server thread belongs inside the metered tasks.
+  a task, nothing allocated. `Renders` keeps, per kind of job (a first picture, a picture somebody waits for, the
+  warm-up, an animation frame, a hover drawn ahead), how long the last 512 waited for a pool thread and ran.
+  `RenderBudget` counts the renders it gave up. Anything new that runs every tick on the server thread belongs
+  inside the metered tasks.
 - **Nothing runs at rest, and a quiet tick allocates next to nothing.** With nobody at a screen the send loop sleeps,
   the arcade's loop is stopped, a cabinet nobody is in range of pauses, and the page loader threads time out.
   A tick in which nobody comes, goes or changes what they look at reuses the last tick's lists: `Walls.viewers`
