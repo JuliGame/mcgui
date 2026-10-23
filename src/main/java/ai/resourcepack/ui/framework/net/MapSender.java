@@ -31,8 +31,9 @@ import java.util.logging.Logger;
  *
  * <p>Pictures go out whole: the changed tiles of one moment are snapshotted and all sent before
  * anything newer is looked at, so a change never arrives as mismatched squares. Runs on its own thread,
- * woken the moment a canvas publishes new tiles (and every few milliseconds regardless, for budgets),
- * and writes straight to each player's connection with one flush per pass, so a new picture goes out as
+ * woken the moment a canvas publishes new tiles, the screens change or a write lands (and every few
+ * milliseconds while a picture is part sent, for budgets; otherwise it sleeps), and writes straight to each
+ * player's connection with one flush per pass, so a new picture goes out as
  * soon as it is drawn rather than with the next tick. The tile arrays it compares are immutable once a
  * {@link Canvas} publishes them.
  *
@@ -113,6 +114,8 @@ public final class MapSender implements AutoCloseable {
     private final Logger log;
     private final Thread loop = new Thread(this::run, "UIEngine-send");
     private volatile boolean closed;
+    /** Whether the last pass left tiles to send (out of budget, or the connection full): then the loop looks again soon. */
+    private volatile boolean unsent;
     private long lastRun = System.nanoTime();
     /** The most a player's budget can build up to: a quarter of a second, so a burst after a quiet moment goes out at once. */
     private final long burst;
@@ -151,6 +154,11 @@ public final class MapSender implements AutoCloseable {
 
     public long bytesSent() {
         return bytesSent.get();
+    }
+
+    /** Whether the last {@link #pass} left tiles to send: the loop then looks again in 8 ms, else sleeps until woken. */
+    boolean unsent() {
+        return unsent;
     }
 
     /** Whether [player]'s connection has written out every tile of [wall]'s current picture. */
@@ -203,9 +211,13 @@ public final class MapSender implements AutoCloseable {
                 // Errors too (out of memory, a broken reflective call): this thread is all that sends pictures,
                 // so it must never die, and an exception that ended it would be lost without a word.
                 warn(e);
+                // Cut short: whatever it had left is tried again soon.
+                unsent = true;
             }
-            // Woken early by wake(); otherwise every 8 ms, so budgets refill and a full connection is retried.
-            LockSupport.parkNanos(8_000_000L);
+            // Woken early by wake(). Every 8 ms while tiles wait, so budgets refill and a full connection is
+            // retried; with nothing left to send, nothing to do until woken (measured: 0.6% of a core at rest).
+            if (unsent) LockSupport.parkNanos(8_000_000L);
+            else LockSupport.park(this);
         }
     }
 
@@ -272,6 +284,11 @@ public final class MapSender implements AutoCloseable {
             v.wallInFlight.entrySet().removeIf(e -> !v.walls.contains(e.getKey()) && e.getValue().get() == 0);
             v.walls.clear();
         }
+        boolean left = false;
+        for (Viewer v : viewers.values()) {
+            for (Frame f : v.frames.values()) left |= !f.queue.isEmpty();
+        }
+        unsent = left;
     }
 
     /** The map each of [wall]'s frames shows [v]'s client. Never changed: a new pointing is a new array. */
