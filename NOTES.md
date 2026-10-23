@@ -103,7 +103,9 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
   one painter, worked out by `html/Repaint` (which also grows the painted area by a backdrop's reach and
   keeps only the changed part: `RepaintTest` compares every hover with a fresh picture), painting on an
   image of their own the size of the area, also unclipped (`HtmlRenderer.paintPart`): a clip cutting a
-  rounded box drew a seam along its edge. `sh gradlew renderBench` times a page's full render, its
+  rounded box drew a seam along its edge. The new state is laid out first (`HtmlRenderer.layOver`), so a
+  hover that shows a tooltip is painted once, over the old and new areas together (`paintOver`), not
+  painted, found to reach further, and painted again. `sh gradlew renderBench` times a page's full render, its
   `Canvas.draw` and a hover repaint.
 - **A scroll is cut from a taller picture** (`html/ScrollCache`): the first
   notch paints up to four views of the page round the view (more ahead of the
@@ -169,7 +171,10 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
   in the painting order (`Stylesheet.orderOnly`, `Repaint.swapped`).
 - **Backdrops blur on a grid fixed to the page** (`Painter.origin`, in device
   pixels from the page's top-left), so a band, a rectangle repaint, a whole
-  view and a view cut from a taller picture all blur alike.
+  view and a view cut from a taller picture all blur alike. So does a wide
+  `filter: blur()` that is the filter's only function (`Filters.gridBlur`,
+  `Painter.gridBlurred`): worked out `Blur.step` times smaller, as a backdrop
+  is. The vanilla pages' blurred panorama was most of every hover repaint there.
 - **A steep gradient is not Java2D's** (`Backgrounds.StopPaint`): Java2D
   samples pixel corners in float, so a hard stop on a whole device pixel
   landed on a sample and a stripe's edge came out differently in a strip, a
