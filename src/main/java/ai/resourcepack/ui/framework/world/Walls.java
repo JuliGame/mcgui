@@ -49,6 +49,8 @@ public final class Walls implements Listener {
     private final double reach;
     private final Predicate<Player> seated;
     private final List<Wall> walls = new CopyOnWriteArrayList<>();
+    /** The same, as an array: what every tick goes through for every player, with no iterator made each time. */
+    private volatile Wall[] placed = new Wall[0];
     /** The tick every wall's {@link Wall#viewers} are from (see {@link #viewers}). */
     private int viewersTick = -1;
     private int nextMapId;
@@ -99,6 +101,7 @@ public final class Walls implements Listener {
             if (removed) return;
             removed = true;
             walls.remove(this);
+            placed = walls.toArray(new Wall[0]);
             map.despawn();
             pin(map, false);
             Set<UUID> watchers = inRange.remove(this);
@@ -117,6 +120,7 @@ public final class Walls implements Listener {
         pin(map, true);
         map.spawn(plugin);
         walls.add(wall);
+        placed = walls.toArray(new Wall[0]);
         return wall;
     }
 
@@ -125,7 +129,7 @@ public final class Walls implements Listener {
     }
 
     public Wall byFrame(Entity entity) {
-        for (Wall w : walls) if (w.map.isFrame(entity)) return w;
+        for (Wall w : placed) if (w.map.isFrame(entity)) return w;
         return null;
     }
 
@@ -154,15 +158,15 @@ public final class Walls implements Listener {
     private void collectViewers() {
         int tick = Bukkit.getCurrentTick();
         viewersTick = tick;
-        if (walls.isEmpty()) return;
-        for (Wall wall : walls) {
+        if (placed.length == 0) return;
+        for (Wall wall : placed) {
             wall.viewersTick = tick;
             wall.viewers.clear();
         }
         double max = viewDistance * viewDistance;
         for (Player p : Bukkit.getOnlinePlayers()) {
             World world = p.getWorld();
-            for (Wall wall : walls) if (within(p, world, wall.map, max)) wall.viewers.add(p);
+            for (Wall wall : placed) if (within(p, world, wall.map, max)) wall.viewers.add(p);
         }
     }
 
@@ -174,7 +178,7 @@ public final class Walls implements Listener {
     /** Whether [player] is near enough a wall to aim at it, from where they stand: no eye, ray or vector made. */
     private boolean nearAny(Player player) {
         World world = player.getWorld();
-        for (Wall wall : walls) {
+        for (Wall wall : placed) {
             // The eye is under 2 blocks above the feet.
             double r = reach + wall.map.radius() + 2;
             if (within(player, world, wall.map, r * r)) return true;
@@ -191,7 +195,7 @@ public final class Walls implements Listener {
     /** Every tick: who is in range of what, and where each player's crosshair is. */
     public void tick() {
         collectViewers();
-        for (Wall wall : walls) {
+        for (Wall wall : placed) {
             // A frame can vanish (a /kill, another plugin); put it back.
             if (!wall.map.spawned() && wall.map.placeable()) wall.map.spawn(plugin);
             // Usually nobody came or went, and who is in range stands.
@@ -209,7 +213,7 @@ public final class Walls implements Listener {
             }
         }
         // No walls and nobody looking at one: nothing to aim at, and nothing to look away from.
-        if (walls.isEmpty() && looks.isEmpty()) return;
+        if (placed.length == 0 && looks.isEmpty()) return;
         for (Player p : Bukkit.getOnlinePlayers()) {
             Look now = seated.test(p) || !nearAny(p) ? null : aim(p);
             Look before = now == null ? looks.remove(p.getUniqueId()) : looks.put(p.getUniqueId(), now);
@@ -250,7 +254,7 @@ public final class Walls implements Listener {
         Vector dir = eye.getDirection();
         Look best = null;
         double bestT = Double.MAX_VALUE;
-        for (Wall wall : walls) {
+        for (Wall wall : placed) {
             if (wall.map.world != player.getWorld()) continue;
             double[] hit = wall.map.pixelAlong(from, dir, reach);
             if (hit == null || hit[2] >= bestT) continue;

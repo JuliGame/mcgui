@@ -124,22 +124,24 @@ public final class Placeholders {
 
     public static String apply(String text, Player player) {
         String out = text;
+        // Each value only if its token is there: a page's style sheet is full of braces, and working out the display
+        // name's plain text alone allocated about 200 KB a call.
         if (out.indexOf('{') >= 0) {
-            out = out.replace("{online}", String.valueOf(Bukkit.getOnlinePlayers().size()))
-                    .replace("{max}", String.valueOf(Bukkit.getMaxPlayers()))
-                    .replace("{server}", Bukkit.getServer().getName());
+            out = put(out, "{online}", () -> String.valueOf(Bukkit.getOnlinePlayers().size()));
+            out = put(out, "{max}", () -> String.valueOf(Bukkit.getMaxPlayers()));
+            out = put(out, "{server}", () -> Bukkit.getServer().getName());
             if (player != null) {
-                out = out.replace("{player}", player.getName())
-                        .replace("{name}", player.getName())
-                        .replace("{display_name}", plain(player))
-                        .replace("{uuid}", player.getUniqueId().toString())
-                        .replace("{world}", player.getWorld().getName())
-                        .replace("{x}", String.valueOf(player.getLocation().getBlockX()))
-                        .replace("{y}", String.valueOf(player.getLocation().getBlockY()))
-                        .replace("{z}", String.valueOf(player.getLocation().getBlockZ()))
-                        .replace("{health}", String.valueOf((int) Math.ceil(player.getHealth())))
-                        .replace("{level}", String.valueOf(player.getLevel()))
-                        .replace("{gamemode}", player.getGameMode().name().toLowerCase());
+                out = put(out, "{player}", player::getName);
+                out = put(out, "{name}", player::getName);
+                out = put(out, "{display_name}", () -> plain(player));
+                out = put(out, "{uuid}", () -> player.getUniqueId().toString());
+                out = put(out, "{world}", () -> player.getWorld().getName());
+                out = put(out, "{x}", () -> String.valueOf(player.getLocation().getBlockX()));
+                out = put(out, "{y}", () -> String.valueOf(player.getLocation().getBlockY()));
+                out = put(out, "{z}", () -> String.valueOf(player.getLocation().getBlockZ()));
+                out = put(out, "{health}", () -> String.valueOf((int) Math.ceil(player.getHealth())));
+                out = put(out, "{level}", () -> String.valueOf(player.getLevel()));
+                out = put(out, "{gamemode}", () -> player.getGameMode().name().toLowerCase());
             }
         }
         Method m = papi();
@@ -183,5 +185,9 @@ public final class Placeholders {
 
     private static String plain(Player p) {
         return net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer.plainText().serialize(p.displayName());
+    }
+
+    private static String put(String text, String token, java.util.function.Supplier<String> value) {
+        return text.contains(token) ? text.replace(token, value.get()) : text;
     }
 }

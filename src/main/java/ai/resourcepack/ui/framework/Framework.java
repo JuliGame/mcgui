@@ -32,7 +32,9 @@ import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
 
 import java.util.ArrayList;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.logging.Level;
 
 /**
@@ -57,9 +59,13 @@ public final class Framework implements UIFramework, Listener {
     private Views views;
     private final List<BukkitTask> tasks = new ArrayList<>();
     private final TickMeter meter = new TickMeter();
-    /** This tick's assignments, made into a list kept for it; and the last handed to the sender, never changed after. Server thread. */
-    private final List<MapSender.Assignment> assigning = new ArrayList<>();
-    private List<MapSender.Assignment> assigned = List.of();
+    /**
+     * This tick's assignments, made into a list kept for it; and the last handed to the sender, never changed after.
+     * Each wall's from last tick, in its viewers' order, reused while the same: a quiet tick makes none. Server thread.
+     */
+    private final ArrayList<MapSender.Assignment> assigning = new ArrayList<>();
+    private ArrayList<MapSender.Assignment> assigned = new ArrayList<>();
+    private final Map<Walls.Wall, ArrayList<MapSender.Assignment>> wallAssignments = new IdentityHashMap<>();
 
     public Framework(JavaPlugin plugin) {
         this.plugin = plugin;
@@ -140,11 +146,17 @@ public final class Framework implements UIFramework, Listener {
         walls.tick();
         // Views first: the sender spends each player's budget in this order, and a seated player sees
         // nothing but their view, so it must not wait behind walls.
-        List<MapSender.Assignment> out = assigning;
+        ArrayList<MapSender.Assignment> out = assigning;
         out.clear();
         views.assignments(out);
-        for (Walls.Wall wall : walls.all()) {
-            for (Player viewer : walls.viewers(wall)) {
+        List<Walls.Wall> all = walls.all();
+        for (int w = 0; w < all.size(); w++) {
+            Walls.Wall wall = all.get(w);
+            List<Player> viewers = walls.viewers(wall);
+            ArrayList<MapSender.Assignment> last = wallAssignments.computeIfAbsent(wall, k -> new ArrayList<>());
+            int kept = 0;
+            for (int i = 0; i < viewers.size(); i++) {
+                Player viewer = viewers.get(i);
                 Canvas canvas;
                 try {
                     canvas = wall.content().canvas(viewer);
@@ -153,12 +165,23 @@ public final class Framework implements UIFramework, Listener {
                     continue;
                 }
                 if (canvas == null) continue;
-                out.add(new MapSender.Assignment(viewer, wall.map(), canvas, hasPack(viewer) ? Canvas.Encoding.HI : Canvas.Encoding.PLAIN, null));
+                Canvas.Encoding encoding = hasPack(viewer) ? Canvas.Encoding.HI : Canvas.Encoding.PLAIN;
+                MapSender.Assignment a = kept < last.size() ? last.get(kept) : null;
+                if (a == null || a.player() != viewer || a.canvas() != canvas || a.encoding() != encoding) {
+                    a = new MapSender.Assignment(viewer, wall.map(), canvas, encoding, null);
+                    if (kept < last.size()) last.set(kept, a);
+                    else last.add(a);
+                }
+                kept++;
+                out.add(a);
             }
+            while (last.size() > kept) last.removeLast();
         }
-        // Usually the same as last tick: the sender has it, and a canvas that publishes wakes it by itself.
+        if (wallAssignments.size() > all.size()) wallAssignments.keySet().removeIf(Walls.Wall::removed);
+        // Usually the same as last tick, assignment for assignment: the sender has it, and a canvas that publishes
+        // wakes it by itself.
         if (out.equals(assigned)) return;
-        assigned = List.copyOf(out);
+        assigned = new ArrayList<>(out);
         sender.update(assigned);
     }
 
