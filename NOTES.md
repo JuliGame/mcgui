@@ -118,8 +118,8 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
   image of their own, also unclipped (`HtmlRenderer.paintPart`): a clip cutting a rounded box drew a seam
   along its edge. That image starts at the picture's left edge, not the area's: Java2D adds up a run's glyph
   advances in floats from where it starts on the image, so text drawn from elsewhere could land a glyph a
-  pixel column over. A layer's filter is still only worked out round the area (`Painter.keeping`), unless
-  the page has a backdrop-filter. The new state is laid out first (`HtmlRenderer.layOver`), so a
+  pixel column over. A layer's filter, blurred shadows and backdrops are still only worked out round the area
+  (`Painter.keeping`). The new state is laid out first (`HtmlRenderer.layOver`), so a
   hover that shows a tooltip is painted once, over the old and new areas together (`paintOver`), not
   painted, found to reach further, and painted again. `sh gradlew renderBench` times a page's full render, its
   `Canvas.draw` and a hover repaint.

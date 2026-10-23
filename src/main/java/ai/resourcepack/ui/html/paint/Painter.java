@@ -98,9 +98,10 @@ public final class Painter {
     }
 
     /**
-     * Of the surface, only [keep] (device px) is kept: a band's own rows. A layer is then filtered and
-     * blended in only round those, as far as its filter's blur reads, not over the band's whole margin.
-     * Only for a page with no backdrop-filter ({@link #backdrops}), which reads the margin as painted.
+     * Of the surface, only [keep] (device px) is kept: a band's own rows, or a repaint's area. A layer is then filtered
+     * and blended in only round those, as far as its filter's blur reads, not over the band's whole margin, and blurred
+     * shadows and backdrops are only worked out there. Not for a band of a page with a backdrop-filter ({@link #backdrops}),
+     * whose backdrops read the band's margin as painted; a repaint's area already holds the margin its backdrops read.
      */
     public Painter keeping(java.awt.Rectangle keep) {
         needed = keep;
@@ -796,9 +797,9 @@ public final class Painter {
             List<Shadows.Shadow> shadows = Shadows.parse(s.boxShadow, s);
             for (int i = shadows.size() - 1; i >= 0; i--) {
                 Shadows.Shadow sh = shadows.get(i);
-                if (!sh.inset()) Shadows.outer(g, x, y, b.w, b.h, radii, sh, deviceScale, surfaceBounds(), budget);
+                if (!sh.inset()) Shadows.outer(g, x, y, b.w, b.h, radii, sh, deviceScale, neededBounds(), budget);
             }
-            if (!s.backdropFilter.equals("none") && surface != null) Filters.backdrop(g, surface, border, s, deviceScale, originX, originY, budget);
+            if (!s.backdropFilter.equals("none") && surface != null) Filters.backdrop(g, surface, border, s, deviceScale, originX, originY, needed, budget);
             Shape clipBox = switch (Backgrounds.pick(s.backgroundClips, 0, "border-box")) {
                 case "padding-box" -> padding(b, x, y);
                 case "content-box" -> Shapes.rect(x + b.contentX(), y + b.contentY(), b.contentW(), b.contentH(),
@@ -815,7 +816,7 @@ public final class Painter {
                 Backgrounds.paint(g, s, res, area, clipBox, surfaceBounds(), budget);
             }
             if (b.inner == Box.Inner.REPLACED) replaced(g, b, x, y, radii);
-            for (Shadows.Shadow sh : shadows) if (sh.inset()) Shadows.inner(g, padding(b, x, y), sh, deviceScale, surfaceBounds(), budget);
+            for (Shadows.Shadow sh : shadows) if (sh.inset()) Shadows.inner(g, padding(b, x, y), sh, deviceScale, neededBounds(), budget);
             drawBorders(g, s, new Rectangle2D.Double(x, y, b.w, b.h), radii, b.b);
         }
         hit(border, s, b.element != null ? b.element : b.owner);
@@ -835,6 +836,15 @@ public final class Painter {
     /** The device bounds of the surface being painted on. */
     private java.awt.Rectangle surfaceBounds() {
         return new java.awt.Rectangle(surface.getWidth(), surface.getHeight());
+    }
+
+    /**
+     * The device bounds of the surface whose pixels matter ({@link #keeping}): a blurred shadow is only worked out
+     * there, exactly as it would be on the whole surface (see {@link Shadows#blurred}).
+     */
+    private java.awt.Rectangle neededBounds() {
+        java.awt.Rectangle all = surfaceBounds();
+        return needed == null ? all : all.intersection(needed);
     }
 
     /**

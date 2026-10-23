@@ -200,8 +200,9 @@ public final class HtmlRenderer {
      * from where the run starts on the image, so text in an image starting elsewhere landed a glyph a pixel column over
      * now and then (the market page's pixel font, by 255). The columns left of the clip are painted too, but a layer's
      * filter is only worked out round the clip ({@link Painter#keeping}): a quarter more CPU than painting the clip alone
-     * on the vanilla pages. A page with a backdrop-filter reads them as painted, which costs twice as much (the market
-     * page: 115 ms of CPU against 49), mostly while drawing ahead. Returns every hit region.
+     * on the vanilla pages. That holds on a page with a backdrop-filter too: a backdrop reads past the pixels kept only as
+     * far as {@link Repaint}'s margin, which is inside the clip, so the columns left of it are never read. Returns every
+     * hit region.
      */
     private static List<Painter.Hit> paintPart(Page page, Box root, BufferedImage img, java.awt.geom.Rectangle2D clip, java.awt.geom.Rectangle2D keep,
                                                double scale, double vw, double vh, double scroll, RenderBudget budget) {
@@ -227,7 +228,7 @@ public final class HtmlRenderer {
             g.translate(0, -y0);
             g.scale(scale, scale);
             Painter painter = new Painter(page.shaper, page, vw, vh, scroll, budget).origin(0, row(scroll, scale) + y0);
-            if (!Painter.backdrops(root)) painter.keeping(new java.awt.Rectangle(x0, 0, x1 - x0, y1 - y0));
+            painter.keeping(new java.awt.Rectangle(x0, 0, x1 - x0, y1 - y0));
             try {
                 painter.paint(g, root, part, scale);
             } finally {

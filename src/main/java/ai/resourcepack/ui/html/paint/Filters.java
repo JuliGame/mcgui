@@ -208,9 +208,11 @@ final class Filters {
      * backdrop-filter: blur (and tint) what is already painted under [shape], then put it back inside the shape.
      * [originX] and [originY] are where [surface]'s top-left is on the page (device px): the blur is worked out on a grid
      * fixed to the page, so every way of painting it (whole, in bands, a rectangle at a time, a view cut from a taller
-     * picture) blurs alike.
+     * picture) blurs alike. [needed], if not null, is the part of [surface] whose pixels matter ({@code Painter.keeping}):
+     * only what the blur reads for it is worked out.
      */
-    static void backdrop(Graphics2D g, BufferedImage surface, Shape shape, Style s, double scale, int originX, int originY, RenderBudget budget) {
+    static void backdrop(Graphics2D g, BufferedImage surface, Shape shape, Style s, double scale, int originX, int originY,
+                         java.awt.Rectangle needed, RenderBudget budget) {
         String filter = s.backdropFilter;
         AffineTransform dev = g.getTransform();
         java.awt.Rectangle bounds = new java.awt.Rectangle(0, 0, surface.getWidth(), surface.getHeight());
@@ -230,6 +232,11 @@ final class Filters {
             if (grab.isEmpty()) return;
         }
         grab = grab.intersection(bounds);
+        if (needed != null) {
+            java.awt.Rectangle reads = new java.awt.Rectangle(needed);
+            reads.grow(pad, pad);
+            grab = grab.intersection(reads);
+        }
         if (grab.isEmpty()) return;
         // Out to whole cells of the page's grid, where the surface has nothing (its edge) the edge pixels carry on.
         int gx = Math.floorDiv(grab.x + originX, k) * k - originX, gy = Math.floorDiv(grab.y + originY, k) * k - originY;
