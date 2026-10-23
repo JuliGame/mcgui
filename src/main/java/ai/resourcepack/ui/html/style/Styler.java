@@ -64,6 +64,9 @@ public final class Styler {
     private final Map<Shared, Shared> shared = new HashMap<>();
     private final List<Weighted> scratch = new ArrayList<>();
 
+    /** The motion of the picture being drawn, or null: nothing moves. */
+    private final Motion motion = Motion.current();
+
     public Styler(Stylesheet ua, Stylesheet author, double vw, double vh, Selector.State state, URI base, RenderBudget budget) {
         this.ua = ua;
         this.author = author;
@@ -84,9 +87,11 @@ public final class Styler {
         previous = Memo.take(root, this);
         memo = new Memo(ua, author, vw, vh, previous == null ? 64 : previous.size);
         boolean done = false;
+        if (motion != null) motion.begin();
         try {
             walk(root, null, true);
             done = true;
+            if (motion != null) motion.end();
         } finally {
             memo.size = next;
             // An abandoned pass leaves the last whole one, which still fits the document.
@@ -108,6 +113,8 @@ public final class Styler {
         Found found = found(e, Stylesheet.ELEMENT, old);
         node.found[Stylesheet.ELEMENT] = found;
         boolean kept = parentKept && old != null && found == old.found[Stylesheet.ELEMENT];
+        // What moves is worked out afresh for every picture: its values are of the moment.
+        if (kept && motion != null && Motion.moves(old.declared)) kept = false;
         Style s;
         Customs own;
         Map<String, String> decl;
@@ -120,6 +127,7 @@ public final class Styler {
             Customs parentCustoms = parent == null ? Customs.NONE : customs.get(parent);
             Shared key = parent == null || !plain(e) ? null : new Shared(Stylesheet.ELEMENT, found, parentStyle, parentCustoms, declared.get(parent));
             Shared same = key == null ? null : shared.get(key);
+            if (same != null && motion != null && Motion.moves(same.declared)) same = null;
             if (same != null) {
                 s = same.style;
                 own = same.customs;
@@ -128,6 +136,7 @@ public final class Styler {
                 List<Weighted> list = weighted(e, Stylesheet.ELEMENT, found);
                 own = customProps(list, parentCustoms);
                 Map<String, String> all = resolve(list, own, parent);
+                if (motion != null && Motion.moves(all)) motion.apply(at, all, author);
                 s = Style.compute(all, parentStyle, rootFontSize, vw, vh);
                 decl = notInherited(all);
                 if (key != null) shared.put(key, key.with(s, own, decl));

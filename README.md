@@ -162,15 +162,19 @@ minmax())`, `fr`, areas, spans), tables, absolute/fixed/relative positioning,
 linear/radial/conic gradients, `background-clip: text`, background images,
 `opacity`, `transform`, `filter`, `backdrop-filter: blur()`, `object-fit`,
 `text-overflow: ellipsis`, `-webkit-line-clamp`, inline SVG and SVG images,
-PNG/JPEG/GIF images, form controls drawn as in a browser.
+PNG/JPEG/GIF images, form controls drawn as in a browser, and CSS animations
+(`@keyframes`, `animation`) and transitions (`transition`): numbers, lengths,
+colours and transforms move smoothly, anything else changes halfway. A page
+that moves is drawn whole, `animation-fps` times a second (10 by default), for
+each player watching it, for as long as something on it moves, and only what
+changed is sent: cheap for a hover that fades, not for a page that spins for ever.
 
 Fonts: Inter (sans-serif and every system UI font name), Source Serif 4
 (serif), JetBrains Mono (monospace) and Monocraft (`font-family: Minecraft`)
 are bundled, all under the SIL Open Font License (`fonts/*-OFL.txt`).
 
-Not supported: JavaScript, WOFF fonts, WebP images, video, iframes, CSS
-animations and transitions, floats (floated boxes stay in the flow), typing into
-inputs.
+Not supported: JavaScript, WOFF fonts, WebP images, video, iframes, floats
+(floated boxes stay in the flow), typing into inputs.
 
 ## For plugin developers
 

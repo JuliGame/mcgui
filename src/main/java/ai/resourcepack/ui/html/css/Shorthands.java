@@ -134,7 +134,9 @@ public final class Shorthands {
                 if (!lines.isEmpty()) out.accept("text-decoration-line", lines.toString().trim());
             }
             case "outline" -> {} // never drawn: a static page has no focus ring
-            case "columns", "transition", "animation" -> {}
+            case "columns" -> {}
+            case "animation" -> ai.resourcepack.ui.html.style.Motion.expandAnimation(v, out);
+            case "transition" -> ai.resourcepack.ui.html.style.Motion.expandTransition(v, out);
             case "-webkit-text-fill-color" -> out.accept("-webkit-text-fill-color", v);
             default -> out.accept(prop, v);
         }

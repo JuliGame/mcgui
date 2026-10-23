@@ -11,6 +11,7 @@ import ai.resourcepack.ui.html.RenderAbandoned;
 import ai.resourcepack.ui.html.ScrollCache;
 import ai.resourcepack.ui.event.PageClickEvent;
 import ai.resourcepack.ui.event.PageOpenEvent;
+import ai.resourcepack.ui.html.style.Motion;
 import ai.resourcepack.ui.html.style.Style;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.event.ClickEvent;
@@ -240,6 +241,7 @@ public final class Session {
         nextRefresh = Bukkit.getCurrentTick() + refreshTicks;
         pendingFragment = fragment;
         hoverSoundAt = null;
+        motion = new Motion();
         Player viewerNow = player();
         Sounds.play(viewerNow, p.meta("ui:open-sound"));
         if (viewerNow != null) Bukkit.getPluginManager().callEvent(new PageOpenEvent(viewerNow, n, screen));
@@ -327,6 +329,9 @@ public final class Session {
 
     /** Every tick: re-fill placeholders on pages that ask for it, and let go of a tall picture nobody scrolls. */
     void tick(long now) {
+        // Something on the page is moving: the next picture of it, so many times a second.
+        Page shown = page;
+        if (shown != null && shown.moves() && motion.active() && now % plugin.animationTicks() == 0) render();
         ScrollCache c = cache;
         if (c != null && c.idleNanos() > CACHE_IDLE_NANOS) cache = null;
         if (refreshTicks > 0 && page != null && now >= nextRefresh) {
@@ -408,7 +413,7 @@ public final class Session {
      */
     private synchronized void lookAhead() {
         if (closed || rendering || !hoverAhead.on() || page == null || doc == null || pointerX < 0 || cache != null || pendingFragment != null) return;
-        if (!page.styles.hovers() || page.siblingStates() || !idle()) return;
+        if (!page.styles.hovers() || page.siblingStates() || page.moves() || !idle()) return;
         HtmlRenderer.Frame f = frame;
         double scale = scale();
         if (f == null || f.page() != page || f.document() != doc || f.scale() != scale) return;
@@ -521,8 +526,11 @@ public final class Session {
         FirstPictures pictures = plugin.firstPictures();
         // Real work first: drawings ahead, of every session, give way.
         HoverAhead.makeRoom();
+        // A page that moves is drawn whole each time, at the moment it is of: nothing is cut from an older picture.
+        Motion moving = p.moves() ? motion : null;
         renderers.execute(() -> {
             boolean published = false, drawnAhead = false;
+            if (moving != null) Motion.set(moving);
             // The document to draw: the session's, or, if it has none yet (a page just shown), a copy made here.
             Document d = held;
             try {
@@ -547,7 +555,7 @@ public final class Session {
                 // A tall picture of another document or size, or one the view has left, is of no more use: nothing reads it
                 // from now on, and a new one may be painted over it.
                 ScrollCache dropped = null;
-                if (c != null && !(same && c.of(p, d, canvas.width(), canvas.height(), scale) && c.covers(at))) {
+                if (c != null && (moving != null || !(same && c.of(p, d, canvas.width(), canvas.height(), scale) && c.covers(at)))) {
                     dropped = c;
                     c = null;
                 }
@@ -555,7 +563,7 @@ public final class Session {
                 ScrollCache kept = c;
                 boolean still = same && Math.abs(before.scrollY() - at) < 0.01;
                 Set<Element> moved = same ? changedState(hoverKey, pressKey) : Set.of();
-                if (still && moved.isEmpty()) {
+                if (still && moved.isEmpty() && moving == null) {
                     drawnHover = hoverKey;
                     drawnPress = pressKey;
                     cache = c;
@@ -580,7 +588,7 @@ public final class Session {
                 if (c != null) {
                     f = c.frame(at);
                     partial = still;
-                } else if (still && !redraw) {
+                } else if (still && !redraw && moving == null) {
                     // Only the hover or press state moved: repaint just what it touches, unless that was drawn ahead
                     // (HoverAhead: the same pixels, worked out over a copy of this picture). A picture shared with other
                     // sessions (FirstPictures) is copied first, as the repaint (or the pixels drawn ahead) go into it.
@@ -594,7 +602,7 @@ public final class Session {
                         changed = r.changed();
                         partial = true;
                     }
-                } else if (same && !still && lasting && ScrollCache.possible(before) && !NO_STRIP.contains(p)) {
+                } else if (same && !still && lasting && moving == null && ScrollCache.possible(before) && !NO_STRIP.contains(p)) {
                     // Only the view moved (and perhaps the pointer's state with it). Painting is nearly all a picture
                     // costs, and the next notches will want the rows round this view: paint a few views' worth of
                     // the page at once, and cut this view and the next ones from that.
@@ -686,6 +694,7 @@ public final class Session {
                 pooled.failed(shown);
                 if (shown != null && shown.page() != p) serverThread.execute(() -> undrawable(p, nav));
             } finally {
+                Motion.clear();
                 if (publish != null && !published) pictures.abandon(publish);
                 done();
             }
@@ -720,7 +729,7 @@ public final class Session {
         if (!plugin.firstPictures().enabled() || fragment != null || s != 0 || hover != null || pressed != null) return null;
         if (!pristine || filled == null || filled.source() != p.document || filled.personal() || d != null && f != null && f.document() == d) return null;
         // A face that has not arrived yet would be kept as its stand-in.
-        if (p.schemed()) return null;
+        if (p.schemed() || p.moves()) return null;
         return new FirstPictures.Key(pageName, p, canvas.cols(), canvas.rows(), scale, filled.key());
     }
 
@@ -1008,6 +1017,9 @@ public final class Session {
         String own = page == null ? null : page.meta("ui:click-sound");
         Sounds.play(p, own != null ? own : plugin.clickSound());
     }
+
+    /** The clock and the transitions under way of the page shown, for its animations: new with each page shown. */
+    private volatile Motion motion = new Motion();
 
     /** The wall screen this session is on, by name, for plugins' events; null for a fullscreen page. */
     String screen;

@@ -33,6 +33,17 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
 
 ## Things that are not obvious
 
+- **Animations work on declared values, as text** (`html/style/Motion`). When
+  an element animates, the Styler replaces its declared values with the
+  values of that moment before computing its style, so anything the cascade
+  computes can move, layout included. The moment comes from `Motion.current()`,
+  a thread-local the session sets around its drawing; with none (renderSamples,
+  the benches) nothing moves. A page that moves (`Page.moves()`) is drawn whole
+  every time: no partial repaint, scroll cache, drawing ahead or kept first
+  picture, all of which assume a picture stays true until the state changes.
+  Elements are keyed by their place in document order, as the Styler's memo
+  is, so a transition survives the session's copy of the document changing.
+
 - **Coordinates in the box tree are relative to the box that laid a box out**:
   its nearest ancestor that is not an inline box. Inline boxes have no
   rectangle, only per-line fragments relative to the block owning the lines.

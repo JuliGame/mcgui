@@ -29,6 +29,11 @@ render-timeout: 2
 # of your own, "uiengine:<file>" for plugins/UIEngine/sounds/<file>.ogg). A page can set its own with <meta name="ui:click-sound">.
 click-sound: true
 
+# Pictures a second of a page while something on it animates (CSS animation or transition), 1 to 20. Each
+# is a whole picture of the page, drawn for each player watching it, and only the parts that changed are
+# sent: an animation costs CPU for as long as it runs, so a page that animates for ever costs it for ever.
+animation-fps: 10
+
 # How far one notch of the scroll wheel scrolls a page, in CSS pixels, or "tile" for one map row (64 CSS
 # pixels on a 16x9 view 576 pixels tall). A page can set its own with <meta name="ui:scroll-step">.
 # With "tile", every notch moves the picture by whole maps, and players are sent only the row that came

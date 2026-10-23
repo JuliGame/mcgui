@@ -19,12 +19,17 @@ public final class Stylesheet {
     public static final int ELEMENT = 0, BEFORE = 1, AFTER = 2, PLACEHOLDER = 3, MARKER = 4, KINDS = 5;
 
     public final List<FontFace> fontFaces = new ArrayList<>();
+    /** {@code @keyframes}, by name, each in order of its offsets. */
+    public final Map<String, List<Keyframe>> keyframes = new HashMap<>();
     final List<Rule> all = new ArrayList<>();
     final Index[] kinds = new Index[KINDS];
     /** Whether any rule depends on :hover or :active, so a page without one never re-renders on hover. */
     public boolean dynamic;
     /** The selector parts that say :hover (or :active): what decides whether a move of the pointer changes anything. */
     private final List<Selector.Compound> hoverParts = new ArrayList<>(), activeParts = new ArrayList<>();
+
+    /** One step of a {@code @keyframes}: where it is (0 to 1) and the values there, shorthands expanded. */
+    public record Keyframe(double offset, Map<String, String> values) {}
 
     /** One selector of a rule, with its declarations: a rule with three selectors is three of these. */
     public record Rule(Selector selector, List<Declaration> declarations, Media media, int order) {}

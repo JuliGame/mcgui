@@ -189,6 +189,11 @@ public final class UIEnginePlugin extends JavaPlugin {
         return String.valueOf(v);
     }
 
+    /** Ticks between the pictures of a page while something on it animates: 20 / animation-fps. */
+    int animationTicks() {
+        return Math.max(1, (int) Math.round(20.0 / Math.max(1, Math.min(20, cfg.getInt("animation-fps", 10)))));
+    }
+
     /** CSS pixels a notch scrolls, or "tile" for one map row. */
     String scrollStep() {
         return cfg.getString("scroll-step", "80");

@@ -12,7 +12,7 @@ import java.util.function.Function;
 
 /**
  * Reads a stylesheet: qualified rules, {@code @media}, {@code @supports}, {@code @layer},
- * {@code @font-face} and {@code @import}. Everything else ({@code @keyframes}, {@code @page}) is
+ * {@code @font-face}, {@code @keyframes} and {@code @import}. Everything else ({@code @page}) is
  * skipped whole. Forgiving the way browsers are: a rule it cannot read is dropped and the rest kept.
  *
  * <p>Every {@code url(...)} in a value is resolved against the sheet's own address as it is read,
@@ -151,6 +151,14 @@ public final class CssParser {
                 FontFace face = FontFace.from(decls);
                 if (face != null) out.fontFaces.add(face);
             }
+            case "keyframes", "-webkit-keyframes", "-moz-keyframes" -> {
+                if (!block) return;
+                int close = matching(pos - 1);
+                String body = src.substring(pos, close);
+                pos = close + 1;
+                String id = unquote(prelude.trim());
+                if (!id.isEmpty()) out.keyframes.put(id, keyframes(body));
+            }
             case "import" -> {
                 if (block) {
                     skipBlock();
@@ -162,6 +170,39 @@ public final class CssParser {
                 if (block) skipBlock();
             }
         }
+    }
+
+    /** The steps of a {@code @keyframes} block's body, in order of their offsets. */
+    private List<Stylesheet.Keyframe> keyframes(String body) {
+        List<Stylesheet.Keyframe> out = new java.util.ArrayList<>();
+        int at = 0;
+        while (at < body.length()) {
+            int open = body.indexOf('{', at);
+            if (open < 0) break;
+            int close = body.indexOf('}', open);
+            if (close < 0) break;
+            String selectors = body.substring(at, open).trim();
+            java.util.Map<String, String> values = new java.util.LinkedHashMap<>();
+            for (Declaration d : declarationList(body.substring(open + 1, close))) Shorthands.expand(d.property(), d.value(), values::put);
+            for (String sel : selectors.split(",")) {
+                String s = sel.trim().toLowerCase(Locale.ROOT);
+                double offset = switch (s) {
+                    case "from" -> 0;
+                    case "to" -> 1;
+                    default -> {
+                        try {
+                            yield s.endsWith("%") ? Double.parseDouble(s.substring(0, s.length() - 1)) / 100 : Double.NaN;
+                        } catch (NumberFormatException e) {
+                            yield Double.NaN;
+                        }
+                    }
+                };
+                if (offset >= 0 && offset <= 1) out.add(new Stylesheet.Keyframe(offset, values));
+            }
+            at = close + 1;
+        }
+        out.sort(java.util.Comparator.comparingDouble(Stylesheet.Keyframe::offset));
+        return out;
     }
 
     private void importSheet(String prelude, Media media) {

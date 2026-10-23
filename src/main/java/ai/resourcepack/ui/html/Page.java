@@ -651,6 +651,26 @@ public final class Page implements Resources {
         return colon > 0 ? SCHEMES.get(uri.substring(0, colon).toLowerCase(java.util.Locale.ROOT)) : null;
     }
 
+    private Boolean moves;
+
+    /**
+     * Whether anything on the page can animate or transition ({@code animation}, {@code transition}): its
+     * pictures are then drawn whole, again and again while something moves, at the moment each is of.
+     */
+    public boolean moves() {
+        Boolean m = moves;
+        if (m == null) {
+            m = !styles.keyframes.isEmpty();
+            for (Stylesheet.Rule r : styles.rules()) {
+                if (m) break;
+                for (Declaration d : r.declarations()) if (d.property().startsWith("transition") || d.property().startsWith("animation")) m = true;
+            }
+            if (!m) m = !document.select("[style*=transition], [style*=animation]").isEmpty();
+            moves = m;
+        }
+        return m;
+    }
+
     /** Whether the page draws pictures of the {@link #SCHEMES}, which can arrive (and change) after it has loaded. */
     public boolean schemed() {
         return schemed;
