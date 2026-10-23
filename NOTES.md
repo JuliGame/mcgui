@@ -235,6 +235,40 @@ bot is no use here. Use a real client and drive the view from the console:
 wide for a default view). `/ui place <page> <cols> <rows> <name> <x> <y> <z>
 <facing> [world]` places a wall without anybody aiming.
 
+## Measuring: `/ui stats` and the bench
+
+- **`/ui stats` is what the plugin costs a live server** (`Stats`; `/ui stats json` for scripts).
+  `framework/TickMeter` times the plugin's two tick tasks (the framework's and the screens') and reads the server
+  thread's allocation counter round them, per tick, over the last 200 ticks: two clock reads and two counter reads
+  a task, nothing allocated. `Renders` keeps, per kind of job (a picture somebody waits for, a hover drawn ahead,
+  the warm-up), how long the last 512 waited for a pool thread and ran. `RenderBudget` counts the renders it gave
+  up. Anything new that runs every tick on the server thread belongs inside the metered tasks.
+- **`python3 bench/bench.py` gives every part's headline numbers in one run** (`--quick` for a shorter one,
+  `--only <cells>`, `--compare <earlier json>`; `--help` for the rest). It builds the plugin and the arcade
+  example, waits for the machine to be quiet (`gate.sh`), and holds the timing lock throughout. Then it runs the
+  headless benches on the test classpath and a private copy of a Paper server with UI Engine, the arcade and the
+  Probe plugin (kept outside this repository), whose fake players are real connections made inside the server
+  that answer what a client must and turn their heads like one. The server's ticks and threads come from Probe
+  (`ticks`, `fake status`, `health`), the plugin's own cost from `/ui stats json`. It prints one line per number
+  and writes them all, with the raw replies, to `build/bench/<time>.json`. The cells:
+
+  | Cell | What it does | Headline numbers |
+  |---|---|---|
+  | `headless` | `HoverCost` on the market (and the vanilla crates, auction and quests with `--vanilla`), `RenderBench` on the market | hover repaint CPU per page (p50, p90); a whole market picture |
+  | `startup` | the server just started, nobody on | enable and warm-up ms, the plugin's threads, its CPU at rest |
+  | `idle` | 0, 50 and 100 players standing still, nothing open | the plugin's server thread µs and bytes a tick, server tick p50/p99 |
+  | `look` | 100 players turning their heads, nothing open | the same: what reading their mice costs |
+  | `walls` | 8 shared 4x3 market walls in view of 100 players, nobody aiming | the same, and the sender's CPU |
+  | `views` | 50 players at the market fullscreen, still | the same, the sender's and pool's CPU, heap per view |
+  | `hover` | 10 and 50 players sweeping round the market | cores used, pool CPU, tick p50/p99, MB/s sent, pictures and drawings ahead |
+  | `latency` | one player at the market, the pointer moved by `/ui debug point` | ms until the hover's map patches reach them: cold, and after resting next to it |
+  | `anim` | 1 and 10 players at `bench/pages/bench-anim.html` (a spinner, cards that fade) | cores, pool CPU, pictures a second, MB/s |
+  | `deadline` | 40 hovering the market, 10 at the spinner, a busy loop on every core but one, while 10 more open a market with their name in it (a whole first picture each) | pictures given up, pictures' wait and run p50/p99/max |
+  | `arcade` | each game on a 16x9 cabinet playing itself, one player watching | CPU (game loop, pool, sender) and MB/s per game |
+
+  Client-side numbers (frame time, hover to screen in the real client) are not in it: they need Josh's PC and
+  the probe agent (outside this repository).
+
 ## The framework: layout
 
 | Path | What |

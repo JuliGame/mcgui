@@ -1,0 +1,41 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Bench: animation</title>
+<!-- The bench's animated page: a spinner that never stops and a grid of cards that fade and lift on hover. -->
+<style>
+html, body { margin: 0; height: 100%; }
+body { font-family: Inter, sans-serif; color: #eef; overflow: hidden;
+  background: radial-gradient(ellipse 70% 60% at 30% 20%, #2b3a6b, #0b1020 75%); }
+header { display: flex; align-items: center; gap: 16px; padding: 20px 32px; }
+h1 { margin: 0; font-size: 28px; }
+.spinner { width: 34px; height: 34px; border-radius: 50%; border: 5px solid rgba(255,255,255,.2);
+  border-top-color: #7cf; animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; padding: 8px 32px; }
+.card { height: 130px; border-radius: 14px; padding: 16px; background: rgba(255,255,255,.08);
+  box-shadow: 0 6px 18px rgba(0,0,0,.35); opacity: .75;
+  transition: opacity .3s ease, transform .3s ease, background-color .3s ease; }
+.card:hover { opacity: 1; transform: translateY(-6px); background-color: rgba(120,200,255,.22); }
+.card b { display: block; font-size: 20px; margin-bottom: 6px; }
+</style>
+</head>
+<body>
+<header><div class="spinner"></div><h1>Loading the market</h1></header>
+<div class="grid">
+  <div class="card"><b>Ember blade</b>A sword that keeps warm.</div>
+  <div class="card"><b>Frost bow</b>Arrows that slow.</div>
+  <div class="card"><b>Sky boots</b>Fall slower.</div>
+  <div class="card"><b>Void pearl</b>Throw it far.</div>
+  <div class="card"><b>Glow lantern</b>Light that follows.</div>
+  <div class="card"><b>Echo tome</b>Read it twice.</div>
+  <div class="card"><b>Dawn apple</b>Breakfast of heroes.</div>
+  <div class="card"><b>Geode heart</b>Shiny inside.</div>
+  <div class="card"><b>Warden aegis</b>A shield that listens.</div>
+  <div class="card"><b>Phoenix feather</b>Burns, comes back.</div>
+  <div class="card"><b>Starlight potion</b>Drink at night.</div>
+  <div class="card"><b>Coin pouch</b>Never quite full.</div>
+</div>
+</body>
+</html>

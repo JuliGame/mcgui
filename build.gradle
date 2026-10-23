@@ -213,6 +213,12 @@ tasks.register('hoverCost', JavaExec) {
     maxHeapSize = '2g'
 }
 
+// The test runtime classpath, for bench/bench.py: it builds under one lock and runs the benches under another.
+tasks.register('benchClasspath') {
+    dependsOn 'testClasses'
+    doLast { println sourceSets.test.runtimeClasspath.asPath }
+}
+
 // Tests and a benchmark against a real Paper server's own classes (its netty pipeline handlers, packet
 // codecs and compressor), for what reflection reaches on a running server. Only with a server directory
 // that has run once (versions/ and libraries/), and a Java 25 toolchain, which Paper 26 is built for:
