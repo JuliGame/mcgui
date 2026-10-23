@@ -244,6 +244,11 @@ public final class UIEnginePlugin extends JavaPlugin {
         return cfg.getBoolean("debug", false);
     }
 
+    /** Where {@code /ui import <code>} fetches shared pages from, the code appended; blank turns importing off. */
+    String importUrl() {
+        return cfg.getString("import-url", "https://uiengine.dev/api/builder/ui/page/").trim();
+    }
+
     /** How long one picture may take to draw (ms) before it is given up and reported like any page that cannot be drawn; 0 for no limit. */
     long renderTimeout() {
         return Math.max(0, Math.round(cfg.getDouble("render-timeout", HtmlRenderer.DEFAULT_TIMEOUT_MS / 1000.0) * 1000));

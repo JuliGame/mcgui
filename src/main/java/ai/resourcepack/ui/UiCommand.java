@@ -18,7 +18,7 @@ import java.util.Set;
 
 /**
  * /ui open &lt;page&gt; [player] · close [player] · place &lt;page&gt; [cols] [rows] [name] [shared] ·
- * remove [name] · list · reload, and the framework's own, which {@link FrameworkCommand} answers.
+ * remove [name] · list · reload · import &lt;code&gt;, and the framework's own, which {@link FrameworkCommand} answers.
  *
  * <p>Each subcommand checks its own node, {@code uiengine.<subcommand>}, and one pointed at another
  * player also needs {@code uiengine.<subcommand>.others}. {@code uiengine.admin} is only a parent in
@@ -29,10 +29,12 @@ final class UiCommand implements TabExecutor {
     private final UIEnginePlugin plugin;
     /** The framework's own subcommands (test, fov, pointer, pack, stats, clear, debug), handed on as they are. */
     private final FrameworkCommand framework;
+    private final PageImport importer;
 
     UiCommand(UIEnginePlugin plugin, FrameworkCommand framework) {
         this.plugin = plugin;
         this.framework = framework;
+        this.importer = new PageImport(plugin);
     }
 
     /** The node a subcommand needs: {@code uiengine.<subcommand>}. */
@@ -91,12 +93,17 @@ final class UiCommand implements TabExecutor {
                             + w.topLeft.getWorld().getName() + " at " + w.topLeft.getBlockX() + " " + w.topLeft.getBlockY() + " " + w.topLeft.getBlockZ(), NamedTextColor.GRAY);
                 }
             }
+            case "import" -> {
+                if (!permitted(sender, permissionFor("import"))) return true;
+                if (args.length < 2) return say(sender, "/ui import <code>: the code from Send to server on uiengine.dev", NamedTextColor.RED);
+                importer.run(sender, args[1]);
+            }
             case "reload" -> {
                 if (!permitted(sender, permissionFor("reload"))) return true;
                 plugin.reload();
                 say(sender, "Reloaded the config and every page.", NamedTextColor.GREEN);
             }
-            default -> say(sender, "/ui open <page> [player] · close [player] · place <page> [cols] [rows] [name] [shared] · remove [name] · list · reload"
+            default -> say(sender, "/ui open <page> [player] · close [player] · place <page> [cols] [rows] [name] [shared] · remove [name] · list · reload · import <code>"
                     + " · test wall|view [cols] [rows] · fov <degrees> · pointer [speed] · pack · stats · clear", NamedTextColor.GRAY);
         }
         return true;
@@ -217,7 +224,7 @@ final class UiCommand implements TabExecutor {
         // Only what the sender may run is offered.
         if (args.length == 1) {
             List<String> subs = new ArrayList<>();
-            for (String sub : List.of("open", "close", "place", "remove", "list", "reload")) if (mayRun(sender, sub)) subs.add(sub);
+            for (String sub : List.of("open", "close", "place", "remove", "list", "reload", "import")) if (mayRun(sender, sub)) subs.add(sub);
             subs.addAll(framework.onTabComplete(sender, command, label, args));
             return filter(subs, args[0]);
         }

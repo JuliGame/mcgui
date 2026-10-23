@@ -6,6 +6,10 @@ pages-folder: pages
 # Edit a page (or its CSS or images) and it updates in game within a second.
 live-reload: true
 
+# Where /ui import <code> fetches pages shared from uiengine.dev (the browser builder for these pages),
+# with the code put on the end. Blank turns /ui import off.
+import-url: https://uiengine.dev/api/builder/ui/page/
+
 # Let pages load stylesheets, fonts and images from the web (Google Fonts, image hosts). They are
 # fetched once and kept in plugins/UIEngine/cache/. Each fetch may take 15 seconds and 16 MB at most.
 allow-web: true

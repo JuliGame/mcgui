@@ -25,6 +25,7 @@ permissions:
       uiengine.remove: true
       uiengine.list: true
       uiengine.reload: true
+      uiengine.import: true
       uiengine.test: true
       uiengine.test.others: true
       uiengine.stats: true
@@ -56,6 +57,9 @@ permissions:
     default: op
   uiengine.reload:
     description: Read the config and every page again with /ui reload.
+    default: op
+  uiengine.import:
+    description: Write pages shared from uiengine.dev into the pages folder with /ui import <code>.
     default: op
   uiengine.test:
     description: Put a test picture on a wall or open one as a view, with /ui test.
