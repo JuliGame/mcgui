@@ -252,7 +252,8 @@ something moves, the page is drawn `animation-fps` times a second (10 by
 default), and each frame redraws only round what moves (see "Fast pages").
 
 Fonts: Inter (sans-serif and every system UI font name), Source Serif 4
-(serif), JetBrains Mono (monospace) and Monocraft (`font-family: Minecraft`)
+(serif), JetBrains Mono (monospace), Mac's Minecraft (`font-family: Minecraft`, the game's
+own letters) and Monocraft (`font-family: Monocraft`, a monospaced take on them)
 are bundled, all under the SIL Open Font License (`fonts/*-OFL.txt`).
 
 Not supported: JavaScript, WOFF fonts, WebP images, video, iframes, floats

@@ -46,6 +46,6 @@ java VanillaTextures.java ~/.minecraft/versions/26.3/26.3.jar pages
 
 That writes `pages/vanilla/`: the textures, the title screen's panorama (which the launcher
 keeps beside the jar), and the game's font as `minecraft.ttf` and `minecraft_bold.ttf`, built
-from its glyph sheets pixel for pixel. Without them the pages fall back to Monocraft, which UI
-Engine bundles: close to the game's font, but monospaced. Then copy `pages/` into
+from its glyph sheets pixel for pixel. Without them the pages fall back to Mac's Minecraft, which
+UI Engine bundles: an open recreation of the game's font. Then copy `pages/` into
 `plugins/UIEngine/pages/`.

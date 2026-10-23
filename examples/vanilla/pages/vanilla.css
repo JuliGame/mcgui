@@ -2,7 +2,7 @@
   The game's own look, in CSS: its buttons, slots, panels and tooltips, measured off its textures.
   One game pixel is 2 CSS pixels here (a fullscreen page is 1024 x 576 CSS pixels).
   Font: the game's own, built from its glyph sheets by VanillaTextures.java. Without it the name
-  "Minecraft" falls back to Monocraft, which UI Engine bundles: close, but monospaced.
+  "Minecraft" falls back to Mac's Minecraft, which UI Engine bundles: an open recreation of it.
 */
 @font-face { font-family: Minecraft; src: url(vanilla/minecraft.ttf); }
 @font-face { font-family: Minecraft; font-weight: bold; src: url(vanilla/minecraft_bold.ttf); }

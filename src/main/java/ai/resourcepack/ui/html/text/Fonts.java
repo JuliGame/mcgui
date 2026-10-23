@@ -17,8 +17,8 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * The fonts a page can use: the four families bundled in the plugin (Inter for sans-serif and every
- * system UI font name, Source Serif 4 for serif, JetBrains Mono for monospace, Monocraft for
- * "Minecraft"), plus whatever the page loads with {@code @font-face}. Picks faces the way CSS does:
+ * system UI font name, Source Serif 4 for serif, JetBrains Mono for monospace, Mac's Minecraft for
+ * "Minecraft" (proportional, as the game's own font is; Monocraft is still there by name), plus whatever the page loads with {@code @font-face}. Picks faces the way CSS does:
  * the first family in the list that exists, then the nearest weight, then a slanted copy if there is
  * no italic. Characters a face lacks fall back to the other bundled ones, then to Java's own.
  */
@@ -66,6 +66,10 @@ public final class Fonts {
         f.load("jetbrains mono", "JetBrainsMono-Bold.ttf", 700, false);
         f.load("monocraft", "Monocraft.ttf", 400, false);
         f.load("monocraft", "Monocraft-Bold.ttf", 700, false);
+        f.load("macs minecraft", "MacsMinecraft-Regular.ttf", 400, false);
+        f.load("macs minecraft", "MacsMinecraft-Italic.ttf", 400, true);
+        f.load("macs minecraft", "MacsMinecraft-Bold.ttf", 700, false);
+        f.load("macs minecraft", "MacsMinecraft-BoldItalic.ttf", 700, true);
         for (String n : new String[]{"sans-serif", "system-ui", "-apple-system", "blinkmacsystemfont", "segoe ui", "segoe ui variable",
                 "roboto", "helvetica", "helvetica neue", "arial", "ui-sans-serif", "noto sans", "ubuntu", "cantarell", "oxygen",
                 "fira sans", "droid sans", "liberation sans", "verdana", "tahoma", "trebuchet ms", "sf pro display", "sf pro text",
@@ -76,10 +80,11 @@ public final class Fonts {
         for (String n : new String[]{"monospace", "ui-monospace", "menlo", "monaco", "consolas", "courier", "courier new", "sfmono-regular",
                 "sf mono", "fira code", "fira mono", "source code pro", "liberation mono", "dejavu sans mono", "cascadia code",
                 "cascadia mono", "roboto mono", "ibm plex mono"}) f.aliases.put(n, "jetbrains mono");
-        for (String n : new String[]{"minecraft", "minecraftia", "mojangles", "minecraft-font", "minecraftfont", "minecraft ten"}) f.aliases.put(n, "monocraft");
+        for (String n : new String[]{"minecraft", "minecraftia", "mojangles", "minecraft-font", "minecraftfont", "minecraft ten", "mac's minecraft", "macsminecraft"}) f.aliases.put(n, "macs minecraft");
         f.fallbacks.add(f.families.get("inter").get(1).font);
         f.fallbacks.add(f.families.get("jetbrains mono").get(0).font);
         f.fallbacks.add(f.families.get("source serif 4").get(0).font);
+        f.fallbacks.add(f.families.get("macs minecraft").get(0).font);
         f.fallbacks.add(f.families.get("monocraft").get(0).font);
         f.fallbacks.add(new Font(Font.DIALOG, Font.PLAIN, 1));
         return f;
