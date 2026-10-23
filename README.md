@@ -149,6 +149,16 @@ name. A page asks for it the way a browser page does:
 .shop-item { cursor: url(sword.png) 4 0, pointer; }
 ```
 
+It follows whatever is under the pointer, so each part of a page can have its
+own, and anything clickable without one still gets the hand:
+
+```css
+body     { cursor: url(arrow.png), default; }
+.mc-btn  { cursor: url(hand.png) 6 0, pointer; }
+.mc-slot { cursor: url(grab.png) 8 8, pointer; }
+.locked  { cursor: url(no.png) 8 8, default; }
+```
+
 The two numbers are the pixel that points, in the picture's own pixels (the
 top left if left out). The keyword after it is what players see on a server
 without that cursor. A picture 16 pixels tall is the arrow's size; up to 32 is
