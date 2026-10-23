@@ -66,8 +66,8 @@ public final class MapSender implements AutoCloseable {
         final Map<Integer, Pointed> pointed = new ConcurrentHashMap<>(); // also read by delivered(), on the main thread
         /** Which map each frame shows on their client; null until the wire can keep it, and until then each shows its own. */
         volatile Wire.Frames pointing;
-        /** This pass's patches, written together with one flush. */
-        final List<Object> packets = new ArrayList<>();
+        /** This pass's patches, made together (on several threads, see Wire#patches) and written with one flush. */
+        final List<Wire.MapPatch> pending = new ArrayList<>();
         final List<Patch> patches = new ArrayList<>();
         long batchCost;
         /** Bumped whenever patches are forgotten (a failed write), which no snapshot or pointing would show. */
@@ -362,7 +362,7 @@ public final class MapSender implements AutoCloseable {
             // Counted in flight from now, so delivered() never sees the tile as sent before it is written.
             v.inFlight.addAndGet(cost);
             wallInFlight.addAndGet(cost);
-            v.packets.add(patch(a, id, rect, current));
+            v.pending.add(patch(a, id, rect, current));
             v.patches.add(new Patch(id, current, cost, wallInFlight));
             v.batchCost += cost;
             v.budget -= cost;
@@ -371,10 +371,10 @@ public final class MapSender implements AutoCloseable {
         }
     }
 
-    /** The packet for [rect] of [tile] to map [id]: the same one for every viewer the wire can give it to. */
-    private Object patch(Assignment a, int id, int[] rect, byte[] tile) {
+    /** The patch for [rect] of [tile] to map [id], made by {@link Wire#patches}: the same packet for every viewer the wire can give it to. */
+    private Wire.MapPatch patch(Assignment a, int id, int[] rect, byte[] tile) {
         Integer viewers = watching.get(new Watch(a.canvas, a.encoding));
-        return wire.patch(a.player, id, rect[0], rect[1], rect[2], rect[3], tile, viewers != null && viewers > 1);
+        return new Wire.MapPatch(id, rect[0], rect[1], rect[2], rect[3], tile, viewers != null && viewers > 1);
     }
 
     /**
@@ -447,6 +447,7 @@ public final class MapSender implements AutoCloseable {
         if (v.budget <= 0 || v.inFlight.get() >= maxInFlight) return true; // all of it next run, from a fresh snapshot
         AtomicLong wallInFlight = v.wallInFlight.computeIfAbsent(a.wall, w -> new AtomicLong());
         List<Patch> patches = new ArrayList<>();
+        List<Wire.MapPatch> made = new ArrayList<>();
         long cost = 0;
         for (int t = 0; t < to.length; t++) {
             int id = to[t];
@@ -457,7 +458,7 @@ public final class MapSender implements AutoCloseable {
                 continue;
             }
             int c = rect[2] * rect[3];
-            packets.add(patch(a, id, rect, current));
+            made.add(patch(a, id, rect, current));
             patches.add(new Patch(id, current, c, wallInFlight));
             cost += c;
         }
@@ -467,20 +468,35 @@ public final class MapSender implements AutoCloseable {
         wallInFlight.addAndGet(cost);
         v.budget -= cost;
         for (Patch p : patches) v.sent.put(p.id, p.tile);
+        packets.addAll(made(a.player, v, made, patches, cost));
         write(a.player, v, packets, patches, cost, true);
         return true;
     }
 
     /** Writes [v]'s patches from this pass to [player] together, with one flush. */
     private void flush(Player player, Viewer v) {
-        if (v == null || v.packets.isEmpty()) return;
-        List<Object> packets = List.copyOf(v.packets);
+        if (v == null || v.pending.isEmpty()) return;
+        List<Wire.MapPatch> pending = List.copyOf(v.pending);
         List<Patch> patches = List.copyOf(v.patches);
         long cost = v.batchCost;
-        v.packets.clear();
+        v.pending.clear();
         v.patches.clear();
         v.batchCost = 0;
-        write(player, v, packets, patches, cost, false);
+        write(player, v, made(player, v, pending, patches, cost), patches, cost, false);
+    }
+
+    /**
+     * The packets for [made], [v]'s patches [patches] costing [cost], already counted as sent and in flight: if they
+     * cannot be made, they are given up on as a failed write would be, so they are sent again.
+     */
+    private List<Object> made(Player player, Viewer v, List<Wire.MapPatch> made, List<Patch> patches, long cost) {
+        try {
+            return wire.patches(player, made);
+        } catch (RuntimeException | Error e) {
+            forget(v, patches);
+            landed(v, patches, cost);
+            throw e;
+        }
     }
 
     /** Writes [packets], which carry [patches] costing [cost], to [player]; [together]: as one bundle. */

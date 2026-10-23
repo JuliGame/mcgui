@@ -53,6 +53,19 @@ public final class ServerWire implements Wire, AutoCloseable {
     }
 
     @Override
+    public List<Object> patches(Player player, List<MapPatch> patches) {
+        Channel channel = shared == null ? null : nms.channel(player);
+        if (channel == null) return Wire.super.patches(player, patches);
+        List<Object> out = shared.patches(channel, patches);
+        for (int i = 0; i < out.size(); i++) {
+            if (out.get(i) != null) continue;
+            MapPatch p = patches.get(i);
+            out.set(i, Wire.super.patch(player, p.mapId(), p.x(), p.y(), p.w(), p.h(), p.tile(), p.shared()));
+        }
+        return out;
+    }
+
+    @Override
     public Object repoint(MapWall wall, int tile, int mapId) {
         int entity = wall.entityId(tile);
         return entity < 0 ? null : nms.frameShows(entity, mapId);

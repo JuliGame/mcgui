@@ -24,6 +24,19 @@ public interface Wire {
         return patch(mapId, x, y, w, h, SharedCompression.rectangle(tile, x, y, w, h));
     }
 
+    /** One rectangle of one tile for one map: what {@link #patch(Player, int, int, int, int, int, byte[], boolean)} takes. */
+    record MapPatch(int mapId, int x, int y, int w, int h, byte[] tile, boolean shared) {}
+
+    /**
+     * {@link #patch(Player, int, int, int, int, int, byte[], boolean)} for each of [patches], in order: one pass's
+     * worth for one player, which a wire may make on several threads at once.
+     */
+    default List<Object> patches(Player player, List<MapPatch> patches) {
+        List<Object> out = new java.util.ArrayList<>(patches.size());
+        for (MapPatch p : patches) out.add(patch(player, p.mapId(), p.x(), p.y(), p.w(), p.h(), p.tile(), p.shared()));
+        return out;
+    }
+
     /** A packet that makes [wall]'s frame for [tile] show map [mapId], or null while the frame is not in the world. */
     Object repoint(MapWall wall, int tile, int mapId);
 
