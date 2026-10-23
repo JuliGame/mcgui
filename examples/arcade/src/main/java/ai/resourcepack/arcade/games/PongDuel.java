@@ -2,6 +2,7 @@ package ai.resourcepack.arcade.games;
 
 import ai.resourcepack.arcade.scene.Host;
 import ai.resourcepack.arcade.scene.Key;
+import ai.resourcepack.arcade.scene.Pixels;
 import ai.resourcepack.arcade.scene.Scene;
 import ai.resourcepack.arcade.scene.Seat;
 
@@ -589,11 +590,7 @@ public final class PongDuel implements Scene {
         int width = host == null ? cols() * 128 : Math.max(1, host.width());
         int height = host == null ? rows() * 128 : Math.max(1, host.height());
         Graphics2D g = (Graphics2D) output.create();
-        g.setColor(NAVY);
-        g.fillRect(0, 0, width, height);
-        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
-                RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-        g.drawImage(world, 0, 0, width, height, null);
+        Pixels.drawSmooth(g, world, 0, 0, width, height);
 
         // These glyphs are rasterized at the actual cabinet resolution.
         g.scale(width / (double) W, height / (double) H);

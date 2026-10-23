@@ -528,8 +528,10 @@ final class Game implements Loop.Ticker {
         }
         log.drawn();
         long handed = System.nanoTime();
-        for (Rectangle r : rects) canvas.draw(frame.getSubimage(r.x, r.y, r.width, r.height), r.x, r.y);
-        log.shown(System.nanoTime() - handed);
+        Canvas.Snapshot before = canvas.snapshot();
+        // All of them as one change, so no viewer is ever sent half a frame.
+        canvas.draw(frame, 0, 0, rects);
+        log.shown(System.nanoTime() - handed, FrameLog.changed(canvas, before));
     }
 
     private Rectangle device(Rectangle2D r) {

@@ -11,9 +11,12 @@ import ai.resourcepack.ui.framework.api.View;
 import ai.resourcepack.ui.framework.api.ViewContent;
 
 import java.awt.Graphics2D;
+import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
+import java.awt.image.DataBufferInt;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -22,8 +25,8 @@ import java.util.function.Consumer;
 
 /**
  * Runs one {@link Scene} on the arcade's loop: hands it its players' input, ticks it at its own frame rate,
- * and puts what it draws on its canvas. The canvas sends only what changed, so a scene can simply draw
- * the whole frame every time.
+ * and puts what it draws on its canvas. Only the tiles that differ from the frame before are handed to the
+ * canvas, and only what changed in them is sent, so a scene can simply draw the whole frame every time.
  */
 final class SceneRunner implements Loop.Ticker, Host {
     /** What the plugin does for a runner, on the server thread. */
@@ -44,11 +47,20 @@ final class SceneRunner implements Loop.Ticker, Host {
     /** Shown on a cabinet: kept running when nobody plays. */
     final boolean cabinet;
     private final Room room;
-    private final BufferedImage frame;
+    /**
+     * Frames are drawn into these by turns: what the one drawn now differs from the one before is what goes to the
+     * canvas, tile by tile. Each frame is painted whole, so the other holds the last frame, which the canvas shows.
+     */
+    private final BufferedImage[] frames = new BufferedImage[2];
+    private final int[][] pixels = new int[2][];
+    private int drawing;
+    /** Whether the canvas has been handed a whole frame yet. */
+    private boolean handed;
     private final ConcurrentLinkedQueue<Input> input = new ConcurrentLinkedQueue<>();
     final FrameLog log = new FrameLog();
     private final List<Seat> seats = new CopyOnWriteArrayList<>();
-    private double carry;
+    /** When the next frame is due and the last was made (System.nanoTime); 0 before the first. */
+    private long next, last;
     private int sounds;
 
     SceneRunner(String id, Scene scene, Canvas canvas, boolean cabinet, Room room) {
@@ -57,7 +69,10 @@ final class SceneRunner implements Loop.Ticker, Host {
         this.canvas = canvas;
         this.cabinet = cabinet;
         this.room = room;
-        frame = new BufferedImage(canvas.width(), canvas.height(), BufferedImage.TYPE_INT_RGB);
+        for (int i = 0; i < 2; i++) {
+            frames[i] = new BufferedImage(canvas.width(), canvas.height(), BufferedImage.TYPE_INT_RGB);
+            pixels[i] = ((DataBufferInt) frames[i].getRaster().getDataBuffer()).getData();
+        }
         scene.start(this);
     }
 
@@ -99,11 +114,33 @@ final class SceneRunner implements Loop.Ticker, Host {
 
     @Override
     public void tick(double dt) {
-        carry += dt;
-        double step = 1.0 / Math.max(1, Math.min(30, scene.fps()));
-        if (carry + 1e-6 < step) return;
-        double elapsed = Math.min(carry, 0.1);
-        carry = 0;
+        double elapsed = due(System.nanoTime());
+        if (elapsed >= 0) frame(elapsed);
+    }
+
+    /**
+     * Whether a frame is due at [now] (System.nanoTime) for a loop run then: the seconds since the last frame if so,
+     * else -1. Frames fall on a grid of 1/fps, give or take half a run of the loop. The loop's runs jitter, and one
+     * that came a hair early used to skip its frame (and make the next one twice as late), which held 30 fps
+     * games near 20 with frames 33 and 67 ms apart.
+     */
+    double due(long now) {
+        long step = 1_000_000_000L / Math.max(1, Math.min(30, scene.fps()));
+        if (last != 0 && now < next - Loop.PERIOD_NANOS / 2) return -1;
+        double elapsed = last == 0 ? step / 1e9 : Math.min(0.1, (now - last) / 1e9);
+        last = now;
+        // After a late run, on from now: never two frames back to back to catch up.
+        next = Math.max(next + step, now + step - Loop.PERIOD_NANOS / 4);
+        return elapsed;
+    }
+
+    /** The frame the canvas was last handed (its pixels, not a copy): for tests. */
+    BufferedImage shown() {
+        return frames[drawing ^ 1];
+    }
+
+    /** One frame, [elapsed] seconds after the last: the input since, the scene's tick, its drawing, the canvas. */
+    void frame(double elapsed) {
         sounds = 0;
         log.begin();
         for (Input e; (e = input.poll()) != null; ) {
@@ -112,6 +149,7 @@ final class SceneRunner implements Loop.Ticker, Host {
         }
         scene.tick(elapsed);
         log.ticked();
+        BufferedImage frame = frames[drawing];
         Graphics2D g = frame.createGraphics();
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
@@ -122,9 +160,47 @@ final class SceneRunner implements Loop.Ticker, Host {
             g.dispose();
         }
         log.drawn();
-        long handed = System.nanoTime();
-        canvas.draw(frame, 0, 0);
-        log.shown(System.nanoTime() - handed);
+        long at = System.nanoTime();
+        Canvas.Snapshot before = canvas.snapshot();
+        // Only the tiles that differ from the last frame: converting a pixel to map colours costs whether or not it changed.
+        List<Rectangle> changed = handed ? changed(pixels[drawing], pixels[drawing ^ 1]) : null;
+        if (changed == null) canvas.draw(frame, 0, 0);
+        else canvas.draw(frame, 0, 0, changed);
+        log.shown(System.nanoTime() - at, FrameLog.changed(canvas, before));
+        handed = true;
+        drawing ^= 1;
+    }
+
+    /** The 128-pixel tiles where [now] differs from [before], as runs of tiles along each row of them. */
+    private List<Rectangle> changed(int[] now, int[] before) {
+        int w = canvas.width(), cols = canvas.cols();
+        List<Rectangle> out = new ArrayList<>();
+        boolean[] dirty = new boolean[cols];
+        for (int top = 0; top < canvas.height(); top += 128) {
+            Arrays.fill(dirty, false);
+            int found = 0;
+            for (int y = top; y < top + 128 && found < cols; y++) {
+                int row = y * w;
+                for (int c = 0; c < cols; c++) {
+                    if (dirty[c]) continue;
+                    int from = row + c * 128;
+                    if (!Arrays.equals(now, from, from + 128, before, from, from + 128)) {
+                        dirty[c] = true;
+                        found++;
+                    }
+                }
+            }
+            for (int c = 0; c < cols; ) {
+                if (!dirty[c]) {
+                    c++;
+                    continue;
+                }
+                int start = c;
+                while (c < cols && dirty[c]) c++;
+                out.add(new Rectangle(start * 128, top, (c - start) * 128, 128));
+            }
+        }
+        return out;
     }
 
     /** Something a player did, for the scene's next frame: when it arrived, and what it was (for {@link FrameLog}). */

@@ -56,43 +56,34 @@ public final class ArcadeBench {
         }
     }
 
-    /** Plays [name] for [warm] frames, then measures [frames] more. */
+    /** What a runner does for the plugin: nothing here. */
+    static final SceneRunner.Room ROOM = new SceneRunner.Room() {
+        @Override public void sound(SceneRunner runner, String sound, float volume, float pitch) {}
+        @Override public int score(SceneRunner runner, Seat seat, int score) { return 0; }
+        @Override public List<Host.Score> scores(SceneRunner runner) { return List.of(); }
+        @Override public void empty(SceneRunner runner) {}
+    };
+
+    /** Plays [name] for [warm] frames, then measures [frames] more, each made by the arcade's own {@link SceneRunner}. */
     static Result run(String name, Palette palette, int frames, int warm, boolean seated) {
         Bot bot = new Bot(name);
         if (name.equals("breakout")) return breakout(palette, frames, warm, seated, bot);
         Scene scene = Games.ALL.get(name).get();
         Canvas canvas = new Canvas(palette, scene.cols(), scene.rows());
-        BufferedImage frame = new BufferedImage(canvas.width(), canvas.height(), BufferedImage.TYPE_INT_RGB);
-        Seat seat = new Seat(UUID.randomUUID(), "Bench", 0);
-        List<Seat> seats = seated ? List.of(seat) : List.of();
-        scene.start(new Host() {
-            @Override public int width() { return canvas.width(); }
-            @Override public int height() { return canvas.height(); }
-            @Override public List<Seat> seats() { return seats; }
-            @Override public void sound(String sound, float volume, float pitch) {}
-            @Override public int score(Seat s, int score) { return 0; }
-            @Override public List<Score> scores() { return List.of(); }
-        });
-        if (seated) scene.joined(seat);
+        SceneRunner runner = new SceneRunner(name, scene, canvas, true, ROOM);
+        Seat seat = seated ? runner.sit(UUID.randomUUID(), "Bench") : null;
         int fps = Math.max(1, Math.min(30, scene.fps()));
         double dt = 1.0 / fps;
         Meter m = new Meter(canvas);
         for (int f = 0; f < warm + frames; f++) {
-            boolean measure = f >= warm;
-            long c0 = THREADS.getCurrentThreadCpuTime(), w0 = System.nanoTime();
+            long p0 = OS.getProcessCpuTime(), w0 = System.nanoTime();
             if (seated) bot.play(scene, seat, f * dt, canvas.width(), canvas.height());
-            scene.tick(dt);
-            long c1 = THREADS.getCurrentThreadCpuTime();
-            Graphics2D g = frame.createGraphics();
-            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-            g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-            g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
-            scene.draw(g);
-            g.dispose();
-            long c2 = THREADS.getCurrentThreadCpuTime(), p2 = OS.getProcessCpuTime(), w2 = System.nanoTime();
-            canvas.draw(frame, 0, 0);
-            long w3 = System.nanoTime(), p3 = OS.getProcessCpuTime();
-            if (measure) m.frame((c1 - c0) / 1e6, (c2 - c1) / 1e6, (w3 - w2) / 1e6, (p3 - p2) / 1e6, (w3 - w0) / 1e6);
+            runner.frame(dt);
+            long w1 = System.nanoTime(), p1 = OS.getProcessCpuTime();
+            int[] l = runner.log.last();
+            // Everything but the scene's own tick and drawing: finding what changed, converting and encoding it.
+            double canvasCpu = Math.max(0, (p1 - p0) / 1e6 - (l[0] + l[1]) / 1000.0);
+            if (f >= warm) m.frame(l[0] / 1000.0, l[1] / 1000.0, l[2] / 1000.0, canvasCpu, (w1 - w0) / 1e6);
             else m.sync();
         }
         return m.result(name, fps);

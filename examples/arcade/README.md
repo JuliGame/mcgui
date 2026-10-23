@@ -21,7 +21,8 @@ keyboard.
 | Block Drop | `blocks` | Falling blocks made of Minecraft blocks, with hold and a next queue. |
 
 - `/arcade play [game]` sits you at a game of your own, fullscreen (Breakout if
-  you name none). Sneak to get up.
+  you name none). Sneak to get up. From the console, `/arcade play <game> <player>`
+  sits somebody else down (needs `arcade.admin`).
 - `/arcade cabinet [game] [cols] [rows]` puts a cabinet on the wall you look at
   (the block you look at is its top-left corner; 12x7 by default). While nobody
   plays it plays itself, and with nobody near enough to see it, it pauses and
@@ -30,6 +31,10 @@ keyboard.
   cabinet.
 - `/arcade remove` takes down the cabinet you look at; `/arcade scores [game]`
   lists the high scores (kept in `scores.yml`).
+- `/arcade stats` shows each running game's frame rate, how evenly its frames
+  come, the CPU each part of a frame takes and how long input waits for the
+  frame that uses it; `/arcade stats trace` writes every frame and input to
+  `plugins/Arcade/trace.json`.
 - From the console or a script, give the place outright:
   `/arcade cabinet <game> <cols> <rows> <x> <y> <z> <facing> [world]` (the
   top-left block, and the way the screen faces), and
@@ -48,6 +53,34 @@ keys, and is asked to `tick` and `draw` a frame. It never sees Bukkit: sounds an
 high scores go through `Host`, so a scene can be run and tested with no server.
 With nobody seated a scene must play itself, because a cabinet is seen by
 everybody walking past.
+
+## Keeping a game smooth
+
+Measured with `ArcadeBench` (headless: `java -cp "$(../../gradlew -q
+benchClasspath)" ai.resourcepack.arcade.ArcadeBench [game ...]`, per game the CPU of
+its tick, its drawing and the canvas, and the bytes a frame) and `/arcade stats`.
+
+- **A frame has 33 ms, and everything on the arcade's loop shares it.** Drawing,
+  finding what changed and converting it run on one thread for every game in
+  range, so keep `draw` well under 20 ms on a 16x9 canvas.
+- **Never stretch a picture with Java2D's bilinear interpolation.**
+  `drawImage(small, 0, 0, w, h, null)` with `VALUE_INTERPOLATION_BILINEAR` to a
+  16x9 canvas takes 34 ms on its own. Use `Pixels.drawSmooth(g, small, 0, 0, w, h)`
+  (same picture, about 3 ms), or nearest neighbour (2 ms) for pixel art.
+- **Draw the whole frame, every pixel, every time.** The runner compares each
+  frame with the last, tile by tile, and hands the canvas only the 128-pixel
+  tiles that differ, so a still part of the screen costs a comparison, not a
+  conversion. That only works if every pixel is painted (the tests check every
+  game for it).
+- **Moving the whole screen costs every map, every frame.** A 16x9 view is 144
+  maps; a raycaster or a scrolling road changes about 100 of them 30 times a
+  second: about 25 ms of server CPU a frame to convert, encode and compress them,
+  1 to 4 MB a second on the wire, and an upload of each changed map on the
+  player's client. Keep big moving areas to the part of the screen that needs
+  them, and HUDs and borders still.
+- **Pixel art scaled up is cheap on the wire** (it compresses about fourteen to
+  one); the per-player budget, `screens.max-bytes-per-second-per-player`, counts
+  compressed bytes, so it does not throttle it.
 
 ## What Breakout shows
 

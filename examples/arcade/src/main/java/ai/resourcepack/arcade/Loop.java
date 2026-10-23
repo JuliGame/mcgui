@@ -21,6 +21,8 @@ final class Loop {
     }
 
     private static final long FRAME_MICROS = 1_000_000 / 30;
+    /** How often the loop runs; a game at a lower frame rate skips runs. */
+    static final long PERIOD_NANOS = FRAME_MICROS * 1000;
 
     private final List<Ticker> games = new CopyOnWriteArrayList<>();
     private final Logger log;

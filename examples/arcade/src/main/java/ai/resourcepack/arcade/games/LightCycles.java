@@ -2,6 +2,7 @@ package ai.resourcepack.arcade.games;
 
 import ai.resourcepack.arcade.scene.Host;
 import ai.resourcepack.arcade.scene.Key;
+import ai.resourcepack.arcade.scene.Pixels;
 import ai.resourcepack.arcade.scene.Scene;
 import ai.resourcepack.arcade.scene.Seat;
 
@@ -769,11 +770,7 @@ public class LightCycles implements Scene {
         footer(g);
         g.dispose();
 
-        Graphics2D out = (Graphics2D) graphics.create();
-        out.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
-                RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-        out.drawImage(frame, 0, 0, Math.max(1, host.width()), Math.max(1, host.height()), null);
-        out.dispose();
+        Pixels.drawSmooth(graphics, frame, 0, 0, Math.max(1, host.width()), Math.max(1, host.height()));
     }
 
     private void card(Graphics2D g, int index) {

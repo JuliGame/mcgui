@@ -1,5 +1,7 @@
 package ai.resourcepack.arcade;
 
+import ai.resourcepack.ui.framework.api.Canvas;
+
 import java.lang.management.ManagementFactory;
 import java.lang.management.ThreadMXBean;
 import java.util.Arrays;
@@ -15,7 +17,7 @@ final class FrameLog {
     private static final ThreadMXBean THREADS = ManagementFactory.getThreadMXBean();
 
     private final long[] start = new long[N], shown = new long[N];
-    private final int[] tickUs = new int[N], drawUs = new int[N], canvasUs = new int[N];
+    private final int[] tickUs = new int[N], drawUs = new int[N], canvasUs = new int[N], changed = new int[N];
     private int frames;
     private final long[] inputAt = new long[N];
     private final int[] inputFrame = new int[N];
@@ -25,6 +27,15 @@ final class FrameLog {
     // The frame being made, on the loop thread.
     private long frameStart, cpuMark;
     private int tick, draw;
+
+    /** How many of [canvas]'s tiles it has published anew since [before] was taken. */
+    static int changed(Canvas canvas, Canvas.Snapshot before) {
+        Canvas.Snapshot now = canvas.snapshot();
+        if (now.sameAs(before)) return 0;
+        int n = 0;
+        for (int t = 0; t < canvas.tiles(); t++) if (now.tile(t, Canvas.Encoding.HI) != before.tile(t, Canvas.Encoding.HI)) n++;
+        return n;
+    }
 
     /** Loop thread: a frame starts. */
     void begin() {
@@ -55,14 +66,24 @@ final class FrameLog {
         cpuMark = now;
     }
 
-    /** Loop thread: the canvas has the frame (published), [canvasNanos] after it was handed over. */
-    synchronized void shown(long canvasNanos) {
+    /**
+     * Loop thread: the canvas has the frame, [canvasNanos] after it was handed over; it published [tiles] changed
+     * tiles (0: the frame changed nothing, and nothing is sent).
+     */
+    synchronized void shown(long canvasNanos, int tiles) {
         int i = frames++ % N;
         start[i] = frameStart;
         shown[i] = System.nanoTime();
         tickUs[i] = tick;
         drawUs[i] = draw;
         canvasUs[i] = (int) (canvasNanos / 1000);
+        changed[i] = tiles;
+    }
+
+    /** The last frame's CPU of its tick and drawing, and the wall time of the canvas's part, in µs. */
+    synchronized int[] last() {
+        int i = (frames - 1) % N;
+        return frames == 0 ? new int[3] : new int[]{tickUs[i], drawUs[i], canvasUs[i]};
     }
 
     /** One line: frames a second over the last [seconds], their spacing, CPU per frame, and input to canvas. */
@@ -113,7 +134,7 @@ final class FrameLog {
         return out;
     }
 
-    /** Everything kept, as JSON: frames [start, shown, tick µs, draw µs, canvas µs] and inputs [at, frame, kind]. */
+    /** Everything kept, as JSON: frames [index, start, shown, tick µs, draw µs, canvas µs, tiles changed] and inputs [at, frame, kind]. */
     synchronized String json() {
         StringBuilder b = new StringBuilder("{\"frames\":[");
         int n = Math.min(frames, N);
@@ -121,7 +142,7 @@ final class FrameLog {
             int i = f % N;
             if (f > frames - n) b.append(',');
             b.append('[').append(f).append(',').append(start[i]).append(',').append(shown[i]).append(',')
-                    .append(tickUs[i]).append(',').append(drawUs[i]).append(',').append(canvasUs[i]).append(']');
+                    .append(tickUs[i]).append(',').append(drawUs[i]).append(',').append(canvasUs[i]).append(',').append(changed[i]).append(']');
         }
         b.append("],\"inputs\":[");
         n = Math.min(inputs, N);
