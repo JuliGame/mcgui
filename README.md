@@ -261,8 +261,10 @@ arriving before the highlight does. What decides it:
 - **Blur is the costliest thing there is to draw.** `filter: blur()` or
   `backdrop-filter` over a large area makes every redraw near it slower, and a
   `backdrop-filter` widens each hover's redraw to its reach. Drawing ahead hides
-  that cost, so it bites on pages that have also lost drawing ahead. A background
-  that is only ever blurred is cheaper as an image that is blurred already.
+  that cost, so it bites on pages that have also lost drawing ahead. A blurred
+  background box with nothing inside it (`<div class="bg"></div>` under
+  `filter: blur()`, with no border or shadow) is blurred once per page and kept;
+  put the content in a box of its own above it, not inside it.
 - **Keep targets a reasonable size.** Only four hovers are drawn ahead, so in a
   dense grid of small targets fewer of the pointer's next stops are ready.
 

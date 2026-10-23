@@ -193,7 +193,16 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
   view and a view cut from a taller picture all blur alike. So does a wide
   `filter: blur()` that is the filter's only function (`Filters.gridBlur`,
   `Painter.gridBlurred`): worked out `Blur.step` times smaller, as a backdrop
-  is. The vanilla pages' blurred panorama was most of every hover repaint there.
+  is (from sigma 6 on, a 6px backdrop at 2x: half size). The vanilla pages' blurred panorama was most of every
+  hover repaint there.
+- **A blurred box with nothing in it but its background is blurred once per page**
+  (`Painter.fromKept`, `BlurredLayers`): a wide `filter: blur()` box with no children, text,
+  borders or shadows (the vanilla pages' panorama) is painted and blurred whole, over the page within
+  a whole-pixel clip, and kept per page and per everything its pixels depend on (the key in
+  `fromKept`); every picture, band and repaint after draws its cells from it. A surface's own
+  blur carries its edge pixels on past its edges where the kept one reads real ones, so it is
+  used only where every pixel kept (`Painter.kept`, else `keeping`, else all) reads nothing past
+  the surface. `BlurredLayersTest` checks it against the same box painted every time.
 - **A blur reads and writes in memory order** (`Blur`): each of its three boxes
   sums along the rows, then down the columns with a running sum per column, two
   channels to an int and the division looked up. Exactly the old pixels, at up
@@ -202,7 +211,9 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
   a text-shadow that is not blurred is the text drawn again in its colour
   (`Painter.glyphs`): filling its glyphs' outlines cost five times as much.
   The ring of an inset shadow and the cut-out of an outer one are even-odd paths
-  for a box without rounded corners (the same pixels as an `Area`, without its cost).
+  for a box without rounded corners (the same pixels as an `Area`, without its cost), and on
+  whole device pixels (boxes at 2x) a square border or sharp box shadow is filled as up to four
+  rectangles, not rasterised (`Shapes.fillPixels`): the vanilla pages' bevels were a third of a picture.
 - **A steep gradient is not Java2D's** (`Backgrounds.StopPaint`): Java2D
   samples pixel corners in float, so a hard stop on a whole device pixel
   landed on a sample and a stripe's edge came out differently in a strip, a
