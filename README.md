@@ -66,6 +66,8 @@ whatever its shape and the player's FOV.
 | `data-message="<gold>Hi {player}"` | sends the player a chat message (MiniMessage) |
 | `data-action="close"` | closes the page; also `back`, `reload`, `top`, `page:shop` |
 | `data-close` | (with a command) closes the page after running it |
+| `data-sound="block.note_block.pling 1 1.5"` | the sound a click on it (or anything inside it) makes, even where nothing else happens: `<sound> [volume] [pitch]`, or `none` |
+| `data-hover-sound="ui.button.click 0.1 2"` | plays when the pointer comes onto it |
 | `href="https://..."` | sends the link to chat, where it can be clicked |
 | `:hover`, `:active`, `cursor: pointer` | work; the pointer turns into a hand |
 | `<details>`, checkboxes, radios | open and tick when clicked |
@@ -78,7 +80,13 @@ Page settings, all optional:
 <meta name="ui:height" content="576">   <!-- the page is laid out this many CSS px tall -->
 <meta name="ui:refresh" content="5">    <!-- refill placeholders every 5 seconds (0.5 at the most often; 0: never) -->
 <meta name="ui:scroll-step" content="tile"> <!-- a notch of the wheel: CSS px, or "tile" for one map row (config: scroll-step) -->
+<meta name="ui:click-sound" content="none"> <!-- what a click that does something sounds like (config: click-sound, the game's button click) -->
+<meta name="ui:open-sound" content="item.book.page_turn"> <!-- plays when the page opens -->
 ```
+
+A sound is any the game has, by its id (`entity.experience_orb.pickup`), or
+your own: put an `.ogg` in `plugins/UIFramework/sounds/` and restart, and
+`sounds/door.ogg` is `uiframework:door`. Only the player who clicked hears it.
 
 Controls while a page is open: mouse moves the pointer, either button clicks,
 the wheel (or W/S) scrolls, F goes back, sneak closes.

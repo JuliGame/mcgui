@@ -4,9 +4,10 @@
 <meta charset="utf-8">
 <title>Quests</title>
 <meta name="ui:refresh" content="5">
+<meta name="ui:open-sound" content="item.book.page_turn">
 <!--
   A quest log in the game's own book. Click a quest on the left page to read it on the right, turn the
-  page with the arrows (radio buttons behind the labels: no script), hover a reward to see it.
+  page with the arrows (radio buttons behind the labels: no script, and the book's own page turn sound), hover a reward to see it.
   "Getting Experienced" is live: {level} is the reader's level, refilled every 5 seconds.
 -->
 <link rel="stylesheet" href="vanilla.css">
@@ -208,8 +209,8 @@
       </div>
     </div></div>
 
-    <label class="turn fwd" for="c2"></label>
-    <label class="turn back" for="c1"></label>
+    <label class="turn fwd" for="c2" data-sound="item.book.page_turn"></label>
+    <label class="turn back" for="c1" data-sound="item.book.page_turn"></label>
   </div>
 
   <div class="done"><div class="btn" data-action="close">Done</div></div>

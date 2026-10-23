@@ -167,8 +167,11 @@ public final class UIEnginePlugin extends JavaPlugin {
         return Math.max(0, Math.round(cfg.getDouble("render-timeout", HtmlRenderer.DEFAULT_TIMEOUT_MS / 1000.0) * 1000));
     }
 
-    boolean clickSound() {
-        return cfg.getBoolean("click-sound", true);
+    /** The sound of a click that does something: a sound, or none. true (the default) is the game's button click. */
+    String clickSound() {
+        Object v = cfg.get("click-sound", true);
+        if (v instanceof Boolean b) return b ? Sounds.CLICK : "none";
+        return String.valueOf(v);
     }
 
     /** CSS pixels a notch scrolls, or "tile" for one map row. */

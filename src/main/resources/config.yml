@@ -23,7 +23,9 @@ allow-private-hosts: false
 # render thread for good. 0 for no limit.
 render-timeout: 2
 
-# A click sound when a link or button does something.
+# The sound of a click on a link or button that does something: true for the game's own button click,
+# false for none, or any sound as "<sound> [volume] [pitch]" (e.g. "block.note_block.hat 0.5 1.6", or one
+# of UI Framework's own, "uiframework:<file>"). A page can set its own with <meta name="ui:click-sound">.
 click-sound: true
 
 # How far one notch of the scroll wheel scrolls a page, in CSS pixels, or "tile" for one map row (64 CSS

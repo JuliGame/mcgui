@@ -14,7 +14,6 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.event.ClickEvent;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
-import org.bukkit.Sound;
 import org.bukkit.entity.Player;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
@@ -76,6 +75,8 @@ public final class Session {
     private boolean pristine;
     private double scrollY;
     private Element hover, pressed;
+    /** Where the pointer last entered an element with a hover sound (its selector), so it plays once per entry. */
+    private String hoverSoundAt;
     private final Deque<Entry> back = new ArrayDeque<>();
     private record Entry(String page, double scroll) {}
     /** Counts the pages asked for, so a page that finishes loading after another was asked for is not shown. */
@@ -225,6 +226,8 @@ public final class Session {
         refreshTicks = refreshSetting(p);
         nextRefresh = Bukkit.getCurrentTick() + refreshTicks;
         pendingFragment = fragment;
+        hoverSoundAt = null;
+        Sounds.play(player(), p.meta("ui:open-sound"));
         render();
     }
 
@@ -807,12 +810,24 @@ public final class Session {
         // Only a move that changes what :hover matches is worth a picture.
         boolean differs = e != hover && !key(hover, false).equals(key(e, false));
         hover = e;
+        hoverSound(e);
         if (differs) render();
         else lookAhead();
     }
 
+    /** The pointer is over [e]: the hover sound of the element with one it is in, if it has just come into it. */
+    private void hoverSound(Element e) {
+        while (e != null && !e.hasAttr("data-hover-sound")) e = e.parent();
+        // By selector, not identity: a toggle gives the session a new copy of the same element.
+        String at = e == null ? null : e.cssSelector();
+        if (java.util.Objects.equals(at, hoverSoundAt)) return;
+        hoverSoundAt = at;
+        if (e != null) Sounds.play(player(), e.attr("data-hover-sound"));
+    }
+
     public void pointerGone() {
         pointerX = pointerY = -1;
+        hoverSoundAt = null;
         synchronized (this) {
             if (ahead != null) ahead.cancel();
         }
@@ -905,7 +920,7 @@ public final class Session {
         Player p = clicker != null ? clicker : player();
         Page on = page;
         boolean acted = activate(e, p);
-        if (acted && p != null && plugin.clickSound()) p.playSound(p.getLocation(), Sound.UI_BUTTON_CLICK, 0.4f, 1.2f);
+        clickSound(e, acted, p);
         if (page == on && page.styles.dynamic) {
             // :active for a moment, so a press shows. A toggle has given the session a new copy by now.
             Element target = counterpart(e, doc);
@@ -921,6 +936,23 @@ public final class Session {
                 }
             }, 3);
         }
+    }
+
+    /**
+     * The sound of a click on [e] that [acted] or not, for [p]: the {@code data-sound} of [e] or its nearest
+     * ancestor with one, which plays even where nothing else happens; else, if something did, the page's
+     * {@code ui:click-sound}, else the config's.
+     */
+    private void clickSound(Element e, boolean acted, Player p) {
+        for (Element a = e; a != null; a = a.parent()) {
+            if (a.hasAttr("data-sound")) {
+                Sounds.play(p, a.attr("data-sound"));
+                return;
+            }
+        }
+        if (!acted) return;
+        String own = page == null ? null : page.meta("ui:click-sound");
+        Sounds.play(p, own != null ? own : plugin.clickSound());
     }
 
     /** [target] (an element of [doc]) or the nearest ancestor that does something, clicked by [p]. */
