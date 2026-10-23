@@ -59,6 +59,8 @@ public final class UIEnginePlugin extends JavaPlugin {
         pages = newPageStore();
         pictures = newFirstPictures();
         screens = new Screens(this, renderers);
+        Heads heads = new Heads(this, screens::redrawSchemed);
+        Page.SCHEMES.put("head", heads::image);
         getServer().getPluginManager().registerEvents(screens, this);
         // Warm the renderer so the first page a player opens is quick: fonts, then a few pages loaded and drawn
         // once, full screen, off screen. A cold JVM takes several times longer over its first pictures. Then the
@@ -79,6 +81,7 @@ public final class UIEnginePlugin extends JavaPlugin {
     @Override
     public void onDisable() {
         UIEngine.instance = null;
+        Page.SCHEMES.remove("head");
         tasks.forEach(BukkitTask::cancel);
         tasks.clear();
         if (watcher != null) watcher.cancel();

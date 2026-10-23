@@ -154,6 +154,12 @@ public final class Session {
         this.lookAgain = () -> serverThread.execute(this::lookAhead);
     }
 
+    /** Whether the page shown draws pictures that can arrive after it is drawn (see {@link Page#schemed}). */
+    boolean schemed() {
+        Page p = page;
+        return p != null && p.schemed();
+    }
+
     public String pageName() {
         return pageName;
     }
@@ -704,6 +710,8 @@ public final class Session {
         HtmlRenderer.Frame f = frame;
         if (!plugin.firstPictures().enabled() || fragment != null || s != 0 || hover != null || pressed != null) return null;
         if (!pristine || filled == null || filled.source() != p.document || filled.personal() || d != null && f != null && f.document() == d) return null;
+        // A face that has not arrived yet would be kept as its stand-in.
+        if (p.schemed()) return null;
         return new FirstPictures.Key(pageName, p, canvas.cols(), canvas.rows(), scale, filled.key());
     }
 

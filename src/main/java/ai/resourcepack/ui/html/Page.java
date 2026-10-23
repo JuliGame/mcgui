@@ -321,6 +321,14 @@ public final class Page implements Resources {
     public final Fonts fonts;
     public final TextShaper shaper;
     private final Map<String, Picture> images = new ConcurrentHashMap<>();
+    /**
+     * Pictures from somewhere other than files and the web, by URI scheme ({@code head:} for a player's
+     * face): looked up as the page is drawn, since what they name is often filled in per player. Each
+     * answers null for one it does not have yet. Set by whoever runs the renderer; none by default.
+     */
+    public static final Map<String, Function<String, Picture>> SCHEMES = new ConcurrentHashMap<>();
+    /** Whether the page names any picture of the {@link #SCHEMES}: what it draws can change after it is loaded. */
+    private boolean schemed;
     /*
      * Pictures made while drawing: data: images found only then, and inline SVGs. Bounded, because
      * their keys can hold placeholder values (a player's name, a number that changes every refresh).
@@ -527,6 +535,10 @@ public final class Page implements Resources {
         int over = 0;
         for (String u : wanted) {
             if (images.containsKey(u)) continue;
+            if (scheme(u) != null) {
+                schemed = true;
+                continue;
+            }
             URI target = resolve(null, u);
             if (target == null) continue;
             // url(#id) names something in the page itself (an SVG filter, clip or gradient), not an image file.
@@ -633,8 +645,27 @@ public final class Page implements Resources {
 
     // ---------------------------------------------------------------- Resources
 
+    /** The {@link #SCHEMES} entry for [uri], or null. */
+    private static Function<String, Picture> scheme(String uri) {
+        int colon = uri.indexOf(':');
+        return colon > 0 ? SCHEMES.get(uri.substring(0, colon).toLowerCase(java.util.Locale.ROOT)) : null;
+    }
+
+    /** Whether the page draws pictures of the {@link #SCHEMES}, which can arrive (and change) after it has loaded. */
+    public boolean schemed() {
+        return schemed;
+    }
+
     @Override
     public Picture image(String uri) {
+        Function<String, Picture> scheme = scheme(uri);
+        if (scheme != null) {
+            try {
+                return scheme.apply(uri);
+            } catch (RuntimeException e) {
+                return null;
+            }
+        }
         Picture p = images.get(uri);
         if (p == null && uri.startsWith("data:")) p = made(dataImages, uri, u -> Pictures.decode(dataUri(u), u));
         return p == NONE_PICTURE ? null : p;

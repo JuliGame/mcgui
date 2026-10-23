@@ -101,7 +101,12 @@ public final class Pictures {
         return head.startsWith("<svg") || (head.startsWith("<?xml") && head.contains("<svg"));
     }
 
-    public static Picture svg(String markup) {
+    /** [img] as a picture of its own size: drawn crisp when it is small pixel art scaled up, like any bitmap. */
+    public static Picture of(BufferedImage img) {
+        return new Raster(img, img.getWidth(), img.getHeight());
+    }
+
+        public static Picture svg(String markup) {
         try {
             SVGDocument doc = new SVGLoader().load(new ByteArrayInputStream(markup.getBytes(StandardCharsets.UTF_8)), URI.create("about:svg"),
                     LoaderContext.createDefault());

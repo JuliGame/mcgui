@@ -103,6 +103,7 @@ whatever its shape and the player's FOV.
 | `data-close` | (with a command) closes the page after running it |
 | `data-sound="block.note_block.pling 1 1.5"` | the sound a click on it (or anything inside it) makes, even where nothing else happens: `<sound> [volume] [pitch]`, or `none` |
 | `data-hover-sound="ui.button.click 0.1 2"` | plays when the pointer comes onto it |
+| `<img src="head:{player}">` | a player's face, with their hat layer, crisp at any size; any name or UUID works (`head:Notch`). Online players' skins come from the server (skin plugins included), anyone else's from Mojang by name; a plain face stands in until it arrives |
 | `href="https://..."` | sends the link to chat, where it can be clicked |
 | `:hover`, `:active`, `cursor: pointer` | work; the pointer turns into a hand |
 | `<details>`, checkboxes, radios | open and tick when clicked |
