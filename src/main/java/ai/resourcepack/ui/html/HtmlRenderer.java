@@ -231,13 +231,15 @@ public final class HtmlRenderer {
             g.scale(scale, scale);
             Painter painter = new Painter(page.shaper, page, vw, vh, scroll, budget).origin(0, row(scroll, scale) + y0);
             painter.keeping(new java.awt.Rectangle(x0, 0, x1 - x0, y1 - y0));
+            int kx0 = Math.max(x0, (int) Math.floor(keep.getX() * scale)), ky0 = Math.max(y0, (int) Math.floor(keep.getY() * scale));
+            int kx1 = Math.min(x1, (int) Math.ceil(keep.getMaxX() * scale)), ky1 = Math.min(y1, (int) Math.ceil(keep.getMaxY() * scale));
+            // What of the part ends up in the picture: a blurred layer kept for the page may be drawn from wherever that reads only what is here.
+            if (kx1 > kx0 && ky1 > ky0) painter.kept(new java.awt.Rectangle(kx0, ky0 - y0, kx1 - kx0, ky1 - ky0));
             try {
                 painter.paint(g, root, part, scale);
             } finally {
                 g.dispose();
             }
-            int kx0 = Math.max(x0, (int) Math.floor(keep.getX() * scale)), ky0 = Math.max(y0, (int) Math.floor(keep.getY() * scale));
-            int kx1 = Math.min(x1, (int) Math.ceil(keep.getMaxX() * scale)), ky1 = Math.min(y1, (int) Math.ceil(keep.getMaxY() * scale));
             int[] from = ((DataBufferInt) part.getRaster().getDataBuffer()).getData(), to = ((DataBufferInt) img.getRaster().getDataBuffer()).getData();
             for (int y = ky0; y < ky1; y++) System.arraycopy(from, (y - y0) * x1 + kx0, to, y * width + kx0, kx1 - kx0);
             return painter.hits;
