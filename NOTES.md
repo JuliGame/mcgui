@@ -41,6 +41,9 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
   the benches) nothing moves. A page that moves (`Page.moves()`) is drawn whole
   every time: no partial repaint, scroll cache, drawing ahead or kept first
   picture, all of which assume a picture stays true until the state changes.
+  So a hover that starts a transition shows its first moment, never its end
+  drawn ahead (`TransitionHoverTest`), and a grid blur (below) under a moving
+  page is the same in every band at every moment (`BandsTest`).
   Elements are keyed by their place in document order, as the Styler's memo
   is, so a transition survives the session's copy of the document changing.
 
@@ -289,7 +292,10 @@ wide for a default view). `/ui place <page> <cols> <rows> <name> <x> <y> <z>
   that waits runs queued work, or hands its place to a spare, so a wait cannot use
   the budget up), but must not wait on the network or on the server thread.
   `MapSender` (one thread of its own), the pack's web server and netty are not
-  part of the budget.
+  part of the budget, but the sender compresses one pass's map patches for a
+  player on the pool too (`SharedCompression.patches`, each thread with a
+  compressor of its own): one at a time, a hover changing 24 tiles took 10 to
+  16 ms on the sender's thread.
 - **`Canvas.draw` converts on every core**, in bands of 32 rows on that
   pool. It reads `INT_RGB`, `INT_ARGB` and `INT_ARGB_PRE` rasters in place,
   sub-images included; any other type goes through `getRGB`, which is several
