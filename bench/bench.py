@@ -176,7 +176,8 @@ class Server:
         self.t0 = time.time()
         self.log = open(f'{self.dir}/console.log', 'w')
         # Heap grown as needed: the VPS's memory is shared, and its limit kills the biggest process (once, this server).
-        self.proc = subprocess.Popen([self.a.java, '-Xms512M', f'-Xmx{self.a.heap}', f'-Dprobe.port={self.probe_port}',
+        jfr = [f'-XX:StartFlightRecording=filename={self.a.jfr},settings=profile,dumponexit=true'] if self.a.jfr else []
+        self.proc = subprocess.Popen([self.a.java, '-Xms512M', f'-Xmx{self.a.heap}', f'-Dprobe.port={self.probe_port}', *jfr,
                                       '-jar', 'paper.jar', '--nogui'], cwd=self.dir, stdin=subprocess.PIPE,
                                      stdout=self.log, stderr=subprocess.STDOUT, text=True)
         while True:
@@ -222,21 +223,24 @@ class Server:
 
     def stats(self):
         """/ui stats json, read back from the console log; None from a build without it."""
-        mark = f'bench-mark-{time.time_ns()}'
-        self.cmd(f'say {mark}')
+        path = f'{self.dir}/logs/latest.log'
+        # Whatever the log holds from here on: a command's reply is not always in the log after a `say` sent first.
+        at = os.path.getsize(path)
         self.cmd('ui stats json')
-        for _ in range(50):
+        # Up to 30 s: a loaded server (the deadline cell) can take seconds to get to a console command.
+        for _ in range(300):
             time.sleep(0.1)
-            text = open(f'{self.dir}/logs/latest.log', errors='replace').read()
-            at = text.rfind(mark)
-            if at < 0:
-                continue
-            for line in text[at:].splitlines():
+            with open(path, 'rb') as f:
+                f.seek(at)
+                text = f.read().decode(errors='replace')
+            for line in text.splitlines():
                 i = line.find('{"walls"')
                 if i >= 0:
                     return json.loads(line[i:])
-            if 'Unknown or incomplete command' in text[at:] or 'Usage' in text[at:]:
+            if 'Unknown or incomplete command' in text or 'Usage' in text:
+                print('stats: no json:', text[:600].replace(chr(10), ' | '), flush=True)
                 return None
+        print('stats: no reply in 30 s', flush=True)
         return None
 
 
@@ -470,10 +474,29 @@ def anim(b):
     return res
 
 
+def open_ms(s, page, player='Fake1', within=20.0, whole=100_000):
+    """Opens [page] for the traced player: ms until the picture reached them, or None. A whole picture is a burst of
+    many map packets; a hover is a few, and the traced player is hovering, so it is the first [whole] bytes since the
+    command that count."""
+    s.P('fakedo lat clear')
+    t0 = s.P('now')['nano']
+    s.cmd(f'ui open {page} {player}')
+    end = time.time() + within
+    while time.time() < end:
+        time.sleep(0.2)
+        got = 0
+        for f in sorted(f for f in s.P('fakedo lat')['frames'] if f[0] > t0):
+            got += f[1]
+            if got >= whole:
+                return (f[0] - t0) / 1e6
+    return None
+
+
 def deadline(b):
     """A loaded server: 40 players hovering the market, 10 at the spinner, a busy loop on every core but one; meanwhile
-    ten players open a market of their own one after another (each a whole first picture). Real pictures must not
-    wait behind drawing ahead or animation, and none may be given up."""
+    ten players open a market of their own one after another (each a whole first picture), and Fake1 (one of the
+    hoverers, the traced one) does too, six times: ms from the command to the picture reaching them. Real pictures must
+    not wait behind drawing ahead or animation, and none may be given up."""
     s = b.srv
     fakes(b, 60)
     s.P('fakedo open market 10')
@@ -481,31 +504,46 @@ def deadline(b):
     for k in range(41, 51):
         s.cmd(f'ui open bench-anim Fake{k}')
     s.P('fakedo sweep 20 10 3')
+    settle(b, 5)
+    # Before the busy loops: a server they starve can take longer than the wait to answer a console command.
+    st0 = s.stats()
     burners = [subprocess.Popen([sys.executable, '-c', 'while True: pass']) for _ in range(max(1, (os.cpu_count() or 2) - 1))]
+    shown = []
     try:
-        settle(b, 5)
-        st0 = s.stats()
         s.P('ticks start')
-        opened = []
         for k in range(51, 61):
             s.cmd(f'ui open market-own Fake{k}')
-            opened.append(k)
+            if k < 57:
+                shown.append(open_ms(s, 'market-own'))
+                s.cmd('ui open market Fake1')
             time.sleep(1.5)
         time.sleep(5)
         t = s.P('ticks stop')
+        # A server the busy loops starve can miss the probe's own deadline for this: ask again, it keeps the ticks.
+        for _ in range(5):
+            if 'p99' in t:
+                break
+            time.sleep(2)
+            t = s.P('ticks stop')
         st = s.stats()
     finally:
         for p in burners:
             p.kill()
-    b.raw['deadline'] = {'ticks': t, 'stats': st, 'before': st0}
+    b.raw['deadline'] = {'ticks': t, 'stats': st, 'before': st0, 'open_ms': shown}
     s.P('fakedo still')
     s.P('fakedo close 10')
     time.sleep(3)
-    out = {'tick_ms_p99': t['p99'], 'cores': (t.get('cpu') or {}).get('cores_used', 0)}
+    got = sorted(v for v in shown if v is not None)
+    out = {'tick_ms_p99': t['p99'], 'cores': (t.get('cpu') or {}).get('cores_used', 0),
+           'open_ms_median': got[len(got) // 2] if got else None, 'open_ms_max': got[-1] if got else None, 'open_never': len(shown) - len(got)}
     if st and st0:
-        out.update({'timed_out': st['timed_out'] - st0['timed_out'], 'picture_run_ms': st['jobs']['picture']['run_ms'],
-                    'picture_wait_ms': st['jobs']['picture']['wait_ms'], 'pictures': st['jobs']['picture']['jobs'] - st0['jobs']['picture']['jobs'],
-                    'ahead': st['jobs']['ahead']['jobs'] - st0['jobs']['ahead']['jobs']})
+        out['timed_out'] = st['timed_out'] - st0['timed_out']
+        # Per kind of job (a build from before kinds has picture and ahead only): how many ran, and the last few
+        # hundred's wait for a thread and run, ms [median, p99, most]. `show` is the ten whole first pictures.
+        for kind, j in st['jobs'].items():
+            out[f'{kind}_jobs'] = j['jobs'] - st0['jobs'].get(kind, {}).get('jobs', 0)
+            out[f'{kind}_wait_ms'] = j['wait_ms']
+            out[f'{kind}_run_ms'] = j['run_ms']
     return out
 
 
@@ -585,12 +623,13 @@ def main():
     p.add_argument('--no-build', action='store_true', help='use the jars and classpath already built')
     p.add_argument('--jar', help='a UI Engine jar to bench instead of this checkout\'s (headless cells still use the checkout)')
     p.add_argument('--arcade', help='an arcade example jar to bench instead of this checkout\'s')
-    p.add_argument('--heap', default='2G')
+    p.add_argument('--heap', default='3G')
     p.add_argument('--ports', default='25790', help='first of three ports: server, probe, pack')
     p.add_argument('--work', default=os.path.join(REPO, 'build/bench'))
     p.add_argument('--out', help='JSON file to write (default build/bench/<time>.json)')
     p.add_argument('--compare', help='an earlier run\'s JSON, shown beside each number')
     p.add_argument('--keep', action='store_true', help='keep the server copy afterwards')
+    p.add_argument('--jfr', help='record the server with JFR (settings=profile) to this file: `jfr print --events jdk.ExecutionSample`')
     p.add_argument('--tag', default='')
     a = p.parse_args()
     cells = [c for c in (a.only.split(',') if a.only else (QUICK if a.quick else CELLS)) if c]

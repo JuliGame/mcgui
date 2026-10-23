@@ -311,10 +311,13 @@ wide for a default view). `/ui place <page> <cols> <rows> <name> <x> <y> <z>
   A tick in which nobody comes, goes or changes what they look at reuses the last tick's lists: `Walls.viewers`
   hands out the wall's own list (read it, never keep it), a player is tested against a wall from `Entity.getX`
   and friends (a `Location` or `getEyeLocation` allocates, and `getLocation(Location)` makes a `WeakReference`),
-  `Walls.aim` runs only for players within reach of a wall, and `Framework.work` hands the sender a new list only
-  when it differs. The `idle`, `walls` and `views` cells show `uie_tick_bytes`: about 380 bytes a tick with
-  no screens at 0 to 100 players; still about 25 KB with 8 walls near 100 players (a `MapSender.Assignment` per
-  viewer per tick) and 34 KB with 50 idle views (mostly `Views.keepStill`'s entity lookup per view per tick).
+  `Walls.aim` runs only for players within reach of a wall, `Framework.work` keeps each wall's
+  `MapSender.Assignment`s from tick to tick while the viewer, canvas and encoding are the same (a new one only for
+  what changed), and hands the sender a new list only when it differs. `Placeholders.apply` works out a value only
+  if its token is in the text (the display name's plain text alone allocated about 200 KB a call). The `idle`,
+  `walls` and `views` cells show `uie_tick_bytes`: about 380 bytes a tick with no screens at 0 to 100 players; 700
+  bytes with 8 walls near 100 players (was 25 KB, an assignment per viewer per tick); still 34 KB with 50 idle
+  views (mostly `Views.keepStill`'s entity lookup per view per tick).
 - **`python3 bench/bench.py` gives every part's headline numbers in one run** (`--quick` for a shorter one,
   `--only <cells>`, `--compare <earlier json>`; `--help` for the rest). It builds the plugin and the arcade
   example, waits for the machine to be quiet (`gate.sh`), and holds the timing lock throughout. Then it runs the
@@ -322,7 +325,9 @@ wide for a default view). `/ui place <page> <cols> <rows> <name> <x> <y> <z>
   Probe plugin (kept outside this repository), whose fake players are real connections made inside the server
   that answer what a client must and turn their heads like one. The server's ticks and threads come from Probe
   (`ticks`, `fake status`, `health`), the plugin's own cost from `/ui stats json`. It prints one line per number
-  and writes them all, with the raw replies, to `build/bench/<time>.json`. The cells:
+  and writes them all, with the raw replies, to `build/bench/<time>.json`. The server's heap is 3 GB (`--heap`):
+  the `deadline` cell holds 60 open views at about 23 MB each, and at 2 GB it spent its time in full collections
+  (a 37 s tick) whichever build ran. The cells:
 
   | Cell | What it does | Headline numbers |
   |---|---|---|
@@ -335,7 +340,7 @@ wide for a default view). `/ui place <page> <cols> <rows> <name> <x> <y> <z>
   | `hover` | 10 and 50 players sweeping round the market | cores used, pool CPU, tick p50/p99, MB/s sent, pictures and drawings ahead |
   | `latency` | one player at the market, the pointer moved by `/ui debug point` | ms until the hover's map patches reach them: cold, and after resting next to it |
   | `anim` | 1, 10 and 50 players at `bench/pages/bench-anim.html` (a spinner, cards that fade) | cores, pool CPU, pictures a second, MB/s |
-  | `deadline` | 40 hovering the market, 10 at the spinner, a busy loop on every core but one, while 10 more open a market with their name in it (a whole first picture each) | pictures given up, pictures' wait and run p50/p99/max |
+  | `deadline` | 40 hovering the market, 10 at the spinner, a busy loop on every core but one, while 10 more open a market with their name in it (a whole first picture each) and the traced player opens it six times | renders given up, ms until the traced player's whole picture arrives (median, most), each kind of job's wait and run p50/p99/max |
   | `arcade` | four cabinets with nobody in range; then each game on a 16x9 cabinet playing itself, one player watching | CPU (game loop, pool, sender) at rest and per game, and MB/s per game |
 
   Client-side numbers (frame time, hover to screen in the real client) are not in it: they need Josh's PC and
