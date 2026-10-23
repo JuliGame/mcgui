@@ -36,7 +36,7 @@ final class Backgrounds {
     static void paint(Graphics2D g, Style s, Resources res, Rectangle2D area, Shape clip, java.awt.Rectangle surface, RenderBudget budget) {
         List<String> images = s.backgroundImages;
         Shape old = g.getClip();
-        g.clip(clip);
+        Shapes.clip(g, clip);
         // The first layer is on top: paint from the last.
         for (int i = images.size() - 1; i >= 0; i--) {
             budget.check();

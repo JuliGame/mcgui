@@ -643,7 +643,7 @@ public final class Painter {
         Shape savedPageClip = pageClip;
         if (box.style.clips() && box.parent != null) {
             Shape inner = padding(box, x, y);
-            g.clip(inner);
+            Shapes.clip(g, inner);
             Shape pageShape = pageTx.createTransformedShape(inner);
             pageClip = pageClip == null ? pageShape : intersect(pageClip, pageShape);
         }
@@ -1075,7 +1075,7 @@ public final class Painter {
         double cx = x + b.contentX(), cy = y + b.contentY(), cw = b.contentW(), ch = b.contentH();
         if (b.picture != null) {
             Shape old = g.getClip();
-            g.clip(Shapes.rect(cx, cy, cw, ch, Shapes.inset(radii, b.b[0] + b.p[0], b.b[1] + b.p[1], b.b[2] + b.p[2], b.b[3] + b.p[3])));
+            Shapes.clip(g, Shapes.rect(cx, cy, cw, ch, Shapes.inset(radii, b.b[0] + b.p[0], b.b[1] + b.p[1], b.b[2] + b.p[2], b.b[3] + b.p[3])));
             double nw = b.picture.width(), nh = b.picture.height();
             if (nw <= 0 || nh <= 0) {
                 nw = cw;

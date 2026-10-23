@@ -116,6 +116,16 @@ final class Shapes {
         return true;
     }
 
+    /**
+     * Clips [g] to [s] as {@code g.clip} does. Inside a square clip that holds all of [s] (a page's overflow: hidden),
+     * that is [s] itself: set as it is, not intersected through an Area (the same pixels: [s]'s edges, a rounded
+     * corner's curve included, come through an Area unchanged when nothing cuts them).
+     */
+    static void clip(Graphics2D g, Shape s) {
+        if (g.getClip() instanceof Rectangle2D c && c.contains(s.getBounds2D())) g.setClip(s);
+        else g.clip(s);
+    }
+
     private static final int NOT = Integer.MIN_VALUE;
 
     /** [v] as a whole pixel edge, if it is one (to well within the sixteenth where antialiasing samples); else {@link #NOT}. */

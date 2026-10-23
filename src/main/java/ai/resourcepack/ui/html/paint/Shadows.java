@@ -76,7 +76,9 @@ final class Shadows {
         Shape old = g.getClip();
         // Browsers cut the box itself out of its outer shadow, so a translucent box shows no shadow through it.
         Rectangle2D all = new Rectangle2D.Double(-1e5, -1e5, 2e5, 2e5);
-        g.clip(minus(all, box));
+        // Within a square clip round it (the page's overflow: hidden), the clip less the box: no Area to intersect.
+        if (old instanceof Rectangle2D c && c.contains(box.getBounds2D())) g.setClip(minus(c, box));
+        else g.clip(minus(all, box));
         blurred(g, shape, sh.color, sh.blur, scale, surface, budget);
         g.setClip(old);
     }
@@ -95,7 +97,7 @@ final class Shadows {
         }
         Shape ring = minus(outside, hole);
         Shape old = g.getClip();
-        g.clip(padding);
+        Shapes.clip(g, padding);
         blurred(g, ring, sh.color, sh.blur, scale, surface, budget);
         g.setClip(old);
     }
