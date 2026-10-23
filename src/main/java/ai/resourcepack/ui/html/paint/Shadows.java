@@ -35,9 +35,28 @@ final class Shadows {
     /** Blurs this small (CSS px) or less are no blur: the shape is filled as it is. */
     static final double SHARP = 0.25;
 
+    /** What a shadow list depends on: its text, the colour it defaults to, and what its lengths are relative to. */
+    private record Parse(String value, int color, Len.Context context) {}
+
+    /** Shadow lists already read: a page asks for the same few on every box, every picture and every repaint. */
+    private static final java.util.concurrent.ConcurrentHashMap<Parse, List<Shadow>> PARSED = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** The shadows of [value] (box-shadow or text-shadow) for [s]; an unmodifiable list. */
     static List<Shadow> parse(String value, Style s) {
+        if (value == null || value.isBlank() || value.trim().equalsIgnoreCase("none")) return List.of();
+        Parse key = new Parse(value, s.color, s.context);
+        List<Shadow> got = PARSED.get(key);
+        if (got == null) {
+            got = List.copyOf(read(value, s));
+            // Bounded: a page animating a shadow's length makes a new one every frame.
+            if (PARSED.size() >= 4096) PARSED.clear();
+            PARSED.put(key, got);
+        }
+        return got;
+    }
+
+    private static List<Shadow> read(String value, Style s) {
         List<Shadow> out = new ArrayList<>();
-        if (value == null || value.isBlank() || value.trim().equalsIgnoreCase("none")) return out;
         for (String part : Values.splitCommas(value)) {
             List<Double> lens = new ArrayList<>();
             Integer color = null;

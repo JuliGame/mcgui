@@ -569,8 +569,26 @@ public final class Repaint {
         return Math.max(Math.max(shadowReach(s.boxShadow, s), shadowReach(s.textShadow, s)), blurReach(s, scale));
     }
 
+    /** What a shadow list's reach depends on: its text and what its lengths are relative to. */
+    private record Reach(String value, ai.resourcepack.ui.html.style.Len.Context context) {}
+
+    /** Shadow reaches already worked out: every hover asks again for every box near it. */
+    private static final java.util.concurrent.ConcurrentHashMap<Reach, Double> REACHES = new java.util.concurrent.ConcurrentHashMap<>();
+
     private static double shadowReach(String value, Style s) {
         if (value == null || value.isBlank() || value.trim().equalsIgnoreCase("none")) return 0;
+        Reach key = new Reach(value, s.context);
+        Double got = REACHES.get(key);
+        if (got == null) {
+            got = reachOf(value, s);
+            // Bounded: a page animating a shadow's length makes a new one every frame.
+            if (REACHES.size() >= 4096) REACHES.clear();
+            REACHES.put(key, got);
+        }
+        return got;
+    }
+
+    private static double reachOf(String value, Style s) {
         double reach = 0;
         for (String shadow : Values.splitCommas(value)) {
             double[] lens = new double[4];
