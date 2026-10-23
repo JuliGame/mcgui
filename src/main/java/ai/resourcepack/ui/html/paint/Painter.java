@@ -149,18 +149,17 @@ public final class Painter {
                 }
             }
         }
-        // All of the page, not only the view: a picture can be taller than the view (a ScrollCache's), and a band
-        // paints rows past the picture's edges for the blurs there.
-        Rectangle2D all = new Rectangle2D.Double(0, -scrollY, viewportW, Math.max(scrollY + viewportH, root.overflowBottom));
-        if (onNothing) {
-            Composite was = g.getComposite();
-            g.setComposite(AlphaComposite.Clear);
-            g.fill(all);
-            g.setComposite(was);
-        } else {
-            g.setColor(Color.WHITE);
-            g.fill(all);
-        }
+        // Every pixel of the surface is set here (in device space, past a fractional edge of the page's own rectangle
+        // too), so the surface may start with anything in it: the one fill is the only write, not a clear and a fill.
+        // (Under a clip, only the clip: a caller with a clip starts from a clear surface.)
+        AffineTransform scaled = g.getTransform();
+        Composite was = g.getComposite();
+        g.setTransform(new AffineTransform());
+        g.setComposite(AlphaComposite.Src);
+        g.setColor(onNothing ? new Color(0, true) : Color.WHITE);
+        g.fill(new java.awt.Rectangle(0, 0, surface.getWidth(), surface.getHeight()));
+        g.setComposite(was);
+        g.setTransform(scaled);
         if (!transparent(canvasSource.style)) {
             Rectangle2D page = new Rectangle2D.Double(0, 0, viewportW, Math.max(viewportH, root.overflowBottom));
             AffineTransform saved = g.getTransform();

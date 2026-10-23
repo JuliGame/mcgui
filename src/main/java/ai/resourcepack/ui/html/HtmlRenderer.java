@@ -480,7 +480,8 @@ public final class HtmlRenderer {
                 if (!gate.enter()) return null;
                 BufferedImage band = null;
                 try {
-                    band = PixelPool.image(width, bottom - top, BufferedImage.TYPE_INT_ARGB_PRE);
+                    // Not cleared: Painter.paint sets every pixel of it first.
+                    band = PixelPool.uncleared(width, bottom - top, BufferedImage.TYPE_INT_ARGB_PRE);
                     Graphics2D g = band.createGraphics();
                     g.translate(0, -top);
                     g.scale(scale, scale);

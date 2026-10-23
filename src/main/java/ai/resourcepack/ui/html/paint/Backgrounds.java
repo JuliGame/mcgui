@@ -910,8 +910,9 @@ final class Backgrounds {
             if (ay > ax) r = Math.PI / 2 - r;
             if (xx < 0) r = Math.PI - r;
             if (yy < 0) r = -r;
-            double ang = Math.toDegrees(r) - from;
-            return ((ang % 360) + 360) % 360 / 360;
+            // A turn without fmod (slow): the same to a few ulps, which the cells' margin dwarfs.
+            double t = r * (1 / (2 * Math.PI)) - from / 360;
+            return t - Math.floor(t);
         }
 
         @Override
@@ -945,20 +946,17 @@ final class Backgrounds {
                     }
                     int[] data = ((java.awt.image.DataBufferInt) raster.getDataBuffer()).getData();
                     int stride = ((java.awt.image.SinglePixelPackedSampleModel) raster.getSampleModel()).getScanlineStride();
-                    // A row's pixel centres mapped to user space at once, as Point2D would one at a time.
-                    double[] row = new double[2 * w];
+                    // Each pixel's centre mapped to user space (the sums AffineTransform.transform makes).
+                    double m00 = toUser.getScaleX(), m01 = toUser.getShearX(), m02 = toUser.getTranslateX();
+                    double m10 = toUser.getShearY(), m11 = toUser.getScaleY(), m12 = toUser.getTranslateY();
                     for (int j = 0; j < h; j++) {
+                        double py = y + j + 0.5;
                         for (int i = 0; i < w; i++) {
-                            row[2 * i] = x + i + 0.5;
-                            row[2 * i + 1] = y + j + 0.5;
-                        }
-                        toUser.transform(row, 0, row, 0, w);
-                        for (int i = 0; i < w; i++) {
+                            double px = x + i + 0.5, ux = m00 * px + m01 * py + m02, uy = m10 * px + m11 * py + m12;
                             // Mostly from the cell the polynomial's angle lands in, which holds one colour however far
                             // out the polynomial is; where it holds more, or near the centre, from atan2 as ever.
-                            double ft = turn(row[2 * i], row[2 * i + 1]);
-                            int k = (int) (ft * CELLS);
-                            data[j * stride + i] = k > 0 && k < CELLS - 1 && !cellExact[k] ? cellColor[k] : exactAt(row[2 * i], row[2 * i + 1]);
+                            int k = (int) (turn(ux, uy) * CELLS);
+                            data[j * stride + i] = k > 0 && k < CELLS - 1 && !cellExact[k] ? cellColor[k] : exactAt(ux, uy);
                         }
                     }
                     return raster;

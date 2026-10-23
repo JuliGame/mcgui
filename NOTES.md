@@ -145,7 +145,7 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
   (`Painter.keeping`), and so is everything else: a box, inline box, text run or background tile wholly outside
   the area (grown by `Painter.CULL_MARGIN`, and by a shadow's reach or a text's em) is not drawn, only its hit regions
   made (`Painter.drawnBounds`, `paints`), and a gradient is filled over the surface only (`Backgrounds.layer`). The image is not cleared first
-  (`PixelPool.uncleared`: `Painter.paint` fills every pixel of it). The new state is laid out first (`HtmlRenderer.layOver`), so a
+  (`PixelPool.uncleared`: `Painter.paint` sets every pixel of the surface itself, in device space, with one fill). The new state is laid out first (`HtmlRenderer.layOver`), so a
   hover that shows a tooltip is painted once, over the old and new areas together (`paintOver`), not
   painted, found to reach further, and painted again. `sh gradlew renderBench` times a page's full render, its
   `Canvas.draw` and a hover repaint.
