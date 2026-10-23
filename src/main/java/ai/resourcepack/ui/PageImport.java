@@ -108,12 +108,24 @@ final class PageImport {
                     return;
                 }
                 plugin.getLogger().info(sender.getName() + " imported " + key + " from uiengine.dev: " + String.join(", ", written));
-                say(sender, "Imported " + String.join(", ", written) + ".", NamedTextColor.GREEN);
-                if (open != null) {
-                    sender.sendMessage(Component.text("Open it: ", NamedTextColor.GRAY)
-                            .append(Component.text("/ui open " + open, NamedTextColor.AQUA)
-                                    .clickEvent(ClickEvent.runCommand("/ui open " + open))
-                                    .hoverEvent(HoverEvent.showText(Component.text("Click to open it fullscreen")))));
+                say(sender, "Imported " + written.size() + " file" + (written.size() == 1 ? "" : "s") + " from " + key + ".", NamedTextColor.GREEN);
+                // Every page, as something to click: the one being worked on first.
+                List<String> pages = new ArrayList<>();
+                if (open != null) pages.add(open);
+                for (String f : written) {
+                    String page = f.endsWith(".html") ? f.substring(0, f.length() - 5) : null;
+                    if (page != null && !pages.contains(page)) pages.add(page);
+                }
+                if (!pages.isEmpty()) {
+                    Component line = Component.text("Open: ", NamedTextColor.GRAY);
+                    for (int i = 0; i < pages.size(); i++) {
+                        String page = pages.get(i);
+                        if (i > 0) line = line.append(Component.text(" · ", NamedTextColor.DARK_GRAY));
+                        line = line.append(Component.text(page, i == 0 ? NamedTextColor.AQUA : NamedTextColor.DARK_AQUA)
+                                .clickEvent(ClickEvent.runCommand("/ui open " + page))
+                                .hoverEvent(HoverEvent.showText(Component.text("/ui open " + page))));
+                    }
+                    sender.sendMessage(line);
                 }
             });
         });

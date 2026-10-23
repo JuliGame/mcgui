@@ -72,13 +72,18 @@ public final class PageStore {
         return root;
     }
 
-    /** "menu", "/menu.html", "shop/ranks" all name a page; null for one that escapes the folder. */
+    /** "menu", "/menu.html", "shop/ranks" all name a page; null for one that escapes the folder or cannot be a file name. */
     public String normalise(String name) {
         String n = name.trim().replace('\\', '/');
         while (n.startsWith("/")) n = n.substring(1);
         if (n.toLowerCase(Locale.ROOT).endsWith(".html")) n = n.substring(0, n.length() - 5);
         else if (n.toLowerCase(Locale.ROOT).endsWith(".htm")) n = n.substring(0, n.length() - 4);
-        Path p = root.resolve(n + ".html").normalize();
+        Path p;
+        try {
+            p = root.resolve(n + ".html").normalize();
+        } catch (java.nio.file.InvalidPathException e) {
+            return null; // a character no file name may have (menu:d): no such page, not an error
+        }
         if (!p.startsWith(root)) return null;
         return n;
     }
