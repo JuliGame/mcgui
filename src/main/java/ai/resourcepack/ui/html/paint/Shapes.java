@@ -3,7 +3,9 @@ package ai.resourcepack.ui.html.paint;
 import ai.resourcepack.ui.html.layout.Box;
 import ai.resourcepack.ui.html.style.Len;
 
+import java.awt.Graphics2D;
 import java.awt.Shape;
+import java.awt.geom.AffineTransform;
 import java.awt.geom.Path2D;
 import java.awt.geom.Rectangle2D;
 
@@ -72,5 +74,53 @@ final class Shapes {
         if (tlx > 0) p.curveTo(x, y + tly - tly * K, x + tlx - tlx * K, y, x + tlx, y);
         p.closePath();
         return p;
+    }
+
+    /**
+     * Fills [outer] less [hole] (null for none) with [g]'s colour as whole device pixels, when every edge of both lands on
+     * a pixel edge under [g]'s transform (a scale and a move, as boxes at 2x are): exactly the pixels an antialiased
+     * fill of that ring covers, each wholly, without rasterising it (a ring the size of its box, edge to edge, for a
+     * 2px border or a sharp inset shadow). Returns false, painting nothing, otherwise.
+     */
+    static boolean fillPixels(Graphics2D g, Rectangle2D outer, Rectangle2D hole) {
+        AffineTransform t = g.getTransform();
+        if ((t.getType() & ~(AffineTransform.TYPE_TRANSLATION | AffineTransform.TYPE_UNIFORM_SCALE | AffineTransform.TYPE_GENERAL_SCALE)) != 0) return false;
+        double sx = t.getScaleX(), sy = t.getScaleY(), tx = t.getTranslateX(), ty = t.getTranslateY();
+        int ox0 = pixel(outer.getMinX() * sx + tx), oy0 = pixel(outer.getMinY() * sy + ty);
+        int ox1 = pixel(outer.getMaxX() * sx + tx), oy1 = pixel(outer.getMaxY() * sy + ty);
+        if (ox0 == NOT || oy0 == NOT || ox1 == NOT || oy1 == NOT) return false;
+        int hx0 = 0, hy0 = 0, hx1 = 0, hy1 = 0;
+        if (hole != null && hole.getWidth() > 0 && hole.getHeight() > 0) {
+            hx0 = pixel(hole.getMinX() * sx + tx);
+            hy0 = pixel(hole.getMinY() * sy + ty);
+            hx1 = pixel(hole.getMaxX() * sx + tx);
+            hy1 = pixel(hole.getMaxY() * sy + ty);
+            if (hx0 == NOT || hy0 == NOT || hx1 == NOT || hy1 == NOT) return false;
+            // Only the part of the hole inside [outer] takes anything away.
+            hx0 = Math.max(hx0, ox0);
+            hy0 = Math.max(hy0, oy0);
+            hx1 = Math.min(hx1, ox1);
+            hy1 = Math.min(hy1, oy1);
+        }
+        g.setTransform(new AffineTransform());
+        if (hx1 <= hx0 || hy1 <= hy0) {
+            if (ox1 > ox0 && oy1 > oy0) g.fill(new java.awt.Rectangle(ox0, oy0, ox1 - ox0, oy1 - oy0));
+        } else {
+            // Above the hole, below it, and either side of it.
+            if (hy0 > oy0) g.fill(new java.awt.Rectangle(ox0, oy0, ox1 - ox0, hy0 - oy0));
+            if (oy1 > hy1) g.fill(new java.awt.Rectangle(ox0, hy1, ox1 - ox0, oy1 - hy1));
+            if (hx0 > ox0) g.fill(new java.awt.Rectangle(ox0, hy0, hx0 - ox0, hy1 - hy0));
+            if (ox1 > hx1) g.fill(new java.awt.Rectangle(hx1, hy0, ox1 - hx1, hy1 - hy0));
+        }
+        g.setTransform(t);
+        return true;
+    }
+
+    private static final int NOT = Integer.MIN_VALUE;
+
+    /** [v] as a whole pixel edge, if it is one (to well within the sixteenth where antialiasing samples); else {@link #NOT}. */
+    private static int pixel(double v) {
+        double r = Math.rint(v);
+        return Math.abs(v - r) < 1e-6 && Math.abs(r) < 1e9 ? (int) r : NOT;
     }
 }

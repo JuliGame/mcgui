@@ -899,9 +899,10 @@ public final class Painter {
             return;
         }
         if (same) {
+            g.setColor(new Color(shade(s.borderColor[0], style, 0), true));
+            if (outer instanceof Rectangle2D outerRect && inner instanceof Rectangle2D innerRect && Shapes.fillPixels(g, outerRect, innerRect)) return;
             Area ring = new Area(outer);
             ring.subtract(new Area(inner));
-            g.setColor(new Color(shade(s.borderColor[0], style, 0), true));
             g.fill(ring);
             return;
         }

@@ -68,10 +68,14 @@ final class Shadows {
         if ((sh.color >>> 24) == 0) return;
         double[] r = Shapes.outset(radii, sh.spread);
         Shape shape = Shapes.rect(x + sh.x - sh.spread, y + sh.y - sh.spread, w + 2 * sh.spread, h + 2 * sh.spread, r);
+        Shape box = Shapes.rect(x, y, w, h, radii);
+        if (sh.blur <= SHARP && shape instanceof Rectangle2D s && box instanceof Rectangle2D b) {
+            g.setColor(new Color(sh.color, true));
+            if (Shapes.fillPixels(g, s, b)) return;
+        }
         Shape old = g.getClip();
         // Browsers cut the box itself out of its outer shadow, so a translucent box shows no shadow through it.
         Rectangle2D all = new Rectangle2D.Double(-1e5, -1e5, 2e5, 2e5);
-        Shape box = Shapes.rect(x, y, w, h, radii);
         g.clip(box instanceof Rectangle2D ? minus(all, box) : subtract(all, box));
         blurred(g, shape, sh.color, sh.blur, scale, surface, budget);
         g.setClip(old);
@@ -84,6 +88,11 @@ final class Shadows {
         Rectangle2D outside = new Rectangle2D.Double(b.getX() - sh.blur * 3 - Math.abs(sh.x) - 10, b.getY() - sh.blur * 3 - Math.abs(sh.y) - 10,
                 b.getWidth() + sh.blur * 6 + Math.abs(sh.x) * 2 + 20, b.getHeight() + sh.blur * 6 + Math.abs(sh.y) * 2 + 20);
         Shape hole = AffineTransform.getTranslateInstance(sh.x, sh.y).createTransformedShape(shrink(padding, sh.spread));
+        if (sh.blur <= SHARP && padding instanceof Rectangle2D p) {
+            // What shows is the padding box less the hole.
+            g.setColor(new Color(sh.color, true));
+            if (Shapes.fillPixels(g, p, hole.getBounds2D())) return;
+        }
         Shape ring = padding instanceof Rectangle2D ? minus(outside, hole) : subtract(outside, hole);
         Shape old = g.getClip();
         g.clip(padding);
