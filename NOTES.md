@@ -93,14 +93,16 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
   fastest and the framework's `Canvas` reads in place. A layer with a `filter`
   stays straight `TYPE_INT_ARGB`, because `Filters` edits its pixels as
   straight colour.
-- **An overlay page is painted on nothing** (`<meta name="ui:overlay">`,
-  `Painter.onNothing`): the painter clears the picture where it would fill it
-  white, so an image that held another picture (a pooled one, a band's, the
-  base a repaint goes over) keeps none of it where the page paints nothing,
-  at every moment of a page that moves too. Its alpha is where the world
-  shows: `Session` and the kept first pictures give the canvas transparency
-  and the page's tint with every drawing. `OverlayTest` checks the market
-  demo, its hovers, and a panel sliding across a reused image.
+- **An overlay page is painted on nothing** (`<meta name="ui:overlay">`):
+  every `Painter` of such a page decides so itself, from the page it is given,
+  and clears the picture where it would fill it white, so an image that held
+  another picture (a pooled one, a band's, the base a repaint goes over) keeps
+  none of it where the page paints nothing, at every moment of a page that
+  moves too. A new way of painting needs nothing extra to get it right. Its
+  alpha is where the world shows: `Session` and the kept first pictures give
+  the canvas transparency and the page's tint with every drawing. `OverlayTest`
+  checks the market demo, its hovers, a hover next to the transparent part,
+  and a panel sliding across a reused image.
 - **A full picture is painted in up to four bands at once**, fewer when several pictures
   are painting (the framework's `Cpu` threads are split between them: a band costs CPU, see
   `sh gradlew loadBench`) (`HtmlRenderer.paintBands`), each by its own `Painter` into its own image,

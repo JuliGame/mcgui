@@ -1,5 +1,6 @@
 package ai.resourcepack.ui.html.paint;
 
+import ai.resourcepack.ui.html.Page;
 import ai.resourcepack.ui.html.RenderBudget;
 import ai.resourcepack.ui.html.css.Values;
 import ai.resourcepack.ui.html.layout.Box;
@@ -66,6 +67,16 @@ public final class Painter {
     /** Page-space transform in force (for hit regions). */
     private AffineTransform pageTx = new AffineTransform();
 
+    /**
+     * Paints the page on nothing rather than on white, so wherever it paints nothing the picture is transparent: an
+     * overlay page ({@code Page.overlay}). What was there is cleared, as white covers it otherwise.
+     */
+    private final boolean onNothing;
+
+    /**
+     * [res] is the page painted, or only where its images come from. Every painter of an overlay page paints it on
+     * nothing, so a whole picture, each of its bands and a hover's partial repaint all start from the same background.
+     */
     public Painter(TextShaper shaper, Resources res, double viewportW, double viewportH, double scrollY, RenderBudget budget) {
         this.shaper = shaper;
         this.res = res;
@@ -73,6 +84,7 @@ public final class Painter {
         this.viewportH = viewportH;
         this.scrollY = scrollY;
         this.budget = budget;
+        this.onNothing = res instanceof Page p && p.overlay();
     }
 
     /**
@@ -92,18 +104,6 @@ public final class Painter {
      */
     public Painter keeping(java.awt.Rectangle keep) {
         needed = keep;
-        return this;
-    }
-
-    /** Paints on nothing rather than on white (see {@link #onNothing()}). */
-    private boolean onNothing;
-
-    /**
-     * Paints the page on nothing rather than on white, so wherever it paints nothing the picture is transparent:
-     * an overlay page ({@code Page.overlay}). What was there is cleared, as white covers it otherwise.
-     */
-    public Painter onNothing() {
-        onNothing = true;
         return this;
     }
 

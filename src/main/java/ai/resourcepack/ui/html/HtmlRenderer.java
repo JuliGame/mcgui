@@ -259,7 +259,6 @@ public final class HtmlRenderer {
                 g.scale(scale, scale);
                 if (clip != null) g.clip(clip);
                 Painter painter = new Painter(page.shaper, page, vw, vh, scroll, budget).origin(0, row(scroll, scale));
-                if (page.overlay()) painter.onNothing();
                 painter.paint(g, laid.root, img, scale);
                 g.dispose();
                 hits = painter.hits;
@@ -344,7 +343,6 @@ public final class HtmlRenderer {
                     // No clip: the band's own edges stop the drawing, so the painter sees exactly what a whole
                     // picture's would (a clip changes how Java2D intersects overflow clips, by a pixel).
                     Painter painter = new Painter(page.shaper, page, vw, vh, scroll, budget).origin(0, above + top);
-                    if (page.overlay()) painter.onNothing();
                     if (!first) painter.withoutHits();
                     if (!backdrops) painter.keeping(new java.awt.Rectangle(0, y0 - top, width, y1 - y0));
                     try {

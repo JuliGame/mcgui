@@ -79,6 +79,30 @@ class OverlayTest {
         assertTrue(w.worst() <= 1, "a partial repaint differs from a fresh picture, " + w.where());
     }
 
+    /**
+     * Hovers whose repaint reaches past the cards onto the transparent part (a glow round a card): however the repaint
+     * is painted, it must start from nothing there too, as a fresh picture does, not from white.
+     */
+    @Test
+    void hoverRepaintsNextToTheTransparentPartStayTransparent() {
+        Page page = Page.of("""
+                <meta name="ui:overlay" content="rgba(8, 10, 22, 0.5)">
+                <style>
+                  html, body { margin: 0; height: 100%; }
+                  .card { position: absolute; top: 120px; width: 160px; height: 200px; border-radius: 12px; background: #24304a; }
+                  .card:hover { background: #34507a; box-shadow: 0 0 24px 6px rgba(255, 200, 80, .8); }
+                </style>
+                <div class="card" style="left: 80px"></div><div class="card" style="left: 400px"></div>
+                """, Path.of("glow.html").toAbsolutePath(), OFFLINE);
+        assertTrue(page.overlay());
+        HtmlRenderer.Frame f = HtmlRenderer.render(page, page.document.clone(), W, H, 2, 0, Selector.State.NONE);
+        // Just left of the first card, where its glow will reach: nothing there before the hover.
+        assertEquals(0, pixels(f)[(2 * 220) * W + 2 * 70] >>> 24);
+        RepaintTest.Walk w = RepaintTest.walk(page, 2.0);
+        assertEquals(w.steps(), w.partials(), "hovers that were not partial repaints");
+        assertTrue(w.worst() <= 1, "a partial repaint differs from a fresh picture, " + w.where());
+    }
+
     private static final String SLIDING = """
             <meta name="ui:overlay" content="rgba(8, 10, 22, 0.5)">
             <style>
