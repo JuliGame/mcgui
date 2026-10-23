@@ -60,9 +60,42 @@ final class Filters {
         return sum;
     }
 
+    /**
+     * The sigma (device px) of a filter that is one blur() and nothing else, wide enough to be worked out on a picture
+     * {@link Blur#step} times smaller, as a backdrop's is ({@link Painter} then draws it on a grid fixed to the page, so
+     * every way of painting it blurs alike); else 0. A blurred picture behind a whole page costs a fraction as much.
+     */
+    static double gridBlur(String filter, Style s, double scale) {
+        if (filter == null || filter.equals("none")) return 0;
+        List<String> fns = functions(filter);
+        if (fns.size() != 1) return 0;
+        String fn = fns.get(0);
+        if (!fn.toLowerCase(Locale.ROOT).startsWith("blur(") || !fn.endsWith(")")) return 0;
+        String arg = fn.substring(5, fn.length() - 1).trim();
+        Len l = Len.parse(arg.isEmpty() ? "0" : arg, s.context);
+        if (l == null) return 0;
+        double sigma = l.of(0) * scale;
+        return Blur.step(sigma) > 1 ? sigma : 0;
+    }
+
+    /** How far (device px) a {@link #gridBlur} of [sigma] reads round each pixel it makes: its boxes on the small picture, and a cell either way for where the grid falls and for scaling back up. */
+    static int gridSupport(double sigma) {
+        int k = Blur.step(sigma);
+        return (Blur.support(sigma / k) + 2) * k;
+    }
+
+    /** How far (device px) [filter]'s blurs reach past what they draw, and read past what they make: about three sigma, or a grid blur's support. */
+    static int reach(String filter, Style s, double scale) {
+        int r = (int) Math.ceil(3 * blurRadius(filter, s) * scale) + 2;
+        double grid = gridBlur(filter, s, scale);
+        return grid > 0 ? Math.max(r, gridSupport(grid) + 2) : r;
+    }
+
     /** How far (device px) {@link #apply} reads round each pixel it makes: the supports of its blurs, one after another. */
     static int blurSupport(String filter, Style s, double scale) {
         if (filter == null || filter.equals("none")) return 0;
+        double grid = gridBlur(filter, s, scale);
+        if (grid > 0) return gridSupport(grid);
         int sum = 0;
         for (String fn : functions(filter)) {
             if (!fn.toLowerCase(Locale.ROOT).startsWith("blur(") || !fn.endsWith(")")) continue;
@@ -238,7 +271,7 @@ final class Filters {
     }
 
     /** Fills what is round the [w] x [h] block at ([x], [y]) in a [width] x [height] picture with the block's nearest edge pixels. */
-    private static void extend(int[] px, int width, int height, int x, int y, int w, int h) {
+    static void extend(int[] px, int width, int height, int x, int y, int w, int h) {
         if (x == 0 && y == 0 && w == width && h == height) return;
         for (int row = y; row < y + h; row++) {
             int base = row * width;

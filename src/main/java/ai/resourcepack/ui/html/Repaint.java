@@ -167,7 +167,7 @@ public final class Repaint {
                 ownerOf.put(e, o);
             }
             owner[j] = ownerOf.get(e);
-            box[j] = grow(hb.get(j).shape().getBounds2D(), paintsOutside(b.style(e)) + 1);
+            box[j] = grow(hb.get(j).shape().getBounds2D(), paintsOutside(b.style(e), b.scale()) + 1);
         }
         List<Rectangle2D> out = new ArrayList<>();
         for (int i = 0; i < n; i++) {
@@ -393,7 +393,7 @@ public final class Repaint {
             Rectangle2D b = h.shape().getBounds2D();
             if (area == null) area = new Rectangle2D.Double(b.getX(), b.getY(), b.getWidth(), b.getHeight());
             else area.add(b);
-            reach = Math.max(reach, paintsOutside(f.style(h.element())));
+            reach = Math.max(reach, paintsOutside(f.style(h.element()), f.scale()));
         }
         for (Rectangle2D b : extra) {
             if (area == null) area = new Rectangle2D.Double(b.getX(), b.getY(), b.getWidth(), b.getHeight());
@@ -420,7 +420,7 @@ public final class Repaint {
             Painter.Hit h = hits.get(i);
             Style s = f.style(h.element());
             if (s == null) continue;
-            double blur = blurReach(s.filter, s);
+            double blur = blurReach(s, f.scale());
             if (blur > 0 && !still.containsKey(h.element())) {
                 Rectangle2D b = extent(f, h.element());
                 Rectangle2D layer = new Rectangle2D.Double(b.getX() - blur, b.getY() - f.scrollY() - blur, b.getWidth() + 2 * blur, b.getHeight() + 2 * blur);
@@ -563,10 +563,10 @@ public final class Repaint {
         return region.getWidth() * region.getHeight() < 0.6 * f.viewportWidth() * f.image().getHeight() / f.scale();
     }
 
-    /** How far past its box (CSS pixels) an element styled [s] can paint: its outer shadows, its text's shadows, its blur. */
-    private static double paintsOutside(Style s) {
+    /** How far past its box (CSS pixels) an element styled [s] can paint at [scale]: its outer shadows, its text's shadows, its blur. */
+    private static double paintsOutside(Style s, double scale) {
         if (s == null) return 0;
-        return Math.max(Math.max(shadowReach(s.boxShadow, s), shadowReach(s.textShadow, s)), blurReach(s.filter, s));
+        return Math.max(Math.max(shadowReach(s.boxShadow, s), shadowReach(s.textShadow, s)), blurReach(s, scale));
     }
 
     private static double shadowReach(String value, Style s) {
@@ -591,7 +591,9 @@ public final class Repaint {
         return reach;
     }
 
-    private static double blurReach(String filter, Style s) {
+    /** How far (CSS px) [s]'s filter blur reaches past what it draws, and reads past what it makes, at [scale]. */
+    private static double blurReach(Style s, double scale) {
+        String filter = s.filter;
         if (filter == null || filter.equals("none")) return 0;
         double reach = 0;
         for (String fn : Values.splitSpaces(filter)) {
@@ -601,7 +603,8 @@ public final class Repaint {
             // blur(r) is a Gaussian of sigma r, drawn out to three sigma.
             if (l != null) reach = Math.max(reach, 3 * Math.abs(l.of(0)) + 2);
         }
-        return reach;
+        // A wide one is worked out on a coarser grid, which reads a cell or two further (Painter.filterReach).
+        return reach == 0 ? 0 : Math.max(reach, Painter.filterReach(s, scale));
     }
 
     /**
