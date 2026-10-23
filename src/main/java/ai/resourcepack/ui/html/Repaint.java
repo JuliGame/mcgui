@@ -78,15 +78,27 @@ public final class Repaint {
         Region region = region(before, moved, order, List.of());
         if (region.commit == null) return fail(region.why);
         if (!small(region.paint, before)) return fail(Why.TOO_BIG);
-        if (undo != null) undo.save(region.paint);
-        HtmlRenderer.Frame f = HtmlRenderer.render(page, doc, width, height, scale, scroll, state, before.image(), region.paint, region.commit, budgets.get());
-        // The new state may reach further than the old one did (a shadow only hovering adds), or an element only
-        // lifted (z-index) may now be painted over something it overlaps: then paint both.
-        if (!order.isEmpty() && !orderKept(before, f, order)) order = Set.of();
-        Region after = region(f, moved, order, order.isEmpty() ? List.of() : swapped(before, f, order));
+        // The new state laid out first, so what it covers (a tooltip it shows, a shadow it adds, an element only lifted
+        // with z-index now painted over something it overlaps) is known before anything is painted, and painted once.
+        RenderBudget budget = budgets.get();
+        HtmlRenderer.Over over = HtmlRenderer.layOver(page, doc, width, height, scale, scroll, state, before.image(), budget);
+        HtmlRenderer.Frame laid = over.frame();
+        if (!order.isEmpty() && !orderKept(before, laid, order)) {
+            order = Set.of();
+            region = region(before, moved, order, List.of());
+            if (region.commit == null) return fail(region.why);
+        }
+        Region after = region(laid, moved, order, order.isEmpty() ? List.of() : swapped(before, laid, order));
         if (after.commit == null) return fail(after.why);
-        if (!region.covers(after)) {
-            region = region.union(after);
+        if (!region.covers(after)) region = region.union(after);
+        if (!small(region.paint, before)) return fail(Why.GREW_TOO_BIG);
+        if (undo != null) undo.save(region.paint);
+        HtmlRenderer.Frame f = HtmlRenderer.paintOver(over, region.paint, region.commit, budget);
+        // What the paint itself found should be what the layout did; if it reaches further, paint both.
+        Region painted = region(f, moved, order, order.isEmpty() ? List.of() : swapped(before, f, order));
+        if (painted.commit == null) return fail(painted.why);
+        if (!region.covers(painted)) {
+            region = region.union(painted);
             if (!small(region.paint, before)) return fail(Why.GREW_TOO_BIG);
             if (undo != null) undo.save(region.paint);
             f = HtmlRenderer.render(page, doc, width, height, scale, scroll, state, before.image(), region.paint, region.commit, budgets.get());

@@ -166,6 +166,30 @@ public final class HtmlRenderer {
     }
 
     /**
+     * [state] styled and laid out over [base] (a picture of the same page at the same scroll), with every hit region,
+     * nothing painted yet: where a partial repaint works out what to paint from, before it paints it with
+     * {@link #paintOver}, so a hover whose new state reaches further than the old (a tooltip) is painted once.
+     */
+    record Over(Laid laid, Frame frame) {}
+
+    static Over layOver(Page page, org.jsoup.nodes.Document document, int width, int height, double scale, double scrollY,
+                        Selector.State state, BufferedImage base, RenderBudget budget) {
+        double vw = width / scale, vh = height / scale;
+        Laid laid = lay(page, document, vw, vh, state, budget);
+        double scroll = Math.max(0, Math.min(scrollY, laid.pageHeight - base.getHeight() / scale));
+        java.awt.geom.Rectangle2D none = new java.awt.geom.Rectangle2D.Double();
+        List<Painter.Hit> hits = paintPart(page, laid.root, base, none, none, scale, vw, vh, scroll, budget);
+        return new Over(laid, new Frame(base, scale, vw, vh, laid.pageHeight, scroll, hits, new IdentityHashMap<>(laid.styler.styles), document, page));
+    }
+
+    /** Paints [clip] of [over] into its picture, keeping [keep] of it (see {@link #render}); the frame with the hit regions this paint made. */
+    static Frame paintOver(Over over, java.awt.geom.Rectangle2D clip, java.awt.geom.Rectangle2D keep, RenderBudget budget) {
+        Frame f = over.frame;
+        List<Painter.Hit> hits = paintPart(f.page(), over.laid.root, f.image(), clip, keep, f.scale(), f.viewportWidth(), f.viewportHeight(), f.scrollY(), budget);
+        return new Frame(f.image(), f.scale(), f.viewportWidth(), f.viewportHeight(), f.pageHeight(), f.scrollY(), hits, f.styles(), f.document(), f.page());
+    }
+
+    /**
      * Paints [clip] of the picture on an image of its own, just that big, and copies [keep] of it into [img]; the rest
      * of [img] is left as it was, also when the budget gives up. As for a band of a whole picture ({@link #paintBands}),
      * no clip is in force: the image's edges stop the drawing. Java2D intersects a clip with the clip of a box with
