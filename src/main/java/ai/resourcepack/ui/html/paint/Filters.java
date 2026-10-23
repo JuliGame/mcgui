@@ -244,7 +244,7 @@ final class Filters {
         int gh = Math.floorDiv(grab.y + grab.height + originY + k - 1, k) * k - originY - gy;
         // Drawn rather than copied raw, so a premultiplied surface arrives as straight colour for the filters below.
         // Every pixel of it is drawn or extended below; from this thread's pool, handed back once drawn in.
-        BufferedImage copy = PixelPool.image(gw, gh, BufferedImage.TYPE_INT_ARGB);
+        BufferedImage copy = PixelPool.uncleared(gw, gh, BufferedImage.TYPE_INT_ARGB);
         java.awt.Graphics2D cg = copy.createGraphics();
         cg.setComposite(java.awt.AlphaComposite.Src);
         cg.drawImage(surface.getSubimage(grab.x, grab.y, grab.width, grab.height), grab.x - gx, grab.y - gy, null);

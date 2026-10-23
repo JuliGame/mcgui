@@ -372,7 +372,8 @@ public final class Painter {
         int px = originX + ox, py = originY + oy;
         int gx = Math.floorDiv(px, k) * k - px, gy = Math.floorDiv(py, k) * k - py;
         int gw = Math.floorDiv(px + w + k - 1, k) * k - px - gx, gh = Math.floorDiv(py + h + k - 1, k) * k - py - gy;
-        BufferedImage cells = PixelPool.image(gw, gh, img.getType());
+        // Every pixel of it is copied or extended below.
+        BufferedImage cells = PixelPool.uncleared(gw, gh, img.getType());
         int[] from = pixels(img), to = pixels(cells);
         for (int y = 0; y < h; y++) System.arraycopy(from, y * w, to, (y - gy) * gw - gx, w);
         Filters.extend(to, gw, gh, -gx, -gy, w, h);
@@ -383,7 +384,7 @@ public final class Painter {
 
     /** The [part] of [img], as an image of its own of the same type (Blur and Filters work on a whole pixel array), from this thread's pool. */
     private static BufferedImage copy(BufferedImage img, java.awt.Rectangle part) {
-        BufferedImage out = PixelPool.image(part.width, part.height, img.getType());
+        BufferedImage out = PixelPool.uncleared(part.width, part.height, img.getType());
         int[] from = pixels(img), to = pixels(out);
         for (int y = 0; y < part.height; y++) System.arraycopy(from, (part.y + y) * img.getWidth() + part.x, to, y * part.width, part.width);
         return out;

@@ -78,6 +78,13 @@ public final class PixelPool {
         return wrap(a, w, h, type);
     }
 
+    /** As {@link #image}, but holding anything: for code that sets every pixel itself before reading any. */
+    public static BufferedImage uncleared(int w, int h, int type) {
+        int n = Math.multiplyExact(w, h);
+        if (n < MIN_INTS) return new BufferedImage(w, h, type);
+        return wrap(pool().take(n), w, h, type);
+    }
+
     /** At least [n] ints, holding anything: for the calling code alone, handed back with {@link #give(int[])}. */
     public static int[] ints(int n) {
         if (n < MIN_INTS) return new int[n];

@@ -135,19 +135,15 @@ final class Shadows {
         if ((long) (i1 - i0) * (j1 - j0) > 25_000_000L) return;
         BufferedImage img = PixelPool.image(i1 - i0, j1 - j0, BufferedImage.TYPE_INT_ARGB_PRE);
         Graphics2D ig = img.createGraphics();
-        // Fill with the shadow's colour at zero alpha first, so blurring only ever mixes alpha.
-        ig.setComposite(AlphaComposite.Src);
-        ig.setColor(new Color(color & 0xFFFFFF, true));
-        ig.fillRect(0, 0, img.getWidth(), img.getHeight());
-        ig.setComposite(AlphaComposite.SrcOver);
+        // The shape's coverage, as alpha: only that is blurred, and the colour put back at each alpha (Blur.shadow).
         ig.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-        ig.setColor(new Color(color | 0xFF000000));
+        ig.setColor(Color.BLACK);
         ig.translate(-i0, -j0);
         ig.scale(1 / k, 1 / k);
         ig.translate(-r.x, -r.y);
         ig.fill(devShape);
         ig.dispose();
-        Blur.blur(img, sigma / k, budget);
+        Blur.shadow(img, sigma / k, color, budget);
         AffineTransform saved = g.getTransform();
         java.awt.Composite oldComposite = g.getComposite();
         Object oldInterpolation = g.getRenderingHint(RenderingHints.KEY_INTERPOLATION);
