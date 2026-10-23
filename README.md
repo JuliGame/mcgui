@@ -225,10 +225,9 @@ linear/radial/conic gradients, `background-clip: text`, background images,
 `text-overflow: ellipsis`, `-webkit-line-clamp`, inline SVG and SVG images,
 PNG/JPEG/GIF images, form controls drawn as in a browser, and CSS animations
 (`@keyframes`, `animation`) and transitions (`transition`): numbers, lengths,
-colours and transforms move smoothly, anything else changes halfway. A page
-that moves is drawn whole, `animation-fps` times a second (10 by default), for
-each player watching it, for as long as something on it moves, and only what
-changed is sent: cheap for a hover that fades, not for a page that spins for ever.
+colours and transforms move smoothly, anything else changes halfway. While
+something moves, the page is drawn `animation-fps` times a second (10 by
+default), and each frame redraws only round what moves (see "Fast pages").
 
 Fonts: Inter (sans-serif and every system UI font name), Source Serif 4
 (serif), JetBrains Mono (monospace) and Monocraft (`font-family: Minecraft`)
@@ -247,10 +246,25 @@ reports of where the player is looking. A page that loses both is redrawn whole
 on every hover: 100 to 300 ms on a busy page, which players feel as the pointer
 arriving before the highlight does. What decides it:
 
-- **Any `transition` or `animation` turns both off, for the whole page**, used or
-  not: one `transition: opacity .2s` on one button is enough (`Page.moves`). The
-  page is then drawn whole on every hover and every animation frame. Leave hovers
-  instant on a page with a lot on it, and put what animates on a page of its own.
+- **A `transition` or `animation` costs nothing while it is not running.** The
+  page keeps partial redraws and drawing ahead, and a hover that starts a
+  transition is drawn ahead too (its first moment, never its end). While
+  something moves, each frame redraws only round where the moving elements were
+  and are now, so a small spinner costs the server under 10 ms a frame, not a
+  whole picture (70 to 350 ms). How to keep animations cheap:
+  - **Animate what painting alone reads**: `opacity`, colours, `transform`,
+    `filter`, shadows. Then the page is not laid out again for each frame.
+    Animating `width`, `height`, `margin`, `padding`, `top` or `font-size` lays
+    the whole page out on every frame.
+  - **Animations that repeat for ever are shared.** An `infinite` animation runs
+    on the page's own clock, so every player looking at the page in the same
+    state is shown the same frame: one is drawn, and the others are sent the
+    same maps (50 players at a spinner cost about what two do). A transition,
+    or an animation that ends, runs on each player's own clock, so each player
+    watching costs a frame of their own.
+  - **Keep what moves small.** Something large moving (a whole panel that bobs)
+    is redrawn whole every frame, and a blur under or round what moves makes
+    each frame as dear as a hover near it.
 - **`:hover` with `+` or `~` turns drawing ahead off** (`.card:hover + .label`),
   as the hover can then change things outside the hovered element. Put the part
   that changes inside it instead (`.card:hover .label`).
@@ -270,8 +284,10 @@ arriving before the highlight does. What decides it:
 
 `sh gradlew hoverCost -Ppages=path/to/page.html` prints what each hover on a
 page costs to redraw and how many fell back to a whole redraw (`not partial`). It
-calls the redraw directly, so it does not see the two switches above: check for
-those by eye.
+calls the redraw directly, so it does not see the `+`/`~` switch above: check
+for that by eye. `sh gradlew animBench -Pdir=path/to/pages -Ppages=page` prints
+what a page's animations cost the server a second at 1, 10 and 50 viewers
+(`page:hover:.card` hovers each viewer over the cards in turn).
 
 ## For plugin developers
 

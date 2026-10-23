@@ -38,14 +38,37 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
   values of that moment before computing its style, so anything the cascade
   computes can move, layout included. The moment comes from `Motion.current()`,
   a thread-local the session sets around its drawing; with none (renderSamples,
-  the benches) nothing moves. A page that moves (`Page.moves()`) is drawn whole
-  every time: no partial repaint, scroll cache, drawing ahead or kept first
-  picture, all of which assume a picture stays true until the state changes.
-  So a hover that starts a transition shows its first moment, never its end
-  drawn ahead (`TransitionHoverTest`), and a grid blur (below) under a moving
-  page is the same in every band at every moment (`BandsTest`).
-  Elements are keyed by their place in document order, as the Styler's memo
-  is, so a transition survives the session's copy of the document changing.
+  the benches) nothing moves. Elements are keyed by their place in document
+  order, as the Styler's memo is, so a transition survives the session's copy
+  of the document changing. How a page that moves (`Page.moves()`) costs only
+  what moves:
+  - **Still is free.** While `Motion.active()` is false (nothing running or
+    waiting), `Session` draws it as a page that never moves: partial repaints,
+    the scroll cache, drawing ahead and kept first pictures. Those carry the
+    motion they were styled with (`Repaint.Prepared.motion`,
+    `FirstPictures.Picture.motion`), which the session takes on with
+    `Motion.copyAt`, so a transition a drawn-ahead hover starts begins at its
+    first moment, never its end (`TransitionHoverTest`).
+  - **A frame repaints what moved.** `Motion.moved()` is the elements that moved
+    (or waited to) in the last pass; the next frame repaints them
+    (`Repaint.partial` over the last frame, with `Repaint.MOTION_MARGIN`, since
+    old and new places both come from the hit regions), or the whole picture if
+    that is too big (`AnimationTest`). A whole picture's bands are all of one
+    moment, so a grid blur under a moving page matches in every band (`BandsTest`).
+  - **Paint-only frames keep the layout.** The motion keeps the last picture's
+    box tree (`Motion.keepLayout`, opaque there). `HtmlRenderer.lay` restyles,
+    and if every style differs from the last only in `Style.PAINT_ONLY` fields
+    (checked by reflection, so a new `Style` field counts as layout until named
+    there), it swaps the new styles into the boxes and skips building and layout.
+    Not when a transform appears or goes on a box holding absolute boxes, or an
+    inline SVG's colour moves (baked into its picture).
+  - **Two clocks.** Transitions and animations that end run on the viewer's
+    clock (from when the page was shown); animations that repeat for ever on the
+    page's (the server tick), so while only those move (`Motion.personal()` false)
+    every viewer of one document in one state wants the same picture each tick:
+    `AnimFrames` lets one draw it and the others show its tiles. A picture taken
+    is shared for good: its drawer copies it before painting over it
+    (`retireShared`), as with a first picture.
 
 - **Coordinates in the box tree are relative to the box that laid a box out**:
   its nearest ancestor that is not an inline box. Inline boxes have no
@@ -126,9 +149,9 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
   hover that shows a tooltip is painted once, over the old and new areas together (`paintOver`), not
   painted, found to reach further, and painted again. `sh gradlew renderBench` times a page's full render, its
   `Canvas.draw` and a hover repaint.
-  What page authors can do about all this (and the two switches that turn partial repaints or drawing ahead
-  off for a whole page, `Page.moves` and `Page.siblingStates`, checked in `Session` and not by `hoverCost`,
-  which calls `Repaint.partial` directly) is in the README's "Fast pages".
+  What page authors can do about all this (and the switch that turns drawing ahead off for a whole page,
+  `Page.siblingStates`, checked in `Session` and not by `hoverCost`, which calls `Repaint.partial` directly; and
+  what a page that moves costs while it moves) is in the README's "Fast pages".
 - **A scroll is cut from a taller picture** (`html/ScrollCache`): the first
   notch paints up to four views of the page round the view (more ahead of the
   scroll than behind), and later notches copy the view's rows out of it, since
@@ -298,7 +321,7 @@ wide for a default view). `/ui place <page> <cols> <rows> <name> <x> <y> <z>
   | `views` | 50 players at the market fullscreen, still | the same, the sender's and pool's CPU, heap per view |
   | `hover` | 10 and 50 players sweeping round the market | cores used, pool CPU, tick p50/p99, MB/s sent, pictures and drawings ahead |
   | `latency` | one player at the market, the pointer moved by `/ui debug point` | ms until the hover's map patches reach them: cold, and after resting next to it |
-  | `anim` | 1 and 10 players at `bench/pages/bench-anim.html` (a spinner, cards that fade) | cores, pool CPU, pictures a second, MB/s |
+  | `anim` | 1, 10 and 50 players at `bench/pages/bench-anim.html` (a spinner, cards that fade) | cores, pool CPU, pictures a second, MB/s |
   | `deadline` | 40 hovering the market, 10 at the spinner, a busy loop on every core but one, while 10 more open a market with their name in it (a whole first picture each) | pictures given up, pictures' wait and run p50/p99/max |
   | `arcade` | four cabinets with nobody in range; then each game on a 16x9 cabinet playing itself, one player watching | CPU (game loop, pool, sender) at rest and per game, and MB/s per game |
 
