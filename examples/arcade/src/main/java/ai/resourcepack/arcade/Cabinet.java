@@ -14,6 +14,7 @@ import java.util.UUID;
  * An arcade cabinet: a wall of maps showing one game. While nobody plays it plays itself; click it and you
  * sit down at the same game fullscreen, and everybody standing round watches you play on the wall. The
  * wall and the view show the same {@link Canvas}, so each frame is drawn and encoded once for all of them.
+ * With nobody near enough to see it and nobody at it, its game pauses: a lobby of cabinets nobody is at costs nothing.
  */
 final class Cabinet implements WallContent {
     final String id;
@@ -26,6 +27,13 @@ final class Cabinet implements WallContent {
     WallScreen screen;
     /** Who is sitting at it, or null. Server thread only. */
     UUID player;
+    /**
+     * The loop runs this rather than the game: the game's tick while anybody can see the cabinet. UI Engine asks
+     * for the canvas every tick for every player in range ({@link #canvas}), which is how it knows.
+     */
+    final Loop.Ticker ticker = this::tick;
+    /** When a player in range last asked for the picture (System.nanoTime). */
+    private volatile long seen = System.nanoTime();
 
     private final ArcadePlugin plugin;
 
@@ -42,7 +50,19 @@ final class Cabinet implements WallContent {
 
     @Override
     public Canvas canvas(Player viewer) {
+        seen = System.nanoTime();
         return game != null ? game.canvas : runner.canvas;
+    }
+
+    private void tick(double dt) {
+        if (!watched()) return;
+        if (game != null) game.tick(dt);
+        else runner.tick(dt);
+    }
+
+    /** Somebody is in range, or sitting at it (whose own view does not ask the wall). */
+    private boolean watched() {
+        return player != null || System.nanoTime() - seen < 1_000_000_000L || (runner != null && runner.anySeated());
     }
 
     @Override

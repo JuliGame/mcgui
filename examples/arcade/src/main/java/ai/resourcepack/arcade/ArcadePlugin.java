@@ -319,7 +319,7 @@ public final class ArcadePlugin extends JavaPlugin {
             Cabinet c = new Cabinet(this, id, topLeft, facing, runner.scene.cols(), runner.scene.rows(), null, runner);
             c.screen = ui.placeWall(topLeft, facing, c.cols, c.rows, c);
             cabinets.put(id, c);
-            loop.add(runner);
+            loop.add(c.ticker);
             return c;
         }
         Cabinet[] self = new Cabinet[1];
@@ -328,7 +328,7 @@ public final class ArcadePlugin extends JavaPlugin {
         self[0] = c;
         c.screen = ui.placeWall(topLeft, facing, cols, rows, c);
         cabinets.put(id, c);
-        loop.add(game);
+        loop.add(c.ticker);
         return c;
     }
 
@@ -344,10 +344,9 @@ public final class ArcadePlugin extends JavaPlugin {
                 View v = p == null ? null : ui.viewOf(p);
                 if (v != null && v.content() instanceof SceneRunner.SceneView sv && sv.runner() == c.runner) v.close();
             }
-            loop.remove(c.runner);
         }
+        loop.remove(c.ticker);
         c.screen.remove();
-        if (c.game != null) loop.remove(c.game);
         cabinets.remove(c.id);
     }
 

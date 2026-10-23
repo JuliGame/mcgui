@@ -91,6 +91,11 @@ final class SceneRunner implements Loop.Ticker, Host {
         return List.copyOf(seats);
     }
 
+    /** Whether anybody is playing: from any thread, nothing made. */
+    boolean anySeated() {
+        return !seats.isEmpty();
+    }
+
     @Override
     public void tick(double dt) {
         carry += dt;

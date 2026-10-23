@@ -24,7 +24,8 @@ keyboard.
   you name none). Sneak to get up.
 - `/arcade cabinet [game] [cols] [rows]` puts a cabinet on the wall you look at
   (the block you look at is its top-left corner; 12x7 by default). While nobody
-  plays it plays itself. Click it to sit down at the same game, and everybody
+  plays it plays itself, and with nobody near enough to see it, it pauses and
+  costs nothing. Click it to sit down at the same game, and everybody
   standing round watches you play on the wall, with the sound coming from the
   cabinet.
 - `/arcade remove` takes down the cabinet you look at; `/arcade scores [game]`
@@ -54,7 +55,8 @@ everybody walking past.
 - **A game loop off the server thread.** `Loop` runs every game on a thread of
   its own. A canvas may be drawn from any one thread, and the framework sends a
   drawing as soon as it is published, so the game runs at 30 frames a second
-  while the server ticks at 20 and the server thread never draws anything.
+  while the server ticks at 20 and the server thread never draws anything. With
+  no games the loop does not run at all.
 - **Drawing only what moved.** The background and the bricks are kept in a still
   picture that changes only when a brick does. Each frame redraws only the
   rectangles something moved through and hands the canvas just those, so only
