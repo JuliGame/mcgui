@@ -13,8 +13,10 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
@@ -56,11 +58,14 @@ public final class PageStore {
         this.loader = loader;
         this.logger = logger;
         AtomicInteger n = new AtomicInteger();
-        this.loaders = Executors.newFixedThreadPool(2, r -> {
+        // Two at most; gone after a minute with nothing to load, so a server at rest keeps none.
+        ThreadPoolExecutor pool = new ThreadPoolExecutor(2, 2, 60, TimeUnit.SECONDS, new LinkedBlockingQueue<>(), r -> {
             Thread t = new Thread(r, "UIEngine-load-" + n.incrementAndGet());
             t.setDaemon(true);
             return t;
         });
+        pool.allowCoreThreadTimeOut(true);
+        this.loaders = pool;
     }
 
     public Path root() {
