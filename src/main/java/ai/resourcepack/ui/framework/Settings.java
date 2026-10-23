@@ -20,7 +20,12 @@ public final class Settings {
     /** Compress each map patch once for every player who can take the same bytes, rather than once per player. */
     public final boolean sharedCompression;
     public final int defaultFov;
-    public final double cursorSpeed;
+    /**
+     * How far a view's pointer moves per mouse count, as a multiple of a desktop pointer at Windows' default
+     * speed on a 1920-pixel-wide screen (one pixel per count); the view fills the window, so 1 crosses it in
+     * 1920 counts. Each player's /ui pointer multiplies it.
+     */
+    public final double pointerSpeed;
     /** With the pack: the client draws the pointer itself every frame from where the player looks. */
     public final boolean clientPointer;
     /** Log each click's resolved spot and each pointer correction ({@code [pointer]} lines), for testing. */
@@ -41,7 +46,7 @@ public final class Settings {
         reach = c.getDouble("screens.reach", 8);
         sharedCompression = c.getBoolean("screens.shared-compression", true);
         defaultFov = c.getInt("views.default-fov", 70);
-        cursorSpeed = c.getDouble("views.cursor-speed", 8.0);
+        pointerSpeed = Math.max(0.05, c.getDouble("views.pointer-speed", 1.5));
         clientPointer = c.getBoolean("views.client-pointer", true);
         debugPointer = c.getBoolean("views.debug-pointer", false);
         mapIdBase = c.getInt("map-id-base", 2_000_000_000);

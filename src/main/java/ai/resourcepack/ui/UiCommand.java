@@ -27,7 +27,7 @@ import java.util.Set;
 final class UiCommand implements TabExecutor {
     private static final Set<BlockFace> WALL = Set.of(BlockFace.NORTH, BlockFace.SOUTH, BlockFace.EAST, BlockFace.WEST);
     private final UIEnginePlugin plugin;
-    /** The framework's own subcommands (test, fov, pack, stats, clear, debug), handed on as they are. */
+    /** The framework's own subcommands (test, fov, pointer, pack, stats, clear, debug), handed on as they are. */
     private final FrameworkCommand framework;
 
     UiCommand(UIEnginePlugin plugin, FrameworkCommand framework) {
@@ -91,7 +91,7 @@ final class UiCommand implements TabExecutor {
                 say(sender, "Reloaded the config and every page.", NamedTextColor.GREEN);
             }
             default -> say(sender, "/ui open <page> [player] · close [player] · place <page> [cols] [rows] [name] [shared] · remove [name] · list · reload"
-                    + " · test wall|view [cols] [rows] · fov <degrees> · pack · stats · clear", NamedTextColor.GRAY);
+                    + " · test wall|view [cols] [rows] · fov <degrees> · pointer [speed] · pack · stats · clear", NamedTextColor.GRAY);
         }
         return true;
     }

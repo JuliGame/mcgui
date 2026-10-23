@@ -70,8 +70,12 @@ views:
   # A view is fitted to the player's field of view. Minecraft does not tell the server what a player's
   # FOV setting is, so this is assumed until they set theirs with /ui fov.
   default-fov: 70
-  # Pointer speed: how far it moves per degree of mouse turn, for a view 768 pixels tall.
-  cursor-speed: 8.0
+  # How far the pointer moves for each step the mouse reports (a "count"), whatever the player's mouse
+  # sensitivity, which UI Engine reads from how their head turns. 1.0 is a desktop pointer at Windows'
+  # default speed on a 1920-pixel-wide screen: the view, which fills the window, is 1920 counts across
+  # (6 cm with an 800 DPI mouse). 1.5 is 1280 counts (4 cm at 800 DPI), close to the 1140 the old fixed
+  # speed gave at the game's default sensitivity. Players scale it for themselves with /ui pointer.
+  pointer-speed: 1.5
   # With the pack, the player's own client draws the pointer every frame from where they look, so it has
   # no network or tick lag. Off: the server moves the pointer as their rotation arrives (20 times a second).
   client-pointer: true

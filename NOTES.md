@@ -356,6 +356,19 @@ wide for a default view). `/ui place <page> <cols> <rows> <name> <x> <y> <z>
   are ignored until the client accepts the teleport to the seat (or 20 ticks
   pass): until then they still carry the old look direction and would throw the
   pointer across the screen.
+- **Pointer speed is per mouse count, and the count is read off the pitch.**
+  `MouseSteps` keeps each online player's last changes of pitch (sampled every
+  tick in `Views.learnMice`) and finds the step every one of them is a whole
+  multiple of: the client turns by whole counts times a step that depends only
+  on the sensitivity. A view's pixels per degree are `views.pointer-speed` (and
+  `/ui pointer`) per count over that step, and reach a client-placed pointer's
+  shader as the pointer text display's distance from the eye
+  (`Shaders.clientPointerDistance`). A turn the server makes is not whole
+  counts: teleports and respawns, and every rotation a view sends (the seat,
+  the turn back from an edge, a level head, `/ui debug point`), bump
+  `ViewImpl.serverTurns` or call `MouseSteps.hold`, which leaves the next few
+  samples out. Anything new that rotates a player must do the same. Keyboard
+  input never rotates anybody.
 - **Depth direction is detected, not assumed.** The in-front trick scales
   `gl_FragCoord.z` towards "near"; the first port assumed reversed depth (26.2). The
   vertex shader passes `ProjMat[2][2] > -0.5` as `mcbReversed`, so the trick
@@ -381,6 +394,6 @@ wide for a default view). `/ui place <page> <cols> <rows> <name> <x> <y> <z>
 ## The framework: testing
 
 `/ui test wall` and `/ui test view` need nothing else installed.
-`/ui debug <player> point|click|scroll|close` drives a view from the
+`/ui debug <player> point|click|scroll|speed|close` drives a view from the
 console, which is how a harness tests one without anybody at the mouse. The
 shaders can only be judged in the real client.

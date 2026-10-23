@@ -59,6 +59,7 @@ import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerItemHeldEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.event.player.PlayerSwapHandItemsEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.event.player.PlayerVelocityEvent;
@@ -76,10 +77,13 @@ import org.joml.Vector3f;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.EnumMap;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Predicate;
 import java.util.logging.Level;
 
@@ -134,6 +138,8 @@ public final class Views implements Listener {
     private static final double CLIENT_MAX_LIFT = 1.5;
     /** How far round a held player other entities are hidden from them, in blocks: their client would push them. */
     private static final double PUSH_MARGIN = 2.0;
+    /** Pixels across the screen a desktop pointer at Windows' default speed crosses in as many mouse counts: views.pointer-speed 1. */
+    private static final double DESKTOP_WIDTH = 1920;
 
     private final Plugin plugin;
     private final Settings settings;
@@ -143,7 +149,9 @@ public final class Views implements Listener {
     private final int firstMapId;
     private final MapSender sender;
     private final Map<UUID, ViewImpl> views = new ConcurrentHashMap<>();
-    private final NamespacedKey seatKey, returnKey, fovKey;
+    private final NamespacedKey seatKey, returnKey, fovKey, stepKey, pointerKey;
+    /** What each online player's mouse turns them by a count, being learned (server thread). */
+    private final Map<UUID, MouseSteps> mice = new HashMap<>();
     private final EntityType mannequin;
 
     public Views(Plugin plugin, Settings settings, Nms nms, Pipeline pipeline, Predicate<UUID> hasPack, MapSender sender, int firstMapId) {
@@ -157,6 +165,8 @@ public final class Views implements Listener {
         this.seatKey = new NamespacedKey(plugin, "seated");
         this.returnKey = new NamespacedKey(plugin, "return-to");
         this.fovKey = new NamespacedKey(plugin, "fov");
+        this.stepKey = new NamespacedKey(plugin, "mouse-step");
+        this.pointerKey = new NamespacedKey(plugin, "pointer-speed");
         // 1.21.9+: a camera with a player's eye height (see spawnCamera).
         this.mannequin = Registry.ENTITY_TYPE.get(NamespacedKey.minecraft("mannequin"));
     }
@@ -200,11 +210,17 @@ public final class Views implements Listener {
         volatile boolean awaitingTeleport;
         int settleBy;
         /** A level head has been sent and the client's rotation may still come from before it. */
-        boolean pitchReset;
+        volatile boolean pitchReset;
         /** A client-placed pointer: the player's whole turn from the picture's centre, not wrapped (degrees). */
         double turnYaw;
         /** A turn back inside the picture has been sent and the client has not yet answered the ping after it. */
         volatile boolean correcting;
+        /**
+         * Bumped, on any thread, when the server turns the player and again once their client has taken the
+         * turn; [serverTurnsSeen] is what the server thread last saw (see {@link #turnedByServer}).
+         */
+        final AtomicInteger serverTurns = new AtomicInteger();
+        int serverTurnsSeen;
         /**
          * Clicks seen on the wire, and how many of them a rotation has followed (under the view's lock): a
          * client sends a click before the same tick's rotation, so the rotation after it is where the
@@ -349,7 +365,7 @@ public final class Views implements Listener {
         }
         // On their client only, and not yet: the maps go out first, and the frames only appear once they can show them.
         wall.spawnFor(nms, player, clientPointer ? stackBlock(cam) : null);
-        double speed = clientPointer ? clientSpeed(canvas) : settings.cursorSpeed * canvas.height() / 768.0;
+        double speed = speedFor(player, canvas, clientPointer);
 
         // With a client-placed pointer the camera is the player's own eye, which turns with the mouse:
         // they are held where it is on the flagged spot (see reveal). Otherwise a camera entity looks at
@@ -558,15 +574,100 @@ public final class Views implements Listener {
     }
 
     /**
-     * Pixels per degree for a client-placed pointer: the configured speed, but fast enough that the
-     * picture's edges are inside {@link #CLIENT_MAX_YAW} and {@link #CLIENT_MAX_PITCH} of its centre (the
-     * pointer is where the camera looks, so an edge further round than that could never be reached).
+     * Canvas pixels per degree of turn for [player]'s view of [canvas]: views.pointer-speed, times their own
+     * (/ui pointer), per mouse count, over the degrees a count turns them by (their {@link MouseSteps}, or
+     * the game's default sensitivity's until those are known). A desktop pointer at Windows' default speed
+     * moves one screen pixel a count, so 1920 counts across a 1920-pixel-wide screen; the view fills the
+     * window, so a speed of 1 crosses it in as many.
      */
-    private double clientSpeed(Canvas canvas) {
-        double speed = settings.cursorSpeed * canvas.height() / 768.0;
+    private double speedFor(Player player, Canvas canvas, boolean clientPointer) {
+        double perCount = settings.pointerSpeed * pointerSpeedOf(player) * canvas.width() / DESKTOP_WIDTH;
+        double step = stepOf(player);
+        double speed = perCount / (Double.isNaN(step) ? MouseSteps.DEFAULT : step);
+        return clientPointer ? clientSpeed(canvas, speed) : speed;
+    }
+
+    /**
+     * [speed] for a client-placed pointer: fast enough that the picture's edges are inside
+     * {@link #CLIENT_MAX_YAW} and {@link #CLIENT_MAX_PITCH} of its centre (the pointer is where the camera
+     * looks, so an edge further round than that could never be reached), and no faster than the shader can
+     * be told (the pointer's distance from the eye carries it, see {@link Shaders#clientPointerDistance}).
+     */
+    private static double clientSpeed(Canvas canvas, double speed) {
         speed = Math.max(speed, canvas.width() / 2.0 / CLIENT_MAX_YAW);
         speed = Math.max(speed, canvas.height() / 2.0 / CLIENT_MAX_PITCH);
         return Math.min(speed, Shaders.CLIENT_POINTER_MAX_SPEED);
+    }
+
+    /** The degrees one count of [player]'s mouse turns them by, or NaN while not known (see {@link MouseSteps}). */
+    private double stepOf(Player player) {
+        MouseSteps m = mice.get(player.getUniqueId());
+        if (m != null) return m.step();
+        Double known = player.getPersistentDataContainer().get(stepKey, PersistentDataType.DOUBLE);
+        return known == null ? Double.NaN : known;
+    }
+
+    /** [player]'s mouse sensitivity as their options hold it (0 to 1; the game shows twice that as a percentage), or NaN while not known. */
+    public double sensitivityOf(Player player) {
+        double step = stepOf(player);
+        return Double.isNaN(step) ? Double.NaN : MouseSteps.sensitivity(step);
+    }
+
+    /** [player]'s own pointer speed, a multiple of views.pointer-speed set with /ui pointer. */
+    public double pointerSpeedOf(Player player) {
+        Double speed = player.getPersistentDataContainer().get(pointerKey, PersistentDataType.DOUBLE);
+        return speed == null ? 1.0 : speed;
+    }
+
+    /** Takes effect from the next view [player] opens. */
+    public void setPointerSpeed(Player player, double speed) {
+        if (speed == 1.0) player.getPersistentDataContainer().remove(pointerKey);
+        else player.getPersistentDataContainer().set(pointerKey, PersistentDataType.DOUBLE, speed);
+    }
+
+    /** For /ui debug: the pointer's speed in [player]'s open view, and what it came from. */
+    public String pointerSpeedReport(Player player) {
+        ViewImpl v = views.get(player.getUniqueId());
+        double sensitivity = sensitivityOf(player);
+        return String.format(Locale.ROOT, "%s px/degree, sensitivity %s, step %s degrees per count, own speed %.2f",
+                v == null ? "no view" : String.format(Locale.ROOT, "%.3f", v.speed),
+                Double.isNaN(sensitivity) ? "not known yet" : String.format(Locale.ROOT, "%.4f (%d%%)", sensitivity, Math.round(sensitivity * 200)),
+                String.format(Locale.ROOT, "%.6f", stepOf(player)), pointerSpeedOf(player));
+    }
+
+    /**
+     * Every tick: each online player's pitch, from which their {@link MouseSteps} learns how far a count of
+     * their mouse turns them. Remembered on the player once known, so their first view after a restart is
+     * already right. Not across a turn the server made: a teleport or respawn ({@link #holdMouse}),
+     * or one a view makes ({@link #turnedByServer}).
+     */
+    private void learnMice() {
+        for (Player p : Bukkit.getOnlinePlayers()) {
+            MouseSteps m = mice.get(p.getUniqueId());
+            if (m == null) {
+                Double known = p.getPersistentDataContainer().get(stepKey, PersistentDataType.DOUBLE);
+                m = new MouseSteps(known == null ? Double.NaN : known);
+                mice.put(p.getUniqueId(), m);
+            }
+            ViewImpl v = views.get(p.getUniqueId());
+            if (v != null && turnedByServer(v)) m.hold();
+            if (m.sample(p.getPitch())) {
+                p.getPersistentDataContainer().set(stepKey, PersistentDataType.DOUBLE, m.step());
+                debug(String.format(Locale.ROOT, "%s's mouse turns %.6f degrees a count: sensitivity %.4f", p.getName(), m.step(), MouseSteps.sensitivity(m.step())));
+            }
+        }
+    }
+
+    /**
+     * Server thread: whether [v] is turning its player, or has since the last look: waiting for the seat
+     * teleport to be taken, turning them back inside the picture, levelling their head, or a debug point.
+     * Their pitch across any of those is not whole counts of their mouse.
+     */
+    private static boolean turnedByServer(ViewImpl v) {
+        int turns = v.serverTurns.get();
+        boolean turned = turns != v.serverTurnsSeen;
+        v.serverTurnsSeen = turns;
+        return turned || v.awaitingTeleport || v.correcting || v.pitchReset;
     }
 
     /**
@@ -588,8 +689,9 @@ public final class Views implements Listener {
         return wall.placeable() ? wall : null;
     }
 
-    /** Every tick: switch waiting players to their view, and turn mouse movement into pointer movement. */
+    /** Every tick: learn mice, switch waiting players to their view, and turn mouse movement into pointer movement. */
     public void tick() {
+        learnMice();
         int now = Bukkit.getCurrentTick();
         for (ViewImpl v : views.values()) {
             Player p = Bukkit.getPlayer(v.player);
@@ -742,6 +844,7 @@ public final class Views implements Listener {
             if (v.pitchReset && Math.abs(pitch) < Math.abs(dpitch)) {
                 dpitch = pitch;
                 v.pitchReset = false;
+                v.serverTurns.incrementAndGet();
             }
             v.lastYaw = yaw;
             v.lastPitch = pitch;
@@ -754,6 +857,7 @@ public final class Views implements Listener {
             }
             if (!v.pitchReset && Math.abs(pitch) > PITCH_LIMIT) {
                 v.pitchReset = true;
+                v.serverTurns.incrementAndGet();
                 pipeline.sendNow(v.player, nms.pitch(0f));
             }
         }
@@ -790,10 +894,14 @@ public final class Views implements Listener {
             Player p = Bukkit.getPlayer(v.player);
             if (p == null) return;
             v.correcting = true;
+            v.serverTurns.incrementAndGet();
             float dyaw = (float) (backX / v.speed), dpitch = (float) (backY / v.speed);
             debug("past the edge: turning back " + dyaw + "," + dpitch);
             pipeline.sendNow(v.player, nms.rotate(dyaw, true, dpitch, true));
-            pipeline.afterClientCaughtUp(p, () -> v.correcting = false);
+            pipeline.afterClientCaughtUp(p, () -> {
+                v.correcting = false;
+                v.serverTurns.incrementAndGet();
+            });
         }
     }
 
@@ -1250,6 +1358,22 @@ public final class Views implements Listener {
         if (to.getWorld() != at.getWorld() || to.distanceSquared(at) > 4) close(e.getPlayer(), CloseReason.INTERRUPTED);
     }
 
+    /** The server turned [player] (a teleport or a respawn sets the rotation outright): not whole counts of their mouse. */
+    private void holdMouse(Player player) {
+        MouseSteps m = mice.get(player.getUniqueId());
+        if (m != null) m.hold();
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onTeleported(PlayerTeleportEvent e) {
+        holdMouse(e.getPlayer());
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onRespawn(PlayerRespawnEvent e) {
+        holdMouse(e.getPlayer());
+    }
+
     /**
      * Nothing the server pushes a held player with may move them (the client moves itself by any
      * velocity it is sent): it is sent as nothing instead. Not cancelled, or the server would keep
@@ -1277,6 +1401,7 @@ public final class Views implements Listener {
             close(e.getPlayer(), CloseReason.INTERRUPTED);
         } finally {
             pipeline.forget(e.getPlayer().getUniqueId());
+            mice.remove(e.getPlayer().getUniqueId());
         }
     }
 
@@ -1293,7 +1418,9 @@ public final class Views implements Listener {
             if (v.clientPointer) {
                 float yaw = v.refYaw + (float) ((v.cursorX - v.canvas.width() / 2.0) / v.speed);
                 float pitch = (float) ((v.cursorY - v.canvas.height() / 2.0) / v.speed);
+                v.serverTurns.incrementAndGet();
                 pipeline.sendNow(v.player, nms.rotate(yaw, false, pitch, false));
+                pipeline.afterClientCaughtUp(player, v.serverTurns::incrementAndGet);
             } else {
                 sendPointer(v);
             }
