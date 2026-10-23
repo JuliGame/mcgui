@@ -57,7 +57,7 @@ sprites and pre-rendered 3D models, and a Trade button that runs a console
 | `/ui test wall\|view [cols] [rows] [player]` | Puts a test picture on the wall you look at, or opens one fullscreen: the framework working with no page at all |
 | `/ui fov <degrees>` | Fits views to your FOV setting, for players without the pack (the server cannot read it) |
 | `/ui pointer [speed]` | Your pointer speed in views, 0.25 to 4 times the server's (`views.pointer-speed`); without a number, shows it and the mouse sensitivity read from your turning |
-| `/ui pack` · `stats` · `clear` | Re-send the pack · walls and bytes sent · remove test walls |
+| `/ui pack` · `stats` · `clear` | Re-send the pack · what the plugin costs the server now (see below) · remove test walls |
 | `/ui debug <player> point <x> <y>` · `click` · `scroll <n>` · `speed` · `close` | Drive a player's view from the console; `speed` shows its pointer speed and where it came from |
 
 ### Permissions
@@ -196,6 +196,12 @@ from the pages folder only.
 A picture that takes longer than `render-timeout` (2 s) to draw is given up and
 reported like a page that cannot be drawn, so one heavy page cannot hold a render
 thread for good. Raise it (or set 0) for very large pages.
+
+`/ui stats` shows what the plugin costs the server right now: its share of the
+server thread each tick (time and bytes allocated, over the last 10 seconds),
+how long the last pictures waited for a thread and took to draw, how many were
+given up for `render-timeout`, its threads, and how long it took to start and
+warm up. `/ui stats json` prints the same as one line of JSON.
 
 The first picture of each page at each screen size is kept (`first-pictures` in
 config.yml), so the next player to open that page there is sent the picture at

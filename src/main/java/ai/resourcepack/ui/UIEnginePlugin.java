@@ -46,9 +46,12 @@ public final class UIEnginePlugin extends JavaPlugin {
     private BukkitTask watcher;
     private FileConfiguration cfg;
     private volatile FirstPictures pictures;
+    /** How long enabling took on the server thread, and until the warm-up (and its kept first pictures) was done, in ms; -1 until known. */
+    private volatile double enableMillis = -1, warmMillis = -1;
 
     @Override
     public void onEnable() {
+        long t0 = System.nanoTime();
         saveDefaultConfig();
         cfg = getConfig();
         framework = new Framework(this);
@@ -71,17 +74,28 @@ public final class UIEnginePlugin extends JavaPlugin {
         // Warm the renderer so the first page a player opens is quick: fonts, then a few pages loaded and drawn
         // once, full screen, off screen. A cold JVM takes several times longer over its first pictures. Then the
         // first picture of every placed screen's page, kept so its first viewers are sent it without waiting.
-        renderers.execute(() -> {
+        renderers.execute(Renders.Kind.WARM, () -> {
             ai.resourcepack.ui.html.text.Fonts.bundled();
             warmUp();
+            warmMillis = (System.nanoTime() - t0) / 1e6;
         });
         screens.load();
         UiCommand command = new UiCommand(this, new FrameworkCommand(framework));
         getCommand("ui").setExecutor(command);
         getCommand("ui").setTabCompleter(command);
-        tasks.add(Bukkit.getScheduler().runTaskTimer(this, () -> screens.tick(Bukkit.getCurrentTick()), 1, 1));
+        var meter = framework.meter();
+        tasks.add(Bukkit.getScheduler().runTaskTimer(this, () -> {
+            meter.begin();
+            int tick = Bukkit.getCurrentTick();
+            try {
+                screens.tick(tick);
+            } finally {
+                meter.end(tick);
+            }
+        }, 1, 1));
         watch();
         UIEngine.instance = this;
+        enableMillis = (System.nanoTime() - t0) / 1e6;
     }
 
     @Override
@@ -180,6 +194,24 @@ public final class UIEnginePlugin extends JavaPlugin {
 
     Screens screens() {
         return screens;
+    }
+
+    Framework framework() {
+        return framework;
+    }
+
+    Renders renderers() {
+        return renderers;
+    }
+
+    /** How long enabling took on the server thread, in ms (-1 until done). */
+    double enableMillis() {
+        return enableMillis;
+    }
+
+    /** How long from enabling until the warm-up was done, in ms (-1 until done). */
+    double warmMillis() {
+        return warmMillis;
     }
 
     boolean debug() {

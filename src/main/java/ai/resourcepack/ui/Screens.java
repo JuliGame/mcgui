@@ -454,12 +454,19 @@ public final class Screens implements Listener {
         for (Seated s : views.values()) if (s.session.schemed()) s.session.render();
     }
 
-        void tick(long now) {
+    void tick(long now) {
         for (Wall w : walls.values()) for (Session s : w.all()) s.tick(now);
         for (Seated s : views.values()) {
             s.session.tick(now);
             s.restHotbar();
         }
+    }
+
+    /** How many walls are placed and how many sessions they have, and how many players are seated at a page. */
+    int[] counts() {
+        int sessions = 0;
+        for (Wall w : walls.values()) sessions += w.sessions.size() + (w.sharedSession != null ? 1 : 0);
+        return new int[]{walls.size(), sessions, views.size()};
     }
 
     void shutdown() {

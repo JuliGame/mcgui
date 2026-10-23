@@ -56,6 +56,7 @@ public final class Framework implements UIFramework, Listener {
     private Walls walls;
     private Views views;
     private final List<BukkitTask> tasks = new ArrayList<>();
+    private final TickMeter meter = new TickMeter();
 
     public Framework(JavaPlugin plugin) {
         this.plugin = plugin;
@@ -123,6 +124,15 @@ public final class Framework implements UIFramework, Listener {
     }
 
     private void tick() {
+        meter.begin();
+        try {
+            work();
+        } finally {
+            meter.end(Bukkit.getCurrentTick());
+        }
+    }
+
+    private void work() {
         views.tick();
         walls.tick();
         // Views first: the sender spends each player's budget in this order, and a seated player sees
@@ -180,6 +190,11 @@ public final class Framework implements UIFramework, Listener {
     @Override
     public java.util.concurrent.Executor serverThread() {
         return nms.serverThread();
+    }
+
+    /** What the plugin's tick tasks cost the server thread (UI Engine's own tick adds to it too). */
+    public TickMeter meter() {
+        return meter;
     }
 
     Views views() {

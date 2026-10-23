@@ -106,9 +106,9 @@ final class SessionRig implements AutoCloseable {
         Cpu.configure(renderThreads);
         renderers = new Renders() {
             @Override
-            public void execute(Runnable job) {
+            public void execute(Kind kind, Runnable job) {
                 queued.incrementAndGet();
-                super.execute(() -> {
+                super.execute(kind, () -> {
                     try {
                         job.run();
                     } finally {

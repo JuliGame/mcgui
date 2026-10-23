@@ -64,7 +64,7 @@ permissions:
     description: Open a test view or place a test wall for another player, with /ui test ... <player>.
     default: op
   uiengine.stats:
-    description: See how many walls there are and how much map data has been sent, with /ui stats.
+    description: See what the plugin costs the server (server thread, pictures, threads, start-up) with /ui stats.
     default: op
   uiengine.clear:
     description: Remove every test wall, whoever placed it, with /ui clear.

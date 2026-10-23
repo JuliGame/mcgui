@@ -435,7 +435,7 @@ public final class Session {
                     hoverKey, pressed, pressKey, x, y, resting ? 0 : pointerVx / scale, resting ? 0 : pointerVy / scale, plugin.renderTimeout());
             ahead = job;
             rendering = true;
-            renderers.execute(() -> {
+            renderers.execute(Renders.Kind.AHEAD, () -> {
                 try {
                     hoverAhead.run(job);
                 } catch (RuntimeException | Error e) {

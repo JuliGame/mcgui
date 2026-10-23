@@ -65,6 +65,12 @@ final class UiCommand implements TabExecutor {
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         String sub = args.length == 0 ? "help" : args[0].toLowerCase(Locale.ROOT);
+        if (sub.equals("stats")) {
+            if (!permitted(sender, permissionFor(sub))) return true;
+            if (args.length > 1 && args[1].equalsIgnoreCase("json")) sender.sendMessage(Stats.json(plugin));
+            else for (String line : Stats.lines(plugin)) say(sender, line, NamedTextColor.GRAY);
+            return true;
+        }
         if (FrameworkCommand.SUBCOMMANDS.contains(sub)) return framework.onCommand(sender, command, label, args);
         switch (sub) {
             case "open" -> open(sender, args);

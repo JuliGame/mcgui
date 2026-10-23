@@ -89,8 +89,6 @@ public final class FrameworkCommand implements TabExecutor {
             case "pack" -> {
                 if (sender instanceof Player p && plugin.pack() != null) plugin.pack().send(p);
             }
-            case "stats" -> say(sender, String.format(Locale.ROOT, "%d wall(s); %.1f MB of map data sent.",
-                    plugin.walls().all().size(), plugin.bytesSent() / 1e6), NamedTextColor.GRAY);
             case "debug" -> debug(sender, args);
             case "clear" -> {
                 testWalls.forEach(WallScreen::remove);
