@@ -352,10 +352,13 @@ public final class Views implements Listener {
         // Where a client-placed picture really is no longer matters, only that the camera is flagged: so a
         // spot by the player's own eye where they can be held (see clientEye). Without one, the server pointer.
         // A blurred view always has the server's: the game blurs only a camera that is another entity (spawnCamera), a
-        // creeper, which Paper will not spawn on peaceful: there the view is tinted but not blurred.
+        // creeper, which Paper will not spawn on peaceful: there the view is tinted but not blurred. A still view (an
+        // overlay) has it too: the client-placed pointer turns the player's own camera, and the world round the panel
+        // would swing with every move of the mouse.
         boolean blurred = withPack && options.blur() && world.getDifficulty() != org.bukkit.Difficulty.PEACEFUL;
-        Location eye = withPack && settings.clientPointer && !blurred ? clientEye(player, wall.facing) : null;
-        if (withPack && settings.clientPointer && !blurred && eye == null) debug("no room to hold " + player.getName() + " still: the server places their pointer");
+        boolean held = blurred || options.still();
+        Location eye = withPack && settings.clientPointer && !held ? clientEye(player, wall.facing) : null;
+        if (withPack && settings.clientPointer && !held && eye == null) debug("no room to hold " + player.getName() + " still: the server places their pointer");
         boolean clientPointer = eye != null;
         Location seat = null;
         if (clientPointer) {

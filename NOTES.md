@@ -408,6 +408,12 @@ wide for a default view). `/ui place <page> <cols> <rows> <name> <x> <y> <z>
   without them it passes the frame through. Paper spawns no creeper on
   peaceful, so there the view is only tinted. The camera is not the player's,
   so the server places the pointer.
+- **An overlay view is still** (`ViewOptions.still`, set for every `ui:overlay`
+  page): its camera is another entity and the server places the pointer. A
+  client-placed pointer is drawn from the player's own camera, so turning the
+  mouse turns the world seen through the transparent pixels, and the world
+  round the panel swings with the pointer. The shader only sees the camera,
+  so a frame-rate pointer and a still world cannot both be had.
 - **The mouse skips the tick.** `Pipeline.watch` reads a seated player's
   rotation packets on the netty thread as they arrive, and the pointer's move
   is written straight back (`Pipeline.sendNow`); the server's own position

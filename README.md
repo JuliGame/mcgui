@@ -176,11 +176,13 @@ your own: put an `.ogg` in `plugins/UIEngine/sounds/` and restart, and
 An overlay page (`ui:overlay`) is drawn on nothing instead of white: leave
 `html` and `body` transparent and put the page in a panel, and fullscreen the
 player sees the world round it, under the tint the meta gives (`none` for
-none). Add `blur` (`content="rgba(8, 10, 22, 0.3) blur"`) to blur the world
+none). The world stays still: the view's camera is not the player's own, so
+the server places the pointer (up to a tick behind the mouse) rather than
+the player's client, which would turn the world with every move of the
+pointer. Add `blur` (`content="rgba(8, 10, 22, 0.3) blur"`) to blur the world
 round the panel too, as the game blurs it behind a menu: that needs a 26.2
 client and a world that is not on peaceful (on peaceful the world is only
-tinted), and the pointer is then placed by the server, so the world stays
-still behind it. On a wall, the wall behind shows through, untinted. Players
+tinted). On a wall, the wall behind shows through, untinted. Players
 without the pack see the world round the panel too, without a tint.
 
 Controls while a page is open: mouse moves the pointer, either button clicks,
