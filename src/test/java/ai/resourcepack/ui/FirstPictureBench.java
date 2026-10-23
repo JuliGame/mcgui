@@ -86,7 +86,7 @@ public final class FirstPictureBench {
         Canvas drawn = new Canvas(PALETTE, size.cols, size.rows);
         drawn.draw(frame.image(), 0, 0);
         FirstPictures.Key key = new FirstPictures.Key(name, page, size.cols, size.rows, scale, first.key());
-        FirstPictures.Picture picture = FirstPictures.Picture.of(key, frame, drawn.copy());
+        FirstPictures.Picture picture = FirstPictures.Picture.of(key, frame, drawn.copy(), null);
         double take = cpu(runs, () -> {
             Canvas canvas = new Canvas(PALETTE, size.cols, size.rows);
             fill.get();

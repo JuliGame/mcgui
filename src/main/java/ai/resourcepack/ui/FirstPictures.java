@@ -3,6 +3,7 @@ package ai.resourcepack.ui;
 import ai.resourcepack.ui.html.HtmlRenderer;
 import ai.resourcepack.ui.html.Page;
 import ai.resourcepack.ui.html.paint.Painter;
+import ai.resourcepack.ui.html.style.Motion;
 import ai.resourcepack.ui.framework.api.Canvas;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
@@ -178,12 +179,18 @@ final class FirstPictures {
         final HtmlRenderer.Frame frame;
         /** The canvas with the picture on it, which nothing draws into any more. */
         final Canvas canvas;
+        /**
+         * On a page that moves, the motion the picture was drawn with (never changed: a taker takes on a copy, see
+         * {@link Motion#copyAt}); else null.
+         */
+        final Motion motion;
         final long bytes;
 
-        private Picture(Key key, HtmlRenderer.Frame frame, Canvas canvas) {
+        private Picture(Key key, HtmlRenderer.Frame frame, Canvas canvas, Motion motion) {
             this.key = key;
             this.frame = frame;
             this.canvas = canvas;
+            this.motion = motion;
             BufferedImage img = frame.image();
             // Its pixels, the canvas's colours (3 bytes a pixel) and tiles (1), and a little for each region and style.
             long pixels = (long) img.getWidth() * img.getHeight();
@@ -192,9 +199,10 @@ final class FirstPictures {
 
         /**
          * [frame], a whole first picture of [key]'s document, drawn onto [canvas], which nothing draws into after
-         * (a {@link Canvas#copy()} taken at once). On the thread that drew it, before anyone else can see it.
+         * (a {@link Canvas#copy()} taken at once), with [motion] (a copy nothing else changes; null on a page that never
+         * moves). On the thread that drew it, before anyone else can see it.
          */
-        static Picture of(Key key, HtmlRenderer.Frame frame, Canvas canvas) {
+        static Picture of(Key key, HtmlRenderer.Frame frame, Canvas canvas, Motion motion) {
             for (Painter.Hit h : frame.hits()) {
                 // Every session sharing these reads them: an Area works its bounds out the first time it is asked,
                 // so that is done here, before they are shared, and they are only read from then on.
@@ -206,7 +214,7 @@ final class FirstPictures {
             // it had none): done here for every element, so that later reads only ever replace that entry's value
             // (under jsoup's own lock) and never change the attributes another thread is reading.
             for (Element e : frame.document().getAllElements()) e.children();
-            return new Picture(key, frame, canvas);
+            return new Picture(key, frame, canvas, motion);
         }
 
         /** The picture (shared: copy it before painting into it). */

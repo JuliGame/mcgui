@@ -35,6 +35,7 @@ import java.util.UUID;
 import java.util.WeakHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
 /**
@@ -121,6 +122,14 @@ public final class Session {
     private final PooledPicture pooled = new PooledPicture();
     /** A picture another session drew for this one's state, handed over when it landed (server thread). */
     private FirstPictures.Picture offered;
+    /** A picture of a page that moves that another session drew for this one's state, handed over when it was published (server thread). */
+    private AnimFrames.Shared offeredFrame;
+    /**
+     * The last picture of a page that moves this session drew and shared (AnimFrames), until it next draws or shows
+     * another, when it settles whether anyone took it ({@link #retireShared}). Set by the render thread, read by the
+     * server thread between pictures.
+     */
+    private volatile AnimFrames.Shared sharedFrame;
     /** The next picture is drawn here, not waited for: the one waited for could not be drawn. */
     private boolean drawOwn;
     /** The tick this session was made. */
@@ -130,6 +139,11 @@ public final class Session {
      * [ahead] is the drawing under way, which holds this session's turn to draw ([rendering]) as a picture would.
      */
     private final HoverAhead hoverAhead;
+    /**
+     * Pictures this session drew whole, drew as a repaint of part of the last (or a view cut from a tall picture), and
+     * took from another session (AnimFrames): for tests and benchmarks.
+     */
+    final AtomicLong drewWhole = new AtomicLong(), drewPart = new AtomicLong(), tookFrames = new AtomicLong();
     private HoverAhead.Job ahead;
     /** Looks ahead again, on the server thread: when another session's drawing ahead is over. */
     private final Runnable lookAgain;
@@ -242,6 +256,7 @@ public final class Session {
         pendingFragment = fragment;
         hoverSoundAt = null;
         motion = new Motion();
+        shownAt = Bukkit.getCurrentTick();
         Player viewerNow = player();
         Sounds.play(viewerNow, p.meta("ui:open-sound"));
         if (viewerNow != null) Bukkit.getPluginManager().callEvent(new PageOpenEvent(viewerNow, n, screen));
@@ -290,6 +305,8 @@ public final class Session {
             // The new file can be shaped differently: nothing carries over by position.
             hover = null;
             pressed = null;
+            motion = new Motion();
+            shownAt = Bukkit.getCurrentTick();
             refreshTicks = refreshSetting(p);
             render();
         }, serverThread);
@@ -320,6 +337,9 @@ public final class Session {
         hover = null;
         pressed = null;
         pendingFragment = null;
+        // Its motion was of the other page's elements.
+        motion = new Motion();
+        shownAt = Bukkit.getCurrentTick();
         refreshTicks = refreshSetting(page);
         nextRefresh = Bukkit.getCurrentTick() + refreshTicks;
         Player pl = player();
@@ -417,7 +437,9 @@ public final class Session {
      */
     private synchronized void lookAhead() {
         if (closed || rendering || !hoverAhead.on() || page == null || doc == null || pointerX < 0 || cache != null || pendingFragment != null) return;
-        if (!page.styles.hovers() || page.siblingStates() || page.moves() || !idle()) return;
+        // On a page that moves, only while nothing does: a hover drawn ahead then shows the first moment of the transitions
+        // it starts (Repaint.prepare styles it with a copy of the motion, taken on with it).
+        if (!page.styles.hovers() || page.siblingStates() || !still() || page.moves() && !motion.styled() || !idle()) return;
         HtmlRenderer.Frame f = frame;
         double scale = scale();
         if (f == null || f.page() != page || f.document() != doc || f.scale() != scale) return;
@@ -435,14 +457,21 @@ public final class Session {
                     hoverKey, pressed, pressKey, x, y, resting ? 0 : pointerVx / scale, resting ? 0 : pointerVy / scale, plugin.renderTimeout());
             ahead = job;
             rendering = true;
+            Motion m = page.moves() ? motion : null;
+            double[] at = moment();
             renderers.execute(Renders.Kind.AHEAD, () -> {
                 try {
+                    if (m != null) {
+                        m.moment(at[0], at[1]);
+                        Motion.set(m);
+                    }
                     hoverAhead.run(job);
                 } catch (RuntimeException | Error e) {
                     // It may have left nothing usable; real pictures draw as ever.
                     hoverAhead.drop();
                     if (plugin.debug()) e.printStackTrace();
                 } finally {
+                    Motion.clear();
                     HoverAhead.release();
                     done();
                 }
@@ -484,12 +513,16 @@ public final class Session {
 
     /** The hover and press keys of the picture last drawn (render thread only). */
     private List<Element> drawnHover = List.of(), drawnPress = List.of();
+    /** The elements that moved (or were waiting to) in the picture last drawn: the next picture repaints them (render thread only). */
+    private Set<Element> drawnMoved = Set.of();
 
     private List<Element> key(Element e, boolean active) {
         return page == null ? List.of() : page.styles.stateKey(e, active);
     }
 
     private void submit() {
+        // The last picture this session shared is settled before anything is drawn or shown over it.
+        retireShared();
         Page p = page;
         Document held = doc;
         Placeholders.Filled fill = filled;
@@ -528,13 +561,45 @@ public final class Session {
         }
         FirstPictures.Key publish = first;
         FirstPictures pictures = plugin.firstPictures();
+        // A page that moves is drawn at the moment each picture is of. While something on it moves, a picture differs
+        // from the last by time alone: what moved is repainted (or all of it, if that is too much), and nothing is cut
+        // from a tall picture of another moment. While nothing does, it is drawn as a page that never moves.
+        Motion moving = p.moves() ? motion : null;
+        boolean animating = moving != null && moving.active();
+        double[] moment = moment();
+        // While only animations that repeat for ever move, every viewer of this document in this state wants the same
+        // picture at each tick: one draws it, the others take it (AnimFrames).
+        AnimFrames.Shared share = null, landedFrame = offeredFrame;
+        offeredFrame = null;
+        AnimFrames.Key frameKey = animating && !moving.personal() ? frameKey(p, held, s, fragment, scale, hoverKey, pressKey) : null;
+        if (frameKey != null) {
+            AnimFrames frames = plugin.animFrames();
+            if (landedFrame != null) {
+                // The one waited for: taken if it is still of this state, else this session draws its own.
+                if (landedFrame.key.equals(frameKey) && frames.take(landedFrame, canvas)) {
+                    tookFrame(landedFrame);
+                    return;
+                }
+            } else {
+                AnimFrames.Claim claim = frames.claim(frameKey, Bukkit.getCurrentTick(), canvas, sh -> serverThread.execute(() -> frameLanded(sh)));
+                if (claim.waits()) return; // still drawing, as far as render() goes
+                if (claim.taken() != null) {
+                    tookFrame(claim.taken());
+                    return;
+                }
+                share = claim.mine();
+            }
+        }
+        AnimFrames.Shared sharing = share;
         // Real work first: drawings ahead, of every session, give way.
         HoverAhead.makeRoom();
-        // A page that moves is drawn whole each time, at the moment it is of: nothing is cut from an older picture.
-        Motion moving = p.moves() ? motion : null;
         renderers.execute(() -> {
             boolean published = false, drawnAhead = false;
-            if (moving != null) Motion.set(moving);
+            Motion m = moving;
+            if (m != null) {
+                m.moment(moment[0], moment[1]);
+                Motion.set(m);
+            }
             // The document to draw: the session's, or, if it has none yet (a page just shown), a copy made here.
             Document d = held;
             try {
@@ -554,12 +619,14 @@ public final class Session {
                 // This picture's: put back once it is drawn, so a failure part way through cannot leave a half-patched one.
                 ScrollCache c = cache;
                 cache = null;
-                boolean same = fragment == null && before != null && before.document() == d && before.page() == p && before.scale() == scale;
+                // A motion that has styled nothing yet (the page shown again over its own last picture) learns from a whole one.
+                boolean same = fragment == null && before != null && before.document() == d && before.page() == p && before.scale() == scale
+                        && (m == null || m.styled());
                 double at = same ? Math.max(0, Math.min(s, before.maxScroll())) : s;
                 // A tall picture of another document or size, or one the view has left, is of no more use: nothing reads it
                 // from now on, and a new one may be painted over it.
                 ScrollCache dropped = null;
-                if (c != null && (moving != null || !(same && c.of(p, d, canvas.width(), canvas.height(), scale) && c.covers(at)))) {
+                if (c != null && (animating || !(same && c.of(p, d, canvas.width(), canvas.height(), scale) && c.covers(at)))) {
                     dropped = c;
                     c = null;
                 }
@@ -567,7 +634,11 @@ public final class Session {
                 ScrollCache kept = c;
                 boolean still = same && Math.abs(before.scrollY() - at) < 0.01;
                 Set<Element> moved = same ? changedState(hoverKey, pressKey) : Set.of();
-                if (still && moved.isEmpty() && moving == null) {
+                // A picture that differs from the last by time alone repaints just round where what moves was and is.
+                double margin = moved.isEmpty() ? Repaint.MOTION_MARGIN : Repaint.DIRTY_MARGIN;
+                // What moved in the picture on the screen may have moved again.
+                if (same && animating && !drawnMoved.isEmpty()) moved = union(moved, drawnMoved);
+                if (still && moved.isEmpty() && !animating) {
                     drawnHover = hoverKey;
                     drawnPress = pressKey;
                     cache = c;
@@ -592,21 +663,23 @@ public final class Session {
                 if (c != null) {
                     f = c.frame(at);
                     partial = still;
-                } else if (still && !redraw && moving == null) {
-                    // Only the hover or press state moved: repaint just what it touches, unless that was drawn ahead
-                    // (HoverAhead: the same pixels, worked out over a copy of this picture). A picture shared with other
-                    // sessions (FirstPictures) is copied first, as the repaint (or the pixels drawn ahead) go into it.
+                } else if (still && !redraw) {
+                    // Only the hover or press state moved, or what moves on the page: repaint just what it touches, unless
+                    // that was drawn ahead (HoverAhead: the same pixels, worked out over a copy of this picture, with the
+                    // motion it was styled with, taken on here). A picture shared with other sessions (FirstPictures) is
+                    // copied first, as the repaint (or the pixels drawn ahead) go into it.
                     HtmlRenderer.Frame base = before.image() == borrowed ? FirstPictures.own(before, pooled.take(canvas.width(), canvas.height())) : before;
-                    Repaint.Prepared ready = hoverAhead.take(before, drawnHover, drawnPress, hoverKey, pressKey);
+                    Repaint.Prepared ready = animating ? null : hoverAhead.take(before, drawnHover, drawnPress, hoverKey, pressKey);
                     drawnAhead = ready != null;
+                    if (drawnAhead && ready.motion() != null) m = took(moving, ready.motion(), moment[0]);
                     Repaint.Result r = drawnAhead ? ready.apply(base)
-                            : Repaint.partial(p, d, canvas.width(), canvas.height(), scale, before.scrollY(), state, base, moved, timeout);
+                            : Repaint.partial(p, d, canvas.width(), canvas.height(), scale, before.scrollY(), state, base, moved, margin, timeout);
                     if (r.frame() != null) {
                         f = r.frame();
                         changed = r.changed();
                         partial = true;
                     }
-                } else if (same && !still && lasting && moving == null && ScrollCache.possible(before) && !NO_STRIP.contains(p)) {
+                } else if (same && !still && lasting && !animating && ScrollCache.possible(before) && !NO_STRIP.contains(p)) {
                     // Only the view moved (and perhaps the pointer's state with it). Painting is nearly all a picture
                     // costs, and the next notches will want the rows round this view: paint a few views' worth of
                     // the page at once, and cut this view and the next ones from that.
@@ -662,14 +735,25 @@ public final class Session {
                 }
                 drawnHover = hoverKey;
                 drawnPress = pressKey;
+                drawnMoved = m != null ? m.moved() : Set.of();
                 drawnName = name;
                 frame = f;
+                (partial ? drewPart : drewWhole).incrementAndGet();
+                if (sharing != null) {
+                    // Still a picture every viewer in this state wants: unless what moves now runs on this viewer's clock.
+                    if (f.document() == d && m != null && m.active() && !m.personal()) {
+                        plugin.animFrames().publish(sharing, f, canvas, drawnMoved);
+                        sharedFrame = sharing;
+                    } else {
+                        plugin.animFrames().abandon(sharing);
+                    }
+                }
                 hoverAhead.drop();
                 if (publish != null && !partial && c == null && f.document() == d && f.scrollY() == 0) {
                     // This session's first picture of the page, drawn as any session's would be: kept for the next to
                     // show it here, with the canvas as it is now. Its image (and document) are shared from now on, so the
                     // image is never handed back. Picture.of cannot return null (CanvasShare).
-                    FirstPictures.Picture picture = FirstPictures.Picture.of(publish, f, canvas.copy());
+                    FirstPictures.Picture picture = FirstPictures.Picture.of(publish, f, canvas.copy(), m == null ? null : m.copy());
                     borrowed = f.image();
                     pooled.share(borrowed);
                     pictures.publish(publish, picture);
@@ -704,6 +788,8 @@ public final class Session {
             } finally {
                 Motion.clear();
                 if (publish != null && !published) pictures.abandon(publish);
+                // Not drawn: whoever waits for it draws their own (nothing if it was published).
+                if (sharing != null) plugin.animFrames().abandon(sharing);
                 done();
             }
         });
@@ -725,6 +811,96 @@ public final class Session {
         return changed;
     }
 
+    private static Set<Element> union(Set<Element> a, Set<Element> b) {
+        if (a.isEmpty()) return b;
+        Set<Element> out = Collections.newSetFromMap(new IdentityHashMap<>());
+        out.addAll(a);
+        out.addAll(b);
+        return out;
+    }
+
+    /**
+     * Takes on [from], the motion a picture drawn elsewhere (ahead, or by another session) was styled with, in place of
+     * [was], the one this picture began with: a copy of its own, as if styled at [viewer] seconds, and current on this
+     * (render) thread. Unless the page was shown again meanwhile, which gave the session a new motion: then [was] stays
+     * this picture's. Returns the one this picture is drawn with.
+     */
+    private Motion took(Motion was, Motion from, double viewer) {
+        Motion m = from.copyAt(viewer);
+        if (!MOTION.compareAndSet(this, was, m)) return was;
+        Motion.set(m);
+        return m;
+    }
+
+    private static final java.lang.invoke.VarHandle MOTION;
+
+    static {
+        try {
+            MOTION = java.lang.invoke.MethodHandles.lookup().findVarHandle(Session.class, "motion", Motion.class);
+        } catch (ReflectiveOperationException e) {
+            throw new ExceptionInInitializerError(e);
+        }
+    }
+
+    /**
+     * The key of the picture about to be drawn if other viewers may want it too (AnimFrames): of the document shown, in the
+     * state, at the place and size its last picture shows. Else null.
+     */
+    private AnimFrames.Key frameKey(Page p, Document d, double s, String fragment, double scale, List<Element> hoverKey, List<Element> pressKey) {
+        HtmlRenderer.Frame f = frame;
+        if (d == null || f == null || fragment != null || f.document() != d || f.page() != p || f.scale() != scale) return null;
+        if (Math.abs(f.scrollY() - Math.max(0, Math.min(s, f.maxScroll()))) >= 0.01) return null;
+        // The render thread's, settled: no picture is being drawn.
+        if (!hoverKey.equals(drawnHover) || !pressKey.equals(drawnPress)) return null;
+        return new AnimFrames.Key(d, p, canvas.width(), canvas.height(), scale, f.scrollY(), hoverKey, pressKey);
+    }
+
+    /**
+     * Shows [sh], a picture another session drew for this one's state, which this session's canvas already shows (taken
+     * by AnimFrames): its frame is this session's from now on, shared, as a first picture taken is. Server thread, in
+     * place of drawing.
+     */
+    private void tookFrame(AnimFrames.Shared sh) {
+        AnimFrames frames = plugin.animFrames();
+        HtmlRenderer.Frame f = frames.frame(sh);
+        frame = f;
+        borrowed = f.image();
+        drawnMoved = frames.moved(sh);
+        cache = null;
+        hoverAhead.drop();
+        tookFrames.incrementAndGet();
+        rendering = false;
+    }
+
+    /** The picture this session waited for ([sh]) was published by another session, with a frame or none. */
+    private void frameLanded(AnimFrames.Shared sh) {
+        synchronized (this) {
+            dirty = false;
+            if (closed) {
+                rendering = false;
+                return;
+            }
+            // Taken if the state is still the one it is of; else what is wanted now is drawn here.
+            offeredFrame = sh;
+            submit();
+        }
+    }
+
+    /**
+     * Settles the last picture this session shared ({@link #sharedFrame}), before it draws or shows another: nobody takes it
+     * from now on, and if anybody did, it is shared for good, so it is copied before it is painted over and never handed
+     * back. Server thread, between pictures.
+     */
+    private void retireShared() {
+        AnimFrames.Shared sh = sharedFrame;
+        if (sh == null) return;
+        sharedFrame = null;
+        java.awt.image.BufferedImage img = plugin.animFrames().retire(sh);
+        if (img == null) return;
+        pooled.share(img);
+        HtmlRenderer.Frame f = frame;
+        if (f != null && f.image() == img) borrowed = img;
+    }
 
     /**
      * The key of the first picture of the page as filled in [filled] if the picture to be drawn is one
@@ -736,8 +912,9 @@ public final class Session {
         HtmlRenderer.Frame f = frame;
         if (!plugin.firstPictures().enabled() || fragment != null || s != 0 || hover != null || pressed != null) return null;
         if (!pristine || filled == null || filled.source() != p.document || filled.personal() || d != null && f != null && f.document() == d) return null;
-        // A face that has not arrived yet would be kept as its stand-in.
-        if (p.schemed() || p.moves()) return null;
+        // A face that has not arrived yet would be kept as its stand-in. A page that moves is kept with the motion it was
+        // drawn with (its transitions' starting points, when its animations that end began), which the taker takes on.
+        if (p.schemed()) return null;
         return new FirstPictures.Key(pageName, p, canvas.cols(), canvas.rows(), scale, filled.key());
     }
 
@@ -756,6 +933,10 @@ public final class Session {
         borrowed = f.image();
         drawnHover = List.of();
         drawnPress = List.of();
+        // Its motion as the picture was drawn, moved on to now on this viewer's clock: a transition its next hover
+        // starts, starts from what the picture shows, and what moved in it is repainted next.
+        if (picture.motion != null) motion = picture.motion.copyAt((Bukkit.getCurrentTick() - shownAt) / 20.0);
+        drawnMoved = picture.motion != null ? motion.moved() : Set.of();
         drawnName = name;
         cache = null;
         frame = f;
@@ -1026,8 +1207,27 @@ public final class Session {
         Sounds.play(p, own != null ? own : plugin.clickSound());
     }
 
-    /** The clock and the transitions under way of the page shown, for its animations: new with each page shown. */
+    /** The clocks and the transitions under way of the page shown, for its animations: new with each page shown. */
     private volatile Motion motion = new Motion();
+    /** The tick the page shown was shown at: where its viewer's clock starts (see {@link #moment}). */
+    private int shownAt;
+
+    /**
+     * The moment a picture asked for now is of, on the viewer's clock and on the page's ({@link Motion#moment}): in
+     * whole ticks, so viewers asking in the same tick are at the same moment.
+     */
+    private double[] moment() {
+        int t = Bukkit.getCurrentTick();
+        return new double[]{(t - shownAt) / 20.0, t / 20.0};
+    }
+
+    /**
+     * Whether nothing on the page shown is moving or waiting to ({@link Motion#active}): its next picture then differs
+     * from the last only by what the viewer does, so it can be drawn ahead, repainted in part, or shared.
+     */
+    boolean still() {
+        return !motion.active();
+    }
 
     /** The wall screen this session is on, by name, for plugins' events; null for a fullscreen page. */
     String screen;

@@ -655,7 +655,7 @@ public final class Page implements Resources {
 
     /**
      * Whether anything on the page can animate or transition ({@code animation}, {@code transition}): its
-     * pictures are then drawn whole, again and again while something moves, at the moment each is of.
+     * pictures are then drawn with a motion, at the moment each is of, again and again while something moves.
      */
     public boolean moves() {
         Boolean m = moves;

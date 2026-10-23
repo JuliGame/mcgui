@@ -134,6 +134,7 @@ final class SessionRig implements AutoCloseable {
             set(p, UIEnginePlugin.class, "pages", pages);
             set(p, UIEnginePlugin.class, "serverThread", serverThread);
             set(p, UIEnginePlugin.class, "pictures", new FirstPictures(entries, 512L << 20));
+            set(p, UIEnginePlugin.class, "frames", new AnimFrames());
             set(p, JavaPlugin.class, "logger", Logger.getLogger("SessionRig"));
             return p;
         } catch (ReflectiveOperationException e) {

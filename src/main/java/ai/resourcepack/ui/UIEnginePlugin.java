@@ -48,6 +48,8 @@ public final class UIEnginePlugin extends JavaPlugin {
     private volatile FirstPictures pictures;
     /** How long enabling took on the server thread, and until the warm-up (and its kept first pictures) was done, in ms; -1 until known. */
     private volatile double enableMillis = -1, warmMillis = -1;
+    /** The pictures of pages that move, shared by the viewers in the same state (see {@link AnimFrames}). */
+    private final AnimFrames frames = new AnimFrames();
 
     @Override
     public void onEnable() {
@@ -178,6 +180,11 @@ public final class UIEnginePlugin extends JavaPlugin {
     /** The first pictures of pages, kept for the next session to show them (see {@link FirstPictures}). */
     FirstPictures firstPictures() {
         return pictures;
+    }
+
+    /** The pictures of pages that move, shared by every viewer in the same state at the same tick. */
+    AnimFrames animFrames() {
+        return frames;
     }
 
     private FirstPictures newFirstPictures() {
@@ -340,15 +347,23 @@ public final class UIEnginePlugin extends JavaPlugin {
                 FirstPictures.Key key = new FirstPictures.Key(t.name, page, size[0], size[1], scale, filled.key());
                 if (!kept.claim(key, p -> {}).mine()) continue;
                 FirstPictures.Picture picture = null;
+                // A page that moves is drawn as a viewer's first picture is, at the start of their clock, and kept with the
+                // motion that drew it: a taker's first hover then starts its transitions from what the picture shows.
+                ai.resourcepack.ui.html.style.Motion motion = page.moves() ? new ai.resourcepack.ui.html.style.Motion() : null;
                 try {
+                    if (motion != null) {
+                        motion.moment(0, Bukkit.getCurrentTick() / 20.0);
+                        ai.resourcepack.ui.html.style.Motion.set(motion);
+                    }
                     var frame = HtmlRenderer.render(page, filled.copy(), size[0] * 128, size[1] * 128, scale, 0, HtmlRenderer.state(null, null),
                             null, null, renderTimeout());
                     var canvas = UIFramework.get().canvas(size[0], size[1]);
                     canvas.transparency(page.overlay());
                     canvas.tint(page.overlayTint());
                     canvas.draw(frame.image(), 0, 0);
-                    picture = FirstPictures.Picture.of(key, frame, canvas);
+                    picture = FirstPictures.Picture.of(key, frame, canvas, motion);
                 } finally {
+                    ai.resourcepack.ui.html.style.Motion.clear();
                     kept.publish(key, picture);
                 }
                 drawn++;

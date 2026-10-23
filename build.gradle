@@ -219,6 +219,20 @@ tasks.register('benchClasspath') {
     doLast { println sourceSets.test.runtimeClasspath.asPath }
 }
 
+// What a page that moves costs at 1, 10 and 50 viewers ticked as on a server: CPU per animated second, pictures each
+// viewer gets a second against animation-fps, and compressed bytes a second (AnimBench). -Pdir=<pages folder>
+// -Ppages=name[:hover:selector],... -Psessions=1,10,50 -Psize=16x9 -Pheight=576 -Psecs=10 -Pwarm=3 -Pfps=10 -Pthreads=<n> -Pout=<tsv> -Ptag=<label>.
+tasks.register('animBench', JavaExec) {
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'ai.resourcepack.ui.AnimBench'
+    systemProperty 'java.awt.headless', 'true'
+    systemProperty 'dir', file(project.findProperty('dir') ?: 'src/main/resources/pages').absolutePath
+    ['pages', 'sessions', 'size', 'height', 'secs', 'warm', 'fps', 'threads', 'out', 'tag'].each { k ->
+        if (project.hasProperty(k)) systemProperty k, project.property(k)
+    }
+    maxHeapSize = '3g'
+}
+
 // Tests and a benchmark against a real Paper server's own classes (its netty pipeline handlers, packet
 // codecs and compressor), for what reflection reaches on a running server. Only with a server directory
 // that has run once (versions/ and libraries/), and a Java 25 toolchain, which Paper 26 is built for:

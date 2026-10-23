@@ -2,10 +2,13 @@ package ai.resourcepack.ui.html.style;
 
 import ai.resourcepack.ui.html.css.Stylesheet;
 import ai.resourcepack.ui.html.css.Values;
+import org.jsoup.nodes.Element;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -14,12 +17,18 @@ import java.util.function.BiConsumer;
 
 /**
  * CSS animations ({@code @keyframes}, {@code animation}) and transitions ({@code transition}) for one copy of a
- * page as it is shown: the clock they run on, and the transitions under way. Each time the page is styled, an
+ * page as it is shown: the clocks they run on, and the transitions under way. Each time the page is styled, an
  * element that animates has its declared values replaced with the values at that moment, worked out from the
  * declared ones as text: numbers with the same units, colours and transform functions move smoothly, anything
  * else changes halfway. The cascade then computes the rest as ever, so any property can be animated, layout
  * included, and a picture is just a picture of that moment. Whoever shows the page draws it again while
- * {@link #active()}.
+ * {@link #active()}, repainting only what {@link #moved()}.
+ *
+ * <p>Two clocks, both set by whoever draws ({@link #moment}): the viewer's, from when the page was shown to them,
+ * which transitions and animations that end run on; and the page's, the same for every viewer, which animations that
+ * repeat for ever run on (their delay only shifts where in the loop they are). So while only those move
+ * ({@link #personal()} is false), every viewer of the page in the same state sees the same picture at the same
+ * moment, and one picture can serve them all.
  *
  * <p>Styling finds the motion of the picture being drawn through {@link #current()}, set around the drawing
  * by whoever draws it; with none (a page drawn once, for a test), nothing moves.
@@ -34,16 +43,35 @@ public final class Motion {
             "padding-top", "padding-right", "padding-bottom", "padding-left", "box-shadow", "text-shadow", "filter",
             "letter-spacing", "font-size", "border-radius", "outline-color", "fill", "stroke");
 
-    private final long start = System.nanoTime();
-    /** A clock stopped at so many seconds, for a picture of one moment (a test); null runs on the real one. */
+    /**
+     * What a keyframe that does not give a property starts or ends at when the element does not declare it either: the
+     * property's initial value, for those whose initial value can be written down without the element's other values.
+     */
+    private static final Map<String, String> INITIAL = Map.ofEntries(Map.entry("opacity", "1"), Map.entry("transform", "none"),
+            Map.entry("filter", "none"), Map.entry("background-color", "rgba(0, 0, 0, 0)"), Map.entry("box-shadow", "none"),
+            Map.entry("text-shadow", "none"), Map.entry("letter-spacing", "0px"), Map.entry("border-radius", "0px"),
+            Map.entry("margin-top", "0px"), Map.entry("margin-right", "0px"), Map.entry("margin-bottom", "0px"), Map.entry("margin-left", "0px"),
+            Map.entry("padding-top", "0px"), Map.entry("padding-right", "0px"), Map.entry("padding-bottom", "0px"), Map.entry("padding-left", "0px"));
+
+    /** A clock stopped at so many seconds, for a picture of one moment (a test); null runs on the one {@link #moment} sets. */
     private Double stopped;
-    /** Seconds since the page was shown, fixed for one styling pass. */
-    private double now;
-    private volatile boolean active;
-    private boolean moving;
-    /** Per element (its place in document order): what each transitioned property was last declared as, and transitions under way. */
+    /** The moment the next pictures are of: seconds on the viewer's clock and on the page's (see {@link #moment}). */
+    private double viewerAt, pageAt;
+    /** The moment of this styling pass, on the viewer's clock and on the page's. */
+    private double now, pageNow;
+    /** Styling passes so far: an animation on the page from the first is as old as the page. */
+    private int passes;
+    private volatile boolean active, personal;
+    private boolean moving, own;
+    /** The elements that moved (or were waiting to) in this pass, and in the last whole one. */
+    private Set<Element> movingNow = newSet(), moved = Set.of();
+    /**
+     * Per element (its place in document order): what each transitioned property was last declared as, transitions
+     * under way, and when each animation that ends began (viewer's clock).
+     */
     private final Map<Integer, Map<String, String>> last = new HashMap<>();
     private final Map<Integer, Map<String, Run>> running = new HashMap<>();
+    private final Map<Integer, Map<String, Double>> began = new HashMap<>();
 
     private record Run(String from, String to, double start, double duration, Easing easing) {}
 
@@ -55,7 +83,7 @@ public final class Motion {
         this.stopped = stopped;
     }
 
-    /** A motion whose clock stays at [seconds] after the page was shown: every picture is of that moment. */
+    /** A motion whose clocks stay at [seconds] after the page was shown: every picture is of that moment. */
     public static Motion at(double seconds) {
         return new Motion(seconds);
     }
@@ -63,6 +91,15 @@ public final class Motion {
     /** Moves a stopped clock (see {@link #at}) on to [seconds]. */
     public void stopAt(double seconds) {
         stopped = seconds;
+    }
+
+    /**
+     * The next pictures are of [viewer] seconds after the page was shown to its viewer, and [page] seconds on the page's
+     * own clock (shared by every viewer). Set by whoever draws, before drawing; a stopped clock ({@link #at}) ignores it.
+     */
+    public void moment(double viewer, double page) {
+        viewerAt = viewer;
+        pageAt = page;
     }
 
     /** The motion of the picture this thread is drawing, or null. */
@@ -84,15 +121,108 @@ public final class Motion {
         return active;
     }
 
+    /**
+     * Whether anything moving in the last picture runs on its viewer's clock (a transition, or an animation that ends):
+     * then its pictures are this viewer's own. While only animations that repeat for ever move, they are the page's.
+     */
+    public boolean personal() {
+        return personal;
+    }
+
+    /** The elements that moved, or were waiting to, in the last whole styling pass: what the next picture repaints. */
+    public Set<Element> moved() {
+        return moved;
+    }
+
+    /**
+     * Whether this motion has styled the page yet. One that has not knows nothing of what was shown before, so a hover
+     * would start no transition: the next picture with it is drawn whole, which teaches it.
+     */
+    public boolean styled() {
+        return passes > 0;
+    }
+
+    /** Whether this motion keeps anything for the element at [at]: it is styled afresh every time, so that it is kept up to date. */
+    boolean tracks(int at) {
+        return last.containsKey(at) || running.containsKey(at) || began.containsKey(at);
+    }
+
+    /**
+     * What the last picture drawn with this motion was laid out as (HtmlRenderer's, opaque here), kept while something
+     * moves: the next picture, if what moved changed only what painting reads, paints it again rather than laying the
+     * page out afresh. Never copied ({@link #copy}): its boxes are one picture's at a time, as this motion is.
+     */
+    private Object layout;
+
+    /** The layout kept (see above), handed over: it is the caller's until it {@link #keepLayout}s one again. Or null. */
+    public Object takeLayout() {
+        Object l = layout;
+        layout = null;
+        return l;
+    }
+
+    /** Keeps [l], the layout of the picture just styled with this motion, if something on it still moves. */
+    public void keepLayout(Object l) {
+        layout = active ? l : null;
+    }
+
+    /** A copy of this motion, which goes on from where this one is without changing it. */
+    public Motion copy() {
+        Motion m = new Motion(stopped);
+        m.viewerAt = viewerAt;
+        m.pageAt = pageAt;
+        m.now = now;
+        m.pageNow = pageNow;
+        m.passes = passes;
+        m.active = active;
+        m.personal = personal;
+        m.moved = moved;
+        for (Map.Entry<Integer, Map<String, String>> e : last.entrySet()) m.last.put(e.getKey(), new HashMap<>(e.getValue()));
+        for (Map.Entry<Integer, Map<String, Run>> e : running.entrySet()) m.running.put(e.getKey(), new HashMap<>(e.getValue()));
+        for (Map.Entry<Integer, Map<String, Double>> e : began.entrySet()) m.began.put(e.getKey(), new HashMap<>(e.getValue()));
+        return m;
+    }
+
+    /**
+     * A copy of this motion as if its last styling pass had been at [viewer] seconds on its viewer's clock: everything
+     * on that clock (transitions, animations that end) moved on or back by the difference. How a viewer takes on the
+     * motion of a picture drawn for it at another moment (ahead of time, or by another viewer), which then starts when
+     * it is shown.
+     */
+    public Motion copyAt(double viewer) {
+        Motion m = copy();
+        double by = viewer - now;
+        if (by == 0) return m;
+        m.now = viewer;
+        for (Map<String, Run> runs : m.running.values()) {
+            for (Map.Entry<String, Run> e : runs.entrySet()) {
+                Run r = e.getValue();
+                e.setValue(new Run(r.from, r.to, r.start + by, r.duration, r.easing));
+            }
+        }
+        for (Map<String, Double> b : m.began.values()) b.replaceAll((k, v) -> v + by);
+        return m;
+    }
+
     /** A styling pass starts: the moment it is of. */
     void begin() {
-        now = stopped != null ? stopped : (System.nanoTime() - start) / 1e9;
+        now = stopped != null ? stopped : viewerAt;
+        pageNow = stopped != null ? stopped : pageAt;
         moving = false;
+        own = false;
+        movingNow = newSet();
     }
 
     /** A styling pass ended. */
     void end() {
+        passes++;
         active = moving;
+        personal = own;
+        moved = Collections.unmodifiableSet(movingNow);
+    }
+
+    private static Set<Element> newSet() {
+        return Collections.newSetFromMap(new IdentityHashMap<>());
     }
 
     /** Whether declared values [d] animate or transition anything. */
@@ -106,21 +236,29 @@ public final class Motion {
         return false;
     }
 
-    /** Puts the element at [at]'s animated and transitioning values into its declared values [all], for this moment. */
-    void apply(int at, Map<String, String> all, Stylesheet sheet) {
+    /**
+     * Puts element [e]'s (at [at] in document order) animated and transitioning values into its declared values [all],
+     * for this moment. Called for every element whose declared values move, and every one this motion {@link #tracks}.
+     */
+    void apply(int at, Element e, Map<String, String> all, Stylesheet sheet) {
         Map<String, String> base = new HashMap<>(all);
-        animate(all, base, sheet);
+        boolean was = moving;
+        moving = false;
+        animate(at, all, base, sheet);
         transition(at, all, base);
+        if (moving) movingNow.add(e);
+        moving |= was;
     }
 
     // ---------------------------------------------------------------- animations
 
-    private void animate(Map<String, String> all, Map<String, String> base, Stylesheet sheet) {
+    private void animate(int at, Map<String, String> all, Map<String, String> base, Stylesheet sheet) {
         List<String> names = split(all.getOrDefault("animation-name", "none"));
         List<String> durations = split(all.getOrDefault("animation-duration", "0s")), delays = split(all.getOrDefault("animation-delay", "0s"));
         List<String> counts = split(all.getOrDefault("animation-iteration-count", "1")), directions = split(all.getOrDefault("animation-direction", "normal"));
         List<String> fills = split(all.getOrDefault("animation-fill-mode", "none")), easings = split(all.getOrDefault("animation-timing-function", "ease"));
         List<String> states = split(all.getOrDefault("animation-play-state", "running"));
+        Map<String, Double> began = this.began.get(at), still = null;
         for (int i = 0; i < names.size(); i++) {
             String name = unquote(names.get(i));
             List<Stylesheet.Keyframe> frames = sheet == null ? null : sheet.keyframes.get(name);
@@ -128,29 +266,47 @@ public final class Motion {
             double duration = time(at(durations, i)), delay = time(at(delays, i));
             String count = at(counts, i).toLowerCase(Locale.ROOT);
             double iterations = count.equals("infinite") ? Double.POSITIVE_INFINITY : number(count, 1);
+            boolean forever = Double.isInfinite(iterations);
+            // One that ends began when it was first applied (as old as the page, from the first pass): on the viewer's clock.
+            double start = 0;
+            if (!forever) {
+                Double b = began == null ? null : began.get(name);
+                start = b != null ? b : passes == 0 ? 0 : now;
+                if (still == null) still = new HashMap<>();
+                still.put(name, start);
+            }
             String direction = at(directions, i).toLowerCase(Locale.ROOT), fill = at(fills, i).toLowerCase(Locale.ROOT);
             Easing easing = Easing.parse(at(easings, i));
             // Paused stays where it starts: nothing here keeps time while paused.
-            double t = at(states, i).equalsIgnoreCase("paused") ? 0 : now - delay;
+            double t = at(states, i).equalsIgnoreCase("paused") ? 0 : (forever ? pageNow : now - start) - delay;
             double progress;
             if (duration <= 0 || iterations <= 0) {
                 if (!fill.equals("forwards") && !fill.equals("both")) continue;
                 progress = end(iterations, direction);
             } else if (t < 0) {
-                moving = true;
+                moved(forever);
                 if (!fill.equals("backwards") && !fill.equals("both")) continue;
                 progress = directed(0, 0, direction);
             } else if (t / duration >= iterations) {
                 if (!fill.equals("forwards") && !fill.equals("both")) continue;
                 progress = end(iterations, direction);
             } else {
-                moving = true;
+                moved(forever);
                 double whole = t / duration;
                 long iteration = (long) Math.floor(whole);
                 progress = directed(whole - iteration, iteration, direction);
             }
             frame(frames, progress, easing, all, base);
         }
+        // Those no longer applied are forgotten: applied again, they start again.
+        if (still == null) this.began.remove(at);
+        else this.began.put(at, still);
+    }
+
+    /** Something moved this pass: on the page's clock if [page], else on the viewer's. */
+    private void moved(boolean page) {
+        moving = true;
+        if (!page) own = true;
     }
 
     /** Where an animation ends, by its direction: the end of its last iteration. */
@@ -172,7 +328,10 @@ public final class Motion {
         return reverse ? 1 - frac : frac;
     }
 
-    /** The values at [progress] (0 to 1) through [frames], into [all]; an end no frame gives is the element's own value. */
+    /**
+     * The values at [progress] (0 to 1) through [frames], into [all]; an end no frame gives is the element's own value,
+     * or the property's initial one.
+     */
     private static void frame(List<Stylesheet.Keyframe> frames, double progress, Easing easing, Map<String, String> all, Map<String, String> base) {
         Set<String> props = new HashSet<>();
         for (Stylesheet.Keyframe k : frames) props.addAll(k.values().keySet());
@@ -190,6 +349,7 @@ public final class Motion {
                 eases.add(own != null ? Easing.parse(own) : easing);
             }
             String own = base.get(prop);
+            if (own == null) own = INITIAL.get(prop);
             if (own != null && at.get(0)[0] > 0) {
                 at.add(0, new double[]{0});
                 values.add(0, own);
@@ -220,8 +380,8 @@ public final class Motion {
 
     private void transition(int at, Map<String, String> all, Map<String, String> base) {
         String duration = all.get("transition-duration");
-        Map<String, String> before = last.computeIfAbsent(at, k -> new HashMap<>());
-        Map<String, Run> runs = running.computeIfAbsent(at, k -> new HashMap<>());
+        Map<String, String> before = last.get(at);
+        Map<String, Run> runs = running.get(at);
         if (duration != null) {
             List<String> props = split(all.getOrDefault("transition-property", "all")), durations = split(duration);
             List<String> delays = split(all.getOrDefault("transition-delay", "0s")), easings = split(all.getOrDefault("transition-timing-function", "ease"));
@@ -230,22 +390,42 @@ public final class Motion {
                 double d = time(at(durations, i));
                 if (d <= 0 || p.equals("none")) continue;
                 for (String prop : p.equals("all") ? ALL : Set.of(p)) {
-                    String target = base.get(prop);
+                    String target = declared(base, prop);
                     if (target == null) continue;
+                    if (before == null) last.put(at, before = new HashMap<>());
                     String was = before.put(prop, target);
                     if (was == null || was.equals(target)) continue;
                     // From where it is now, if it was already on its way somewhere.
-                    Run run = runs.get(prop);
+                    Run run = runs == null ? null : runs.get(prop);
                     String from = run != null ? value(prop, run) : was;
+                    if (runs == null) running.put(at, runs = new HashMap<>());
                     runs.put(prop, new Run(from, target, now + time(at(delays, i)), d, Easing.parse(at(easings, i))));
                 }
             }
         }
+        // What it no longer transitions is still followed, so a transition declared again later starts from where it is.
+        if (before != null) {
+            for (Map.Entry<String, String> e : before.entrySet()) {
+                String target = declared(base, e.getKey());
+                if (target != null) e.setValue(target);
+            }
+        }
+        if (runs == null) return;
         runs.entrySet().removeIf(e -> now >= e.getValue().start + e.getValue().duration);
+        if (runs.isEmpty()) {
+            running.remove(at);
+            return;
+        }
         for (Map.Entry<String, Run> e : runs.entrySet()) {
             all.put(e.getKey(), value(e.getKey(), e.getValue()));
-            moving = true;
+            moved(false);
         }
+    }
+
+    /** [prop] as declared in [d], or its initial value if it is not and that can be written down; else null. */
+    private static String declared(Map<String, String> d, String prop) {
+        String v = d.get(prop);
+        return v != null ? v : INITIAL.get(prop);
     }
 
     private String value(String prop, Run r) {

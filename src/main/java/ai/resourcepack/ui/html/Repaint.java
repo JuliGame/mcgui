@@ -5,6 +5,7 @@ import ai.resourcepack.ui.html.css.Values;
 import ai.resourcepack.ui.html.paint.Painter;
 import ai.resourcepack.ui.html.paint.PixelPool;
 import ai.resourcepack.ui.html.style.Len;
+import ai.resourcepack.ui.html.style.Motion;
 import ai.resourcepack.ui.html.style.Style;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
@@ -56,7 +57,12 @@ public final class Repaint {
     public record Result(HtmlRenderer.Frame frame, Rectangle2D changed, Why why) {}
 
     /** Room round a changed element for what it may draw outside itself on hover beyond its shadows and blur: a lift, a glow. */
-    private static final double DIRTY_MARGIN = 48;
+    public static final double DIRTY_MARGIN = 48;
+    /**
+     * Room round what moved in a picture that differs from the last by time alone (an animation frame): where it was and
+     * where it is now are both taken from what was painted, so only a pixel of antialiasing is left round them.
+     */
+    public static final double MOTION_MARGIN = 2;
 
     /**
      * Draws the state [state] over [before], the picture of the same page and document at the same scroll, in which
@@ -66,16 +72,22 @@ public final class Repaint {
      */
     public static Result partial(Page page, Document doc, int width, int height, double scale, double scroll, Selector.State state,
                                  HtmlRenderer.Frame before, Set<Element> moved, long timeoutMs) {
-        return partial(page, doc, width, height, scale, scroll, state, before, moved, () -> RenderBudget.of(timeoutMs), null);
+        return partial(page, doc, width, height, scale, scroll, state, before, moved, DIRTY_MARGIN, timeoutMs);
+    }
+
+    /** As above, with [margin] (CSS px) round what [moved] paints: {@link #MOTION_MARGIN} for an animation frame. */
+    public static Result partial(Page page, Document doc, int width, int height, double scale, double scroll, Selector.State state,
+                                 HtmlRenderer.Frame before, Set<Element> moved, double margin, long timeoutMs) {
+        return partial(page, doc, width, height, scale, scroll, state, before, moved, margin, () -> RenderBudget.of(timeoutMs), null);
     }
 
     /** As above, each render within a budget from [budgets]; [undo], if not null, is told what each render may paint over first. */
     private static Result partial(Page page, Document doc, int width, int height, double scale, double scroll, Selector.State state,
-                                  HtmlRenderer.Frame before, Set<Element> moved, Supplier<RenderBudget> budgets, Undo undo) {
+                                  HtmlRenderer.Frame before, Set<Element> moved, double margin, Supplier<RenderBudget> budgets, Undo undo) {
         // A page where hovering one element restyles its siblings ('+', '~') is drawn whole.
         if (page.siblingStates()) return fail(Why.SIBLING_STATES);
         Set<Element> order = orderOnly(page, moved);
-        Region region = region(before, moved, order, List.of());
+        Region region = region(before, moved, order, List.of(), margin);
         if (region.commit == null) return fail(region.why);
         if (!small(region.paint, before)) return fail(Why.TOO_BIG);
         // The new state laid out first, so what it covers (a tooltip it shows, a shadow it adds, an element only lifted
@@ -85,17 +97,17 @@ public final class Repaint {
         HtmlRenderer.Frame laid = over.frame();
         if (!order.isEmpty() && !orderKept(before, laid, order)) {
             order = Set.of();
-            region = region(before, moved, order, List.of());
+            region = region(before, moved, order, List.of(), margin);
             if (region.commit == null) return fail(region.why);
         }
-        Region after = region(laid, moved, order, order.isEmpty() ? List.of() : swapped(before, laid, order));
+        Region after = region(laid, moved, order, order.isEmpty() ? List.of() : swapped(before, laid, order), margin);
         if (after.commit == null) return fail(after.why);
         if (!region.covers(after)) region = region.union(after);
         if (!small(region.paint, before)) return fail(Why.GREW_TOO_BIG);
         if (undo != null) undo.save(region.paint);
         HtmlRenderer.Frame f = HtmlRenderer.paintOver(over, region.paint, region.commit, budget);
         // What the paint itself found should be what the layout did; if it reaches further, paint both.
-        Region painted = region(f, moved, order, order.isEmpty() ? List.of() : swapped(before, f, order));
+        Region painted = region(f, moved, order, order.isEmpty() ? List.of() : swapped(before, f, order), margin);
         if (painted.commit == null) return fail(painted.why);
         if (!region.covers(painted)) {
             region = region.union(painted);
@@ -184,24 +196,35 @@ public final class Repaint {
      * A partial repaint worked out in advance: the pixels it paints, kept apart, and the frame it makes (with no picture
      * of its own). {@link #apply} puts the pixels into a picture that holds what the one it was worked out over held
      * (that one, or a copy of it), which then is what {@link #partial} would have left, and the result is what it would
-     * have returned. Only while that picture has not changed since.
+     * have returned. Only while that picture has not changed since. On a page that moves, the repaint may have started
+     * transitions: {@link #motion} is the motion it was styled with, which whoever shows it takes on.
      */
     public static final class Prepared {
         private final HtmlRenderer.Frame frame;
         private final Rectangle2D changed;
         private final java.awt.Rectangle at;
         private final int[] pixels;
+        private final Motion motion;
 
-        private Prepared(HtmlRenderer.Frame frame, Rectangle2D changed, java.awt.Rectangle at, int[] pixels) {
+        private Prepared(HtmlRenderer.Frame frame, Rectangle2D changed, java.awt.Rectangle at, int[] pixels, Motion motion) {
             this.frame = frame;
             this.changed = changed;
             this.at = at;
             this.pixels = pixels;
+            this.motion = motion;
         }
 
         /** What it holds on to, roughly: its pixels (the frame's styles and regions are shared in part with the picture's). */
         public long bytes() {
             return 4L * pixels.length + 64L * frame.hits().size();
+        }
+
+        /**
+         * The motion the repaint was styled with (a copy of the one current when it was prepared, which it left as it
+         * was), or null if none was: never changed again, so take it on with {@link Motion#copyAt}, a copy for each taker.
+         */
+        public Motion motion() {
+            return motion;
         }
 
         /** Paints the repaint into [onto]'s picture (the picture it was worked out over, or a copy of it) and gives the frame it makes. */
@@ -220,13 +243,16 @@ public final class Repaint {
      * {@link #partial} worked out without changing [before]'s picture: painted over it, the pixels kept apart, and the
      * picture put back as it was, also when it fails or [budget] gives up ({@link RenderAbandoned}). Null if the repaint
      * would not be partial. [before]'s picture must not be read or painted by anything else meanwhile (HoverAhead
-     * gives it a copy of its own), and the result keeps no hold on it.
+     * gives it a copy of its own), and the result keeps no hold on it. Styled with a copy of the current motion, if
+     * there is one, which the result carries: the current one is left as it was.
      */
     public static Prepared prepare(Page page, Document doc, int width, int height, double scale, double scroll, Selector.State state,
                                    HtmlRenderer.Frame before, Set<Element> moved, RenderBudget budget) {
         Undo undo = new Undo(before.image(), scale);
+        Motion current = Motion.current(), own = current == null ? null : current.copy();
+        if (own != null) Motion.set(own);
         try {
-            Result r = partial(page, doc, width, height, scale, scroll, state, before, moved, () -> budget, undo);
+            Result r = partial(page, doc, width, height, scale, scroll, state, before, moved, DIRTY_MARGIN, () -> budget, undo);
             if (r.frame() == null) return null;
             // Only the rectangle kept changes (the rest of what was painted is put back by the render itself), give or
             // take the pixel Java2D may round a clip edge out by; and of that, often only the middle (a card, not the
@@ -235,8 +261,9 @@ public final class Repaint {
             HtmlRenderer.Frame f = r.frame();
             HtmlRenderer.Frame pictureless = new HtmlRenderer.Frame(null, f.scale(), f.viewportWidth(), f.viewportHeight(), f.pageHeight(), f.scrollY(),
                     f.hits(), f.styles(), f.document(), f.page());
-            return new Prepared(pictureless, r.changed(), tight, undo.copy(tight, new int[tight.width * tight.height]));
+            return new Prepared(pictureless, r.changed(), tight, undo.copy(tight, new int[tight.width * tight.height]), own);
         } finally {
+            if (own != null) Motion.set(current);
             undo.restore();
         }
     }
@@ -364,16 +391,16 @@ public final class Repaint {
 
     /**
      * The part of the picture (CSS pixels) that [changed] and everything inside them cover in [f], grown by the
-     * furthest their styles there paint outside themselves, over every blurred layer it meets, and with the
+     * furthest their styles there paint outside themselves (at least [room]), over every blurred layer it meets, and with the
      * backdrops that read it; in whole pixels. Of an element in [order] (only moved in the painting order), only what
      * is inside another element of [changed] counts, and instead [extra] (page CSS pixels: where it overlaps what it
      * moved past) is taken in; if that leaves nothing, a point in the middle of one does, since nothing round it changes
      * but a repaint has to start somewhere. Null commit when it cannot be told (nothing of theirs was drawn) or cannot
      * be repainted in part (a blur reads past the picture's edge, see the class).
      */
-    static Region region(HtmlRenderer.Frame f, Set<Element> changed, Set<Element> order, List<Rectangle2D> extra) {
+    static Region region(HtmlRenderer.Frame f, Set<Element> changed, Set<Element> order, List<Rectangle2D> extra, double room) {
         Rectangle2D area = null, seed = null;
-        double reach = DIRTY_MARGIN;
+        double reach = room;
         int first = Integer.MAX_VALUE;
         List<Painter.Hit> hits = f.hits();
         for (int i = 0; i < hits.size(); i++) {

@@ -25,10 +25,12 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Hovers on a page whose hover starts a transition, through real {@link Session}s: the picture after the hover is the
- * transition's first moment, not its end (a drawing ahead or a partial repaint would show the end at once), each
- * picture while it runs is a fresh picture of its moment, over a blurred backdrop worked out on the page's grid, and
- * the hover sound fires on entering, as it does on a page without transitions whose hovers are drawn ahead.
+ * Hovers on a page whose hover starts a transition, through real {@link Session}s. While nothing on it moves, the page
+ * is drawn as one that never moves: its hovers are drawn ahead and repainted in part. But the picture after the hover is
+ * the transition's first moment, never its end (drawn ahead, the hover is styled with a copy of the session's motion,
+ * which the session takes on with it), each picture while it runs is a picture of its moment, repainted over the last,
+ * over a blurred backdrop worked out on the page's grid, and the hover sound fires on entering, as on a page without
+ * transitions.
  */
 class TransitionHoverTest {
     private static final int COLS = 4, ROWS = 3, W = COLS * 128, H = ROWS * 128;
@@ -144,21 +146,21 @@ class TransitionHoverTest {
     }
 
     @Test
-    void aHoverThatStartsATransitionIsDrawnAtEachMomentNotAhead() {
+    void aHoverThatStartsATransitionIsDrawnAheadAtItsFirstMoment() {
         Page page = rig.pages.loaded("moving");
         Session s = open("moving");
         // The session's clock, stopped, so a fresh picture can be drawn of the same moment.
-        Motion clock = Motion.at(0);
-        set(s, "motion", clock);
+        set(s, "motion", Motion.at(0));
         onServer(s::render);
         Rectangle2D box = card(page, 1);
         int cx = (int) box.getCenterX(), cy = (int) box.getCenterY();
 
-        // Resting beside the card: a page that does not move would draw its hover ahead now (see the test below).
+        // Resting beside the card: nothing on the page moves, so its hovers are drawn ahead, as on a page that never does.
         onServer(() -> s.pointer((int) box.getX() - 8, cy));
-        onServer(() -> s.pointer(cx, cy));
         HoverAhead ahead = get(s, "hoverAhead");
-        assertEquals(0, ahead.prepared.get(), "a page with transitions had hovers drawn ahead");
+        assertTrue(ahead.prepared.get() > 0, "a page whose transitions are not running had no hovers drawn ahead");
+        onServer(() -> s.pointer(cx, cy));
+        assertTrue(ahead.taken.get() >= 1, "the hover was not the one drawn ahead");
 
         // The same pictures afresh, on a clock of their own: the page as it opened, then hovered at 0 s, 0.4 s and 1.5 s.
         Document d = page.document.clone();
@@ -182,9 +184,11 @@ class TransitionHoverTest {
         int middle = drawn[cy * W + cx];
         assertTrue((middle & 255) < 0x80, "the first picture of the hover shows the card at " + Integer.toHexString(middle) + ", near the transition's end");
         assertSamePicture(start, drawn, "hovered, 0 s");
+        // The session took on the motion the hover was drawn ahead with: its transition is under way.
+        Motion clock = get(s, "motion");
         assertTrue(clock.active(), "the transition is under way");
 
-        // The next pictures come with the ticks, each a whole picture of its moment.
+        // The next pictures come with the ticks, each a picture of its moment.
         clock.stopAt(0.4);
         int tick = SessionRig.TICK.addAndGet(2);
         onServer(() -> s.tick(tick));
@@ -197,7 +201,6 @@ class TransitionHoverTest {
 
         // The sound of the card it came into.
         assertEquals(c.cssSelector(), get(s, "hoverSoundAt"), "the hover sound");
-        assertEquals(0, ahead.prepared.get(), "a page with transitions had hovers drawn ahead");
     }
 
     @Test

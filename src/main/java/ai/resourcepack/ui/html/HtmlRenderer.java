@@ -6,6 +6,7 @@ import ai.resourcepack.ui.html.layout.BoxBuilder;
 import ai.resourcepack.ui.html.layout.Layout;
 import ai.resourcepack.ui.html.paint.Painter;
 import ai.resourcepack.ui.html.paint.PixelPool;
+import ai.resourcepack.ui.html.style.Motion;
 import ai.resourcepack.ui.html.style.Style;
 import ai.resourcepack.ui.html.style.Styler;
 import ai.resourcepack.ui.framework.api.Cpu;
@@ -275,17 +276,108 @@ public final class HtmlRenderer {
         return paint(page, laid, img, fits, scale, vw, vh, topRow / scale, true, null, document, budget);
     }
 
-    /** A document styled and laid out for a view, not painted yet. */
-    private record Laid(Styler styler, Box root, double pageHeight) {}
+    /** A document ([html], its root) styled and laid out for a [vw] × [vh] view of [page], not painted yet. */
+    private record Laid(Styler styler, Box root, double pageHeight, Element html, Page page, double vw, double vh) {}
+
+    /** Pictures laid out afresh, and pictures that painted the last one's layout with new styles: for tests and benchmarks. */
+    private static final java.util.concurrent.atomic.AtomicLong LAID_OUT = new java.util.concurrent.atomic.AtomicLong(),
+            LAID_AGAIN = new java.util.concurrent.atomic.AtomicLong();
+
+    /** How many pictures so far were laid out afresh ([0]) and painted over the last one's layout ([1]). */
+    public static long[] layouts() {
+        return new long[]{LAID_OUT.get(), LAID_AGAIN.get()};
+    }
 
     private static Laid lay(Page page, org.jsoup.nodes.Document document, double vw, double vh, Selector.State state, RenderBudget budget) {
         Element html = document.selectFirst("html");
         if (html == null) html = document;
+        // While a page moves, the motion keeps the last picture's layout: if what changed since changes only what
+        // painting reads (opacity, colours, a transform), its boxes are where they were, and they are painted again
+        // with the new styles. A page with pictures that can arrive later (faces) is laid out every time.
+        Motion motion = Motion.current();
+        Object kept = motion == null ? null : motion.takeLayout();
+        Laid last = kept instanceof Laid l && l.html == html && l.page == page && l.vw == vw && l.vh == vh && !page.schemed() ? l : null;
         Styler styler = new Styler(Page.UA, page.styles, vw, vh, state, page.uri, budget);
         styler.run(html);
-        Box root = new BoxBuilder(styler, page, page.uri).build(html);
-        double pageHeight = new Layout(page.shaper, vw, vh, budget).run(root);
-        return new Laid(styler, root, pageHeight);
+        Laid laid;
+        if (last != null && restyled(last, styler)) {
+            laid = new Laid(styler, last.root, last.pageHeight, html, page, vw, vh);
+            LAID_AGAIN.incrementAndGet();
+        } else {
+            Box root = new BoxBuilder(styler, page, page.uri).build(html);
+            double pageHeight = new Layout(page.shaper, vw, vh, budget).run(root);
+            laid = new Laid(styler, root, pageHeight, html, page, vw, vh);
+            LAID_OUT.incrementAndGet();
+        }
+        if (motion != null) motion.keepLayout(laid);
+        return laid;
+    }
+
+    /**
+     * Whether [last]'s boxes are laid out as [now]'s styles would lay them out: every element (and pseudo-element) is
+     * styled as before but for what only painting reads. If so, the boxes are given [now]'s styles (painting reads them
+     * from the boxes), and true; else they are left as they were.
+     */
+    private static boolean restyled(Laid last, Styler now) {
+        Map<Style, Style> to = new IdentityHashMap<>();
+        Set<Style> same = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+        Styler was = last.styler;
+        if (!restyles(was.styles, now.styles, to, same) || !restyles(was.before, now.before, to, same) || !restyles(was.after, now.after, to, same)
+                || !restyles(was.placeholder, now.placeholder, to, same) || !restyles(was.marker, now.marker, to, same)) return false;
+        if (to.isEmpty()) return true;
+        // A style two elements shared that only one of them keeps cannot be told apart on their boxes.
+        for (Style s : same) if (to.containsKey(s)) return false;
+        if (!boxesKept(last.root, to)) return false;
+        restyle(last.root, to);
+        return true;
+    }
+
+    /** Adds to [to] what each style of [was] (by element) becomes in [now], unless one would lay out differently; [same], those kept. */
+    private static boolean restyles(Map<Element, Style> was, Map<Element, Style> now, Map<Style, Style> to, Set<Style> same) {
+        if (was.size() != now.size()) return false;
+        for (Map.Entry<Element, Style> e : now.entrySet()) {
+            Style o = was.get(e.getKey()), n = e.getValue();
+            if (o == n) {
+                same.add(o);
+                continue;
+            }
+            if (!Style.sameLayout(o, n)) return false;
+            Style prior = to.putIfAbsent(o, n);
+            if (prior != null && prior != n) return false;
+        }
+        return true;
+    }
+
+    /**
+     * Whether no box under [b] was built or laid out from what [to] changes of its style: an inline SVG's colour, or
+     * whether there is a transform at all on a box that holds absolutely placed boxes (it is where they are placed from).
+     */
+    private static boolean boxesKept(Box b, Map<Style, Style> to) {
+        Style n = to.get(b.style);
+        if (n != null) {
+            if (b.element != null && b.picture != null && b.element.normalName().equals("svg") && n.color != b.style.color) return false;
+            if (n.transform.equals("none") != b.style.transform.equals("none") && placesAny(b)) return false;
+        }
+        for (Box c : b.children) if (!boxesKept(c, to)) return false;
+        return true;
+    }
+
+    /** Whether any box under [b] is absolutely placed (absolute or fixed). */
+    private static boolean placesAny(Box b) {
+        for (Box c : b.children) {
+            if (c.style.position.equals("absolute") || c.style.position.equals("fixed") || placesAny(c)) return true;
+        }
+        return false;
+    }
+
+    /** Gives every box under [b], and every piece of its lines, the style [to] makes of its own. */
+    private static void restyle(Box b, Map<Style, Style> to) {
+        b.style = to.getOrDefault(b.style, b.style);
+        if (b.markerStyle != null) b.markerStyle = to.getOrDefault(b.markerStyle, b.markerStyle);
+        if (b.lines != null) {
+            for (Box.Line line : b.lines) for (Box.Item it : line.items) if (it.style != null) it.style = to.getOrDefault(it.style, it.style);
+        }
+        for (Box c : b.children) restyle(c, to);
     }
 
     /**

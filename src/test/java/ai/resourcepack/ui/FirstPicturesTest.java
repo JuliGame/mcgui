@@ -126,7 +126,7 @@ class FirstPicturesTest {
                 took = false;
                 doc = f.copy();
                 draw();
-                FirstPictures.Picture p = FirstPictures.Picture.of(k, frame, canvas.copy());
+                FirstPictures.Picture p = FirstPictures.Picture.of(k, frame, canvas.copy(), null);
                 borrowed = frame.image();
                 pictures.publish(k, p);
                 return;

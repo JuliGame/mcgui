@@ -162,6 +162,50 @@ public final class Style {
         return parent;
     }
 
+    /**
+     * The fields only painting reads: layout and building the boxes never do, but for an inline SVG's colour, and
+     * whether a box has a transform at all, which makes it hold its absolutely placed descendants: the caller sees to
+     * those ({@code HtmlRenderer}).
+     */
+    private static final Set<String> PAINT_ONLY = Set.of("opacity", "visibility", "backgroundColor", "backgroundImages",
+            "backgroundPositions", "backgroundSizes", "backgroundRepeats", "backgroundClips", "boxShadow", "filter", "backdropFilter",
+            "color", "textDecorationColor", "textShadow", "textFillColor", "cursor", "pointerEvents", "borderColor", "borderColorSet",
+            "radius", "zIndex", "transform", "transformOrigin", "objectPosition");
+    /** Every other field: what a layout reads. Not the parent, which is compared as an element of its own. */
+    private static final java.lang.reflect.Field[] LAYOUT = layoutFields();
+
+    private static java.lang.reflect.Field[] layoutFields() {
+        List<java.lang.reflect.Field> out = new ArrayList<>();
+        int paintOnly = 0;
+        for (java.lang.reflect.Field f : Style.class.getDeclaredFields()) {
+            if (java.lang.reflect.Modifier.isStatic(f.getModifiers()) || f.getName().equals("parent")) continue;
+            if (PAINT_ONLY.contains(f.getName())) {
+                paintOnly++;
+            } else {
+                f.setAccessible(true);
+                out.add(f);
+            }
+        }
+        if (paintOnly != PAINT_ONLY.size()) throw new IllegalStateException("Style.PAINT_ONLY names a field Style does not have");
+        return out.toArray(new java.lang.reflect.Field[0]);
+    }
+
+    /**
+     * Whether [a] and [b] lay out the same as far as the element itself goes: they differ, if at all, only in what
+     * painting reads (colours, opacity, shadows, filters, a transform), so its box laid out with one is where the
+     * other's would be. Not whether there is a transform at all, which matters only to what it holds (see PAINT_ONLY).
+     */
+    public static boolean sameLayout(Style a, Style b) {
+        if (a == b) return true;
+        if (a == null || b == null) return false;
+        try {
+            for (java.lang.reflect.Field f : LAYOUT) if (!java.util.Objects.deepEquals(f.get(a), f.get(b))) return false;
+        } catch (IllegalAccessException e) {
+            throw new IllegalStateException(e);
+        }
+        return true;
+    }
+
     /** The style of an element (or pseudo-element) whose declared values are [declared]. */
     public static Style compute(Map<String, String> declared, Style parent, double rootFontSize, double vw, double vh) {
         Style s = new Style(parent);

@@ -135,6 +135,121 @@ class MotionTest {
         assertFalse(Page.of("<p>still</p>", Path.of("still.html").toAbsolutePath(), new Page.Loader(false, null)).moves());
     }
 
+    /** [html] drawn [state] with [m] current. */
+    private static HtmlRenderer.Frame draw(Page page, org.jsoup.nodes.Document doc, Selector.State state, Motion m) {
+        Motion.set(m);
+        try {
+            return HtmlRenderer.render(page, doc, 400, 300, 1, 0, state);
+        } finally {
+            Motion.clear();
+        }
+    }
+
+    private static Page page(String html) {
+        return Page.of(html, Path.of("m.html").toAbsolutePath(), new Page.Loader(false, null));
+    }
+
+    @Test
+    void anEndNoKeyframeGivesIsTheElementsOwnValueOrTheInitialOne() {
+        Page page = page("<style>@keyframes dim { to { opacity: .2 } } @keyframes turn { to { transform: rotate(360deg) } }"
+                + " #a { animation: dim 1s linear } #b { opacity: .6; animation: dim 1s linear } #c { animation: turn 1s linear infinite }</style>"
+                + "<div id=a>a</div><div id=b>b</div><div id=c>c</div>");
+        HtmlRenderer.Frame f = draw(page, page.document.clone(), Selector.State.NONE, Motion.at(0.5));
+        assertEquals(0.6, style(f, "a").opacity, 1e-6);
+        assertEquals(0.4, style(f, "b").opacity, 1e-6);
+        assertEquals("rotate(180deg)", style(f, "c").transform);
+    }
+
+    @Test
+    void animationsThatRepeatRunOnThePagesClockAndThoseThatEndOnTheViewers() {
+        Page page = page("<style>@keyframes fade { from { opacity: 0 } to { opacity: 1 } }"
+                + " #loop { animation: fade 1s linear infinite } #once { animation: fade 2s linear }</style><div id=loop></div><div id=once></div>");
+        Motion m = new Motion();
+        m.moment(0.5, 10.25);
+        HtmlRenderer.Frame f = draw(page, page.document.clone(), Selector.State.NONE, m);
+        assertEquals(0.25, style(f, "loop").opacity, 1e-6);
+        assertEquals(0.25, style(f, "once").opacity, 1e-6);
+        assertTrue(m.active());
+        assertTrue(m.personal(), "an animation that ends runs on the viewer's clock");
+        m.moment(3, 20.75);
+        f = draw(page, f.document(), Selector.State.NONE, m);
+        assertEquals(0.75, style(f, "loop").opacity, 1e-6);
+        assertTrue(m.active());
+        assertFalse(m.personal(), "only an animation that repeats for ever moves: the page's");
+        assertEquals(java.util.Set.of(f.document().getElementById("loop")), m.moved());
+    }
+
+    @Test
+    void anAnimationAppliedLaterStartsWhenItIsApplied() {
+        Page page = page("<style>@keyframes fade { from { opacity: 0 } to { opacity: 1 } } #t { height: 10px } #t:hover { animation: fade 1s linear }</style><div id=t></div>");
+        var doc = page.document.clone();
+        var t = doc.getElementById("t");
+        Motion m = new Motion();
+        m.moment(0, 0);
+        draw(page, doc, Selector.State.NONE, m);
+        m.moment(3, 3);
+        assertEquals(0, style(draw(page, doc, HtmlRenderer.state(t, null), m), "t").opacity, 1e-6);
+        m.moment(3.5, 3.5);
+        assertEquals(0.5, style(draw(page, doc, HtmlRenderer.state(t, null), m), "t").opacity, 1e-6);
+        // Taken away and applied again, it starts again.
+        m.moment(4, 4);
+        draw(page, doc, Selector.State.NONE, m);
+        m.moment(4.25, 4.25);
+        assertEquals(0, style(draw(page, doc, HtmlRenderer.state(t, null), m), "t").opacity, 1e-6);
+    }
+
+    @Test
+    void aTransitionOfAPropertyNotDeclaredStartsFromItsInitialValue() {
+        Page page = page("<style>#t { height: 10px; transition: transform 1s linear } #t:hover { transform: translateX(100px) }</style><div id=t></div>");
+        var doc = page.document.clone();
+        Motion m = Motion.at(0);
+        draw(page, doc, Selector.State.NONE, m);
+        draw(page, doc, HtmlRenderer.state(doc.getElementById("t"), null), m);
+        m.stopAt(0.25);
+        assertEquals("translateX(25px)", style(draw(page, doc, HtmlRenderer.state(doc.getElementById("t"), null), m), "t").transform);
+    }
+
+    @Test
+    void aCopyTakenAtAnotherMomentRunsFromThere() {
+        Page page = page("<style>#t { width: 100px; height: 10px; transition: width 1s linear } #t:hover { width: 300px }</style><div id=t></div>");
+        var doc = page.document.clone();
+        var t = doc.getElementById("t");
+        Motion m = new Motion();
+        m.moment(0, 0);
+        draw(page, doc, Selector.State.NONE, m);
+        // Drawn ahead at 2 s, on a copy: the session's own motion is left as it was.
+        m.moment(2, 2);
+        Motion ahead = m.copy();
+        assertEquals(100, f(style(draw(page, doc, HtmlRenderer.state(t, null), ahead), "t").width), 1e-6);
+        assertTrue(ahead.active());
+        assertFalse(m.active());
+        // Shown at 5 s: the transition starts then.
+        Motion taken = ahead.copyAt(5);
+        taken.moment(5.5, 5.5);
+        assertEquals(200, f(style(draw(page, doc, HtmlRenderer.state(t, null), taken), "t").width), 1e-6);
+    }
+
+    @Test
+    void anElementMidTransitionSharesItsStyleWithNoSibling() {
+        // The siblings have the same rules, and the transition is only declared while hovered. Hovered a second time, the
+        // first has a transition to its hover under way, which goes on once the pointer leaves (nothing then says to stop
+        // it): left half way, it is styled with the same rules as its sibling, but moving.
+        Page page = page("<style>.t { width: 100px; height: 10px } .t:hover { width: 300px; transition: width 1s linear }</style>"
+                + "<div><div class=t id=a></div><div class=t id=b></div></div>");
+        var doc = page.document.clone();
+        var a = doc.getElementById("a");
+        Motion m = Motion.at(0);
+        draw(page, doc, Selector.State.NONE, m);
+        draw(page, doc, HtmlRenderer.state(a, null), m);
+        draw(page, doc, Selector.State.NONE, m);
+        draw(page, doc, HtmlRenderer.state(a, null), m);
+        m.stopAt(0.5);
+        // A new copy of the document (as a click gives a session), so nothing is kept from the last pass over it.
+        HtmlRenderer.Frame f = draw(page, doc.clone(), Selector.State.NONE, m);
+        assertEquals(200, f(style(f, "a").width), 1e-6);
+        assertEquals(100, f(style(f, "b").width), 1e-6);
+    }
+
     /** A computed width in px. */
     private static double f(Object width) {
         return ((Len) width).of(0);

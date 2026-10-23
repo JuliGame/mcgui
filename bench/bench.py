@@ -454,10 +454,10 @@ def latency(b):
 
 
 def anim(b):
-    """A page that never stops moving (a spinner), at 1 and 10 viewers: CPU, pictures a second, bytes."""
+    """A page that never stops moving (a spinner), at 1, 10 and 50 viewers: CPU, pictures a second, bytes."""
     s = b.srv
     res = {}
-    for n in (1, 10):
+    for n in (1, 10, 50):
         fakes(b, n)
         s.P('fakedo open bench-anim 5')
         settle(b, 10)

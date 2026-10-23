@@ -52,6 +52,8 @@ public abstract class Len {
         @Override public double of(double basis) { return px; }
         @Override public boolean relative() { return false; }
         @Override public String toString() { return px + "px"; }
+        @Override public boolean equals(Object o) { return o instanceof Fixed f && Double.compare(f.px, px) == 0; }
+        @Override public int hashCode() { return Double.hashCode(px); }
     }
 
     private static final class Percent extends Len {
@@ -64,6 +66,8 @@ public abstract class Len {
         @Override public double of(double basis) { return Double.isNaN(basis) ? 0 : clamp(basis * pct / 100); }
         @Override public boolean relative() { return true; }
         @Override public String toString() { return pct + "%"; }
+        @Override public boolean equals(Object o) { return o instanceof Percent p && Double.compare(p.pct, pct) == 0; }
+        @Override public int hashCode() { return 31 * Double.hashCode(pct) + 1; }
     }
 
     private static final class Expr extends Len {
@@ -103,6 +107,16 @@ public abstract class Len {
         public boolean relative() {
             for (Len t : terms) if (t.relative()) return true;
             return false;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            return o instanceof Expr x && x.op == op && Double.compare(x.factor, factor) == 0 && x.terms.equals(terms);
+        }
+
+        @Override
+        public int hashCode() {
+            return (op * 31 + Double.hashCode(factor)) * 31 + terms.hashCode();
         }
     }
 

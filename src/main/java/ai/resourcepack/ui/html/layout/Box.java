@@ -21,7 +21,8 @@ public final class Box {
     public enum Inner { FLOW, FLEX, GRID, TABLE, ROW_GROUP, ROW, CELL, REPLACED, TEXT, BREAK }
 
     public final Element element;       // null for anonymous boxes and text
-    public final Style style;
+    /** Its style: changed only for a picture that is laid out as the last one was (HtmlRenderer, while a page moves). */
+    public Style style;
     public Box parent;
     public final List<Box> children = new ArrayList<>();
     public boolean blockLevel;

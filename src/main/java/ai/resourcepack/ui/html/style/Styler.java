@@ -113,8 +113,9 @@ public final class Styler {
         Found found = found(e, Stylesheet.ELEMENT, old);
         node.found[Stylesheet.ELEMENT] = found;
         boolean kept = parentKept && old != null && found == old.found[Stylesheet.ELEMENT];
-        // What moves is worked out afresh for every picture: its values are of the moment.
-        if (kept && motion != null && Motion.moves(old.declared)) kept = false;
+        // What moves is worked out afresh for every picture: its values are of the moment. So is what the motion follows,
+        // so a transition starts from what this viewer last saw, whoever styled this document last.
+        if (kept && motion != null && (Motion.moves(old.declared) || motion.tracks(at))) kept = false;
         Style s;
         Customs own;
         Map<String, String> decl;
@@ -127,7 +128,7 @@ public final class Styler {
             Customs parentCustoms = parent == null ? Customs.NONE : customs.get(parent);
             Shared key = parent == null || !plain(e) ? null : new Shared(Stylesheet.ELEMENT, found, parentStyle, parentCustoms, declared.get(parent));
             Shared same = key == null ? null : shared.get(key);
-            if (same != null && motion != null && Motion.moves(same.declared)) same = null;
+            if (same != null && motion != null && (Motion.moves(same.declared) || motion.tracks(at))) same = null;
             if (same != null) {
                 s = same.style;
                 own = same.customs;
@@ -136,10 +137,12 @@ public final class Styler {
                 List<Weighted> list = weighted(e, Stylesheet.ELEMENT, found);
                 own = customProps(list, parentCustoms);
                 Map<String, String> all = resolve(list, own, parent);
-                if (motion != null && Motion.moves(all)) motion.apply(at, all, author);
+                // An animated style is of this element at this moment: never shared with a sibling.
+                boolean animated = motion != null && (Motion.moves(all) || motion.tracks(at));
+                if (animated) motion.apply(at, e, all, author);
                 s = Style.compute(all, parentStyle, rootFontSize, vw, vh);
                 decl = notInherited(all);
-                if (key != null) shared.put(key, key.with(s, own, decl));
+                if (key != null && !animated) shared.put(key, key.with(s, own, decl));
             }
         }
         node.style = s;
