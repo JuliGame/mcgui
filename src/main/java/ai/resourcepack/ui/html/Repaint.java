@@ -74,13 +74,16 @@ public final class Repaint {
                                   HtmlRenderer.Frame before, Set<Element> moved, Supplier<RenderBudget> budgets, Undo undo) {
         // A page where hovering one element restyles its siblings ('+', '~') is drawn whole.
         if (page.siblingStates()) return fail(Why.SIBLING_STATES);
-        Region region = region(before, moved);
+        Set<Element> order = orderOnly(page, moved);
+        Region region = region(before, moved, order, List.of());
         if (region.commit == null) return fail(region.why);
         if (!small(region.paint, before)) return fail(Why.TOO_BIG);
         if (undo != null) undo.save(region.paint);
         HtmlRenderer.Frame f = HtmlRenderer.render(page, doc, width, height, scale, scroll, state, before.image(), region.paint, region.commit, budgets.get());
-        // The new state may reach further than the old one did (a shadow only hovering adds): then paint both.
-        Region after = region(f, moved);
+        // The new state may reach further than the old one did (a shadow only hovering adds), or an element only
+        // lifted (z-index) may now be painted over something it overlaps: then paint both.
+        if (!order.isEmpty() && !orderKept(before, f, order)) order = Set.of();
+        Region after = region(f, moved, order, order.isEmpty() ? List.of() : swapped(before, f, order));
         if (after.commit == null) return fail(after.why);
         if (!region.covers(after)) {
             region = region.union(after);
@@ -90,6 +93,79 @@ public final class Repaint {
         }
         if (!sameLayout(before, f, region.commit)) return fail(Why.LAYOUT_MOVED);
         return new Result(f, region.commit, Why.PARTIAL);
+    }
+
+    /**
+     * The elements of [moved] whose change only moves them in the painting order ({@link
+     * ai.resourcepack.ui.html.css.Stylesheet#orderOnly}): a repaint takes in only where they overlap what they are now
+     * painted over or under ({@link #swapped}), not all of them.
+     */
+    private static Set<Element> orderOnly(Page page, Set<Element> moved) {
+        Set<Element> out = null;
+        for (Element e : moved) {
+            if (!page.styles.orderOnly(e)) continue;
+            if (out == null) out = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+            out.add(e);
+        }
+        return out == null ? Set.of() : out;
+    }
+
+    /**
+     * Whether every element of [order] is positioned, at a z-index of auto or at least 0, in both pictures. Such an
+     * element is painted all at once, after the content of its stacking context that is not positioned, in both; so
+     * what can change is only its order against other things painted all at once, each with a box of its own, which
+     * {@link #swapped} compares box by box.
+     */
+    private static boolean orderKept(HtmlRenderer.Frame a, HtmlRenderer.Frame b, Set<Element> order) {
+        for (Element e : order) {
+            for (HtmlRenderer.Frame f : List.of(a, b)) {
+                Style s = f.style(e);
+                if (s == null || s.position.equals("static") || s.zIndex != null && s.zIndex < 0) return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Where a box of an element in [order] (or inside one) and a box of anything else (or of another of them) overlap,
+     * in page CSS pixels, grown by what either paints outside itself, wherever the two come in the other order in [b]
+     * than in [a]. Boxes are matched by element, as in {@link #sameLayout}; one in only one picture is of something
+     * that changed, which the repaint takes in whole anyway.
+     */
+    private static List<Rectangle2D> swapped(HtmlRenderer.Frame a, HtmlRenderer.Frame b, Set<Element> order) {
+        Map<Element, List<Integer>> at = new IdentityHashMap<>();
+        List<Painter.Hit> ha = a.hits(), hb = b.hits();
+        for (int i = 0; i < ha.size(); i++) at.computeIfAbsent(ha.get(i).element(), k -> new ArrayList<>()).add(i);
+        // Per box of [b]: its index in [a] (-1: none), the element of [order] it is in (null: none), and its bounds
+        // grown by its reach.
+        int n = hb.size();
+        int[] was = new int[n];
+        Element[] owner = new Element[n];
+        Rectangle2D[] box = new Rectangle2D[n];
+        Map<Element, Integer> seen = new IdentityHashMap<>();
+        Map<Element, Element> ownerOf = new IdentityHashMap<>();
+        for (int j = 0; j < n; j++) {
+            Element e = hb.get(j).element();
+            List<Integer> before = at.get(e);
+            int k = seen.merge(e, 1, Integer::sum) - 1;
+            was[j] = before == null || k >= before.size() ? -1 : before.get(k);
+            if (!ownerOf.containsKey(e)) {
+                Element o = null;
+                for (Element p = e; p != null && o == null; p = p.parent()) if (order.contains(p)) o = p;
+                ownerOf.put(e, o);
+            }
+            owner[j] = ownerOf.get(e);
+            box[j] = grow(hb.get(j).shape().getBounds2D(), paintsOutside(b.style(e)) + 1);
+        }
+        List<Rectangle2D> out = new ArrayList<>();
+        for (int i = 0; i < n; i++) {
+            if (owner[i] == null || was[i] < 0) continue;
+            for (int j = 0; j < n; j++) {
+                if (owner[j] == owner[i] || was[j] < 0 || (i < j) == (was[i] < was[j]) || !box[i].intersects(box[j])) continue;
+                out.add(box[i].createIntersection(box[j]));
+            }
+        }
+        return out;
     }
 
     /**
@@ -277,25 +353,41 @@ public final class Repaint {
     /**
      * The part of the picture (CSS pixels) that [changed] and everything inside them cover in [f], grown by the
      * furthest their styles there paint outside themselves, over every blurred layer it meets, and with the
-     * backdrops that read it; in whole pixels. Null commit when it cannot be told (nothing of theirs was drawn)
-     * or cannot be repainted in part (a blur reads past the picture's edge, see the class).
+     * backdrops that read it; in whole pixels. Of an element in [order] (only moved in the painting order), only what
+     * is inside another element of [changed] counts, and instead [extra] (page CSS pixels: where it overlaps what it
+     * moved past) is taken in; if that leaves nothing, a point in the middle of one does, since nothing round it changes
+     * but a repaint has to start somewhere. Null commit when it cannot be told (nothing of theirs was drawn) or cannot
+     * be repainted in part (a blur reads past the picture's edge, see the class).
      */
-    static Region region(HtmlRenderer.Frame f, Set<Element> changed) {
-        Rectangle2D area = null;
+    static Region region(HtmlRenderer.Frame f, Set<Element> changed, Set<Element> order, List<Rectangle2D> extra) {
+        Rectangle2D area = null, seed = null;
         double reach = DIRTY_MARGIN;
         int first = Integer.MAX_VALUE;
         List<Painter.Hit> hits = f.hits();
         for (int i = 0; i < hits.size(); i++) {
             Painter.Hit h = hits.get(i);
-            boolean inside = false;
-            for (Element e = h.element(); e != null && !inside; e = e.parent()) inside = changed.contains(e);
+            boolean inside = false, painted = false;
+            for (Element e = h.element(); e != null && !painted; e = e.parent()) {
+                if (!changed.contains(e)) continue;
+                inside = true;
+                painted = !order.contains(e);
+            }
             if (!inside) continue;
+            first = Math.min(first, i);
+            if (!painted) {
+                if (seed == null) seed = h.shape().getBounds2D();
+                continue;
+            }
             Rectangle2D b = h.shape().getBounds2D();
             if (area == null) area = new Rectangle2D.Double(b.getX(), b.getY(), b.getWidth(), b.getHeight());
             else area.add(b);
             reach = Math.max(reach, paintsOutside(f.style(h.element())));
-            first = Math.min(first, i);
         }
+        for (Rectangle2D b : extra) {
+            if (area == null) area = new Rectangle2D.Double(b.getX(), b.getY(), b.getWidth(), b.getHeight());
+            else area.add(b);
+        }
+        if (area == null && seed != null) area = new Rectangle2D.Double(seed.getCenterX(), seed.getCenterY(), 0, 0);
         if (area == null) return NONE;
         Rectangle2D view = picture(f);
         Rectangle2D wanted = new Rectangle2D.Double(area.getX() - reach, area.getY() - f.scrollY() - reach, area.getWidth() + 2 * reach, area.getHeight() + 2 * reach);

@@ -162,7 +162,11 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
   again with a margin instead (see above). A blur that reads past the picture's
   top or bottom where the page goes on means a full picture, which paints the
   page there. A box that appears or goes on hover (a tooltip by `display`) is
-  fine as long as it is inside the region (`Repaint.sameLayout`).
+  fine as long as it is inside the region (`Repaint.sameLayout`). An element
+  whose hover only sets its own z-index (`.crate:hover { z-index: 2 }`, which
+  lifts a card so a tooltip in it shows over its neighbours) is not repainted
+  whole: only where its boxes overlap something they now come before or after
+  in the painting order (`Stylesheet.orderOnly`, `Repaint.swapped`).
 - **Backdrops blur on a grid fixed to the page** (`Painter.origin`, in device
   pixels from the page's top-left), so a band, a rectangle repaint, a whole
   view and a view cut from a taller picture all blur alike.
