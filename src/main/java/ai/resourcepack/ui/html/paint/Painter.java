@@ -108,6 +108,16 @@ public final class Painter {
         return this;
     }
 
+    /**
+     * Of the surface, only [kept] (device px, within what {@link #keeping} needs) ends up in the picture: a repaint's
+     * own rectangle, inside the margin it paints round it. A blurred layer kept for the page ({@link BlurredLayers})
+     * may then be drawn from wherever its pixels there read only what this surface holds of it.
+     */
+    public Painter kept(java.awt.Rectangle kept) {
+        this.kept = kept;
+        return this;
+    }
+
     /** Whether anything in [root]'s tree has a backdrop-filter. */
     public static boolean backdrops(Box root) {
         List<Box> todo = new ArrayList<>(List.of(root));
@@ -256,6 +266,8 @@ public final class Painter {
     private int layers;
     /** The part of [surface] (device px) whose pixels matter, or null for all of it: see {@link #keeping}. */
     private java.awt.Rectangle needed;
+    /** The part of [surface] (device px) actually kept, within [needed], or null for all of [needed]: see {@link #kept}. */
+    private java.awt.Rectangle kept;
 
     /** Opacity and filters: the subtree painted on a layer of its own, then blended in. */
     private void layered(Graphics2D g, Box box, double x, double y) {
@@ -269,9 +281,10 @@ public final class Painter {
         }
         Reach reach = new Reach();
         reach(box, x, y, reach);
+        java.awt.Rectangle painted = null;
         // A backdrop-filter inside reads what is painted round it, which a smaller layer would cut off.
         if (!reach.backdrop) {
-            java.awt.Rectangle painted = dev.createTransformedShape(reach.area).getBounds();
+            painted = dev.createTransformedShape(reach.area).getBounds();
             // Blurs spread in device pixels whatever the transforms, so their room is added after mapping.
             int pad = (int) Math.ceil(reach.blur) + 2;
             painted.grow(pad, pad);
@@ -299,6 +312,8 @@ public final class Painter {
                 return;
             }
         }
+        double grid = Filters.gridBlur(box.style.filter, box.style, deviceScale);
+        if (grid > 0 && painted != null && fromKept(g, box, x, y, r, part, painted, grid)) return;
         // Colour filters work on straight colour, so a filtered layer stays plain ARGB; opacity alone blends faster premultiplied.
         // From this thread's pool, handed back once blended in: nothing keeps a layer.
         BufferedImage img = PixelPool.image(r.width, r.height, box.style.filter.equals("none") ? BufferedImage.TYPE_INT_ARGB_PRE : BufferedImage.TYPE_INT_ARGB);
@@ -308,10 +323,11 @@ public final class Painter {
         lg.transform(dev);
         if (g.getClip() != null) lg.setClip(g.getClip());
         BufferedImage savedSurface = surface;
-        java.awt.Rectangle savedNeeded = needed;
+        java.awt.Rectangle savedNeeded = needed, savedKept = kept;
         surface = img;
         // Layers inside are needed exactly where this one's filter reads.
         needed = part;
+        kept = null;
         // The layer starts at r on the surface: a backdrop inside it blurs on the same grid as one outside.
         originX += r.x;
         originY += r.y;
@@ -320,6 +336,7 @@ public final class Painter {
         originY -= r.y;
         surface = savedSurface;
         needed = savedNeeded;
+        kept = savedKept;
         lg.dispose();
         int ox = r.x, oy = r.y;
         if (part != null && (part.width < r.width || part.height < r.height)) {
@@ -329,7 +346,6 @@ public final class Painter {
             ox += part.x;
             oy += part.y;
         }
-        double grid = Filters.gridBlur(box.style.filter, box.style, deviceScale);
         if (grid > 0) {
             BufferedImage small = gridBlurred(img, ox, oy, grid);
             PixelPool.give(img);
@@ -380,6 +396,113 @@ public final class Painter {
         BufferedImage small = Blur.blurredCopy(cells, sigma, k, budget);
         PixelPool.give(cells);
         return small;
+    }
+
+    /**
+     * Draws [box]'s layer, the grid blur of [sigma] ({@link #gridBlurred}) of nothing but its own background, from the one
+     * kept for the page ({@link BlurredLayers}), making that first if need be; true if it did, false if this layer must
+     * be painted as ever. [r] is the layer's part of the surface, [part] the part of [r] worth blurring (null: all), and
+     * [painted] where it paints, as {@link #layered} works them out (device px of the surface).
+     *
+     * <p>The kept layer is the whole box's, over every page pixel it paints within the clip; a surface paints only its
+     * own part, carrying its edge pixels on past its edges. The two agree wherever a pixel reads only pixels the surface
+     * has, so the kept one is used only if every pixel kept here ({@link #kept}, else {@link #needed}, else all) does.
+     */
+    private boolean fromKept(Graphics2D g, Box box, double x, double y, java.awt.Rectangle r, java.awt.Rectangle part,
+                             java.awt.Rectangle painted, double sigma) {
+        Style s = box.style;
+        if (!box.children.isEmpty() || box.lines != null && !box.lines.isEmpty() || box.marker != null || box.inner != Box.Inner.FLOW) return false;
+        if (!s.boxShadow.equals("none") || !s.backdropFilter.equals("none") || box.b[0] != 0 || box.b[1] != 0 || box.b[2] != 0 || box.b[3] != 0) return false;
+        AffineTransform dev = g.getTransform();
+        if ((dev.getType() & ~(AffineTransform.TYPE_TRANSLATION | AffineTransform.TYPE_UNIFORM_SCALE | AffineTransform.TYPE_GENERAL_SCALE)) != 0) return false;
+        // Page device px: the surface's top-left is at the origin.
+        AffineTransform onPage = AffineTransform.getTranslateInstance(originX, originY);
+        onPage.concatenate(dev);
+        java.awt.Rectangle area = new java.awt.Rectangle(painted);
+        area.translate(originX, originY);
+        java.awt.Rectangle clip = null;
+        if (g.getClip() != null) {
+            // A clip of whole pixels only (an overflow: hidden page), which every surface cuts the same.
+            Area a = new Area(onPage.createTransformedShape(g.getClip()));
+            Rectangle2D c = a.getBounds2D();
+            if (!a.isRectangular() || c.getX() != Math.rint(c.getX()) || c.getY() != Math.rint(c.getY())
+                    || c.getMaxX() != Math.rint(c.getMaxX()) || c.getMaxY() != Math.rint(c.getMaxY())) return false;
+            clip = c.getBounds();
+            area = area.intersection(clip);
+        }
+        if (area.isEmpty()) return false;
+        java.awt.Rectangle keep = kept != null ? kept : needed != null ? needed : surfaceBounds();
+        java.awt.Rectangle reads = new java.awt.Rectangle(keep);
+        int support = Filters.blurSupport(s.filter, s, deviceScale);
+        reads.grow(support, support);
+        reads.translate(originX, originY);
+        reads = reads.intersection(area);
+        java.awt.Rectangle have = new java.awt.Rectangle(r);
+        have.translate(originX, originY);
+        if (!reads.isEmpty() && !have.contains(reads)) return false;
+        Rectangle2D on = onPage.createTransformedShape(new Rectangle2D.Double(x, y, box.w, box.h)).getBounds2D();
+        String key = String.join("|", String.valueOf(sigma), String.valueOf(onPage.getScaleX()), String.valueOf(onPage.getScaleY()),
+                Math.round(on.getX() * 1024) + "," + Math.round(on.getY() * 1024) + "," + Math.round(on.getWidth() * 1024) + "," + Math.round(on.getHeight() * 1024),
+                String.valueOf(area), String.valueOf(clip), String.valueOf(s.hidden()), Integer.toHexString(s.backgroundColor),
+                String.valueOf(s.backgroundImages), String.valueOf(s.backgroundPositions), String.valueOf(s.backgroundSizes),
+                String.valueOf(s.backgroundRepeats), String.valueOf(s.backgroundClips), java.util.Arrays.toString(Shapes.radii(box)),
+                String.valueOf(s.fontSize), String.valueOf(viewportW), String.valueOf(viewportH));
+        java.awt.Rectangle within = area;
+        BlurredLayers.Layer layer = BlurredLayers.get(res, key, () -> keptLayer(g, box, x, y, onPage, within, sigma));
+        int k = layer.k();
+        // What the layer here would blur, out to whole cells of the page's grid (as gridBlurred), and those cells of the kept one.
+        java.awt.Rectangle work = part == null ? r : new java.awt.Rectangle(r.x + part.x, r.y + part.y, part.width, part.height);
+        int cx = Math.floorDiv(originX + work.x, k) * k, cy = Math.floorDiv(originY + work.y, k) * k;
+        int cx1 = Math.floorDiv(originX + work.x + work.width + k - 1, k) * k, cy1 = Math.floorDiv(originY + work.y + work.height + k - 1, k) * k;
+        int sx = (cx - layer.x()) / k, sy = (cy - layer.y()) / k, sw = (cx1 - cx) / k, sh = (cy1 - cy) / k;
+        if (sx < 0 || sy < 0 || sx + sw > layer.small().getWidth() || sy + sh > layer.small().getHeight()) return false;
+        blend(g, layer.small().getSubimage(sx, sy, sw, sh), cx - originX, cy - originY, sw * k, sh * k, (float) s.opacity);
+        if (recordHits) hitsOnly(g, box, x, y);
+        return true;
+    }
+
+    /**
+     * [box]'s layer over [area] of the page (device px), clipped as [g] is, blurred on the page's grid: painted as
+     * {@link #layered} paints it, on an image of its own whose top-left is [area]'s, with [onPage] the transform to page
+     * device px. Its own picture, not a pooled one: it is kept.
+     */
+    private BlurredLayers.Layer keptLayer(Graphics2D g, Box box, double x, double y, AffineTransform onPage, java.awt.Rectangle area, double sigma) {
+        BufferedImage img = PixelPool.image(area.width, area.height, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D lg = img.createGraphics();
+        lg.setRenderingHints(g.getRenderingHints());
+        lg.translate(-area.x, -area.y);
+        lg.transform(onPage);
+        if (g.getClip() != null) lg.setClip(g.getClip());
+        BufferedImage savedSurface = surface;
+        java.awt.Rectangle savedNeeded = needed, savedKept = kept;
+        int savedX = originX, savedY = originY;
+        boolean savedHits = recordHits;
+        surface = img;
+        needed = null;
+        kept = null;
+        originX = area.x;
+        originY = area.y;
+        recordHits = false;
+        BufferedImage small;
+        try {
+            contextBody(lg, box, x, y);
+            small = gridBlurred(img, 0, 0, sigma);
+        } finally {
+            surface = savedSurface;
+            needed = savedNeeded;
+            kept = savedKept;
+            originX = savedX;
+            originY = savedY;
+            recordHits = savedHits;
+            lg.dispose();
+            PixelPool.give(img);
+        }
+        int k = Blur.step(sigma);
+        BufferedImage own = new BufferedImage(small.getWidth(), small.getHeight(), small.getType());
+        int[] from = pixels(small), to = pixels(own);
+        System.arraycopy(from, 0, to, 0, to.length);
+        PixelPool.give(small);
+        return new BlurredLayers.Layer(own, Math.floorDiv(area.x, k) * k, Math.floorDiv(area.y, k) * k, k, area);
     }
 
     /** The [part] of [img], as an image of its own of the same type (Blur and Filters work on a whole pixel array), from this thread's pool. */
