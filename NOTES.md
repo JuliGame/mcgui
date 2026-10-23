@@ -119,7 +119,10 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
   along its edge. That image starts at the picture's left edge, not the area's: Java2D adds up a run's glyph
   advances in floats from where it starts on the image, so text drawn from elsewhere could land a glyph a
   pixel column over. A layer's filter, blurred shadows and backdrops are still only worked out round the area
-  (`Painter.keeping`). The new state is laid out first (`HtmlRenderer.layOver`), so a
+  (`Painter.keeping`), and so is everything else: a box, inline box, text run or background tile wholly outside
+  the area (grown by `Painter.CULL_MARGIN`, and by a shadow's reach or a text's em) is not drawn, only its hit regions
+  made (`Painter.drawnBounds`, `paints`), and a gradient is filled over the surface only (`Backgrounds.layer`). The image is not cleared first
+  (`PixelPool.uncleared`: `Painter.paint` fills every pixel of it). The new state is laid out first (`HtmlRenderer.layOver`), so a
   hover that shows a tooltip is painted once, over the old and new areas together (`paintOver`), not
   painted, found to reach further, and painted again. `sh gradlew renderBench` times a page's full render, its
   `Canvas.draw` and a hover repaint.
@@ -214,6 +217,10 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
   paths (the same pixels as an `Area`, without its cost), and on
   whole device pixels (boxes at 2x) a square border or sharp box shadow is filled as up to four
   rectangles, not rasterised (`Shapes.fillPixels`): the vanilla pages' bevels were a third of a picture.
+- **A conic gradient finds its colour by table** (`Backgrounds.ConicPaint`): a pixel's angle comes from a
+  polynomial of atan (4e-8 rad), and the colour from a table of 4096 cells where a cell, with a margin that dwarfs
+  that error, is one colour (between two stops of one colour, as the market's rays are); every other pixel, and
+  any near the centre, still goes through `atan2`. `ConicGradientTest` checks millions of pixels against `atan2`.
 - **A steep gradient is not Java2D's** (`Backgrounds.StopPaint`): Java2D
   samples pixel corners in float, so a hard stop on a whole device pixel
   landed on a sample and a stripe's edge came out differently in a strip, a

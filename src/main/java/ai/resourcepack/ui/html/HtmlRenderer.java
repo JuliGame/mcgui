@@ -222,7 +222,8 @@ public final class HtmlRenderer {
             }
             return painter.hits;
         }
-        BufferedImage part = PixelPool.image(x1, y1 - y0, BufferedImage.TYPE_INT_ARGB_PRE);
+        // Not cleared: the painter fills every pixel of it first (Painter.paint fills the whole page).
+        BufferedImage part = PixelPool.uncleared(x1, y1 - y0, BufferedImage.TYPE_INT_ARGB_PRE);
         try {
             Graphics2D g = part.createGraphics();
             g.translate(0, -y0);

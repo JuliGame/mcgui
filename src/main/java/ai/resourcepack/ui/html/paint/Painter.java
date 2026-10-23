@@ -171,7 +171,7 @@ public final class Painter {
             }
             if (!canvasSource.style.backgroundImages.isEmpty()) {
                 Rectangle2D area = canvasSource == root ? page : new Rectangle2D.Double(0, 0, viewportW, Math.max(viewportH, root.overflowBottom));
-                Backgrounds.paint(g, canvasSource.style, res, area, page, surfaceBounds(), budget);
+                Backgrounds.paint(g, canvasSource.style, res, area, page, drawnBounds(), budget);
             }
             g.setTransform(saved);
         }
@@ -316,7 +316,16 @@ public final class Painter {
         if (grid > 0 && painted != null && fromKept(g, box, x, y, r, part, painted, grid)) return;
         // Colour filters work on straight colour, so a filtered layer stays plain ARGB; opacity alone blends faster premultiplied.
         // From this thread's pool, handed back once blended in: nothing keeps a layer.
-        BufferedImage img = PixelPool.image(r.width, r.height, box.style.filter.equals("none") ? BufferedImage.TYPE_INT_ARGB_PRE : BufferedImage.TYPE_INT_ARGB);
+        int type = box.style.filter.equals("none") ? BufferedImage.TYPE_INT_ARGB_PRE : BufferedImage.TYPE_INT_ARGB;
+        BufferedImage img;
+        if (part != null && (part.width < r.width || part.height < r.height)) {
+            // Only [part] of it is read (copied out below), and it is the layer's own needed pixels: the rest need not start clear.
+            img = PixelPool.uncleared(r.width, r.height, type);
+            int[] px = pixels(img);
+            for (int j = part.y; j < part.y + part.height; j++) java.util.Arrays.fill(px, j * r.width + part.x, j * r.width + part.x + part.width, 0);
+        } else {
+            img = PixelPool.image(r.width, r.height, type);
+        }
         Graphics2D lg = img.createGraphics();
         lg.setRenderingHints(g.getRenderingHints());
         lg.translate(-r.x, -r.y);
@@ -725,13 +734,15 @@ public final class Painter {
         Rectangle2D r = new Rectangle2D.Double(fx, fy, Math.max(0, f.w), f.h);
         double[] radii = Shapes.radii(box);
         Shape shape = Shapes.rect(r.getX(), r.getY(), r.getWidth(), r.getHeight(), radii);
-        if ((s.backgroundColor >>> 24) != 0) {
-            g.setColor(new Color(s.backgroundColor, true));
-            g.fill(shape);
+        if (paints(g, r.getX(), r.getY(), r.getWidth(), r.getHeight(), List.of())) {
+            if ((s.backgroundColor >>> 24) != 0) {
+                g.setColor(new Color(s.backgroundColor, true));
+                g.fill(shape);
+            }
+            if (!s.backgroundImages.isEmpty()) Backgrounds.paint(g, s, res, r, shape, drawnBounds(), budget);
+            double left = f.first ? box.b[3] : 0, right = f.last ? box.b[1] : 0;
+            drawBorders(g, s, r, radii, new double[]{box.b[0], right, box.b[2], left});
         }
-        if (!s.backgroundImages.isEmpty()) Backgrounds.paint(g, s, res, r, shape, surfaceBounds(), budget);
-        double left = f.first ? box.b[3] : 0, right = f.last ? box.b[1] : 0;
-        drawBorders(g, s, r, radii, new double[]{box.b[0], right, box.b[2], left});
         hit(shape, s, box.element != null ? box.element : box.owner);
     }
 
@@ -746,12 +757,13 @@ public final class Painter {
         double tx = x + it.x, ty = y + it.baselineY;
         Font font = it.font;
         List<Shadows.Shadow> shadows = Shadows.parse(s.textShadow, s);
-        // A band of a full picture is handed the whole page: text far above or below what it can show
-        // costs a layout and a glyph raster for nothing. Its hit region is still wanted.
-        Rectangle2D vis = visible(g, surfaceBounds());
+        // A band of a full picture is handed the whole page, and a hover's repaint paints from the picture's left
+        // edge: text wholly outside what is kept costs a layout and a glyph raster for nothing. Its hit region is
+        // still wanted.
+        Rectangle2D vis = visible(g, drawnBounds());
         double reach = 2 * Math.max(s.fontSize, font.getSize2D());
-        for (Shadows.Shadow sh : shadows) reach = Math.max(reach, 2 * s.fontSize + Math.abs(sh.y()) + 3 * sh.blur());
-        if (vis == null || ty + reach < vis.getMinY() || ty - reach > vis.getMaxY()) {
+        for (Shadows.Shadow sh : shadows) reach = Math.max(reach, 2 * s.fontSize + Math.max(Math.abs(sh.x()), Math.abs(sh.y())) + 3 * sh.blur());
+        if (vis == null || ty + reach < vis.getMinY() || ty - reach > vis.getMaxY() || tx + Math.max(0, it.w) + reach < vis.getMinX() || tx - reach > vis.getMaxX()) {
             Fonts.Metrics m = shaper.fonts().metrics(font);
             hit(new Rectangle2D.Double(tx, ty - m.ascent(), it.w, m.ascent() + m.descent()), s, it.box.owner);
             return;
@@ -761,7 +773,7 @@ public final class Painter {
         for (int i = shadows.size() - 1; i >= 0; i--) {
             Shadows.Shadow sh = shadows.get(i);
             if (sh.blur() > Shadows.SHARP) {
-                Shadows.text(g, shaper, text, font, tx + sh.x(), ty + sh.y(), sh, deviceScale, surfaceBounds(), budget);
+                Shadows.text(g, shaper, text, font, tx + sh.x(), ty + sh.y(), sh, deviceScale, neededBounds(), budget);
             } else if ((sh.color() >>> 24) != 0) {
                 g.setColor(new Color(sh.color(), true));
                 glyphs(g, it, text, font, tx + sh.x(), ty + sh.y());
@@ -928,8 +940,8 @@ public final class Painter {
         Style s = b.style;
         double[] radii = Shapes.radii(b);
         Shape border = Shapes.rect(x, y, b.w, b.h, radii);
-        if (!s.hidden()) {
-            List<Shadows.Shadow> shadows = Shadows.parse(s.boxShadow, s);
+        List<Shadows.Shadow> shadows = s.hidden() ? List.of() : Shadows.parse(s.boxShadow, s);
+        if (!s.hidden() && paints(g, x, y, b.w, b.h, shadows)) {
             for (int i = shadows.size() - 1; i >= 0; i--) {
                 Shadows.Shadow sh = shadows.get(i);
                 if (!sh.inset()) Shadows.outer(g, x, y, b.w, b.h, radii, sh, deviceScale, neededBounds(), budget);
@@ -948,7 +960,7 @@ public final class Painter {
             }
             if (!textClip && !s.backgroundImages.isEmpty()) {
                 Rectangle2D area = new Rectangle2D.Double(x + b.b[3], y + b.b[0], b.w - b.b[1] - b.b[3], b.h - b.b[0] - b.b[2]);
-                Backgrounds.paint(g, s, res, area, clipBox, surfaceBounds(), budget);
+                Backgrounds.paint(g, s, res, area, clipBox, drawnBounds(), budget);
             }
             if (b.inner == Box.Inner.REPLACED) replaced(g, b, x, y, radii);
             for (Shadows.Shadow sh : shadows) if (sh.inset()) Shadows.inner(g, padding(b, x, y), sh, deviceScale, neededBounds(), budget);
@@ -980,6 +992,52 @@ public final class Painter {
     private java.awt.Rectangle neededBounds() {
         java.awt.Rectangle all = surfaceBounds();
         return needed == null ? all : all.intersection(needed);
+    }
+
+    /** Device px past {@link #needed} still drawn: a shape's antialiased edge, and a rectangle mapped back and forth, reach this far. */
+    private static final int CULL_MARGIN = 2;
+
+    /**
+     * The device bounds of the surface where drawing can change a pixel that matters: {@link #needed} with
+     * {@link #CULL_MARGIN} to spare, within the surface. Whatever lies wholly outside it is not drawn at all (only
+     * its hit regions are made): a hover's repaint paints from the picture's left edge, and a band is handed the
+     * whole page, but only the part kept is ever read.
+     */
+    private java.awt.Rectangle drawnBounds() {
+        java.awt.Rectangle all = surfaceBounds();
+        if (needed == null) return all;
+        java.awt.Rectangle n = new java.awt.Rectangle(needed);
+        n.grow(CULL_MARGIN, CULL_MARGIN);
+        return all.intersection(n);
+    }
+
+    /**
+     * Whether a box with its border box at ([x], [y]), [w] x [h], and these [shadows] (its own, inset ones included)
+     * can paint anything inside {@link #drawnBounds}: its background, borders, outer shadows and replaced content, with
+     * {@link #SLACK} round all of it, as {@link #reach} counts them (blurs in device px, after mapping).
+     */
+    private boolean paints(Graphics2D g, double x, double y, double w, double h, List<Shadows.Shadow> shadows) {
+        if (needed == null) return true;
+        java.awt.Rectangle drawn = drawnBounds();
+        if (drawn.isEmpty()) return false;
+        AffineTransform dev = g.getTransform();
+        if (reaches(dev, x - SLACK, y - SLACK, w + 2 * SLACK, h + 2 * SLACK, 0, drawn)) return true;
+        for (Shadows.Shadow sh : shadows) {
+            if (sh.inset()) continue;
+            double grow = Math.max(0, sh.spread()) + SLACK;
+            if (reaches(dev, x + sh.x() - grow, y + sh.y() - grow, w + 2 * grow, h + 2 * grow, shadowSpread(sh), drawn)) return true;
+        }
+        return false;
+    }
+
+    /** Whether the rectangle ([x], [y], [w], [h]) mapped by [dev], grown by [grow] device px, meets [drawn]. */
+    private static boolean reaches(AffineTransform dev, double x, double y, double w, double h, double grow, java.awt.Rectangle drawn) {
+        double[] p = {x, y, x + w, y, x, y + h, x + w, y + h};
+        dev.transform(p, 0, p, 0, 4);
+        double x0 = Math.min(Math.min(p[0], p[2]), Math.min(p[4], p[6])), x1 = Math.max(Math.max(p[0], p[2]), Math.max(p[4], p[6]));
+        double y0 = Math.min(Math.min(p[1], p[3]), Math.min(p[5], p[7])), y1 = Math.max(Math.max(p[1], p[3]), Math.max(p[5], p[7]));
+        // NaN (a degenerate transform) counts as reaching: drawn as ever.
+        return !(x1 + grow < drawn.x || x0 - grow > drawn.x + drawn.width || y1 + grow < drawn.y || y0 - grow > drawn.y + drawn.height);
     }
 
     /**

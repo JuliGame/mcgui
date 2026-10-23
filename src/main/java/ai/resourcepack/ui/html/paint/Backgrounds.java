@@ -104,6 +104,11 @@ final class Backgrounds {
         if (fill.isEmpty()) return;
         Paint oldPaint = g.getPaint();
         AffineTransform base = g.getTransform();
+        // A gradient is filled only over the surface (whose edges stop the drawing anyway), not over all of a big box
+        // of which a hover's repaint keeps a corner. Not cut by the clip: an edge of the fill on a clip's fractional edge
+        // would antialias a pixel the clip lets through.
+        Rectangle2D room = gradient ? onSurface(g, surface) : null;
+        if (gradient && room == null) return;
         if (gradient) g.setPaint(paint);
         int tiles = 0;
         tiling:
@@ -113,9 +118,12 @@ final class Backgrounds {
                 if (++tiles > MAX_TILES) break tiling;
                 if ((tiles & 1023) == 0) budget.check();
                 if (gradient) {
-                    g.translate(x - x0, y - y0);
-                    g.fill(fill);
-                    g.setTransform(base);
+                    Rectangle2D here = fill.createIntersection(new Rectangle2D.Double(room.getX() - (x - x0), room.getY() - (y - y0), room.getWidth(), room.getHeight()));
+                    if (!here.isEmpty()) {
+                        g.translate(x - x0, y - y0);
+                        g.fill(here);
+                        g.setTransform(base);
+                    }
                 } else {
                     pic.draw(g, x, y, tile[0], tile[1]);
                 }
@@ -124,6 +132,16 @@ final class Backgrounds {
             if (!ry) break;
         }
         g.setPaint(oldPaint);
+    }
+
+    /** [surface] (device px) in [g]'s user space, or null if [g] cannot map back to it. */
+    private static Rectangle2D onSurface(Graphics2D g, java.awt.Rectangle surface) {
+        if (surface.isEmpty()) return null;
+        try {
+            return g.getTransform().createInverse().createTransformedShape(surface).getBounds2D();
+        } catch (java.awt.geom.NoninvertibleTransformException e) {
+            return null;
+        }
     }
 
     private static final int MAX_TILES = 250_000;
@@ -231,7 +249,7 @@ final class Backgrounds {
     private record Stop(int color, double pos) {}
 
     /** The Paint of the gradient [layer] for a tile at [r], or null if it cannot be read. */
-    private static Paint gradientPaint(String layer, Style s, Rectangle2D r) {
+    static Paint gradientPaint(String layer, Style s, Rectangle2D r) {
         String lower = layer.toLowerCase(Locale.ROOT).trim();
         boolean repeating = lower.startsWith("repeating-");
         String name = lower.substring(0, lower.indexOf('('));
@@ -786,7 +804,7 @@ final class Backgrounds {
     }
 
     /** conic-gradient(from angle at position, stops): a Paint that looks up each pixel's angle. */
-    private static final class ConicPaint implements Paint {
+    static final class ConicPaint implements Paint {
         private final List<Stop> stops;
         /** The stops' positions and colours, to search. */
         private final double[] pos;
@@ -830,9 +848,78 @@ final class Backgrounds {
             this.from = fromDeg;
         }
 
+        /** Cells of a turn in {@link #cells}. */
+        private static final int CELLS = 4096;
+        /**
+         * How far (in turns) the angle {@link #turn} works out can be from the one atan2 gives: its polynomial is within
+         * 4e-8 radians (6e-9 of a turn) of atan, so this is over a hundred times that.
+         */
+        private static final double SLOP = 1e-6;
+        /**
+         * The colour of every angle in each 4096th of a turn, with {@link #SLOP} round it, where that is one colour
+         * throughout (the stretch between two stops of one colour), else 0 with {@link #exact} set: pixels there are
+         * worked out from atan2 itself. Made on first use.
+         */
+        private int[] cells;
+        private boolean[] exact;
+
+        private void tabulate() {
+            int[] c = new int[CELLS];
+            boolean[] e = new boolean[CELLS];
+            for (int i = 0; i < CELLS; i++) {
+                // The ends of the turn wrap round: always worked out.
+                int a = i == 0 || i == CELLS - 1 ? -1 : segment((double) i / CELLS - SLOP), b = segment((double) (i + 1) / CELLS + SLOP);
+                if (a >= 0 && a == b && one(a)) c[i] = a > pos.length - 1 ? colors[pos.length - 1] : colors[a];
+                else e[i] = true;
+            }
+            exact = e;
+            cells = c;
+        }
+
+        /** Which stretch [t] falls in, as {@link #colorAt} finds it: the stop it ends at, or one past the last stop. */
+        private int segment(double t) {
+            int hi = pos.length - 1;
+            if (hi == 0) return 0;
+            if (t > pos[hi]) return hi + 1;
+            int lo = 1;
+            while (lo < hi) {
+                int mid = (lo + hi) >>> 1;
+                if (t <= pos[mid]) hi = mid;
+                else lo = mid + 1;
+            }
+            return lo;
+        }
+
+        /** Whether {@link #colorAt} gives one colour all through [segment]. */
+        private boolean one(int segment) {
+            return segment == 0 || segment > pos.length - 1 || colors[segment - 1] == colors[segment];
+        }
+
+        /**
+         * The turn at user point ([ux], [uy]) from (cx, cy) as {@link #createContext} works it out, but with atan2 by a
+         * polynomial (atan to 4e-8 radians on [0, 1]); NaN where that is not to be trusted (on an axis through the centre,
+         * or at it).
+         */
+        private double turn(double ux, double uy) {
+            double yy = ux - cx, xx = -(uy - cy), ax = Math.abs(xx), ay = Math.abs(yy);
+            double big = Math.max(ax, ay), small = Math.min(ax, ay);
+            if (!(small > 1e-9)) return Double.NaN;
+            double a = small / big, s = a * a;
+            double r = a * (0.9999993356473158 + s * (-0.3332986091101211 + s * (0.19946566316123615 + s * (-0.13908630641390377
+                    + s * (0.09642196487500461 + s * (-0.05591228177527417 + s * (0.021862910328682428 + s * -0.004054550788647623)))))));
+            if (ay > ax) r = Math.PI / 2 - r;
+            if (xx < 0) r = Math.PI - r;
+            if (yy < 0) r = -r;
+            double ang = Math.toDegrees(r) - from;
+            return ((ang % 360) + 360) % 360 / 360;
+        }
+
         @Override
         public java.awt.PaintContext createContext(java.awt.image.ColorModel cm, java.awt.Rectangle deviceBounds, Rectangle2D userBounds,
                                                    AffineTransform xform, java.awt.RenderingHints hints) {
+            if (cells == null) tabulate();
+            int[] cellColor = cells;
+            boolean[] cellExact = exact;
             AffineTransform inv;
             try {
                 inv = xform.createInverse();
@@ -867,14 +954,22 @@ final class Backgrounds {
                         }
                         toUser.transform(row, 0, row, 0, w);
                         for (int i = 0; i < w; i++) {
-                            double ang = Math.toDegrees(Math.atan2(row[2 * i] - cx, -(row[2 * i + 1] - cy))) - from;
-                            double t = ((ang % 360) + 360) % 360 / 360;
-                            data[j * stride + i] = colorAt(t);
+                            // Mostly from the cell the polynomial's angle lands in, which holds one colour however far
+                            // out the polynomial is; where it holds more, or near the centre, from atan2 as ever.
+                            double ft = turn(row[2 * i], row[2 * i + 1]);
+                            int k = (int) (ft * CELLS);
+                            data[j * stride + i] = k > 0 && k < CELLS - 1 && !cellExact[k] ? cellColor[k] : exactAt(row[2 * i], row[2 * i + 1]);
                         }
                     }
                     return raster;
                 }
             };
+        }
+
+        /** The colour at user point ([ux], [uy]), its angle from atan2 itself. */
+        int exactAt(double ux, double uy) {
+            double ang = Math.toDegrees(Math.atan2(ux - cx, -(uy - cy))) - from;
+            return colorAt(((ang % 360) + 360) % 360 / 360);
         }
 
         /** The colour at [t] of a turn: between the first stop at or past it and the one before (stops never go back). */
