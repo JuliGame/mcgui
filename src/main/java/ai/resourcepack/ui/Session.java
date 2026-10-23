@@ -361,17 +361,21 @@ public final class Session {
         }
     }
 
-    /** Copies what a click can change, ticks and open details, from [from] to [to], copies of the same page. */
+    /** Copies what a click can change, ticks, values, chosen options and open details, from [from] to [to], copies of the same page. */
     private static void keepFormState(Document from, Document to) {
         Elements a = from.getAllElements(), b = to.getAllElements();
         if (a.size() != b.size()) return;
         for (int i = 0; i < a.size(); i++) {
             String attr = switch (a.get(i).normalName()) {
                 case "input" -> "checked";
+                case "option" -> "selected";
                 case "details" -> "open";
                 default -> null;
             };
             if (attr == null) continue;
+            // A slider's or number field's value is the click's too.
+            String type = a.get(i).attr("type").toLowerCase(Locale.ROOT);
+            if (type.equals("range") || type.equals("number")) b.get(i).attr("value", a.get(i).attr("value"));
             if (a.get(i).hasAttr(attr)) b.get(i).attr(attr, "");
             else b.get(i).removeAttr(attr);
         }
