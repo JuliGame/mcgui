@@ -54,6 +54,8 @@ public final class Walls implements Listener {
     /** The tick every wall's {@link Wall#viewers} are from (see {@link #viewers}). */
     private int viewersTick = -1;
     private int nextMapId;
+    /** Every placed wall: each player's client gets one map for each distinct tile in them (see {@link MapPool}). */
+    private final MapPool pool;
 
     /** A player's crosshair on a wall. */
     private record Look(Wall wall, int x, int y) {}
@@ -67,6 +69,7 @@ public final class Walls implements Listener {
     public Walls(Plugin plugin, int firstMapId, double viewDistance, double reach, Predicate<Player> seated) {
         this.plugin = plugin;
         this.nextMapId = firstMapId;
+        this.pool = new MapPool(firstMapId);
         this.viewDistance = viewDistance;
         this.reach = reach;
         this.seated = seated;
@@ -103,6 +106,7 @@ public final class Walls implements Listener {
             walls.remove(this);
             placed = walls.toArray(new Wall[0]);
             map.despawn();
+            pool.remove(map);
             pin(map, false);
             Set<UUID> watchers = inRange.remove(this);
             if (watchers != null) for (UUID id : watchers) {
@@ -119,6 +123,7 @@ public final class Walls implements Listener {
         Wall wall = new Wall(map, content);
         pin(map, true);
         map.spawn(plugin);
+        pool.add(map);
         walls.add(wall);
         placed = walls.toArray(new Wall[0]);
         return wall;

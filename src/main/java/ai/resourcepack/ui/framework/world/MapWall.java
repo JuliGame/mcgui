@@ -68,6 +68,8 @@ public final class MapWall {
     /** An overlay's signature frame, its entity id (see {@link #showSignature}); -1 for none. */
     private int signatureFrame = -1;
     private volatile int sendsVersion;
+    /** The walls whose maps this one's frames may show, and theirs this one's (see {@link MapPool}); null for none. */
+    volatile MapPool pool;
 
     public MapWall(World world, int anchorX, int anchorY, int anchorZ, BlockFace facing, int cols, int rows, int firstMapId) {
         if (!HORIZONTAL.contains(facing)) throw new IllegalArgumentException("A screen faces north, south, east or west");
@@ -97,6 +99,11 @@ public final class MapWall {
 
     /** Each tile's own map id, in tile order: one array for the wall's life, which nobody may change. */
     public int[] ownMaps() { return ownMaps; }
+
+    /** The pool this wall's frames share maps in, or null if they show its own maps alone (a view). */
+    public MapPool pool() {
+        return pool;
+    }
 
     /** The entity id of the frame showing [tile], or -1 while the frames are not in the world. */
     public int entityId(int tile) {
