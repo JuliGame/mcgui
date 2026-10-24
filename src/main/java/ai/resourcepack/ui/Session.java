@@ -176,6 +176,9 @@ public final class Session {
         this.renderers = renderers;
         this.serverThread = plugin.serverThread();
         this.canvas = canvas;
+        // Players' pictures of one page are alike but where their own values are, and where they hover: one tile for each
+        // place they are alike in, whoever drew it.
+        canvas.shareAlike(true);
         this.viewer = viewer;
         this.designHeight = designHeight;
         this.born = Bukkit.getCurrentTick();

@@ -68,6 +68,8 @@ public final class Canvas {
     private volatile boolean transparent;
     /** Later drawings carry mcgui.dev's mark (see {@link #builderMark(boolean)}). */
     private volatile boolean builderMark;
+    /** Tiles are shared with every canvas that has a tile of the same colours (see {@link #shareAlike(boolean)}). */
+    private volatile boolean alike;
     /**
      * What a view lays over the world where the picture is transparent (ARGB; see {@link #tint(int)}): as published,
      * always written just before [tiles], so whoever reads [tiles] first sees the tint that came with them.
@@ -140,6 +142,7 @@ public final class Canvas {
         this.version = from.version;
         this.transparent = from.transparent;
         this.builderMark = from.builderMark;
+        this.alike = from.alike;
         this.tint = from.tint;
         this.nextTint = from.tint;
     }
@@ -223,6 +226,17 @@ public final class Canvas {
      */
     public void builderMark(boolean on) {
         builderMark = on;
+    }
+
+    /**
+     * Whether later drawings share each tile they change with every canvas (of this palette and size) that has a tile of
+     * the same colours: one tile, its colours and what is made from it (the same arrays, so they are compressed once,
+     * and a viewer who has them is sent nothing) for, say, every player's own picture of one page, alike but for their
+     * names. A tile's colours are then never drawn into in place, so each changed tile costs a copy of its colours on
+     * the next drawing: for pictures that change in a few places now and then, not a game's every frame. Off by default.
+     */
+    public void shareAlike(boolean on) {
+        alike = on;
     }
 
     public boolean transparency() {
@@ -598,12 +612,19 @@ public final class Canvas {
         final byte[] hi;
         /** Where its opaque 2×2 blocks are ({@link Palette#encodeHi}'s bounds). */
         final int bounds;
+        /** The colours it was encoded from, if it is shared by its colours ({@link #shareAlike}): never changed. Else null. */
+        final byte[] ycc;
         private byte[] own, plain, tiled;
         private int ownTint, tiledAt = -1, tiledTint;
 
         Tile(byte[] hi, int bounds) {
+            this(hi, bounds, null);
+        }
+
+        Tile(byte[] hi, int bounds, byte[] ycc) {
             this.hi = hi;
             this.bounds = bounds;
+            this.ycc = ycc;
         }
 
         /** Made once for each tint, the first time a view needs it; one array whichever thread asks first. */
@@ -635,8 +656,16 @@ public final class Canvas {
             synchronized (this) {
                 if (plain != null) return plain;
             }
-            long before = canvas.changing;
             byte[] out = new byte[TILE];
+            if (ycc != null) {
+                // Its own colours, which never change.
+                canvas.palette.encodePlain(ycc, 128, 0, 0, out, canvas.transparent);
+                synchronized (this) {
+                    if (plain == null) plain = out;
+                    return plain;
+                }
+            }
+            long before = canvas.changing;
             canvas.palette.encodePlain(colours(canvas.ycc, index), 128, 0, 0, out, canvas.transparent);
             // Kept only if the picture did not change under it and this tile is still where it was read from;
             // otherwise it may be of other pixels, and is made again next time.
@@ -676,10 +705,104 @@ public final class Canvas {
     }
 
     private void encode(int t, Tile[] into) {
+        byte[] colours = colours(ycc, t);
+        if (alike && colours != BLACK) {
+            // The very tile another canvas (or this one before) made of the same colours: nothing encoded, and a viewer
+            // who has it is sent nothing. Its colours are this canvas's from now on too, shared, so never changed in place.
+            Tile same = Alike.find(palette, cols, rows, transparent, colours);
+            if (same == null) {
+                byte[] h = new byte[TILE];
+                same = Alike.add(palette, cols, rows, transparent, new Tile(h, palette.encodeHi(colours, 128, 0, 0, h, transparent), colours));
+            }
+            ycc[t] = same.ycc;
+            mine.set(t, null);
+            into[t] = same;
+            return;
+        }
         // A fresh array each time: the sender may still hold the old one. PLAIN is made from it when asked for.
         byte[] h = new byte[TILE];
-        int bounds = palette.encodeHi(colours(ycc, t), 128, 0, 0, h, transparent);
+        int bounds = palette.encodeHi(colours, 128, 0, 0, h, transparent);
         into[t] = new Tile(h, bounds);
+    }
+
+    /**
+     * Tiles of canvases that share alike ({@link #shareAlike}), by their colours, palette, size and transparency, each
+     * held weakly: as long as a canvas shows it. Looked up from several encoding threads at once.
+     */
+    private static final class Alike {
+        private static final java.util.concurrent.ConcurrentHashMap<Integer, List<Ref>> BY = new java.util.concurrent.ConcurrentHashMap<>();
+        private static final java.lang.ref.ReferenceQueue<Tile> GONE = new java.lang.ref.ReferenceQueue<>();
+
+        private static final class Ref extends java.lang.ref.WeakReference<Tile> {
+            final int hash, cols, rows;
+            final Palette palette;
+            final boolean clear;
+
+            Ref(Tile t, int hash, Palette palette, int cols, int rows, boolean clear) {
+                super(t, GONE);
+                this.hash = hash;
+                this.palette = palette;
+                this.cols = cols;
+                this.rows = rows;
+                this.clear = clear;
+            }
+
+            boolean of(Palette palette, int cols, int rows, boolean clear) {
+                return this.palette == palette && this.cols == cols && this.rows == rows && this.clear == clear;
+            }
+        }
+
+        static Tile find(Palette palette, int cols, int rows, boolean clear, byte[] colours) {
+            purge();
+            List<Ref> refs = BY.get(hash(colours, cols, rows, clear));
+            if (refs == null) return null;
+            synchronized (refs) {
+                for (Ref r : refs) {
+                    Tile t = r.get();
+                    if (t != null && r.of(palette, cols, rows, clear) && Arrays.equals(t.ycc, colours)) return t;
+                }
+            }
+            return null;
+        }
+
+        /** [t], unless one of the same colours was added meanwhile: then that one. */
+        static Tile add(Palette palette, int cols, int rows, boolean clear, Tile t) {
+            int h = hash(t.ycc, cols, rows, clear);
+            List<Ref> refs = BY.computeIfAbsent(h, k -> new ArrayList<>(1));
+            synchronized (refs) {
+                for (Ref r : refs) {
+                    Tile o = r.get();
+                    if (o != null && r.of(palette, cols, rows, clear) && Arrays.equals(o.ycc, t.ycc)) return o;
+                }
+                refs.add(new Ref(t, h, palette, cols, rows, clear));
+            }
+            return t;
+        }
+
+        private static void purge() {
+            for (java.lang.ref.Reference<? extends Tile> g; (g = GONE.poll()) != null; ) {
+                Ref r = (Ref) g;
+                BY.computeIfPresent(r.hash, (k, refs) -> {
+                    synchronized (refs) {
+                        refs.remove(r);
+                        return refs.isEmpty() ? null : refs;
+                    }
+                });
+            }
+        }
+
+        /** Four lanes, so the multiplies do not wait on each other. */
+        private static int hash(byte[] b, int cols, int rows, boolean clear) {
+            int a = 1, c = 2, d = 3, e = 4, i = 0;
+            for (; i + 3 < b.length; i += 4) {
+                a = a * 31 + b[i];
+                c = c * 31 + b[i + 1];
+                d = d * 31 + b[i + 2];
+                e = e * 31 + b[i + 3];
+            }
+            for (; i < b.length; i++) a = a * 31 + b[i];
+            return (((a * 31 + c) * 31 + d) * 31 + e) * 31 + (cols << 16 | rows) * 2 + (clear ? 1 : 0);
+        }
     }
 
     /** How a tile is sent: which colours mean what to the player's client. */

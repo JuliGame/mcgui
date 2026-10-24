@@ -123,6 +123,46 @@ class SharedTilesTest {
         check("everything drawn again", a, b, c, d, blank);
     }
 
+    /**
+     * Canvases that share alike, each drawn on its own: where their pictures are alike they publish the very same tiles,
+     * colours shared; where one then draws, only it changes, into new arrays, and nothing handed out changes.
+     */
+    @Test
+    void canvasesThatShareAlikeShowOneTileWhereTheyAreAlike() {
+        Random r = new Random(23);
+        int[] picture = noise(r, W, H);
+        Shown a = new Shown("a", new Canvas(PALETTE, COLS, ROWS), picture.clone());
+        Shown b = new Shown("b", new Canvas(PALETTE, COLS, ROWS), picture.clone());
+        // A third that does not share alike: its own arrays, the same bytes.
+        Shown c = new Shown("c", new Canvas(PALETTE, COLS, ROWS), picture.clone());
+        a.canvas.shareAlike(true);
+        b.canvas.shareAlike(true);
+        paint(a, picture.clone(), W, H, 0, 0);
+        paint(b, picture.clone(), W, H, 0, 0);
+        paint(c, picture.clone(), W, H, 0, 0);
+        for (int t = 0; t < COLS * ROWS; t++) {
+            for (Canvas.Encoding e : new Canvas.Encoding[]{Canvas.Encoding.HI, Canvas.Encoding.HI_OWN, Canvas.Encoding.HI_TILED, Canvas.Encoding.PLAIN}) {
+                assertSame(a.canvas.tile(t, e), b.canvas.tile(t, e), "alike: tile " + t + " " + e);
+            }
+            assertNotSame(a.canvas.tile(t, Canvas.Encoding.HI), c.canvas.tile(t, Canvas.Encoding.HI), "c shares alike");
+        }
+        assertEquals(0, a.canvas.ownMaps() + b.canvas.ownMaps(), "the colours of a tile shared alike are shared");
+        check("drawn alike", a, b, c);
+        // b draws over tile 4: a new tile there; a keeps its own; the rest are still one.
+        byte[] a4 = a.canvas.tile(4, Canvas.Encoding.HI);
+        paint(b, noise(r, 30, 30), 30, 30, 140, 150);
+        assertNotSame(a4, b.canvas.tile(4, Canvas.Encoding.HI));
+        assertSame(a4, a.canvas.tile(4, Canvas.Encoding.HI));
+        assertSame(a.canvas.tile(0, Canvas.Encoding.HI), b.canvas.tile(0, Canvas.Encoding.HI));
+        check("b drew", a, b, c);
+        // a draws the same pixels there: it then shows b's tile.
+        int[] patch = new int[30 * 30];
+        for (int j = 0; j < 30; j++) System.arraycopy(b.picture, (150 + j) * W + 140, patch, j * 30, 30);
+        paint(a, patch, 30, 30, 140, 150);
+        assertSame(b.canvas.tile(4, Canvas.Encoding.HI), a.canvas.tile(4, Canvas.Encoding.HI), "the same pixels again: b's tile");
+        check("a drew the same", a, b, c);
+    }
+
     private static java.awt.image.BufferedImage toImage(int[] px, int w, int h) {
         java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(w, h, java.awt.image.BufferedImage.TYPE_INT_RGB);
         img.setRGB(0, 0, w, h, px, 0, w);
