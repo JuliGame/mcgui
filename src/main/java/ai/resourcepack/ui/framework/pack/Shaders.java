@@ -20,6 +20,9 @@ import java.util.regex.Pattern;
  *       entity is drawn: besides the outlines, it keeps the world an overlay page's player saw when it
  *       opened and shows it, still, round the panel ({@link #overlayChain}; 26.2 only).</li>
  *   <li>{@code rendertype_clouds.vsh} draws no clouds over that still world (26.2 only).</li>
+ *   <li>A post effect, {@code post_effect/blur.json}, the game's menu blur, which first takes the pointer out
+ *       of the picture, so it does not show under the pause menu beside the system's own cursor
+ *       ({@link #menuBlurChain}; 26.2 only).</li>
  * </ol>
  *
  * <p>"Seated" is read from {@code Globals.CameraOffset}: the engine puts a seated player's camera at a
@@ -735,9 +738,197 @@ public final class Shaders {
                 #else
                     fragColor = apply_fog(color, sphericalVertexDistance, cylindricalVertexDistance, FogEnvironmentalStart, FogEnvironmentalEnd, FogRenderDistanceStart, FogRenderDistanceEnd, FogColor);
                 #endif
+                #ifndef IS_GUI
+                    // The pointer carries a code the menu blur finds it by, to take it out (menuBlurChain).
+                    if (mcbPointer > 0.5 && fragColor.a > 0.99) fragColor.rgb = mcb_pointer_code(fragColor.rgb);
+                #endif
                 }
                 """;
-        return emit(head + decoder + mainHead + tail, d);
+        return emit(head + decoder + (d == Dialect.V26_2 ? POINTER_CODE : "") + mainHead + tail, d);
+    }
+
+    // ---------------------------------------------------------------- the pointer, out of the menu blur
+
+    /**
+     * The low two bits of each channel of a pointer pixel at window pixel [p] (26.2's text.fsh writes them, see
+     * {@link #menuBlurChain}): a hash of the position, so a flat or smoothly shaded picture almost never carries
+     * the code in two neighbouring pixels, as every pointer pixel inside the pointer does. White is at worst
+     * (252, 252, 252).
+     */
+    private static final String CODE_GLSL = """
+
+            ivec3 mcb_code(ivec2 p) {
+                uint h = uint(p.x) * 0x9E3779B1u ^ uint(p.y) * 0x85EBCA77u;
+                h ^= h >> 15;
+                h *= 0x2C1B3C6Du;
+                h ^= h >> 12;
+                int e = int(h >> 26);
+                return ivec3(e & 3, (e >> 2) & 3, (e >> 4) & 3);
+            }
+            """;
+
+    /** text.fsh's half of the pointer code. */
+    private static final String POINTER_CODE = CODE_GLSL + """
+
+            vec3 mcb_pointer_code(vec3 rgb) {
+                ivec3 c = ivec3(round(clamp(rgb, 0.0, 1.0) * 255.0));
+                return vec3((c & ~3) | mcb_code(ivec2(gl_FragCoord.xy))) / 255.0;
+            }
+            """;
+
+    /** How far a pointer pixel's fill looks for the picture round the pointer, in window pixels each way. */
+    static final int POINTER_REACH = 128;
+
+    /**
+     * {@code post_effect/blur.json}, the game's menu blur (26.2). The game runs it over the frame, world drawn,
+     * when a screen asks for a blurred background: the pause menu and the option screens it leads to, with
+     * "Menu Background Blur" at 1 or more ({@code Screen.extractBlurredBackground}, {@code GuiRenderer.draw}).
+     * Those are the times the system's own cursor is out, so the pointer would be a second one. Three passes
+     * first take it out:
+     *
+     * <ol>
+     *   <li>{@code pointer_find}: a pixel is the pointer's if its low bits carry the code for where it is
+     *   ({@code mcb_code}, which text.fsh gives every opaque pointer pixel) and at least two of its eight
+     *   neighbours' do too. Kept in alpha.</li>
+     *   <li>{@code pointer_grow}: every pixel within two of such a pixel is to go, which takes in the pointer's
+     *   blended edge and any thin end.</li>
+     *   <li>{@code pointer_fill}: each of those is filled from the nearest pixels left, right, above and below
+     *   that stay, in proportion to how near each is.</li>
+     * </ol>
+     *
+     * <p>Then the game's own six box-blur passes, unchanged. Anyone without a pointer loses nothing but the odd
+     * pixel of very busy picture, refilled from beside it before the blur. The depth buffer would have been the
+     * better mark, but the game clears it before the GUI.
+     */
+    public static String menuBlurChain() {
+        StringBuilder passes = new StringBuilder("""
+                    {
+                      "vertex_shader": "minecraft:core/screenquad",
+                      "fragment_shader": "uiengine:post/pointer_find",
+                      "inputs": [{"sampler_name": "In", "target": "minecraft:main"}],
+                      "output": "ptr_a"
+                    },
+                    {
+                      "vertex_shader": "minecraft:core/screenquad",
+                      "fragment_shader": "uiengine:post/pointer_grow",
+                      "inputs": [{"sampler_name": "In", "target": "ptr_a"}],
+                      "output": "ptr_b"
+                    },
+                    {
+                      "vertex_shader": "minecraft:core/screenquad",
+                      "fragment_shader": "uiengine:post/pointer_fill",
+                      "inputs": [{"sampler_name": "In", "target": "ptr_b"}],
+                      "output": "minecraft:main"
+                    }""");
+        for (int k = 0; k < 6; k++) {
+            passes.append(",\n").append("""
+                    {
+                      "vertex_shader": "minecraft:core/screenquad",
+                      "fragment_shader": "minecraft:post/box_blur",
+                      "inputs": [{"sampler_name": "In", "target": "%s", "bilinear": true}],
+                      "output": "%s",
+                      "uniforms": {"BlurConfig": [{"name": "BlurDir", "type": "vec2", "value": [%s]}, {"name": "Radius", "type": "float", "value": 0.0}]}
+                    }""".formatted(k % 2 == 0 ? "minecraft:main" : "swap", k % 2 == 0 ? "swap" : "minecraft:main", k % 2 == 0 ? "1.0, 0.0" : "0.0, 1.0"));
+        }
+        return "{\n  \"targets\": {\"swap\": {}, \"ptr_a\": {}, \"ptr_b\": {}},\n  \"passes\": [\n" + passes + "\n  ]\n}\n";
+    }
+
+    private static final String POINTER_HEAD = """
+            #version 330
+
+            uniform sampler2D InSampler;
+
+            layout(std140) uniform SamplerInfo {
+                vec2 OutSize;
+            };
+
+            in vec2 texCoord;
+
+            out vec4 fragColor;
+            """;
+
+    /** {@link #menuBlurChain}'s first pass: the frame, alpha 1 where it is the pointer. */
+    public static String pointerFindFsh() {
+        return emit(POINTER_HEAD + CODE_GLSL + """
+
+                bool coded(ivec2 p) {
+                    return (ivec3(round(texelFetch(InSampler, p, 0).rgb * 255.0)) & 3) == mcb_code(p);
+                }
+
+                void main() {
+                    ivec2 at = ivec2(gl_FragCoord.xy);
+                    vec3 here = texelFetch(InSampler, at, 0).rgb;
+                    bool pointer = false;
+                    if (coded(at)) {
+                        ivec2 edge = textureSize(InSampler, 0) - 1;
+                        int near = 0;
+                        for (int i = 0; i < 9; i++) {
+                            ivec2 q = at + ivec2(i % 3 - 1, i / 3 - 1);
+                            if (i != 4 && q == clamp(q, ivec2(0), edge) && coded(q)) near++;
+                        }
+                        pointer = near >= 2;
+                    }
+                    fragColor = vec4(here, pointer ? 1.0 : 0.0);
+                }
+                """, Dialect.V26_2);
+    }
+
+    /** The second: alpha 1 within two pixels of the pointer. */
+    public static String pointerGrowFsh() {
+        return emit(POINTER_HEAD + """
+
+                void main() {
+                    ivec2 at = ivec2(gl_FragCoord.xy);
+                    ivec2 edge = textureSize(InSampler, 0) - 1;
+                    float near = 0.0;
+                    for (int i = 0; i < 25; i++) {
+                        near = max(near, texelFetch(InSampler, clamp(at + ivec2(i % 5 - 2, i / 5 - 2), ivec2(0), edge), 0).a);
+                    }
+                    fragColor = vec4(texelFetch(InSampler, at, 0).rgb, near);
+                }
+                """, Dialect.V26_2);
+    }
+
+    /** The third: the frame with the pointer filled from round it. */
+    public static String pointerFillFsh() {
+        return emit(POINTER_HEAD + """
+
+                // The first pixel from [at] along [dir] that stays, and how far it is; 0 if there is none in reach.
+                vec3 kept(ivec2 at, ivec2 dir, ivec2 edge, out float far) {
+                    for (int k = 1; k <= @REACH@; k++) {
+                        ivec2 q = at + dir * k;
+                        if (q != clamp(q, ivec2(0), edge)) break;
+                        vec4 c = texelFetch(InSampler, q, 0);
+                        if (c.a < 0.5) {
+                            far = float(k);
+                            return c.rgb;
+                        }
+                    }
+                    far = 0.0;
+                    return vec3(0.0);
+                }
+
+                void main() {
+                    ivec2 at = ivec2(gl_FragCoord.xy);
+                    vec4 here = texelFetch(InSampler, at, 0);
+                    if (here.a < 0.5) {
+                        fragColor = vec4(here.rgb, 1.0);
+                        return;
+                    }
+                    ivec2 edge = textureSize(InSampler, 0) - 1;
+                    vec3 sum = vec3(0.0);
+                    float weights = 0.0;
+                    for (int i = 0; i < 4; i++) {
+                        float far;
+                        vec3 c = kept(at, ivec2(i == 0 ? -1 : i == 1 ? 1 : 0, i == 2 ? -1 : i == 3 ? 1 : 0), edge, far);
+                        if (far > 0.0) {
+                            sum += c / far;
+                            weights += 1.0 / far;
+                        }
+                    }
+                    fragColor = vec4(weights > 0.0 ? sum / weights : here.rgb, 1.0);
+                }
+                """.replace("@REACH@", String.valueOf(POINTER_REACH)), Dialect.V26_2);
     }
 
     // ---------------------------------------------------------------- the world round an overlay, kept still

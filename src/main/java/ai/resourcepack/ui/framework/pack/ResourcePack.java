@@ -178,6 +178,11 @@ public final class ResourcePack implements AutoCloseable {
             e.put(OVERLAY_26_2 + "/assets/uiengine/shaders/post/overlay_compose.fsh", Shaders.overlayComposeFsh());
             e.put(OVERLAY_26_2 + "/assets/uiengine/shaders/post/overlay_outline.fsh", Shaders.overlayOutlineFsh());
             e.put(OVERLAY_26_2 + "/assets/minecraft/shaders/core/rendertype_clouds.vsh", Shaders.cloudsVsh());
+            // The pointer taken out of the menu blur, so the pause menu shows only the system's cursor. 26.2 only, too.
+            e.put(OVERLAY_26_2 + "/assets/minecraft/post_effect/blur.json", Shaders.menuBlurChain());
+            e.put(OVERLAY_26_2 + "/assets/uiengine/shaders/post/pointer_find.fsh", Shaders.pointerFindFsh());
+            e.put(OVERLAY_26_2 + "/assets/uiengine/shaders/post/pointer_grow.fsh", Shaders.pointerGrowFsh());
+            e.put(OVERLAY_26_2 + "/assets/uiengine/shaders/post/pointer_fill.fsh", Shaders.pointerFillFsh());
             // The pointer a seated player sees: one glyph per shape on a text display in front of the
             // view. Text, unlike an item, gets no directional shading, so the arrow stays white.
             // The server's own cursors (Pointer.custom) are a provider each, as tall as they are drawn, with the

@@ -89,4 +89,42 @@ class ShadersTest {
             assertFalse(s.contains("@"), "a placeholder was left in " + s);
         }
     }
+
+    /**
+     * The menu blur is JSON the game reads: our three pointer passes, ending on main, then the game's own six box-blur
+     * passes as it ships them (main to swap and back, horizontal then vertical, at the player's own radius). It names
+     * only targets it declares or main (LevelTargetBundle.MAIN_TARGETS), and its shaders have every placeholder filled.
+     */
+    @Test
+    void menuBlurChainTakesThePointerOutThenBlursAsTheGameDoes() {
+        com.google.gson.JsonObject chain = com.google.gson.JsonParser.parseString(Shaders.menuBlurChain()).getAsJsonObject();
+        java.util.Set<String> known = new java.util.HashSet<>(chain.getAsJsonObject("targets").keySet());
+        known.add("minecraft:main");
+        com.google.gson.JsonArray passes = chain.getAsJsonArray("passes");
+        assertEquals(9, passes.size());
+        String[] ours = {"uiengine:post/pointer_find", "uiengine:post/pointer_grow", "uiengine:post/pointer_fill"};
+        for (int i = 0; i < passes.size(); i++) {
+            com.google.gson.JsonObject pass = passes.get(i).getAsJsonObject();
+            assertTrue(known.contains(pass.get("output").getAsString()), pass.toString());
+            for (var in : pass.getAsJsonArray("inputs")) assertTrue(known.contains(in.getAsJsonObject().get("target").getAsString()), pass.toString());
+            if (i < 3) {
+                assertEquals(ours[i], pass.get("fragment_shader").getAsString());
+                continue;
+            }
+            int k = i - 3;
+            assertEquals("minecraft:post/box_blur", pass.get("fragment_shader").getAsString());
+            assertEquals(k % 2 == 0 ? "minecraft:main" : "swap", pass.getAsJsonArray("inputs").get(0).getAsJsonObject().get("target").getAsString());
+            assertEquals(k % 2 == 0 ? "swap" : "minecraft:main", pass.get("output").getAsString());
+            com.google.gson.JsonArray config = pass.getAsJsonObject("uniforms").getAsJsonArray("BlurConfig");
+            assertEquals(k % 2 == 0 ? 1.0 : 0.0, config.get(0).getAsJsonObject().getAsJsonArray("value").get(0).getAsDouble());
+            assertEquals(0.0, config.get(1).getAsJsonObject().get("value").getAsDouble());
+        }
+        assertEquals("minecraft:main", passes.get(2).getAsJsonObject().get("output").getAsString());
+        for (String s : new String[]{Shaders.pointerFindFsh(), Shaders.pointerGrowFsh(), Shaders.pointerFillFsh()}) {
+            assertFalse(s.contains("@"), "a placeholder was left in " + s);
+        }
+        // The code goes on the pointer in 26.2 only, where the chain ships.
+        assertTrue(Shaders.textFsh(Shaders.Dialect.V26_2, PALETTE).contains("mcb_pointer_code(fragColor.rgb)"));
+        assertFalse(Shaders.textFsh(Shaders.Dialect.V26_3, PALETTE).contains("mcb_pointer_code"));
+    }
 }
