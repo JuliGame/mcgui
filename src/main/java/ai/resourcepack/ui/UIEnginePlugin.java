@@ -246,7 +246,7 @@ public final class UIEnginePlugin extends JavaPlugin {
 
     /** Where {@code /ui import <code>} fetches shared pages from, the code appended; blank turns importing off. */
     String importUrl() {
-        return cfg.getString("import-url", "https://uiengine.dev/api/builder/ui/page/").trim();
+        return cfg.getString("import-url", "https://mcgui.dev/api/builder/ui/page/").trim();
     }
 
     /** How long one picture may take to draw (ms) before it is given up and reported like any page that cannot be drawn; 0 for no limit. */

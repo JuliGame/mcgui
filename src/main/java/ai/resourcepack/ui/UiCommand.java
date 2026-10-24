@@ -95,7 +95,7 @@ final class UiCommand implements TabExecutor {
             }
             case "import" -> {
                 if (!permitted(sender, permissionFor("import"))) return true;
-                if (args.length < 2) return say(sender, "/ui import <code>: the code from Send to server on uiengine.dev", NamedTextColor.RED);
+                if (args.length < 2) return say(sender, "/ui import <code>: the code from Send to server on mcgui.dev", NamedTextColor.RED);
                 importer.run(sender, args[1]);
             }
             case "reload" -> {

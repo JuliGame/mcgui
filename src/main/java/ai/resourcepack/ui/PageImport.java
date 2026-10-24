@@ -28,7 +28,7 @@ import java.util.Map;
 import java.util.regex.Pattern;
 
 /**
- * {@code /ui import <code>}: the pages somebody shared from <a href="https://uiengine.dev">uiengine.dev</a>,
+ * {@code /ui import <code>}: the pages somebody shared from <a href="https://mcgui.dev">mcgui.dev</a>,
  * written into the pages folder. The code names a frozen copy there; this fetches its files (pages,
  * stylesheets, pictures) as JSON from {@code import-url} + code, checks every name itself (a server
  * trusts no website to keep names inside its folder), and writes them, replacing files of the same
@@ -63,7 +63,7 @@ final class PageImport {
         }
         String key = code.toLowerCase(java.util.Locale.ROOT);
         if (!CODE.matcher(key).matches()) {
-            say(sender, "That isn't a uiengine.dev code: it's the eight letters after /ui import on the Send to server screen.", NamedTextColor.RED);
+            say(sender, "That isn't a mcgui.dev code: it's the eight letters after /ui import on the Send to server screen.", NamedTextColor.RED);
             return;
         }
         say(sender, "Fetching " + key + "...", NamedTextColor.GRAY);
@@ -109,7 +109,7 @@ final class PageImport {
                     say(sender, "Could not import " + key + ": " + failed, NamedTextColor.RED);
                     return;
                 }
-                plugin.getLogger().info(sender.getName() + " imported " + key + " from uiengine.dev: " + String.join(", ", written));
+                plugin.getLogger().info(sender.getName() + " imported " + key + " from mcgui.dev: " + String.join(", ", written));
                 say(sender, "Imported " + written.size() + " file" + (written.size() == 1 ? "" : "s") + " from " + key + ".", NamedTextColor.GREEN);
                 // Every page, as something to click: the one being worked on first.
                 List<String> pages = new ArrayList<>();
