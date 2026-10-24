@@ -1,10 +1,10 @@
 package ai.resourcepack.ui.framework.world;
 
+import ai.resourcepack.ui.framework.platform.Platform;
 import ai.resourcepack.ui.framework.api.Click;
 import ai.resourcepack.ui.framework.api.WallContent;
 import ai.resourcepack.ui.framework.api.WallScreen;
 import ai.resourcepack.ui.framework.net.Nms;
-import com.destroystokyo.paper.event.player.PlayerUseUnknownEntityEvent;
 import org.bukkit.Bukkit;
 import org.bukkit.FluidCollisionMode;
 import org.bukkit.Location;
@@ -165,7 +165,7 @@ public final class Walls implements Listener {
      * The list is the wall's own and refilled next tick: read it, never keep it.
      */
     public List<Player> viewers(Wall wall) {
-        int tick = Bukkit.getCurrentTick();
+        int tick = Platform.tick();
         if (viewersTick != tick) collectViewers();
         // A wall placed since: its own.
         if (wall.viewersTick != tick) {
@@ -181,7 +181,7 @@ public final class Walls implements Listener {
      * reach of every player, and the screens' tick and the sender both want the answer.
      */
     private void collectViewers() {
-        int tick = Bukkit.getCurrentTick();
+        int tick = Platform.tick();
         viewersTick = tick;
         if (placed.length == 0) return;
         for (Wall wall : placed) {
@@ -197,15 +197,24 @@ public final class Walls implements Listener {
     /** Whether [p], in [world], is in range of [map] (see {@link #viewers}). */
     private boolean inRange(Player p, World world, MapWall map) {
         if (map.world != world) return false;
-        double d = map.distanceSquared(p.getX(), p.getY(), p.getZ());
+        Location at = p.getLocation(SCRATCH);
+        double d = map.distanceSquared(at.getX(), at.getY(), at.getZ());
         if (d <= viewDistance * viewDistance) return true;
         double keep = viewDistance + KEEP_BEYOND;
         return d <= keep * keep && map.shownTo(p);
     }
 
-    /** Whether [p], in [world], stands within the square root of [squared] blocks of [map]'s centre. Read straight off the entity: no Location made. */
+    /**
+     * Where a player is, copied in rather than made afresh: the ranges are worked out for every player and wall each
+     * tick, and Spigot has no getX() on an entity. Server thread only.
+     */
+    private static final Location SCRATCH = new Location(null, 0, 0, 0);
+
+    /** Whether [p], in [world], stands within the square root of [squared] blocks of [map]'s centre. No Location made. */
     private static boolean within(Player p, World world, MapWall map, double squared) {
-        return map.world == world && map.distanceSquared(p.getX(), p.getY(), p.getZ()) <= squared;
+        if (map.world != world) return false;
+        Location at = p.getLocation(SCRATCH);
+        return map.distanceSquared(at.getX(), at.getY(), at.getZ()) <= squared;
     }
 
     /** Whether [player] is near enough a wall to aim at it, from where they stand: no eye, ray or vector made. */
@@ -313,7 +322,7 @@ public final class Walls implements Listener {
         if (e.getAnimationType() != PlayerAnimationType.ARM_SWING) return;
         Look look = lookOf(e.getPlayer());
         if (look == null || seated.test(e.getPlayer())) return;
-        long now = Bukkit.getCurrentTick();
+        long now = Platform.tick();
         UUID id = e.getPlayer().getUniqueId();
         // A right click that the client takes as done (on a frame, or on the block behind) swings the arm after it:
         // that swing is not a left click as well.
@@ -341,22 +350,22 @@ public final class Walls implements Listener {
     }
 
     /**
-     * A click on one of a wall's frames, which exist on the clients only, so the server knows no such entity. An
-     * attack comes with a swing, which is the click already (see {@link #onSwing}); a right click comes twice
-     * (at a point and not), which {@link #rightClick} takes as one.
+     * A right click with the main hand on one of a wall's frames, which exist on the clients only, so the server
+     * knows no such entity and no event says so on Spigot: it is read off the wire ({@code Pipeline.useEntities}) and
+     * handed here on the server thread. An attack comes with a swing, which is the click already (see
+     * {@link #onSwing}); a right click can come twice, which {@link #rightClick} takes as one.
      */
-    @EventHandler(priority = EventPriority.LOW)
-    public void onFrameClick(PlayerUseUnknownEntityEvent e) {
-        if (e.isAttack() || e.getHand() != EquipmentSlot.HAND || seated.test(e.getPlayer())) return;
-        Wall wall = byFrame(e.getEntityId());
+    public void frameUsed(Player player, int entityId) {
+        if (!player.isOnline() || seated.test(player)) return;
+        Wall wall = byFrame(entityId);
         if (wall == null) return;
-        Look look = lookOf(e.getPlayer());
-        if (look != null && look.wall == wall) rightClick(e.getPlayer(), look);
+        Look look = lookOf(player);
+        if (look != null && look.wall == wall) rightClick(player, look);
     }
 
     /** Holding the button repeats the click every 4 ticks, and one press can arrive as two events: a fresh press only. */
     private void rightClick(Player player, Look look) {
-        long now = Bukkit.getCurrentTick();
+        long now = Platform.tick();
         Long last = lastUse.put(player.getUniqueId(), now);
         if (last != null && now - last <= 5) return;
         look.wall.content.click(player, look.x, look.y, Click.RIGHT);

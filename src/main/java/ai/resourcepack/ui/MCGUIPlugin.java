@@ -1,5 +1,6 @@
 package ai.resourcepack.ui;
 
+import ai.resourcepack.ui.framework.platform.Platform;
 import ai.resourcepack.ui.chat.Chat;
 import ai.resourcepack.ui.framework.Framework;
 import ai.resourcepack.ui.framework.FrameworkCommand;
@@ -120,7 +121,7 @@ public final class MCGUIPlugin extends JavaPlugin {
         var meter = framework.meter();
         tasks.add(Bukkit.getScheduler().runTaskTimer(this, () -> {
             meter.begin();
-            int tick = Bukkit.getCurrentTick();
+            int tick = Platform.tick();
             try {
                 screens.tick(tick);
                 HoverAhead.wake();
@@ -168,7 +169,7 @@ public final class MCGUIPlugin extends JavaPlugin {
                 return mcgui.tabComplete(sender, alias, args);
             }
         };
-        if (!getServer().getCommandMap().register("mcgui", alias)) {
+        if (!Platform.commandMap().register("mcgui", alias)) {
             getLogger().info("Another plugin has /" + name + ", so /" + name + " is that plugin's here; /mcgui and /mcgui:" + name
                     + " still work (" + key + ": false in config.yml stops trying)");
         }
@@ -467,7 +468,7 @@ public final class MCGUIPlugin extends JavaPlugin {
                 ai.resourcepack.ui.html.style.Motion motion = page.moves() ? new ai.resourcepack.ui.html.style.Motion() : null;
                 try {
                     if (motion != null) {
-                        motion.moment(0, Bukkit.getCurrentTick() / 20.0);
+                        motion.moment(0, Platform.tick() / 20.0);
                         ai.resourcepack.ui.html.style.Motion.set(motion);
                     }
                     var frame = HtmlRenderer.render(page, filled.copy(), size[0] * 128, size[1] * 128, scale, 0, HtmlRenderer.state(null, null),

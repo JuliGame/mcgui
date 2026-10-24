@@ -159,30 +159,30 @@ public final class SharedCompression implements AutoCloseable {
         unbundlerClass = Class.forName(net + "PacketBundleUnpacker");
         connectionClass = Class.forName(net + "Connection");
         Class<?> names = Class.forName(net + "HandlerNames");
-        compressName = (String) names.getField("COMPRESS").get(null);
-        prependerName = (String) names.getField("PREPENDER").get(null);
-        encoderName = (String) names.getField("ENCODER").get(null);
+        compressName = (String) Reflect.field(names, "COMPRESS").get(null);
+        prependerName = (String) Reflect.field(names, "PREPENDER").get(null);
+        encoderName = (String) Reflect.field(names, "ENCODER").get(null);
         protocolInfo = encoderClass.getDeclaredField("protocolInfo");
         protocolInfo.setAccessible(true);
-        threshold = l.unreflect(compressClass.getMethod("getThreshold"));
+        threshold = l.unreflect(Reflect.method(compressClass, "getThreshold"));
         Class<?> info = Class.forName(net + "ProtocolInfo");
-        protocolId = l.unreflect(info.getMethod("id"));
-        protocolCodec = l.unreflect(info.getMethod("codec"));
-        play = Class.forName(net + "ConnectionProtocol").getField("PLAY").get(null);
-        encode = l.unreflect(Class.forName(net + "codec.StreamEncoder").getMethod("encode", Object.class, Object.class));
-        bundlerInfo = l.unreflect(info.getMethod("bundlerInfo"));
+        protocolId = l.unreflect(Reflect.method(info, "id"));
+        protocolCodec = l.unreflect(Reflect.method(info, "codec"));
+        play = Reflect.field(Class.forName(net + "ConnectionProtocol"), "PLAY").get(null);
+        encode = l.unreflect(Reflect.method(Class.forName(net + "codec.StreamEncoder"), "encode", Object.class, Object.class));
+        bundlerInfo = l.unreflect(Reflect.method(info, "bundlerInfo"));
         Class<?> bundler = Class.forName(net + "protocol.BundlerInfo");
-        unbundle = l.unreflect(bundler.getMethod("unbundlePacket", Class.forName(net + "protocol.Packet"), Consumer.class));
+        unbundle = l.unreflect(Reflect.method(bundler, "unbundlePacket", Class.forName(net + "protocol.Packet"), Consumer.class));
         // The compressor Paper's own connections use (libdeflate where Velocity has it for the platform, else
         // java.util.zip), at the server's level, so a patch costs here what it cost there.
-        Object loader = Class.forName("com.velocitypowered.natives.util.Natives").getField("compress").get(null);
-        factory = loader.getClass().getMethod("get").invoke(loader);
+        Object loader = Reflect.field(Class.forName("com.velocitypowered.natives.util.Natives"), "compress").get(null);
+        factory = Reflect.method(loader.getClass(), "get").invoke(loader);
         Class<?> compressorType = Class.forName("com.velocitypowered.natives.compression.VelocityCompressor");
-        createCompressor = l.unreflect(Class.forName("com.velocitypowered.natives.compression.VelocityCompressorFactory").getMethod("create", int.class));
+        createCompressor = l.unreflect(Reflect.method(Class.forName("com.velocitypowered.natives.compression.VelocityCompressorFactory"), "create", int.class));
         this.level = level;
-        compressorName = String.valueOf(loader.getClass().getMethod("getLoadedVariant").invoke(loader));
-        deflate = l.unreflect(compressorType.getMethod("deflate", ByteBuf.class, ByteBuf.class));
-        closeCompressor = l.unreflect(compressorType.getMethod("close"));
+        compressorName = String.valueOf(Reflect.method(loader.getClass(), "getLoadedVariant").invoke(loader));
+        deflate = l.unreflect(Reflect.method(compressorType, "deflate", ByteBuf.class, ByteBuf.class));
+        closeCompressor = l.unreflect(Reflect.method(compressorType, "close"));
         // One now, so a server whose natives cannot make one says so at start, as before.
         worker();
     }
@@ -211,10 +211,10 @@ public final class SharedCompression implements AutoCloseable {
     /** Paper's {@code misc.compression-level}, which its connections compress at; -1 (the default) if unreadable. */
     private static int paperLevel() {
         try {
-            Object config = Class.forName("io.papermc.paper.configuration.GlobalConfiguration").getMethod("get").invoke(null);
-            Object misc = config.getClass().getField("misc").get(config);
-            Object level = misc.getClass().getField("compressionLevel").get(misc);
-            return (int) level.getClass().getMethod("or", int.class).invoke(level, -1);
+            Object config = Reflect.method(Class.forName("io.papermc.paper.configuration.GlobalConfiguration"), "get").invoke(null);
+            Object misc = Reflect.field(config.getClass(), "misc").get(config);
+            Object level = Reflect.field(misc.getClass(), "compressionLevel").get(misc);
+            return (int) Reflect.method(level.getClass(), "or", int.class).invoke(level, -1);
         } catch (ReflectiveOperationException | RuntimeException e) {
             return -1;
         }

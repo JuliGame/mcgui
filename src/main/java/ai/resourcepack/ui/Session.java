@@ -1,5 +1,6 @@
 package ai.resourcepack.ui;
 
+import ai.resourcepack.ui.framework.platform.Platform;
 import ai.resourcepack.ui.framework.api.Canvas;
 import ai.resourcepack.ui.framework.api.Pointer;
 import ai.resourcepack.ui.html.HoverAhead;
@@ -185,7 +186,7 @@ public final class Session {
         canvas.shareAlike(true);
         this.viewer = viewer;
         this.designHeight = designHeight;
-        this.born = Bukkit.getCurrentTick();
+        this.born = Platform.tick();
         this.hoverAhead = new HoverAhead(plugin.hoverAhead(), plugin.repaints());
         this.lookAgain = () -> serverThread.execute(this::lookAhead);
     }
@@ -306,7 +307,7 @@ public final class Session {
         plugin.pages().load(n).thenAcceptAsync(p -> {
             if (closed || navigation != nav) return;
             if (p != null) then.accept(p);
-            else if (tell != null && tell.isOnline()) tell.sendActionBar(Component.text("There is no page called " + n, NamedTextColor.RED));
+            else if (tell != null && tell.isOnline()) Platform.actionBar(tell, Component.text("There is no page called " + n, NamedTextColor.RED));
         }, serverThread);
     }
 
@@ -328,11 +329,11 @@ public final class Session {
         hover = null;
         pressed = null;
         refreshTicks = refreshSetting(p);
-        nextRefresh = Bukkit.getCurrentTick() + refreshTicks;
+        nextRefresh = Platform.tick() + refreshTicks;
         pendingFragment = fragment;
         hoverSoundAt = null;
         motion = new Motion();
-        shownAt = Bukkit.getCurrentTick();
+        shownAt = Platform.tick();
         Player viewerNow = player();
         Sounds.play(viewerNow, p.meta("ui:open-sound"));
         if (viewerNow != null) Bukkit.getPluginManager().callEvent(new PageOpenEvent(viewerNow, n, screen));
@@ -382,7 +383,7 @@ public final class Session {
             hover = null;
             pressed = null;
             motion = new Motion();
-            shownAt = Bukkit.getCurrentTick();
+            shownAt = Platform.tick();
             refreshTicks = refreshSetting(p);
             render();
         }, serverThread);
@@ -415,11 +416,11 @@ public final class Session {
         pendingFragment = null;
         // Its motion was of the other page's elements.
         motion = new Motion();
-        shownAt = Bukkit.getCurrentTick();
+        shownAt = Platform.tick();
         refreshTicks = refreshSetting(page);
-        nextRefresh = Bukkit.getCurrentTick() + refreshTicks;
+        nextRefresh = Platform.tick() + refreshTicks;
         Player pl = player();
-        if (pl != null) pl.sendActionBar(Component.text("Could not show " + failed + ": see the console", NamedTextColor.RED));
+        if (pl != null) Platform.actionBar(pl, Component.text("Could not show " + failed + ": see the console", NamedTextColor.RED));
         render();
     }
 
@@ -728,7 +729,7 @@ public final class Session {
         double scale = scale();
         long timeout = plugin.renderTimeout();
         // A tall picture is worth painting only if its document lasts: not if a refresh replaces it within seconds.
-        boolean lasting = refreshTicks == 0 || nextRefresh - Bukkit.getCurrentTick() > CACHE_MIN_TICKS;
+        boolean lasting = refreshTicks == 0 || nextRefresh - Platform.tick() > CACHE_MIN_TICKS;
         boolean shift = plugin.tileShift();
         // The first picture of this copy of the page, as every session's is: taken from FirstPictures if it is kept
         // there, waited for if another session is drawing it, else drawn here and kept for the next.
@@ -776,7 +777,7 @@ public final class Session {
                     return;
                 }
             } else {
-                AnimFrames.Claim claim = frames.claim(frameKey, Bukkit.getCurrentTick(), canvas, sh -> serverThread.execute(() -> frameLanded(sh)));
+                AnimFrames.Claim claim = frames.claim(frameKey, Platform.tick(), canvas, sh -> serverThread.execute(() -> frameLanded(sh)));
                 if (claim.waits()) return; // still drawing, as far as render() goes
                 if (claim.taken() != null) {
                     tookFrame(claim.taken());
@@ -1325,7 +1326,7 @@ public final class Session {
         drawnPress = List.of();
         // Its motion as the picture was drawn, moved on to now on this viewer's clock: a transition its next hover
         // starts, starts from what the picture shows, and what moved in it is repainted next.
-        if (picture.motion != null) motion = picture.motion.copyAt((Bukkit.getCurrentTick() - shownAt) / 20.0);
+        if (picture.motion != null) motion = picture.motion.copyAt((Platform.tick() - shownAt) / 20.0);
         drawnMoved = picture.motion != null ? motion.moved() : Set.of();
         drawnName = name;
         cache = null;
@@ -1360,7 +1361,7 @@ public final class Session {
      * than {@link #BLANK_AFTER_TICKS}, blank until it is.
      */
     boolean showing() {
-        return frame != null || Bukkit.getCurrentTick() - born >= BLANK_AFTER_TICKS;
+        return frame != null || Platform.tick() - born >= BLANK_AFTER_TICKS;
     }
 
     public boolean ready() {
@@ -1636,7 +1637,7 @@ public final class Session {
      * whole ticks, so viewers asking in the same tick are at the same moment.
      */
     private double[] moment() {
-        int t = Bukkit.getCurrentTick();
+        int t = Platform.tick();
         return new double[]{(t - shownAt) / 20.0, t / 20.0};
     }
 
@@ -1740,7 +1741,7 @@ public final class Session {
      */
     private void run(Element e, java.util.Map<String, String> form, Player p) {
         if (e.hasAttr("data-message") && p != null) {
-            p.sendMessage(net.kyori.adventure.text.minimessage.MiniMessage.miniMessage().deserialize(Placeholders.apply(Forms.fill(original(e, "data-message"), form), p)));
+            Platform.send(p, net.kyori.adventure.text.minimessage.MiniMessage.miniMessage().deserialize(Placeholders.apply(Forms.fill(original(e, "data-message"), form), p)));
         }
         if (e.hasAttr("data-command") && p != null) runAs(p, Placeholders.apply(Forms.fill(original(e, "data-command"), form), p));
         if (e.hasAttr("data-console")) console(Forms.fill(original(e, "data-console"), form), p);
@@ -1841,7 +1842,7 @@ public final class Session {
         } else if (l.startsWith("http://") || l.startsWith("https://")) {
             // A page cannot be browsed to: the link goes to chat, where it can be clicked.
             String url = Placeholders.apply(h, p);
-            if (p != null) p.sendMessage(Component.text(url, NamedTextColor.AQUA).clickEvent(ClickEvent.openUrl(url)));
+            if (p != null) Platform.send(p, Component.text(url, NamedTextColor.AQUA).clickEvent(ClickEvent.openUrl(url)));
         } else if (h.startsWith("#")) {
             scrollTo(h.substring(1));
         } else if (!l.contains(":")) {
@@ -1859,7 +1860,7 @@ public final class Session {
             return;
         }
         if (!open(target, fragment, true, p) && p != null) {
-            p.sendActionBar(Component.text("There is no page called " + target, NamedTextColor.RED));
+            Platform.actionBar(p, Component.text("There is no page called " + target, NamedTextColor.RED));
         }
     }
 

@@ -1,5 +1,6 @@
 package ai.resourcepack.ui;
 
+import ai.resourcepack.ui.framework.platform.Platform;
 import org.bukkit.Bukkit;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.entity.Player;
@@ -238,7 +239,7 @@ public final class Placeholders {
     }
 
     private static String plain(Player p) {
-        return net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer.plainText().serialize(p.displayName());
+        return Platform.displayName(p);
     }
 
     private static String put(String text, String token, java.util.function.Supplier<String> value) {

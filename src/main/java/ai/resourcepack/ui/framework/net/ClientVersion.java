@@ -41,6 +41,6 @@ public final class ClientVersion {
                 // Not known to ViaVersion (yet): the handshake's, below.
             }
         }
-        return player.getProtocolVersion();
+        return ai.resourcepack.ui.framework.platform.Platform.protocol(player);
     }
 }

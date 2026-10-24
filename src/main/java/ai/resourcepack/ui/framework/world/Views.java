@@ -1,5 +1,6 @@
 package ai.resourcepack.ui.framework.world;
 
+import ai.resourcepack.ui.framework.platform.Platform;
 import ai.resourcepack.ui.framework.Settings;
 import ai.resourcepack.ui.framework.api.Canvas;
 import ai.resourcepack.ui.framework.api.Click;
@@ -17,12 +18,9 @@ import ai.resourcepack.ui.framework.net.Pipeline;
 import ai.resourcepack.ui.framework.pack.ResourcePack;
 import ai.resourcepack.ui.framework.pack.Shaders;
 import ai.resourcepack.ui.framework.render.Palette;
-import io.papermc.paper.event.player.AsyncChatEvent;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
-import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import org.bukkit.Bukkit;
-import org.bukkit.Fluid;
 import org.bukkit.GameMode;
 import org.bukkit.Input;
 import org.bukkit.Location;
@@ -55,6 +53,7 @@ import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.player.PlayerAnimationEvent;
 import org.bukkit.event.player.PlayerAnimationType;
 import org.bukkit.event.player.PlayerChangedWorldEvent;
+import org.bukkit.event.player.AsyncPlayerChatEvent;
 import org.bukkit.event.player.PlayerDropItemEvent;
 import org.bukkit.event.player.PlayerInputEvent;
 import org.bukkit.event.player.PlayerInteractEntityEvent;
@@ -322,7 +321,7 @@ public final class Views implements Listener {
             this.returnTo = returnTo;
             this.privateView = new PrivateView(wall, cameraAt, !withPack, !keeps);
             this.layers = layers;
-            this.openedAt = Bukkit.getCurrentTick();
+            this.openedAt = Platform.tick();
             this.deadline = openedAt + REVEAL_TIMEOUT;
             this.pointerId = pointer == null ? -1 : pointer.getEntityId();
             this.cursorX = canvas.width() / 2.0;
@@ -495,7 +494,6 @@ public final class Views implements Listener {
             pointerAt.setPitch(0);
         }
         TextDisplay pointer = !withPack ? null : world.spawn(pointerAt, TextDisplay.class, d -> {
-            d.text(Component.empty());
             d.setBackgroundColor(org.bukkit.Color.fromARGB(0));
             d.setShadowed(false);
             d.setBillboard(clientPointer ? Display.Billboard.FIXED : Display.Billboard.CENTER);
@@ -630,7 +628,7 @@ public final class Views implements Listener {
             if (feet < world.getMinHeight() || feet + height > world.getMaxHeight()) continue;
             if (!world.getBlockAt(bx, y, bz).getType().isAir()) continue;
             BoundingBox box = new BoundingBox(x - half, feet + 1e-7, z - half, x + half, feet + height - 1e-7, z + half);
-            if (world.hasCollisionsIn(box) || touchesLava(world, box)) continue;
+            if (Platform.collides(world, box) || touchesLava(world, box)) continue;
             return new Location(world, x, eyeY, z);
         }
         return null;
@@ -657,7 +655,7 @@ public final class Views implements Listener {
             double bottom = y - eyeHeight;
             if (bottom < world.getMinHeight() || bottom + height > world.getMaxHeight()) continue;
             BoundingBox box = new BoundingBox(x - half, bottom + 1e-7, z - half, x + half, bottom + height - 1e-7, z + half);
-            if (world.hasCollisionsIn(box) || touchesLava(world, box)) continue;
+            if (Platform.collides(world, box) || touchesLava(world, box)) continue;
             best = new Location(world, x, y, z);
             bestDistance = d;
         }
@@ -685,8 +683,8 @@ public final class Views implements Listener {
         for (int x = (int) Math.floor(box.getMinX()); x <= (int) Math.floor(box.getMaxX()); x++) {
             for (int y = (int) Math.floor(box.getMinY()); y <= (int) Math.floor(box.getMaxY()); y++) {
                 for (int z = (int) Math.floor(box.getMinZ()); z <= (int) Math.floor(box.getMaxZ()); z++) {
-                    Fluid f = world.getFluidData(x, y, z).getFluidType();
-                    if (f == Fluid.LAVA || f == Fluid.FLOWING_LAVA) return true;
+                    // Lava is never waterlogged into another block, so the block is the fluid.
+                    if (world.getBlockAt(x, y, z).getType() == org.bukkit.Material.LAVA) return true;
                 }
             }
         }
@@ -779,7 +777,7 @@ public final class Views implements Listener {
             }
             ViewImpl v = views.get(p.getUniqueId());
             if (v != null && turnedByServer(v)) m.hold();
-            if (m.sample(p.getPitch())) {
+            if (m.sample(p.getLocation().getPitch())) {
                 p.getPersistentDataContainer().set(stepKey, PersistentDataType.DOUBLE, m.step());
                 debug(String.format(Locale.ROOT, "%s's mouse turns %.6f degrees a count: sensitivity %.4f", p.getName(), m.step(), MouseSteps.sensitivity(m.step())));
             }
@@ -819,7 +817,7 @@ public final class Views implements Listener {
     /** Every tick: learn mice, switch waiting players to their view, and turn mouse movement into pointer movement. */
     public void tick() {
         learnMice();
-        int now = Bukkit.getCurrentTick();
+        int now = Platform.tick();
         for (ViewImpl v : views.values()) {
             Player p = Bukkit.getPlayer(v.player);
             if (p == null) continue;
@@ -889,8 +887,8 @@ public final class Views implements Listener {
      */
     private void take(Player p, ViewImpl v) {
         v.stage = 1;
-        v.keepBy = Bukkit.getCurrentTick() + KEEP_TIMEOUT;
-        v.settleBy = Bukkit.getCurrentTick() + SETTLE_TIMEOUT;
+        v.keepBy = Platform.tick() + KEEP_TIMEOUT;
+        v.settleBy = Platform.tick() + SETTLE_TIMEOUT;
         v.awaitingTeleport = true;
         hold(p);
         p.setGliding(false);
@@ -899,7 +897,7 @@ public final class Views implements Listener {
         signature(p, v);
         v.wall.showSignature(p);
         p.showEntity(plugin, v.glow);
-        pipeline.afterClientCaughtUp(p, () -> v.takenSince = Bukkit.getCurrentTick());
+        pipeline.afterClientCaughtUp(p, () -> v.takenSince = Platform.tick());
     }
 
     /**
@@ -910,7 +908,7 @@ public final class Views implements Listener {
      */
     private void keep(Player p, ViewImpl v) {
         v.stage = 2;
-        v.keepBy = Bukkit.getCurrentTick() + SETTLE_TIMEOUT;
+        v.keepBy = Platform.tick() + SETTLE_TIMEOUT;
         v.aligning = true;
         v.serverTurns.incrementAndGet();
         v.revealed = true;
@@ -945,7 +943,7 @@ public final class Views implements Listener {
 
     private void reveal(Player p, ViewImpl v) {
         // Before revealed, so turned() never reads a rotation from before the teleport below as the start.
-        v.settleBy = Bukkit.getCurrentTick() + SETTLE_TIMEOUT;
+        v.settleBy = Platform.tick() + SETTLE_TIMEOUT;
         v.awaitingTeleport = true;
         v.revealed = true;
         // All in one tick, so the client applies them together with the camera switch.
@@ -973,7 +971,7 @@ public final class Views implements Listener {
             Bukkit.getScheduler().runTaskLater(plugin, () -> {
                 if (views.get(v.player) != v || !p.isOnline()) return;
                 nms.setCamera(p, v.camera);
-                p.sendActionBar(Component.empty());
+                Platform.actionBar(p, Component.empty());
             }, 5);
         }
     }
@@ -989,8 +987,8 @@ public final class Views implements Listener {
      * movement key whatever their movement_speed ({@code Player.getFlyingSpeed}), and flying also turns off
      * crouching (which lowers the eye), swimming, climbing, gliding, water currents, bubble columns,
      * levitation and cobwebs ({@code Player}, {@code LivingEntity.travelInAir}). Then attribute modifiers,
-     * transient so a crash cannot save them, all under one key so {@link #release} can always take them
-     * off: movement_speed, jump_strength, gravity and step_height times zero (a total multiplier of -1
+     * transient so a crash cannot save them (on Paper; Spigot saves them, and {@link #onJoin} takes
+     * them off), all under one key so {@link #release} can always take them off: movement_speed, jump_strength, gravity and step_height times zero (a total multiplier of -1
      * zeroes whatever the other modifiers add up to), knockback_resistance and
      * explosion_knockback_resistance plus one. Gravity at zero also keeps the server from kicking them
      * for floating ({@code ServerGamePacketListenerImpl.getMaximumFlyingTicks}).
@@ -1000,9 +998,10 @@ public final class Views implements Listener {
             AttributeInstance attr = player.getAttribute(a);
             if (attr == null) continue;
             boolean resistance = a == Attribute.KNOCKBACK_RESISTANCE || a == Attribute.EXPLOSION_KNOCKBACK_RESISTANCE;
-            attr.removeModifier(seatKey);
-            attr.addTransientModifier(new AttributeModifier(seatKey, resistance ? 1 : -1,
-                    resistance ? AttributeModifier.Operation.ADD_NUMBER : AttributeModifier.Operation.MULTIPLY_SCALAR_1));
+            Platform.removeModifier(attr, seatKey);
+            Platform.addTransient(attr, new AttributeModifier(seatKey, resistance ? 1 : -1,
+                    resistance ? AttributeModifier.Operation.ADD_NUMBER : AttributeModifier.Operation.MULTIPLY_SCALAR_1,
+                    org.bukkit.inventory.EquipmentSlotGroup.ANY));
         }
         pipeline.hold(player.getUniqueId(), true);
         nms.resendAbilities(player);
@@ -1019,7 +1018,7 @@ public final class Views implements Listener {
     private void removeModifiers(Player player) {
         for (Attribute a : HELD) {
             AttributeInstance attr = player.getAttribute(a);
-            if (attr != null) attr.removeModifier(seatKey);
+            if (attr != null) Platform.removeModifier(attr, seatKey);
         }
     }
 
@@ -1209,7 +1208,7 @@ public final class Views implements Listener {
                 debug("click at " + x + "," + y + ", before its rotation " + (int) v.preClickX + "," + (int) v.preClickY);
             } else {
                 debug("click waits for its rotation, before it " + (int) v.preClickX + "," + (int) v.preClickY);
-                if (v.waitingClicks.isEmpty()) v.waitingSince = Bukkit.getCurrentTick();
+                if (v.waitingClicks.isEmpty()) v.waitingSince = Platform.tick();
                 v.waitingClicks.add(click);
                 return;
             }
@@ -1274,7 +1273,7 @@ public final class Views implements Listener {
                     new Vector3f((shape.advance() / 2f - shape.hotX) * GLYPH_PX * s, (TOP_Y + shape.hotY) * GLYPH_PX * s, 0f),
                     new Quaternionf(), new Vector3f(s, s, s), new Quaternionf()));
             int rgb = v.clientPointer ? Shaders.clientPointerRgb(v.wall.cols, v.wall.rows) : Shaders.pointerRgb(v.wall.cols, v.wall.rows);
-            pointer.text(shape == Pointer.HIDDEN ? Component.empty()
+            Platform.text(pointer, shape == Pointer.HIDDEN ? Component.empty()
                     : Component.text(String.valueOf(shape.glyph)).font(ResourcePack.POINTER_FONT).color(TextColor.color(rgb)));
         }
         // A client-placed pointer never moves: the shader places it from where the camera looks.
@@ -1352,8 +1351,8 @@ public final class Views implements Listener {
         PotionEffect own = v.previousInvisibility;
         if (own != null && !own.isInfinite()) {
             // Sitting does not stop its clock.
-            int left = own.getDuration() - (Bukkit.getCurrentTick() - v.openedAt);
-            own = left > 0 ? own.withDuration(left) : null;
+            int left = own.getDuration() - (Platform.tick() - v.openedAt);
+            own = left > 0 ? new PotionEffect(own.getType(), left, own.getAmplifier(), own.isAmbient(), own.hasParticles(), own.hasIcon()) : null;
         }
         restore(player, v.previousMode, own);
         if (v.heldSlot >= 0 && player.isOnline()) player.getInventory().setHeldItemSlot(v.heldSlot);
@@ -1443,7 +1442,7 @@ public final class Views implements Listener {
     @EventHandler
     public void onJoin(PlayerJoinEvent e) {
         Player player = e.getPlayer();
-        // Transient, so never saved with the player, but taken off whatever: removing them is harmless.
+        // Transient on Paper, so never saved there; Spigot saves them with the player, and this takes them off.
         removeModifiers(player);
         String mode = player.getPersistentDataContainer().get(seatKey, PersistentDataType.STRING);
         if (mode != null) {
@@ -1472,7 +1471,7 @@ public final class Views implements Listener {
     public void onSwing(PlayerAnimationEvent e) {
         ViewImpl v = of(e.getPlayer());
         if (v == null || e.getAnimationType() != PlayerAnimationType.ARM_SWING) return;
-        long now = Bukkit.getCurrentTick();
+        long now = Platform.tick();
         if (now - v.lastClickTick < 2) return; // attack and swing arrive together: one click
         v.lastClickTick = now;
         atClick(v, (x, y) -> v.content.click(v, x, y, Click.LEFT));
@@ -1488,7 +1487,7 @@ public final class Views implements Listener {
         e.setCancelled(true);
         if (e.getHand() != EquipmentSlot.HAND) return;
         // Holding the button repeats the click every 4 ticks; only a fresh press counts.
-        long now = Bukkit.getCurrentTick();
+        long now = Platform.tick();
         boolean fresh = now - v.lastRightClickTick > 5;
         v.lastRightClickTick = now;
         if (fresh) atClick(v, (x, y) -> v.content.click(v, x, y, Click.RIGHT));
@@ -1570,11 +1569,11 @@ public final class Views implements Listener {
     }
 
     @EventHandler(priority = EventPriority.LOWEST)
-    public void onChat(AsyncChatEvent e) {
+    public void onChat(AsyncPlayerChatEvent e) {
         ViewImpl v = views.get(e.getPlayer().getUniqueId());
         if (v == null) return;
         e.setCancelled(true);
-        String text = PlainTextComponentSerializer.plainText().serialize(e.message());
+        String text = e.getMessage();
         Bukkit.getScheduler().runTask(plugin, () -> {
             if (views.get(v.player) == v) v.content.chat(v, text);
         });
@@ -1643,7 +1642,7 @@ public final class Views implements Listener {
 
     @EventHandler
     public void onDeath(PlayerDeathEvent e) {
-        close(e.getPlayer(), CloseReason.INTERRUPTED);
+        close(e.getEntity(), CloseReason.INTERRUPTED);
     }
 
     @EventHandler

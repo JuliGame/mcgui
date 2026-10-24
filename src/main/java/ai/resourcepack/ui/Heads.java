@@ -2,7 +2,8 @@ package ai.resourcepack.ui;
 
 import ai.resourcepack.ui.html.res.Picture;
 import ai.resourcepack.ui.html.res.Pictures;
-import com.destroystokyo.paper.profile.PlayerProfile;
+import ai.resourcepack.ui.framework.platform.Platform;
+import org.bukkit.profile.PlayerProfile;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 
@@ -68,7 +69,7 @@ final class Heads {
         // The player and their profile are read on the server thread; the lookup and the download are not.
         Bukkit.getScheduler().runTask(plugin, () -> {
             Player online = ID.matcher(who).matches() ? Bukkit.getPlayer(uuid(who)) : Bukkit.getPlayerExact(who);
-            PlayerProfile known = online == null ? null : online.getPlayerProfile();
+            PlayerProfile known = online == null ? null : Platform.profile(online);
             String name = online != null ? online.getName() : NAME.matcher(who).matches() ? who : null;
             UUID id = online == null && name == null ? uuid(who) : null;
             Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
@@ -77,8 +78,8 @@ final class Heads {
                     URL skin = known == null ? null : known.getTextures().getSkin();
                     if (skin == null) {
                         // Looked up by name (or UUID) at Mojang, whether or not this server checks accounts.
-                        PlayerProfile looked = Bukkit.createProfile(id, name);
-                        if (looked.complete(true, true)) skin = looked.getTextures().getSkin();
+                        PlayerProfile looked = Bukkit.createPlayerProfile(id, name).update().get(15, TimeUnit.SECONDS);
+                        if (looked != null) skin = looked.getTextures().getSkin();
                     }
                     if (skin != null) picture = face(skin);
                 } catch (Exception e) {

@@ -1,5 +1,6 @@
 package ai.resourcepack.ui.framework;
 
+import ai.resourcepack.ui.framework.platform.Platform;
 import ai.resourcepack.ui.framework.api.Canvas;
 import ai.resourcepack.ui.framework.api.CloseReason;
 import ai.resourcepack.ui.framework.api.Cpu;
@@ -75,7 +76,7 @@ public final class Framework implements UIFramework, Listener {
         try {
             nms = new Nms(plugin.getServer());
         } catch (ReflectiveOperationException | LinkageError e) {
-            plugin.getLogger().log(Level.SEVERE, "This server is not one MC GUI can drive (Paper 26.2 or newer is needed): " + e, e);
+            plugin.getLogger().log(Level.SEVERE, "This server is not one MC GUI can drive (Spigot or Paper 26.2 or newer is needed): " + e, e);
             return false;
         }
         palette = new Palette(nms::mapColor);
@@ -96,8 +97,11 @@ public final class Framework implements UIFramework, Listener {
         pm.registerEvents(views, plugin);
         tasks.add(Bukkit.getScheduler().runTaskTimer(plugin, this::tick, 1, 1));
         sender.start();
-        // Players already online (a reload): hand them the pack again.
-        for (Player p : Bukkit.getOnlinePlayers()) if (pack != null) pack.send(p);
+        // Players already online (a reload): hand them the pack again, and read their clicks on walls.
+        for (Player p : Bukkit.getOnlinePlayers()) {
+            if (pack != null) pack.send(p);
+            readUses(p);
+        }
         UIFramework.Holder.set(this);
         return true;
     }
@@ -134,7 +138,7 @@ public final class Framework implements UIFramework, Listener {
         try {
             work();
         } finally {
-            meter.end(Bukkit.getCurrentTick());
+            meter.end(Platform.tick());
         }
     }
 
@@ -244,6 +248,12 @@ public final class Framework implements UIFramework, Listener {
     public void onJoin(PlayerJoinEvent e) {
         sender.reset(e.getPlayer().getUniqueId());
         if (pack != null) pack.send(e.getPlayer());
+        readUses(e.getPlayer());
+    }
+
+    /** Clicks on a wall's frames, which only the clients have, read off [player]'s connection (see Pipeline.useEntities). */
+    private void readUses(Player player) {
+        pipeline.useEntities(player, id -> nms.serverThread().execute(() -> walls.frameUsed(player, id)));
     }
 
     @EventHandler

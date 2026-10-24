@@ -39,6 +39,8 @@ final class SessionRig implements AutoCloseable {
     static final java.util.List<String> COMMANDS = new java.util.concurrent.CopyOnWriteArrayList<>();
 
     static {
+        // The tick is the test's: the stand-in server has neither Paper's count nor the game's.
+        ai.resourcepack.ui.framework.platform.Platform.useTicks(TICK::get);
         // Set straight into Bukkit: setServer would look for the build information of a real server.
         if (Bukkit.getServer() == null) {
             try {
@@ -54,7 +56,6 @@ final class SessionRig implements AutoCloseable {
     /** Answers what Session and Placeholders ask the server; anything else gets nothing (a stub of its own for an interface). */
     private static Object stub(Class<?> type) {
         return Proxy.newProxyInstance(SessionRig.class.getClassLoader(), new Class<?>[]{type}, (self, m, args) -> switch (m.getName()) {
-            case "getCurrentTick" -> TICK.get();
             case "getOnlinePlayers" -> Collections.nCopies(ONLINE.get(), null);
             case "getMaxPlayers" -> 20;
             // Every viewer is offline, unless the test named them: a page is filled for nobody in particular, as for anyone on a public page.
@@ -83,7 +84,7 @@ final class SessionRig implements AutoCloseable {
         return (org.bukkit.entity.Player) Proxy.newProxyInstance(SessionRig.class.getClassLoader(), new Class<?>[]{org.bukkit.entity.Player.class}, (self, m, args) -> switch (m.getName()) {
             case "getName" -> name;
             case "getUniqueId" -> id;
-            case "displayName" -> net.kyori.adventure.text.Component.text(name);
+            case "getDisplayName" -> name;
             case "getLocation" -> new org.bukkit.Location(null, 0, 64, 0);
             case "getHealth" -> 20.0;
             case "getGameMode" -> org.bukkit.GameMode.SURVIVAL;
@@ -175,7 +176,10 @@ final class SessionRig implements AutoCloseable {
             set(p, MCGUIPlugin.class, "pictures", new FirstPictures(entries, 512L << 20));
             set(p, MCGUIPlugin.class, "frames", new AnimFrames());
             set(p, MCGUIPlugin.class, "repaints", new ai.resourcepack.ui.html.SharedRepaints(256L << 20));
-            set(p, JavaPlugin.class, "logger", Logger.getLogger("SessionRig"));
+            // Spigot's JavaPlugin keeps a PluginLogger, which is made from the plugin's description and server.
+            set(p, JavaPlugin.class, "description", new org.bukkit.plugin.PluginDescriptionFile("MCGUI", "test", MCGUIPlugin.class.getName()));
+            set(p, JavaPlugin.class, "server", Bukkit.getServer());
+            set(p, JavaPlugin.class, "logger", new org.bukkit.plugin.PluginLogger(p));
             return p;
         } catch (ReflectiveOperationException e) {
             throw new IllegalStateException(e);

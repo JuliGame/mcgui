@@ -1,5 +1,6 @@
 package ai.resourcepack.ui;
 
+import ai.resourcepack.ui.framework.platform.Platform;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -77,7 +78,7 @@ final class PageImport {
         say(sender, "Fetching " + key + "…", NamedTextColor.GRAY);
         HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(base + key))
                 .timeout(Duration.ofSeconds(20))
-                .header("User-Agent", "MCGUI/" + plugin.getPluginMeta().getVersion());
+                .header("User-Agent", "MCGUI/" + plugin.getDescription().getVersion());
         if (plugin.telemetry()) about(builder, sender);
         HttpRequest request = builder.GET().build();
         http.sendAsync(request, HttpResponse.BodyHandlers.ofByteArray()).whenComplete((res, error) -> {
@@ -167,8 +168,7 @@ final class PageImport {
         request.header("X-Server-Port", Integer.toString(Bukkit.getPort()));
         String ip = Bukkit.getIp();
         if (ip != null && !ip.isBlank()) request.header("X-Server-Ip", ip.trim());
-        String motd = net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer.plainText()
-                .serialize(Bukkit.motd()).replaceAll("\\s+", " ").trim();
+        String motd = Platform.motd().replaceAll("\\s+", " ").trim();
         if (!motd.isEmpty()) request.header("X-Server-Motd", ascii(motd, 200));
         request.header("X-Server-Players", Integer.toString(Bukkit.getOnlinePlayers().size()));
         request.header("X-Imported-By", sender instanceof org.bukkit.entity.Player ? sender.getName() : "console");

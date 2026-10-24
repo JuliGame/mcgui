@@ -2,8 +2,8 @@
 
 Put an HTML page in `plugins/MCGUI/pages/` and it is in the game: on a wall,
 or fullscreen in front of the player, who points with their mouse and clicks.
-Vanilla clients, no mods: a Paper plugin and a small resource pack it builds and
-serves itself. Edit the file and it updates in game within a second.
+Vanilla clients, no mods: a Spigot or Paper plugin and a small resource pack it
+builds and serves itself. Edit the file and it updates in game within a second.
 
 No browser runs. MC GUI has its own HTML and CSS renderer, so what works is
 **static** HTML and CSS: no JavaScript. Links, commands, hover states, scrolling,
@@ -14,8 +14,8 @@ walls and in fullscreen views, with the player's mouse, clicks and keys. The
 [examples](examples/) include an arcade of games and a live world map built on
 it. See [For plugin developers](#for-plugin-developers).
 
-**Needs** Paper 26.2 or 26.3 (Java 25). PlaceholderAPI is optional. Build with
-`./gradlew build` (JDK 17 or 21 to run Gradle); the plugin is
+**Needs** Spigot or Paper 26.2 or 26.3 (Java 25), one jar for both. PlaceholderAPI
+is optional. Build with `./gradlew build` (JDK 17 or 21 to run Gradle); the plugin is
 `build/libs/MCGUI-<version>.jar`. `./gradlew renderSamples` renders
 `samples/*.html` to `build/samples/` to check the renderer by eye.
 

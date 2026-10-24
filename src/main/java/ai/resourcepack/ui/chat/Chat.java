@@ -1,5 +1,6 @@
 package ai.resourcepack.ui.chat;
 
+import ai.resourcepack.ui.framework.platform.Platform;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.TextComponent;
 import net.kyori.adventure.text.event.ClickEvent;
@@ -84,7 +85,7 @@ public final class Chat {
 
     /** A line under a message: indented, no prefix. */
     public static void detail(CommandSender to, String text) {
-        to.sendMessage(Component.text().append(Component.text("  ")).append(words(text, style.body)).build());
+        Platform.send(to, Component.text().append(Component.text("  ")).append(words(text, style.body)).build());
     }
 
     /** A heading over a list: the accent, bold, and the rest of the line grey. */
@@ -110,13 +111,13 @@ public final class Chat {
     public static boolean say(CommandSender to, String text, NamedTextColor kind) {
         Style s = style;
         TextColor color = kind == NamedTextColor.RED ? s.error : kind == NamedTextColor.GREEN ? s.success : kind == NamedTextColor.YELLOW ? s.warning : s.body;
-        to.sendMessage(Component.text().append(prefix()).append(words(text, color)).build());
+        Platform.send(to, Component.text().append(prefix()).append(words(text, color)).build());
         return true;
     }
 
     /** A message built by the caller, after the prefix. */
     public static void send(CommandSender to, Component message) {
-        to.sendMessage(Component.text().append(prefix()).append(message).build());
+        Platform.send(to, Component.text().append(prefix()).append(message).build());
     }
 
     /** Text in the accent: a page, a code, a count. */

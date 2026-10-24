@@ -1,18 +1,20 @@
 package ai.resourcepack.ui.framework.world;
 
-import io.papermc.paper.math.Position;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
+import org.bukkit.block.BlockState;
 import org.bukkit.block.data.BlockData;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.util.BoundingBox;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Predicate;
@@ -37,7 +39,7 @@ final class PrivateView {
     /** Hide what is between the camera and the picture; not for an overlay, whose picture is no place in the world. */
     private final boolean hideInView;
     /** Everything this player has been told is air, so all of it is put back. */
-    private final Set<Position> cleared = new HashSet<>();
+    private final Set<Pos> cleared = new HashSet<>();
     /** Entities in the way that this player stops seeing meanwhile: a mob, another player. */
     private final Set<Entity> unseen = new HashSet<>();
     /** Whether this view hides each placed wall asked about (see {@link #hides}): neither moves, so worked out once. */
@@ -60,12 +62,12 @@ final class PrivateView {
     void refresh(Player player) {
         if (!player.isOnline() || player.getWorld() != wall.world) return;
         if (clearBlocks) {
-            Set<Position> now = cone();
+            Set<Pos> now = cone();
             cleared.addAll(now);
             if (!now.isEmpty()) {
-                Map<Position, BlockData> air = new HashMap<>();
-                for (Position p : now) air.put(p, AIR);
-                player.sendMultiBlockChange(air);
+                Map<Pos, BlockData> air = new HashMap<>();
+                for (Pos p : now) air.put(p, AIR);
+                send(player, air);
             }
         }
         if (plugin == null || !hideInView) return;
@@ -129,12 +131,30 @@ final class PrivateView {
         unseen.clear();
         if (!player.isOnline() || player.getWorld() != wall.world || cleared.isEmpty()) return;
         World world = wall.world;
-        Map<Position, BlockData> real = new HashMap<>();
-        for (Position p : cleared) {
-            if (world.isChunkLoaded(p.blockX() >> 4, p.blockZ() >> 4)) real.put(p, world.getBlockAt(p.blockX(), p.blockY(), p.blockZ()).getBlockData());
+        Map<Pos, BlockData> real = new HashMap<>();
+        for (Pos p : cleared) {
+            if (world.isChunkLoaded(p.x() >> 4, p.z() >> 4)) real.put(p, world.getBlockAt(p.x(), p.y(), p.z()).getBlockData());
         }
-        player.sendMultiBlockChange(real);
+        send(player, real);
         cleared.clear();
+    }
+
+    /** A block in the world. */
+    private record Pos(int x, int y, int z) {}
+
+    /**
+     * Tells [player] the blocks in [blocks] are what it says, and the world itself nothing: Bukkit's way, as block
+     * states, which the server sends a section to a packet.
+     */
+    private void send(Player player, Map<Pos, BlockData> blocks) {
+        List<BlockState> states = new ArrayList<>(blocks.size());
+        for (Map.Entry<Pos, BlockData> e : blocks.entrySet()) {
+            Pos p = e.getKey();
+            BlockState state = wall.world.getBlockAt(p.x(), p.y(), p.z()).getState();
+            state.setBlockData(e.getValue());
+            states.add(state);
+        }
+        player.sendBlockChanges(states);
     }
 
     /**
@@ -195,10 +215,10 @@ final class PrivateView {
     }
 
     /** Solid blocks that could hide any part of the picture from the camera: those reaching into the pyramid. */
-    private Set<Position> cone() {
+    private Set<Pos> cone() {
         World world = wall.world;
         Pyramid p = pyramid();
-        Set<Position> out = new HashSet<>();
+        Set<Pos> out = new HashSet<>();
         if (p == null) return out;
         BoundingBox b = p.bounds;
         for (int x = (int) b.getMinX(); x <= (int) b.getMaxX(); x++) {
@@ -208,7 +228,7 @@ final class PrivateView {
                 if (!p.reaches(x, b.getMinY(), z, x + 1.0, b.getMaxY() + 1, z + 1.0, 0)) continue;
                 for (int y = (int) b.getMinY(); y <= (int) b.getMaxY(); y++) {
                     if (!p.reaches(x, y, z, x + 1.0, y + 1.0, z + 1.0, 0)) continue;
-                    if (!world.getBlockAt(x, y, z).getType().isAir()) out.add(Position.block(x, y, z));
+                    if (!world.getBlockAt(x, y, z).getType().isAir()) out.add(new Pos(x, y, z));
                 }
             }
         }

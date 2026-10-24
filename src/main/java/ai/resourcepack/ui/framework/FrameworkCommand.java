@@ -1,5 +1,6 @@
 package ai.resourcepack.ui.framework;
 
+import ai.resourcepack.ui.framework.platform.Platform;
 import ai.resourcepack.ui.framework.api.Canvas;
 import ai.resourcepack.ui.framework.api.Click;
 import ai.resourcepack.ui.framework.api.HoverLayers;
@@ -145,7 +146,7 @@ public final class FrameworkCommand implements TabExecutor {
             return;
         }
         Block block = p.getTargetBlockExact(12);
-        BlockFace face = p.getTargetBlockFace(12);
+        BlockFace face = Platform.targetFace(p, 12);
         if (block == null || face == null || !MapWall.HORIZONTAL.contains(face)) {
             say(sender, "Look at the side of a wall: that block becomes the top-left corner.", NamedTextColor.RED);
             return;

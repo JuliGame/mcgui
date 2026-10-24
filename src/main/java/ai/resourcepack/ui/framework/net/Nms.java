@@ -24,13 +24,14 @@ import java.util.function.Function;
 import java.util.function.IntUnaryOperator;
 
 /**
- * Everything the framework needs that the Paper API cannot do, reached by reflection on the
- * Mojang-mapped server (Paper 1.20.5 and newer run Mojang's names), so the plugin compiles against
- * the plain API and survives a server update that leaves these few members alone. Every handle is
- * looked up once, at startup: a missing one fails the whole engine there, loudly, rather than the
+ * Everything the framework needs that the Bukkit API cannot do, reached by reflection on the
+ * Mojang-mapped server (Paper 1.20.5 and newer, and Spigot 26.x, run Mojang's names), so the plugin
+ * compiles against the plain API and survives a server update that leaves these few members alone.
+ * Every member is found through {@link Reflect}, as Spigot leaves private much that Paper makes
+ * public. Every handle is looked up once, at startup: a missing one fails the whole engine there, loudly, rather than the
  * first time somebody looks at a screen.
  *
- * Checked against Paper 26.2 and 26.3, which agree on every member used here.
+ * Checked against Spigot and Paper 26.2 and 26.3, which agree on every member used here.
  */
 public final class Nms {
     private static final MethodHandles.Lookup L = MethodHandles.lookup();
@@ -81,6 +82,10 @@ public final class Nms {
     private final MethodHandle positionSyncId, teleportId;
     /** What a click or a wheel step sends, each before that client tick's rotation. */
     private final List<Class<?>> clickPackets;
+    // A right click on an entity: how a click on a frame that only a client has reaches the plugin.
+    private final Class<?> interactPacket;         // ServerboundInteractPacket
+    private final MethodHandle interactEntity, interactHand;
+    private final Object mainHand;                 // InteractionHand.MAIN_HAND
     private final Class<?> actionPacket;           // ServerboundPlayerActionPacket, whose actions include the drop key
     private final MethodHandle actionOfPacket;
     /** What the client sends at the end of each of its ticks, after that tick's clicks and rotation. */
@@ -126,55 +131,55 @@ public final class Nms {
 
     public Nms(org.bukkit.Server server) throws ReflectiveOperationException {
         String craft = server.getClass().getPackageName();
-        craftHandle = L.unreflect(Class.forName(craft + ".entity.CraftEntity").getMethod("getHandle"));
+        craftHandle = L.unreflect(Reflect.method(Class.forName(craft + ".entity.CraftEntity"), "getHandle"));
         Class<?> serverPlayer = Class.forName("net.minecraft.server.level.ServerPlayer");
-        connectionField = serverPlayer.getField("connection");
+        connectionField = Reflect.field(serverPlayer, "connection");
         Class<?> common = Class.forName("net.minecraft.server.network.ServerCommonPacketListenerImpl");
-        networkField = common.getField("connection");
-        channelField = Class.forName("net.minecraft.network.Connection").getField("channel");
+        networkField = Reflect.field(common, "connection");
+        channelField = Reflect.field(Class.forName("net.minecraft.network.Connection"), "channel");
         Class<?> packet = Class.forName("net.minecraft.network.protocol.Packet");
-        send = L.unreflect(common.getMethod("send", packet));
-        sendListening = L.unreflect(common.getMethod("send", packet, ChannelFutureListener.class));
-        accepting = L.unreflect(Class.forName("net.minecraft.server.network.ServerGamePacketListenerImpl").getMethod("isAcceptingMessages"));
-        serverThread = (Executor) server.getClass().getMethod("getServer").invoke(server);
+        send = L.unreflect(Reflect.method(common, "send", packet));
+        sendListening = L.unreflect(Reflect.method(common, "send", packet, ChannelFutureListener.class));
+        accepting = L.unreflect(Reflect.method(Class.forName("net.minecraft.server.network.ServerGamePacketListenerImpl"), "isAcceptingMessages"));
+        serverThread = (Executor) Reflect.method(server.getClass(), "getServer").invoke(server);
 
         Class<?> mapId = Class.forName("net.minecraft.world.level.saveddata.maps.MapId");
         Class<?> patch = Class.forName("net.minecraft.world.level.saveddata.maps.MapItemSavedData$MapPatch");
-        newMapId = L.findConstructor(mapId, MethodType.methodType(void.class, int.class));
-        newMapPatch = L.findConstructor(patch, MethodType.methodType(void.class, int.class, int.class, int.class, int.class, byte[].class));
-        newMapPacket = L.findConstructor(Class.forName("net.minecraft.network.protocol.game.ClientboundMapItemDataPacket"),
+        newMapId = Reflect.constructor(L, mapId, MethodType.methodType(void.class, int.class));
+        newMapPatch = Reflect.constructor(L, patch, MethodType.methodType(void.class, int.class, int.class, int.class, int.class, byte[].class));
+        newMapPacket = Reflect.constructor(L, Class.forName("net.minecraft.network.protocol.game.ClientboundMapItemDataPacket"),
                 MethodType.methodType(void.class, mapId, byte.class, boolean.class, Optional.class, Optional.class));
 
         Class<?> nmsEntity = Class.forName("net.minecraft.world.entity.Entity");
-        newCameraPacket = L.findConstructor(Class.forName("net.minecraft.network.protocol.game.ClientboundSetCameraPacket"),
+        newCameraPacket = Reflect.constructor(L, Class.forName("net.minecraft.network.protocol.game.ClientboundSetCameraPacket"),
                 MethodType.methodType(void.class, nmsEntity));
-        newPingPacket = L.findConstructor(Class.forName("net.minecraft.network.protocol.common.ClientboundPingPacket"),
+        newPingPacket = Reflect.constructor(L, Class.forName("net.minecraft.network.protocol.common.ClientboundPingPacket"),
                 MethodType.methodType(void.class, int.class));
         pongClass = Class.forName("net.minecraft.network.protocol.common.ServerboundPongPacket");
-        pongId = L.unreflect(pongClass.getMethod("getId"));
-        mapColor = L.unreflect(Class.forName("net.minecraft.world.level.material.MapColor").getMethod("getColorFromPackedId", int.class));
-        packetHandlerName = (String) Class.forName("net.minecraft.network.HandlerNames").getField("PACKET_HANDLER").get(null);
+        pongId = L.unreflect(Reflect.method(pongClass, "getId"));
+        mapColor = L.unreflect(Reflect.method(Class.forName("net.minecraft.world.level.material.MapColor"), "getColorFromPackedId", int.class));
+        packetHandlerName = (String) Reflect.field(Class.forName("net.minecraft.network.HandlerNames"), "PACKET_HANDLER").get(null);
 
         Class<?> item = Class.forName("net.minecraft.world.item.ItemStack");
-        emptyItem = item.getField("EMPTY").get(null);
+        emptyItem = Reflect.field(item, "EMPTY").get(null);
         contentPacket = Class.forName("net.minecraft.network.protocol.game.ClientboundContainerSetContentPacket");
         contentContainer = open(contentPacket, "containerId");
         contentState = open(contentPacket, "stateId");
         contentItems = open(contentPacket, "items");
         contentCarried = open(contentPacket, "carriedItem");
-        newContentPacket = L.findConstructor(contentPacket, MethodType.methodType(void.class, int.class, int.class, List.class, item));
+        newContentPacket = Reflect.constructor(L, contentPacket, MethodType.methodType(void.class, int.class, int.class, List.class, item));
         slotPacket = Class.forName("net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket");
         slotContainer = open(slotPacket, "containerId");
         slotState = open(slotPacket, "stateId");
         slotSlot = open(slotPacket, "slot");
-        newSlotPacket = L.findConstructor(slotPacket, MethodType.methodType(void.class, int.class, int.class, int.class, item));
+        newSlotPacket = Reflect.constructor(L, slotPacket, MethodType.methodType(void.class, int.class, int.class, int.class, item));
         inventoryPacket = Class.forName("net.minecraft.network.protocol.game.ClientboundSetPlayerInventoryPacket");
         inventorySlot = open(inventoryPacket, "slot");
-        newInventoryPacket = L.findConstructor(inventoryPacket, MethodType.methodType(void.class, int.class, item));
-        containerMenu = Class.forName("net.minecraft.world.entity.player.Player").getField("containerMenu");
+        newInventoryPacket = Reflect.constructor(L, inventoryPacket, MethodType.methodType(void.class, int.class, item));
+        containerMenu = Reflect.field(Class.forName("net.minecraft.world.entity.player.Player"), "containerMenu");
         Class<?> menu = Class.forName("net.minecraft.world.inventory.AbstractContainerMenu");
-        menuContainerId = menu.getField("containerId");
-        menuSlots = menu.getField("slots");
+        menuContainerId = Reflect.field(menu, "containerId");
+        menuSlots = Reflect.field(menu, "slots");
 
         String game = "net.minecraft.network.protocol.game.";
         movePacket = Class.forName(game + "ServerboundMovePlayerPacket");
@@ -184,38 +189,38 @@ public final class Nms {
         acceptTeleportPacket = Class.forName(game + "ServerboundAcceptTeleportationPacket");
         Class<?> vec3 = Class.forName("net.minecraft.world.phys.Vec3");
         Class<?> pmr = Class.forName("net.minecraft.world.entity.PositionMoveRotation");
-        newVec3 = L.findConstructor(vec3, MethodType.methodType(void.class, double.class, double.class, double.class));
-        newPositionMoveRotation = L.findConstructor(pmr, MethodType.methodType(void.class, vec3, vec3, float.class, float.class));
+        newVec3 = Reflect.constructor(L, vec3, MethodType.methodType(void.class, double.class, double.class, double.class));
+        newPositionMoveRotation = Reflect.constructor(L, pmr, MethodType.methodType(void.class, vec3, vec3, float.class, float.class));
         teleportPacket = Class.forName(game + "ClientboundTeleportEntityPacket");
-        newTeleport = L.findConstructor(teleportPacket, MethodType.methodType(void.class, int.class, pmr, java.util.Set.class, boolean.class));
-        teleportId = L.unreflect(teleportPacket.getMethod("id"));
+        newTeleport = Reflect.constructor(L, teleportPacket, MethodType.methodType(void.class, int.class, pmr, java.util.Set.class, boolean.class));
+        teleportId = L.unreflect(Reflect.method(teleportPacket, "id"));
         positionSyncPacket = Class.forName(game + "ClientboundEntityPositionSyncPacket");
-        positionSyncId = L.unreflect(positionSyncPacket.getMethod("id"));
+        positionSyncId = L.unreflect(Reflect.method(positionSyncPacket, "id"));
         moveEntityPacket = Class.forName(game + "ClientboundMoveEntityPacket");
         moveEntityId = open(moveEntityPacket, "entityId");
-        newPlayerRotation = L.findConstructor(Class.forName(game + "ClientboundPlayerRotationPacket"),
+        newPlayerRotation = Reflect.constructor(L, Class.forName(game + "ClientboundPlayerRotationPacket"),
                 MethodType.methodType(void.class, float.class, boolean.class, float.class, boolean.class));
 
         bundlePacket = Class.forName(game + "ClientboundBundlePacket");
-        newBundle = L.findConstructor(bundlePacket, MethodType.methodType(void.class, Iterable.class));
-        subPackets = L.unreflect(Class.forName("net.minecraft.network.protocol.BundlePacket").getMethod("subPackets"));
+        newBundle = Reflect.constructor(L, bundlePacket, MethodType.methodType(void.class, Iterable.class));
+        subPackets = L.unreflect(Reflect.method(Class.forName("net.minecraft.network.protocol.BundlePacket"), "subPackets"));
         addEntityPacket = Class.forName(game + "ClientboundAddEntityPacket");
-        addEntityId = L.unreflect(addEntityPacket.getMethod("getId"));
+        addEntityId = L.unreflect(Reflect.method(addEntityPacket, "getId"));
         dataPacket = Class.forName(game + "ClientboundSetEntityDataPacket");
-        dataPacketId = L.unreflect(dataPacket.getMethod("id"));
-        dataPacketItems = L.unreflect(dataPacket.getMethod("packedItems"));
-        newDataPacket = L.findConstructor(dataPacket, MethodType.methodType(void.class, int.class, List.class));
+        dataPacketId = L.unreflect(Reflect.method(dataPacket, "id"));
+        dataPacketItems = L.unreflect(Reflect.method(dataPacket, "packedItems"));
+        newDataPacket = Reflect.constructor(L, dataPacket, MethodType.methodType(void.class, int.class, List.class));
         Class<?> value = Class.forName("net.minecraft.network.syncher.SynchedEntityData$DataValue");
         Class<?> accessor = Class.forName("net.minecraft.network.syncher.EntityDataAccessor");
-        dataValueId = L.unreflect(value.getMethod("id"));
-        dataValue = L.unreflect(value.getMethod("create", accessor, Object.class));
+        dataValueId = L.unreflect(Reflect.method(value, "id"));
+        dataValue = L.unreflect(Reflect.method(value, "create", accessor, Object.class));
         frameItem = open(Class.forName("net.minecraft.world.entity.decoration.ItemFrame"), "DATA_ITEM").get(null);
-        frameItemId = (int) accessor.getMethod("id").invoke(frameItem);
-        newItemStack = L.findConstructor(item, MethodType.methodType(void.class, Class.forName("net.minecraft.world.level.ItemLike")));
-        filledMap = Class.forName("net.minecraft.world.item.Items").getField("FILLED_MAP").get(null);
+        frameItemId = (int) Reflect.method(accessor, "id").invoke(frameItem);
+        newItemStack = Reflect.constructor(L, item, MethodType.methodType(void.class, Class.forName("net.minecraft.world.level.ItemLike")));
+        filledMap = Reflect.field(Class.forName("net.minecraft.world.item.Items"), "FILLED_MAP").get(null);
         Class<?> componentType = Class.forName("net.minecraft.core.component.DataComponentType");
-        mapIdComponent = Class.forName("net.minecraft.core.component.DataComponents").getField("MAP_ID").get(null);
-        setComponent = L.unreflect(item.getMethod("set", componentType, Object.class));
+        mapIdComponent = Reflect.field(Class.forName("net.minecraft.core.component.DataComponents"), "MAP_ID").get(null);
+        setComponent = L.unreflect(Reflect.method(item, "set", componentType, Object.class));
         Class<?> entityType = Class.forName("net.minecraft.world.entity.EntityType");
         Class<?> types;
         try {
@@ -223,22 +228,32 @@ public final class Nms {
         } catch (ClassNotFoundException e) {
             types = entityType;
         }
-        glowFrameType = types.getField("GLOW_ITEM_FRAME").get(null);
-        newAddEntity = L.findConstructor(addEntityPacket, MethodType.methodType(void.class, int.class, java.util.UUID.class,
+        glowFrameType = Reflect.field(types, "GLOW_ITEM_FRAME").get(null);
+        newAddEntity = Reflect.constructor(L, addEntityPacket, MethodType.methodType(void.class, int.class, java.util.UUID.class,
                 double.class, double.class, double.class, float.class, float.class, entityType, int.class, vec3, double.class));
-        noMovement = vec3.getField("ZERO").get(null);
+        noMovement = Reflect.field(vec3, "ZERO").get(null);
         sharedFlags = open(nmsEntity, "DATA_SHARED_FLAGS_ID").get(null);
         silent = open(nmsEntity, "DATA_SILENT").get(null);
-        newRemoveEntities = L.findConstructor(Class.forName(game + "ClientboundRemoveEntitiesPacket"), MethodType.methodType(void.class, int[].class)).asFixedArity();
+        newRemoveEntities = Reflect.constructor(L, Class.forName(game + "ClientboundRemoveEntitiesPacket"), MethodType.methodType(void.class, int[].class)).asFixedArity();
         Object unsafe = server.getUnsafe();
         MethodHandle next;
         boolean takesWorld;
         try {
-            next = L.unreflect(unsafe.getClass().getMethod("nextEntityId", org.bukkit.World.class)).bindTo(unsafe);
+            next = L.unreflect(Reflect.method(unsafe.getClass(), "nextEntityId", org.bukkit.World.class)).bindTo(unsafe);
             takesWorld = true;
         } catch (NoSuchMethodException e) {
-            next = L.unreflect(unsafe.getClass().getMethod("nextEntityId")).bindTo(unsafe);
-            takesWorld = false;
+            try {
+                next = L.unreflect(Reflect.method(unsafe.getClass(), "nextEntityId")).bindTo(unsafe);
+                takesWorld = false;
+            } catch (NoSuchMethodException spigot) {
+                // Spigot's UnsafeValues has neither (they are Paper's): the level's own counter, Level#getNextEntityId,
+                // which is what every entity the game makes takes its id from.
+                MethodHandle worldHandle = L.unreflect(Reflect.method(Class.forName(craft + ".CraftWorld"), "getHandle"));
+                MethodHandle levelNext = L.unreflect(Reflect.method(Class.forName("net.minecraft.world.level.Level"), "getNextEntityId"));
+                next = MethodHandles.filterReturnValue(worldHandle.asType(MethodType.methodType(Object.class, org.bukkit.World.class)),
+                        levelNext.asType(MethodType.methodType(int.class, Object.class)));
+                takesWorld = true;
+            }
         }
         nextEntityId = next;
         nextEntityIdTakesWorld = takesWorld;
@@ -253,12 +268,17 @@ public final class Nms {
             }
         }
         clickPackets = List.copyOf(clicks);
+        Class<?> interact = Class.forName(game + "ServerboundInteractPacket");
+        interactPacket = interact;
+        interactEntity = L.unreflect(Reflect.method(interact, "entityId"));
+        interactHand = L.unreflect(Reflect.method(interact, "hand"));
+        mainHand = enumConstant(Class.forName("net.minecraft.world.InteractionHand"), "MAIN_HAND");
         // Leniently too: without it, the drop key is only not a key.
         Class<?> action = null;
         MethodHandle actionOf = null;
         try {
             action = Class.forName(game + "ServerboundPlayerActionPacket");
-            actionOf = L.unreflect(action.getMethod("getAction"));
+            actionOf = L.unreflect(Reflect.method(action, "getAction"));
         } catch (ReflectiveOperationException ignored) {
             action = null;
         }
@@ -266,21 +286,21 @@ public final class Nms {
         actionOfPacket = actionOf;
         tickEndPacket = Class.forName(game + "ServerboundClientTickEndPacket");
         abilitiesPacket = Class.forName(game + "ClientboundPlayerAbilitiesPacket");
-        abilitiesInvulnerable = L.unreflect(abilitiesPacket.getMethod("isInvulnerable"));
-        abilitiesInstabuild = L.unreflect(abilitiesPacket.getMethod("canInstabuild"));
+        abilitiesInvulnerable = L.unreflect(Reflect.method(abilitiesPacket, "isInvulnerable"));
+        abilitiesInstabuild = L.unreflect(Reflect.method(abilitiesPacket, "canInstabuild"));
         Class<?> abilities = Class.forName("net.minecraft.world.entity.player.Abilities");
-        newAbilitiesPacket = L.findConstructor(abilitiesPacket, MethodType.methodType(void.class, abilities));
-        newAbilities = L.findConstructor(abilities, MethodType.methodType(void.class));
-        abilityFlying = abilities.getField("flying");
-        abilityMayfly = abilities.getField("mayfly");
-        abilityInvulnerable = abilities.getField("invulnerable");
-        abilityInstabuild = abilities.getField("instabuild");
-        setFlyingSpeed = L.unreflect(abilities.getMethod("setFlyingSpeed", float.class));
-        setWalkingSpeed = L.unreflect(abilities.getMethod("setWalkingSpeed", float.class));
-        onUpdateAbilities = L.unreflect(Class.forName("net.minecraft.world.entity.player.Player").getMethod("onUpdateAbilities"));
+        newAbilitiesPacket = Reflect.constructor(L, abilitiesPacket, MethodType.methodType(void.class, abilities));
+        newAbilities = Reflect.constructor(L, abilities, MethodType.methodType(void.class));
+        abilityFlying = Reflect.field(abilities, "flying");
+        abilityMayfly = Reflect.field(abilities, "mayfly");
+        abilityInvulnerable = Reflect.field(abilities, "invulnerable");
+        abilityInstabuild = Reflect.field(abilities, "instabuild");
+        setFlyingSpeed = L.unreflect(Reflect.method(abilities, "setFlyingSpeed", float.class));
+        setWalkingSpeed = L.unreflect(Reflect.method(abilities, "setWalkingSpeed", float.class));
+        onUpdateAbilities = L.unreflect(Reflect.method(Class.forName("net.minecraft.world.entity.player.Player"), "onUpdateAbilities"));
         Class<?> relative = Class.forName("net.minecraft.world.entity.Relative");
-        playerTeleport = L.unreflect(Class.forName("net.minecraft.server.network.ServerGamePacketListenerImpl")
-                .getMethod("teleport", pmr, java.util.Set.class));
+        playerTeleport = L.unreflect(Reflect.method(Class.forName("net.minecraft.server.network.ServerGamePacketListenerImpl"),
+                "teleport", pmr, java.util.Set.class));
         keepRotation = java.util.Set.of(enumConstant(relative, "X_ROT"), enumConstant(relative, "Y_ROT"));
     }
 
@@ -291,7 +311,7 @@ public final class Nms {
     }
 
     private static Object enumConstant(Class<?> type, String name) throws NoSuchFieldException, IllegalAccessException {
-        return type.getField(name).get(null);
+        return Reflect.field(type, name).get(null);
     }
 
     /** The server's own object behind a Bukkit entity. */
@@ -436,6 +456,16 @@ public final class Nms {
     }
 
     /** A fresh entity id from the server's own counter, which no real entity will ever be given. */
+    /** The entity [packet] right-clicks with the main hand, if it is such a click; -1 for anything else. */
+    public int usedEntity(Object packet) {
+        if (packet.getClass() != interactPacket) return -1;
+        try {
+            return interactHand.invoke(packet) == mainHand ? (int) interactEntity.invoke(packet) : -1;
+        } catch (Throwable t) {
+            throw rethrow(t);
+        }
+    }
+
     public int nextEntityId(org.bukkit.World world) {
         try {
             return nextEntityIdTakesWorld ? (int) nextEntityId.invoke(world) : (int) nextEntityId.invoke();

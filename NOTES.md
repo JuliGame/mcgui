@@ -440,12 +440,46 @@ with it. The rig and every result of the 26.3 port are in
 | `net/` | `Nms` (every server internal, by reflection), `MapSender` (diffed map patches, per-player budget, frame re-pointing), `Wire`/`ServerWire` (what the sender writes through), `Pipeline` (ping answers, the hidden inventory, each connection's frame pointing) |
 | `world/` | `MapWall` (the frames), `MapPool` (placed walls whose frames share maps), `Walls` (placed walls and crosshair input), `Views` (seating, camera, pointer, input), `PrivateView` (fake air for players without the pack) |
 
+## Spigot and Paper: one jar
+
+MC GUI runs on Spigot and Paper from the same jar (since 0.3.0; SpigotMC lists only what runs on Spigot). How:
+
+- **It compiles against spigot-api**, so a Paper-only call does not build. Paper implements Spigot's API, so what
+  compiles runs on both.
+- **Adventure is the plugin's own**, shaded and relocated to `ai.resourcepack.ui.libs.kyori`: Spigot ships none,
+  and Paper's must never meet ours. No Adventure type crosses into the server. Chat leaves as BungeeCord components
+  (`Platform.send`, `actionBar`: Adventure to JSON to `ComponentSerializer`), the console gets section-sign colour
+  codes, and a text display's text (the pointer glyph, which names the pack's font) is set as the game's own
+  component from JSON on the entity behind it, because Spigot's `setText` takes a legacy string with no font.
+  Nothing in the public API (`MCGUI`, `UIFramework`, `event/`) takes or returns an Adventure type, and must not
+  start to: it would be our relocated copy, which no other plugin can name.
+- **`framework/platform/Platform` is every other difference**, each decided by what the server has rather than by
+  asking which it is: the tick (`Bukkit.getCurrentTick()` on Paper, `MinecraftServer.getTickCount()` on Spigot),
+  the command map, a player's protocol version (Paper keeps the handshake's; Spigot admits only its own version),
+  a player's profile (called by name, since Paper's `getPlayerProfile()` returns its own type), collisions (Paper's
+  `hasCollisionsIn`, else the blocks' collision shapes and the border), and transient attribute modifiers (Spigot
+  saves every modifier, so `Views.onJoin` takes the seat's off).
+- **A right click on a wall's frame is read off the wire on both** (`Pipeline.useEntities`,
+  `ServerboundInteractPacket`): the frames exist only on clients, Paper reports such a click with
+  `PlayerUseUnknownEntityEvent` and Spigot with nothing. Left clicks were always the swing.
+- **Entity ids for client-only frames** come from Paper's `UnsafeValues.nextEntityId`, or on Spigot from the
+  level's own counter (`Level.getNextEntityId`).
+- **Shared compression is Paper's only**: it uses the Velocity natives Paper bundles. On Spigot each connection
+  compresses its own map packets, as with shared compression off.
+- **Testing**: the mineflayer bot cannot join 26.3 (protocol 777), even through ViaBackwards (it is kicked for
+  an invalid move). On 26.2 with ViaVersion and ViaBackwards it joins as 26.1, so 26.2 is where a bot can drive
+  both servers; 26.3 needs a real client.
+
 ## The framework: things that are not obvious
 
 - **The server internals are reached by reflection**, so the plugin compiles against the plain 1.21.8 API and needs
   no paperweight. Every member is looked up once in `Nms`'s constructor; a
   missing one disables the plugin at startup with the reason. They were checked
-  against Paper 26.2 and 26.3, which agree on all of them.
+  against Spigot and Paper 26.2 and 26.3, which agree on all of them: both run
+  Mojang's names. **Paper makes many of the game's members public and Spigot does
+  not**, so every lookup goes through `net/Reflect`, which tries the public member
+  and then opens the declared one. A bare `getField`/`getMethod`/`findConstructor`
+  on a game class works on Paper and fails on Spigot at startup.
 - **26.3 rewrote the shader dialect**: `layout(location = N)` on every varying,
   `#include` for `#moj_import`, both uniform blocks reordered, and order-
   independent transparency in `text.fsh`. `Shaders` is written once in the 26.3
@@ -685,8 +719,8 @@ with it. The rig and every result of the 26.3 port are in
   scaled-up pixel art (1.9 MB of map bytes a frame, 136 KB compressed) to 8
   frames a second. The in-flight window stays in map bytes (800 KB).
   Pointer reports reach `ViewContent.pointer` through
-  `UIFramework.serverThread()`, the server's own task queue, which Paper
-  drains while it waits for the next tick: still the server thread, but not up
+  `UIFramework.serverThread()`, the server's own task queue, which the
+  server drains while it waits for the next tick: still the server thread, but not up
   to 50 ms late.
 - **One pool for all CPU-heavy work: `api/Cpu`.** `cpu-threads` (default: the cores
   minus one) is the most threads that convert, encode or draw at once, for this
@@ -794,7 +828,7 @@ with it. The rig and every result of the 26.3 port are in
 - **The mannequin camera** (1.21.9+) has a player's eye height. An armour stand
   (the fallback) makes the client glide its eye height for most of a second,
   off the flagged position the whole time.
-- **Paper resends the held item after every cancelled entity click**, which is
+- **The server resends the held item after every cancelled entity click**, which is
   every right-click while seated, and scrolling then pops its name over the
   view. `Pipeline.conceal` rewrites inventory packets to empty for a seated
   player; the server keeps the real items.

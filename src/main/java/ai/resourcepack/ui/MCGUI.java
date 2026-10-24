@@ -1,5 +1,6 @@
 package ai.resourcepack.ui;
 
+import ai.resourcepack.ui.framework.platform.Platform;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.entity.Player;
@@ -31,7 +32,7 @@ public final class MCGUI {
      * where they are; when that only shows once the page has loaded, the player is told instead.
      */
     public static boolean open(Player player, String page) {
-        return plugin().screens().open(player, page, problem -> player.sendActionBar(Component.text(problem, NamedTextColor.RED)));
+        return plugin().screens().open(player, page, problem -> Platform.actionBar(player, Component.text(problem, NamedTextColor.RED)));
     }
 
     /** Closes [player]'s page, if they have one open. */

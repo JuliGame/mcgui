@@ -1,5 +1,6 @@
 package ai.resourcepack.ui;
 
+import ai.resourcepack.ui.framework.platform.Platform;
 import ai.resourcepack.ui.framework.TickMeter;
 import ai.resourcepack.ui.framework.api.Cpu;
 import ai.resourcepack.ui.html.HoverAhead;
@@ -22,7 +23,7 @@ final class Stats {
     private Stats() {}
 
     static List<String> lines(MCGUIPlugin plugin) {
-        TickMeter.Summary t = plugin.framework().meter().summary(Bukkit.getCurrentTick());
+        TickMeter.Summary t = plugin.framework().meter().summary(Platform.tick());
         int[] c = plugin.screens().counts();
         Renders r = plugin.renderers();
         ForkJoinPool pool = Cpu.pool();
@@ -42,7 +43,7 @@ final class Stats {
     }
 
     static String json(MCGUIPlugin plugin) {
-        TickMeter.Summary t = plugin.framework().meter().summary(Bukkit.getCurrentTick());
+        TickMeter.Summary t = plugin.framework().meter().summary(Platform.tick());
         int[] c = plugin.screens().counts();
         Renders r = plugin.renderers();
         StringBuilder jobs = new StringBuilder();

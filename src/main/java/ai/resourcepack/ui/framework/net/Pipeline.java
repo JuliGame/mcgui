@@ -34,6 +34,7 @@ public final class Pipeline {
     private static final String PONGS = "uiengine_pong";
     private static final String FILTER = "uiengine_conceal";
     private static final String FRAMES = "uiengine_frames";
+    private static final String USES = "uiengine_uses";
     /** The player's own 36 slots, which every container other than the inventory itself ends with. */
     private static final int PLAYER_SLOTS = 36;
 
@@ -169,6 +170,48 @@ public final class Pipeline {
         player.updateInventory();
     }
 
+    /**
+     * Hand every right click [player] makes with the main hand on an entity to [used], with the entity's id, on the
+     * netty thread. The frames of a wall exist only on clients, so the server knows no such entity and does nothing
+     * with the click; Paper says so with an event of its own, Spigot with nothing, so it is read here on both. The
+     * packet goes on to the server all the same.
+     */
+    public void useEntities(Player player, java.util.function.IntConsumer used) {
+        Channel channel = nms.channel(player);
+        if (channel == null) return;
+        try {
+            channel.eventLoop().execute(() -> {
+                ChannelPipeline p = channel.pipeline();
+                if (!ours(p.get(USES))) install(p, USES, new Uses(used));
+            });
+        } catch (RejectedExecutionException e) {
+            // The event loop is shutting down with the server.
+        }
+    }
+
+    private final class Uses extends ChannelInboundHandlerAdapter {
+        private final java.util.function.IntConsumer used;
+
+        Uses(java.util.function.IntConsumer used) {
+            this.used = used;
+        }
+
+        @Override
+        public void channelRead(ChannelHandlerContext ctx, Object msg) {
+            try {
+                int id = nms.usedEntity(msg);
+                if (id >= 0) used.accept(id);
+            } catch (RuntimeException e) {
+                log.log(Level.WARNING, "Could not read a click on an entity", e);
+            }
+            ctx.fireChannelRead(msg);
+        }
+
+        Pipeline owner() {
+            return Pipeline.this;
+        }
+    }
+
     public void forget(UUID player) {
         concealed.remove(player);
         held.remove(player);
@@ -186,6 +229,7 @@ public final class Pipeline {
     private boolean ours(ChannelHandler handler) {
         if (handler instanceof Filter f) return f.owner() == this;
         if (handler instanceof FrameMaps m) return m.owner() == this;
+        if (handler instanceof Uses u) return u.owner() == this;
         return handler instanceof Pongs g && g.owner() == this;
     }
 
@@ -212,7 +256,7 @@ public final class Pipeline {
             try {
                 channel.eventLoop().execute(() -> {
                     ChannelPipeline p = channel.pipeline();
-                    for (String name : List.of(FILTER, PONGS, FRAMES)) if (ours(p.get(name))) p.remove(name);
+                    for (String name : List.of(FILTER, PONGS, FRAMES, USES)) if (ours(p.get(name))) p.remove(name);
                 });
             } catch (RejectedExecutionException e) {
                 // The event loop is shutting down with the server, and the channel with it.

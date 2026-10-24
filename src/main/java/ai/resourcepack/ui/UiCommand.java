@@ -1,5 +1,6 @@
 package ai.resourcepack.ui;
 
+import ai.resourcepack.ui.framework.platform.Platform;
 import ai.resourcepack.ui.chat.Chat;
 import ai.resourcepack.ui.framework.FrameworkCommand;
 import net.kyori.adventure.text.Component;
@@ -136,13 +137,13 @@ final class UiCommand implements TabExecutor {
     /** The commands the sender may run, one a line under a heading, as the other ResourcePack AI plugins list theirs. */
     private void help(CommandSender sender, String label) {
         String root = "/" + label.toLowerCase(Locale.ROOT).replaceFirst("^mcgui:", "");
-        sender.sendMessage(Chat.heading("MC GUI", Component.text()
-                .append(Chat.text(plugin.getPluginMeta().getVersion() + ", pages made on "))
+        Platform.send(sender, Chat.heading("MC GUI", Component.text()
+                .append(Chat.text(plugin.getDescription().getVersion() + ", pages made on "))
                 .append(Chat.accent("mcgui.dev").clickEvent(net.kyori.adventure.text.event.ClickEvent.openUrl("https://mcgui.dev/")))
                 .build()));
         for (Help h : HELP) {
             if (h.sub() != null && !sender.hasPermission(permissionFor(h.sub()))) continue;
-            sender.sendMessage(Chat.row(root + " " + h.usage(), h.what()));
+            Platform.send(sender, Chat.row(root + " " + h.usage(), h.what()));
         }
     }
 
@@ -204,7 +205,7 @@ final class UiCommand implements TabExecutor {
         String name = args.length > 4 ? args[4] : plugin.pages().normalise(page).replace('/', '-').replace('.', '-') + "-" + (plugin.screens().walls().size() + 1);
         boolean shared = args.length > 5 && args[5].equalsIgnoreCase("shared");
         Block block = p.getTargetBlockExact(16);
-        BlockFace face = p.getTargetBlockFace(16);
+        BlockFace face = Platform.targetFace(p, 16);
         if (block == null || face == null || !WALL.contains(face)) {
             say(sender, "Look at the side of a wall: the block you look at becomes the top-left corner.", NamedTextColor.RED);
             return;
@@ -244,7 +245,7 @@ final class UiCommand implements TabExecutor {
         String name = args.length > 1 ? args[1] : null;
         if (name == null && sender instanceof Player p) {
             Block block = p.getTargetBlockExact(16);
-            BlockFace face = p.getTargetBlockFace(16);
+            BlockFace face = Platform.targetFace(p, 16);
             if (block != null && face != null) {
                 Screens.Wall w = plugin.screens().wallAt(block.getRelative(face).getLocation());
                 if (w == null) w = plugin.screens().wallAt(block.getLocation());

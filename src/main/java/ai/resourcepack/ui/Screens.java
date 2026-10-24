@@ -1,5 +1,6 @@
 package ai.resourcepack.ui;
 
+import ai.resourcepack.ui.framework.platform.Platform;
 import ai.resourcepack.ui.framework.api.Canvas;
 import ai.resourcepack.ui.framework.api.Click;
 import ai.resourcepack.ui.framework.api.CloseReason;
@@ -138,7 +139,7 @@ public final class Screens implements Listener {
             if (click == Click.RIGHT && plugin.wallFullscreen()) {
                 // Sit down at it: the page this screen is on for them, fullscreen.
                 String at = s.pageName() != null ? s.pageName() : page;
-                Consumer<String> tell = problem -> viewer.sendActionBar(Component.text(problem, NamedTextColor.RED));
+                Consumer<String> tell = problem -> Platform.actionBar(viewer, Component.text(problem, NamedTextColor.RED));
                 try {
                     open(viewer, at, tell);
                 } catch (IllegalStateException e) {

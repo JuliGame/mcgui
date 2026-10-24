@@ -5,7 +5,7 @@ plugins {
 }
 
 group = 'ai.resourcepack'
-version = '0.2.1'
+version = '0.3.0'
 
 java {
     toolchain {
@@ -21,7 +21,9 @@ tasks.withType(JavaCompile).configureEach {
 
 repositories {
     mavenCentral()
-    maven { url = 'https://repo.papermc.io/repository/maven-public/' }
+    // spigot-api: the one API both servers have. Paper keeps Spigot's API, so compiling against it is what
+    // makes one jar run on both, and what keeps a Paper-only call from creeping back in.
+    maven { url = 'https://hub.spigotmc.org/nexus/content/repositories/snapshots/' }
     // ai.resourcepack:common, the small library our plugins share (the usage
     // count). Exclusive: the ai.resourcepack group is looked for here and
     // nowhere else, so a look-alike on Central cannot stand in for it.
@@ -36,7 +38,7 @@ repositories {
 }
 
 dependencies {
-    compileOnly 'io.papermc.paper:paper-api:1.21.8-R0.1-SNAPSHOT'
+    compileOnly 'org.spigotmc:spigot-api:1.21.8-R0.1-SNAPSHOT'
     // The server ships netty; the map sender and the packet filters are netty handlers.
     compileOnly 'io.netty:netty-transport:4.2.7.Final'
 
@@ -45,10 +47,21 @@ dependencies {
     implementation 'com.github.weisj:jsvg:2.2.0'
     // The anonymous usage count. Shaded and relocated below, so it never meets another plugin's copy.
     implementation 'ai.resourcepack:common:0.4.0'
+    // Adventure, for building chat. Spigot has none and Paper's must never meet ours, so it is shaded and
+    // relocated below; messages leave as BungeeCord chat, which both servers ship (platform/Platform). Gson
+    // is the server's on both.
+    implementation('net.kyori:adventure-api:4.24.0') { exclude group: 'org.jetbrains' }
+    implementation('net.kyori:adventure-text-serializer-gson:4.24.0') {
+        exclude group: 'com.google.code.gson'
+        exclude group: 'org.jetbrains'
+    }
+    implementation('net.kyori:adventure-text-minimessage:4.24.0') { exclude group: 'org.jetbrains' }
+    implementation('net.kyori:adventure-text-serializer-plain:4.24.0') { exclude group: 'org.jetbrains' }
+    implementation('net.kyori:adventure-text-serializer-legacy:4.24.0') { exclude group: 'org.jetbrains' }
 
     testImplementation 'org.junit.jupiter:junit-jupiter:5.11.0'
     // Tests that drive the map sender need the API's types (a wall, a player) on the classpath, as the server provides them.
-    testImplementation 'io.papermc.paper:paper-api:1.21.8-R0.1-SNAPSHOT'
+    testImplementation 'org.spigotmc:spigot-api:1.21.8-R0.1-SNAPSHOT'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
@@ -57,6 +70,7 @@ shadowJar {
     relocate 'org.jsoup', 'ai.resourcepack.ui.libs.jsoup'
     relocate 'com.github.weisj.jsvg', 'ai.resourcepack.ui.libs.jsvg'
     relocate 'ai.resourcepack.common', 'ai.resourcepack.ui.libs.common'
+    relocate 'net.kyori', 'ai.resourcepack.ui.libs.kyori'
 }
 
 base { archivesName = 'MCGUI' }

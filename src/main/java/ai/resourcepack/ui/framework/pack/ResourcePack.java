@@ -5,9 +5,6 @@ import ai.resourcepack.ui.framework.api.Pointer;
 import ai.resourcepack.ui.framework.render.Palette;
 import com.sun.net.httpserver.HttpServer;
 import net.kyori.adventure.key.Key;
-import net.kyori.adventure.resource.ResourcePackInfo;
-import net.kyori.adventure.resource.ResourcePackRequest;
-import net.kyori.adventure.text.Component;
 import org.bukkit.entity.Player;
 
 import javax.imageio.ImageIO;
@@ -17,7 +14,6 @@ import java.io.File;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
-import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -125,11 +121,8 @@ public final class ResourcePack implements AutoCloseable {
         if (url == null) return;
         // The sha1 in the query defeats any cache between the client and the server.
         String sep = url.contains("?") ? "&" : "?";
-        player.sendResourcePacks(ResourcePackRequest.resourcePackRequest()
-                .packs(ResourcePackInfo.resourcePackInfo(PACK_ID, URI.create(url + sep + "v=" + sha1), sha1))
-                .required(settings.packRequired)
-                .prompt(Component.text(settings.packPrompt))
-                .replace(false));
+        // Added beside any other plugin's pack, never in place of it. Bukkit's call, which both servers have.
+        player.addResourcePack(PACK_ID, url + sep + "v=" + sha1, HexFormat.of().parseHex(sha1), settings.packPrompt, settings.packRequired);
     }
 
     public boolean has(UUID player) {
