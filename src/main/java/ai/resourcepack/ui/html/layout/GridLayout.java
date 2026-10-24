@@ -272,6 +272,17 @@ final class GridLayout {
         return s;
     }
 
+    /**
+     * The least an item lets an auto (or fr) column shrink to: its min-width when one is set, nothing
+     * but its padding and border when it clips (overflow other than visible), else its min-content.
+     * Without it a 1fr column holding a wide slide track (a carousel) grew past its grid.
+     */
+    private double autoMinWidth(Box b, double space) {
+        if (b.style.minWidth != null) return L.clampWidth(b, 0, Double.isNaN(space) ? 0 : space);
+        if (b.style.clips()) return L.hEdges(b);
+        return L.minContent(b);
+    }
+
     /** Track sizing along one axis. [space] may be NaN (an auto-height grid). */
     private void sizeTracks(List<Track> tracks, List<Cell> cells, boolean columns, double space, double gap, String distribute) {
         for (Track t : tracks) {
@@ -292,7 +303,7 @@ final class GridLayout {
             double min, max;
             if (columns) {
                 double margins = L.fixedMargins(c.box);
-                min = L.minContent(c.box) + margins;
+                min = (t.minKind.equals("auto") ? autoMinWidth(c.box, space) : L.minContent(c.box)) + margins;
                 max = L.maxContent(c.box) + margins;
             } else {
                 min = max = c.box.h + c.box.m[0] + c.box.m[2];
