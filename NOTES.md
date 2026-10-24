@@ -461,9 +461,11 @@ wide for a default view). `/ui place <page> <cols> <rows> <name> <x> <y> <z>
   Measured on Josh's PC (720p, uncapped): world alone 0.53 ms a frame; the
   market at 16×9 2.5 ms, of which about 1.3 ms is the 144 maps' draw calls (a
   map is its own texture, so its own render pass: nothing the pack does can
-  batch them) and about 0.4 ms the decode. Map count is the lever (see the
-  README's "Frame rate"); moving per-pixel tint decoding to the vertex shader
-  made overlay views about 6 % faster.
+  batch them) and about 0.4 ms the decode (about 0.7 ms at 1080p). Map count
+  is the lever (see the README's "Frame rate"). Moving the per-map work to the
+  vertex shader and the one-read lookup measured within noise of the old shader
+  at 720p and 1080p (two rounds each); keeping that work per pixel in the
+  fragment shader was the slowest variant at 1080p (284 FPS against 310).
 - **An overlay keeps the world it opened on** (`ViewOptions.overlay`, every
   `ui:overlay` page; 26.2). Its camera is the player's own eye where it was
   (`Views.overlayEye`, their rotation untouched) and its pointer the client's,
