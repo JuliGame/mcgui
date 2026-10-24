@@ -455,8 +455,8 @@ public final class Screens implements Listener {
 
     /** Draws again every session whose page shows pictures that arrive late (players' faces), as one just has. */
     void redrawSchemed() {
-        for (Wall w : walls.values()) for (Session s : w.all()) if (s.schemed()) s.render();
-        for (Seated s : views.values()) if (s.session.schemed()) s.session.render();
+        for (Wall w : walls.values()) for (Session s : w.all()) if (s.schemed()) s.pictureArrived();
+        for (Seated s : views.values()) if (s.session.schemed()) s.session.pictureArrived();
     }
 
     void tick(long now) {

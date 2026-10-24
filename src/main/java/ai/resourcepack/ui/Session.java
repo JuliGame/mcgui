@@ -105,6 +105,8 @@ public final class Session {
     /** Counts clicks, so the end of one press does not end a later one. */
     private int presses;
     private boolean rendering, dirty;
+    /** A picture the page draws has arrived since the last one was drawn (a face): the next is drawn whole. */
+    private boolean arrived;
     private boolean closed;
     /** Told the pointer shape for what is under the pointer (views only). */
     public Consumer<Pointer> pointerShape = p -> {};
@@ -191,6 +193,15 @@ public final class Session {
     /** The page shown, or null before the first has loaded. */
     Page page() {
         return page;
+    }
+
+    /**
+     * A picture the page draws has arrived (a player's face, until now its stand-in): drawn again whole. A plain
+     * {@link #render} would find the same document, scroll and state as the picture on the screen and draw nothing.
+     */
+    synchronized void pictureArrived() {
+        arrived = true;
+        render();
     }
 
     /** Whether the page shown draws pictures that can arrive after it is drawn (see {@link Page#schemed}). */
@@ -697,6 +708,13 @@ public final class Session {
         }
         // The last picture this session shared is settled before anything is drawn or shown over it.
         retireShared();
+        if (arrived) {
+            // Everything drawn so far has the stand-in in it: the picture, its tall copy and the hovers drawn ahead.
+            arrived = false;
+            frame = null;
+            cache = null;
+            hoverAhead.drop();
+        }
         Page p = page;
         Document held = doc;
         Placeholders.Filled fill = filled;
