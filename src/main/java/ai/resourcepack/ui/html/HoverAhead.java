@@ -451,6 +451,7 @@ public final class HoverAhead {
         List<List<Element>> drew = new ArrayList<>();
         try {
             List<Target> ranked = rank(job, targets(job.before));
+            if (ranked == null) return;
             synchronized (this) {
                 if (pickedOf != job.before) picked = new ArrayList<>();
                 pickedOf = job.before;
@@ -588,12 +589,14 @@ public final class HoverAhead {
      * each. Where it lands is taken as anywhere in a disc round the pointer, {@link #REACH} wide at rest, and round where
      * it is heading (half a report on) and as wide as three quarters of a report's travel when it moves. The chance of a
      * target is the share of that disc it is what the pointer is over, topmost first as a hover finds it (a card's row
-     * over the card: the row's state, not the card's). The state the pointer is in now is left out.
+     * over the card: the row's state, not the card's). The state the pointer is in now is left out. A disc never reaches
+     * past the view's diagonal (a pointer flicked across the view, or set by a command, has a speed with no bound, and
+     * the rings would number millions), and the rings stop as soon as the job is told to (null then).
      */
     private List<Target> rank(Job job, List<Target> all) {
         HtmlRenderer.Frame f = job.before;
         double speed = Math.hypot(job.vx, job.vy);
-        double reach = Math.max(REACH, 0.75 * speed * REPORT);
+        double reach = Math.min(Math.max(REACH, 0.75 * speed * REPORT), Math.max(REACH, Math.hypot(f.viewportWidth(), f.viewportHeight())));
         double cx = job.x + 0.5 * job.vx * REPORT, cy = job.y + 0.5 * job.vy * REPORT;
         Map<List<Element>, Target> byKey = new java.util.HashMap<>();
         for (Target t : all) byKey.put(t.key, t);
@@ -601,6 +604,7 @@ public final class HoverAhead {
         Map<List<Element>, double[]> score = new LinkedHashMap<>();
         // Rings of points, as many to a ring as its length holds: each point stands for the same area.
         for (double r = STEP / 2; r <= reach; r += STEP) {
+            if (job.stopped()) return null;
             int n = Math.max(6, (int) Math.round(2 * Math.PI * r / STEP));
             for (int a = 0; a < n; a++) {
                 double ang = 2 * Math.PI * (a + 0.5 * ((int) (r / STEP) & 1)) / n;

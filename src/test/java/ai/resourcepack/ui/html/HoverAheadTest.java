@@ -25,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -255,6 +256,23 @@ class HoverAheadTest {
             if (p != null && p.pixels().length > 0) changing++;
         }
         assertTrue(changing <= 4 && changing >= 3, changing + " repaints that change pixels drawn ahead");
+    }
+
+    /**
+     * A pointer flicked across the view (or set by a command a moment after the last report) has a speed with no bound:
+     * where its next report may land is still only somewhere in the view, so ranking the targets takes no longer than at
+     * rest, rather than ringing millions of points round a spot far off the page.
+     */
+    @Test
+    void aFlickedPointerIsRankedOverTheViewOnly() throws IOException {
+        Page page = file("src/main/resources/pages/menu.html");
+        Document doc = page.document.clone();
+        HtmlRenderer.Frame cur = HtmlRenderer.render(page, doc, W, H, SCALE, 0, Selector.State.NONE);
+        HoverAhead ahead = new HoverAhead(4, new SharedRepaints(Long.MAX_VALUE));
+        HoverAhead.budget(1);
+        assertTimeoutPreemptively(java.time.Duration.ofSeconds(10), () ->
+                ahead.run(ahead.job(page, doc, W, H, SCALE, cur, List.of(), List.of(), List.of(), null, List.of(), 100, 100, 4e7, 1e7, 0)));
+        assertTrue(ahead.done(cur, 100, 100), "the drawing ahead did not finish");
     }
 
     /** Stopped part way through (real work came), the picture on the screen is as it was, and nothing half drawn is kept. */
