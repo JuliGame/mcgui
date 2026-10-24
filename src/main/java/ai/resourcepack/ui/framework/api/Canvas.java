@@ -493,8 +493,6 @@ public final class Canvas {
     public final class Snapshot {
         private final Tile[] at;
         private final int tint;
-        /** {@link #panel}, once worked out. */
-        private Panel panel;
 
         private Snapshot(Tile[] at, int tint) {
             this.tint = tint;
@@ -507,25 +505,11 @@ public final class Canvas {
         }
 
         /**
-         * The bounds of everything opaque in the picture, in canvas pixels ([left, right) × [top, bottom)): the panel a
-         * blurred view keeps sharp. The whole canvas for a picture with nothing transparent; empty for one that is all.
+         * Whether tile [index] has anything opaque in it: an overlay sends only those (its panel), and nothing is drawn
+         * where the rest would be. Every tile of a picture with nothing transparent.
          */
-        public Panel panel() {
-            Panel p = panel;
-            if (p != null) return p;
-            int x0 = width, y0 = height, x1 = 0, y1 = 0;
-            for (int i = 0; i < at.length; i++) {
-                int b = at[i].bounds;
-                if (b == Palette.NO_BOUNDS) continue;
-                int ox = (i % cols) * 128, oy = (i / cols) * 128;
-                x0 = Math.min(x0, ox + (b & 63) * 2);
-                y0 = Math.min(y0, oy + (b >> 6 & 63) * 2);
-                x1 = Math.max(x1, ox + (b >> 12 & 63) * 2 + 2);
-                y1 = Math.max(y1, oy + (b >> 18 & 63) * 2 + 2);
-            }
-            p = x1 <= x0 ? new Panel(0, 0, 0, 0) : new Panel(x0, y0, x1, y1);
-            panel = p;
-            return p;
+        public boolean opaque(int index) {
+            return at[index].bounds != Palette.NO_BOUNDS;
         }
 
         /** Tile [index]'s map colour bytes in [encoding]. The array is never changed after it is returned. */
@@ -543,14 +527,10 @@ public final class Canvas {
                     }
                     yield own.tile;
                 }
-                case HI_OWN_BLUR -> t.blurred(palette, cols, rows, tint, panel());
                 case PLAIN -> t.plain(Canvas.this, index, at);
             };
         }
     }
-
-    /** A rectangle of canvas pixels, [left, right) × [top, bottom). */
-    public record Panel(int left, int top, int right, int bottom) {}
 
     private record Own(byte[] base, int tint, byte[] tile) {}
 
@@ -562,9 +542,8 @@ public final class Canvas {
         final byte[] hi;
         /** Where its opaque 2×2 blocks are ({@link Palette#encodeHi}'s bounds). */
         final int bounds;
-        private byte[] own, plain, blurred;
-        private int ownTint, blurredTint;
-        private Panel blurredPanel;
+        private byte[] own, plain;
+        private int ownTint;
 
         Tile(byte[] hi, int bounds) {
             this.hi = hi;
@@ -578,16 +557,6 @@ public final class Canvas {
                 ownTint = tint;
             }
             return own;
-        }
-
-        /** As {@link #own}, for a blurred view: made again when the tint or the picture's panel changes. */
-        synchronized byte[] blurred(Palette palette, int cols, int rows, int tint, Panel panel) {
-            if (blurred == null || blurredTint != tint || !panel.equals(blurredPanel)) {
-                blurred = palette.markBlurred(hi, cols, rows, tint, panel.left(), panel.top(), panel.right(), panel.bottom());
-                blurredTint = tint;
-                blurredPanel = panel;
-            }
-            return blurred;
         }
 
         /** Made from the picture the first time somebody without the pack looks, while this tile is at [index] in [at]. */
@@ -653,11 +622,6 @@ public final class Canvas {
         HI_OWN,
         /** HI_OWN, carrying each tile's place too, for a view whose pointer the viewer's client draws. */
         HI_TILED,
-        /**
-         * HI_OWN for a view whose client blurs the world round the picture's panel ({@link Snapshot#panel}): every tile
-         * carries the panel too.
-         */
-        HI_OWN_BLUR,
         /** Plain map colours, for players without the pack. */
         PLAIN
     }

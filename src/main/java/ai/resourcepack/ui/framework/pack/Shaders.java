@@ -16,13 +16,15 @@ import java.util.regex.Pattern;
  *       (the text pipeline blends: {@code BlendFunction.TRANSLUCENT}).</li>
  *   <li>{@code position_tex_color} hides the hotbar, hearts, crosshair and vignette, but only for a
  *       seated player.</li>
- *   <li>A post effect, {@code post_effect/creeper.json}, blurs the world round a blurred view's panel
- *       ({@link #overlayBlurChain}; 26.2 only).</li>
+ *   <li>A post effect, {@code post_effect/entity_outline.json}, which the game runs whenever a glowing
+ *       entity is drawn: besides the outlines, it keeps the world an overlay page's player saw when it
+ *       opened and shows it, still, round the panel ({@link #overlayChain}; 26.2 only).</li>
+ *   <li>{@code rendertype_clouds.vsh} draws no clouds over that still world (26.2 only).</li>
  * </ol>
  *
  * <p>"Seated" is read from {@code Globals.CameraOffset}: the engine puts a seated player's camera at a
- * block fraction of k/16 + 3/128 along the view's normal and 0 or 1/2 on the other two axes, which no
- * normal eye position produces. Everyone else sees vanilla.
+ * block fraction of k/16 + 3/128 along the view's normal and 0 or 1/2 on the other two axes, or for an
+ * overlay k/16 + 3/128 on all three, which no normal eye position produces. Everyone else sees vanilla.
  *
  * <p><b>26.3 rewrote the shader dialect</b> (explicit {@code layout(location)} on every varying,
  * {@code #include} for {@code #moj_import}, reordered uniform blocks, order-independent transparency
@@ -79,11 +81,18 @@ public final class Shaders {
     public static final double CLIENT_POINTER_MAX_SPEED = 255;
 
     /**
-     * A blurred view's signature (see {@code mcb_signature} in text.fsh and {@link #overlayBlurFsh}): the RGB of the
-     * window's bottom-left pixel, and the blue of the fourth pixel along. Colours the world is all but certain never to
-     * put in both places at once.
+     * An overlay's signature (see {@code mcb_signature} in text.fsh and {@link #overlayChain}): the RGB of the
+     * window's bottom-left pixel, and the fourth pixel along, red and green 0 and blue this. Colours the world is
+     * all but certain never to put in both places at once. The second pixel is the view's tint, the third its
+     * alpha and the {@code SIGNATURE_*} flags.
      */
     static final int SIGNATURE_0 = 0x5AC396, SIGNATURE_3 = 0x69;
+
+    /** The tile column and row an overlay's signature map carries in place of its own (Palette.markSignature). */
+    public static final int SIGNATURE_TILE = Palette.SYMBOLS - 1;
+
+    /** Signature flags: blur the world round the panel; the world is kept (not taken afresh each frame); depth is reversed. */
+    public static final int SIGNATURE_BLUR = 1, SIGNATURE_KEPT = 2, SIGNATURE_REVERSED = 4;
 
     private static String f6(double v) {
         return String.format(Locale.ROOT, "%.6f", v);
@@ -157,10 +166,12 @@ public final class Shaders {
             bool mcb_near(float v, float t) { return abs(v - t) < 0.0001; }
             bool mcb_grid(float v) { return mcb_near(v, 0.0) || mcb_near(v, 0.5) || mcb_near(v, 1.0); }
             float mcb_flag(float v) { return abs(fract(v * @STEPS@) - @FRACTION@) < 0.002 ? 1.0 : 0.0; }
-            // Seated cameras sit at a flagged fraction of a block along one horizontal axis: 0 for x, 2 for
-            // z, -1 when this camera is not seated.
+            // Seated cameras sit at a flagged fraction of a block along one horizontal axis and on the half-block
+            // grid on the other two: 0 for x, 2 for z. An overlay's camera is the player's own eye with all three
+            // flagged (each moved at most 1/32 of a block): 1. -1 when this camera is not seated.
             int mcb_flag_axis() {
                 vec3 f = -CameraOffset;
+                if (mcb_flag(f.x) > 0.0 && mcb_flag(f.y) > 0.0 && mcb_flag(f.z) > 0.0) return 1;
                 if (!mcb_grid(f.y)) return -1;
                 if (mcb_grid(f.z) && mcb_flag(f.x) > 0.0) return 0;
                 if (mcb_grid(f.x) && mcb_flag(f.z) > 0.0) return 2;
@@ -322,8 +333,12 @@ public final class Shaders {
                 // is the glyph's own, from its hot pixel, at 128 pixels to a block. The hot pixel is the view's
                 // centre plus the speed times how far the camera has turned from that axis, held inside the
                 // view; the server works the cursor out the same way from the rotations the client sends.
+                // On an overlay (flag 1) every axis is flagged: the text's own offset says which is ahead, as the glyph
+                // is far smaller than its distance.
                 vec2 mcb_client_pointer(vec2 size) {
-                    vec3 axis = mcb_flag_axis() == 0 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 0.0, 1.0);
+                    int flagAxis = mcb_flag_axis();
+                    bool alongX = flagAxis == 0 || (flagAxis == 1 && abs(Position.x) > abs(Position.z));
+                    vec3 axis = alongX ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 0.0, 1.0);
                     float along = dot(Position, axis);
                     vec3 ahead = axis * sign(along);
                     vec3 right = vec3(-ahead.z, 0.0, ahead.x);
@@ -370,18 +385,27 @@ public final class Shaders {
                             mcbPointer = 2.0;
                             mcbTint = vec4(1.0, 1.0, 1.0, Color.a);
                             gl_Position = mcb_flat(mcb_client_pointer(vec2(mcbRgb.gb) * 128.0));
-                        } else if (mcbMap == 2 || mcbMap == 4) {
+                        } else if (mcbMap == 2) {
                             // Their own view's maps carry its columns and rows next to the marker.
                             mcbGrid = vec2(float(mcb_symbol(ivec2(2, 0))), float(mcb_symbol(ivec2(3, 0))));
                         } else if (mcbMap == 3) {
                             // A view whose pointer this client places: each map also carries its own column and
                             // row, and goes to its place in the window by those and its corner (the map quad's
                             // texture coordinates are exactly 0 and 1), wherever its frame is and wherever the
-                            // camera looks.
+                            // camera looks. An overlay sends only the maps its panel covers, so nothing is drawn
+                            // round them.
                             vec2 mcbViewGrid = vec2(float(mcb_symbol(ivec2(2, 0))), float(mcb_symbol(ivec2(3, 0))));
                             vec2 mcbTile = vec2(float(mcb_symbol(ivec2(2, 1))), float(mcb_symbol(ivec2(3, 1))));
-                            vec2 mcbAt = (mcbTile + UV0) / mcbViewGrid;
-                            gl_Position = mcb_flat(vec2(mcbAt.x * 2.0 - 1.0, 1.0 - mcbAt.y * 2.0));
+                            if (mcbTile == vec2(@SIGTILE@)) {
+                                // An overlay's signature map (Palette.markSignature): over the window's four
+                                // bottom-left pixels, which text.fsh writes for the post effect to read.
+                                mcbMapInfo.x = 5.0;
+                                gl_Position = mcb_flat(vec2(-1.0) + vec2(UV0.x * 8.0, (1.0 - UV0.y) * 2.0) / ScreenSize);
+                            } else {
+                                if (mcb_flag_axis() == 1) mcbMapInfo.x = 6.0;
+                                vec2 mcbAt = (mcbTile + UV0) / mcbViewGrid;
+                                gl_Position = mcb_flat(vec2(mcbAt.x * 2.0 - 1.0, 1.0 - mcbAt.y * 2.0));
+                            }
                         }
                         // Both fill the window whatever its shape and whatever the player's FOV. The picture is centred
                         // on the camera's axis and square to it, so how far a vertex is from that axis, in blocks, as a
@@ -400,7 +424,8 @@ public final class Shaders {
                 #endif
                 #endif
                 }
-                """.replace("@PR@", String.valueOf(POINTER_RED)).replace("@PC@", String.valueOf(CLIENT_POINTER_RED)), d);
+                """.replace("@PR@", String.valueOf(POINTER_RED)).replace("@PC@", String.valueOf(CLIENT_POINTER_RED))
+                .replace("@SIGTILE@", SIGNATURE_TILE + ".0"), d);
     }
 
     /**
@@ -429,7 +454,8 @@ public final class Shaders {
 
                 // 0: not ours. 1: a screen. 2: the view of whoever is seated at it (bottom markers swapped).
                 // 3: such a view whose pointer their client places, each map carrying its place (both the fourth).
-                // 4: a view as 2 whose client blurs the world round its panel, each map carrying the panel (both the third).
+                // text.vsh then tells two kinds of 3 apart for text.fsh: 5, an overlay's signature map, and 6, a map of
+                // an overlay's panel.
                 int mcb_screen_map() {
                     if (textureSize(Sampler0, 0) != ivec2(128, 128)
                         || mcb_fetch(ivec2(0, 0)) != @M0@ || mcb_fetch(ivec2(1, 0)) != @M1@) return 0;
@@ -438,7 +464,6 @@ public final class Shaders {
                     if (a == @M2@ && b == @M3@) return 1;
                     if (a == @M3@ && b == @M2@) return 2;
                     if (a == @M3@ && b == @M3@) return 3;
-                    if (a == @M2@ && b == @M2@) return 4;
                     return 0;
                 }
 
@@ -449,9 +474,8 @@ public final class Shaders {
                                 float(mcb_symbol(ivec2(4, 1))), float(mcb_symbol(ivec2(5, 1)))) / @SYMMAX@;
                 }
 
-                // How many 2x2 blocks after the marker hold data, not picture: a view's size, place and tint (2), and a
-                // blurred view's panel too (4).
-                int mcb_info(int kind) { return kind == 4 ? 4 : kind >= 2 ? 2 : 0; }
+                // How many 2x2 blocks after the marker hold data, not picture: a view's size, place and tint (2).
+                int mcb_info(int kind) { return kind >= 2 ? 2 : 0; }
 
                 // A 2x2 block's mean luma and its chroma, and 1 (0 for all four when it is transparent).
                 vec4 mcb_block(ivec2 b) {
@@ -577,20 +601,13 @@ public final class Shaders {
                                 covered / max(total, 1e-6));
                 }
 
-                // One edge of a blurred view's panel in canvas pixels (Palette.markBlurred): two symbols, high and low.
-                float mcb_edge(ivec2 p) { return float(mcb_symbol(p) * @SYMBOLS@ + mcb_symbol(p + ivec2(1, 0))); }
-
-                // Where a blurred view's panel is, for the post effect that blurs the world round it (Shaders.overlayBlurFsh),
-                // written as the window's four bottom-left pixels: a check, the panel's left and top edges, its right and
-                // bottom ones (fractions of the view, 16 bits each), and a second check.
+                // An overlay's signature, for the post effect that keeps the world round its panel (Shaders.overlayChain),
+                // written as the window's four bottom-left pixels: a check, the view's tint, its alpha and the flags (the
+                // signature map's own, Palette.markSignature, and whether depth is reversed), and a second check.
                 vec3 mcb_signature(int i) {
-                    vec2 size = vec2(float(mcb_symbol(ivec2(2, 0))), float(mcb_symbol(ivec2(3, 0)))) * 128.0;
-                    vec4 edges = vec4(mcb_edge(ivec2(6, 0)), mcb_edge(ivec2(6, 1)), mcb_edge(ivec2(8, 0)), mcb_edge(ivec2(8, 1))) / size.xyxy;
-                    ivec4 e = ivec4(round(clamp(edges, 0.0, 1.0) * 65535.0));
-                    ivec3 c = i == 0 ? ivec3(@SIG0@)
-                            : i == 1 ? ivec3(e.x >> 8, e.x & 255, e.y >> 8)
-                            : i == 2 ? ivec3(e.y & 255, e.z >> 8, e.z & 255)
-                            : ivec3(e.w >> 8, e.w & 255, @SIG3@);
+                    ivec4 t = ivec4(round(clamp(mcbViewTint, 0.0, 1.0) * 255.0));
+                    int flags = mcb_symbol(ivec2(6, 0)) | (mcbReversed > 0.5 ? @SREV@ : 0);
+                    ivec3 c = i == 0 ? ivec3(@SIG0@) : i == 1 ? t.rgb : i == 2 ? ivec3(t.a, flags, 0) : ivec3(0, 0, @SIG3@);
                     return vec3(c) / 255.0;
                 }
                 // ---- end decoder ----
@@ -598,7 +615,7 @@ public final class Shaders {
                 bool mcb_in(vec2 p, vec2 a, vec2 b) { return p.x >= a.x && p.x <= b.x && p.y >= a.y && p.y <= b.y; }
                 """
                 .replace("@LUMAMAX@", String.format(Locale.ROOT, "%.1f", (float) (Palette.LUMA_LEVELS - 1)))
-                .replace("@SYMBOLS@", String.valueOf(Palette.SYMBOLS))
+                .replace("@SREV@", String.valueOf(SIGNATURE_REVERSED))
                 .replace("@SIG0@", (SIGNATURE_0 >> 16) + "," + (SIGNATURE_0 >> 8 & 255) + "," + (SIGNATURE_0 & 255))
                 .replace("@SIG3@", String.valueOf(SIGNATURE_3));
 
@@ -625,24 +642,29 @@ public final class Shaders {
                 #ifndef IS_GRAYSCALE
                     int mcbMap = int(mcbMapInfo.x + 0.5);
                     if (mcbMap > 0) {
-                        // A screen emits its own light: no lightmap, tint or fog, so colours are exact day and night.
-                        vec4 mcbPicture = mcb_sample(texCoord0 * 128.0, mcbFootprint, mcb_info(mcbMap), mcbMapInfo.y > 0.5);
-                        // Where the picture is transparent the world behind shows, on someone's own view under its
-                        // tint: the picture over the tint over the world, as one colour blended over the world.
-                        vec4 mcbTint = mcbMap >= 2 && mcbPicture.a < 1.0 ? mcbViewTint : vec4(0.0);
-                        float mcbAlpha = 1.0 - (1.0 - mcbPicture.a) * (1.0 - mcbTint.a);
-                        bool mcbSignature = false;
-                #ifndef IS_GUI
-                        mcbSignature = mcbMap == 4 && mcbSeated > 0.5 && gl_FragCoord.y < 1.0 && gl_FragCoord.x < 4.0;
-                #endif
-                        if (mcbAlpha < 0.002 && !mcbSignature) discard;
-                        vec4 mcbColor = mcbSignature ? vec4(mcb_signature(int(gl_FragCoord.x)), 1.0)
-                            : vec4((mcbPicture.rgb * mcbPicture.a + mcbTint.rgb * (mcbTint.a * (1.0 - mcbPicture.a))) / max(mcbAlpha, 0.002), mcbAlpha);
+                        vec4 mcbColor;
+                        if (mcbMap == 5) {
+                            if (gl_FragCoord.y >= 1.0 || gl_FragCoord.x >= 4.0) discard;
+                            mcbColor = vec4(mcb_signature(int(gl_FragCoord.x)), 1.0);
+                        } else {
+                            // A screen emits its own light: no lightmap, tint or fog, so colours are exact day and night.
+                            vec4 mcbPicture = mcb_sample(texCoord0 * 128.0, mcbFootprint, mcb_info(mcbMap), mcbMapInfo.y > 0.5);
+                            // An overlay's panel (6) is there or not, never blended with the world behind it: round it the
+                            // post effect shows the world as it was, tinted there.
+                            if (mcbMap == 6) mcbPicture = mcbPicture.a < 0.5 ? vec4(0.0) : vec4(mcbPicture.rgb, 1.0);
+                            // Where the picture is transparent the world behind shows, on someone's own view under its
+                            // tint: the picture over the tint over the world, as one colour blended over the world.
+                            vec4 mcbTint = mcbMap >= 2 && mcbMap != 6 && mcbPicture.a < 1.0 ? mcbViewTint : vec4(0.0);
+                            float mcbAlpha = 1.0 - (1.0 - mcbPicture.a) * (1.0 - mcbTint.a);
+                            if (mcbAlpha < 0.002) discard;
+                            mcbColor = vec4((mcbPicture.rgb * mcbPicture.a + mcbTint.rgb * (mcbTint.a * (1.0 - mcbPicture.a))) / max(mcbAlpha, 0.002), mcbAlpha);
+                        }
                 #ifndef IS_GUI
                         if (mcbMap >= 2 && mcbSeated > 0.5) {
-                            // A view the client places (3) is just behind its pointer, in front of all else: its
-                            // frames are at the camera, so its own depth means nothing.
-                            mcbDepth = mcbMap == 3 ? (mcbReversed > 0.5 ? 0.99999 : 0.00001) : mcb_in_front(64.0);
+                            // A view the client places (3, 6) is just behind its pointer, in front of all else: its
+                            // frames are at the camera, so its own depth means nothing. A signature (5) is nearest.
+                            mcbDepth = mcbMap == 5 ? (mcbReversed > 0.5 ? 1.0 : 0.0)
+                                : mcbMap == 3 || mcbMap == 6 ? (mcbReversed > 0.5 ? 0.99999 : 0.00001) : mcb_in_front(64.0);
                             gl_FragDepth = mcbDepth;
                         }
                 #endif
@@ -718,106 +740,335 @@ public final class Shaders {
         return emit(head + decoder + mainHead + tail, d);
     }
 
-    // ---------------------------------------------------------------- the blur round a blurred view's panel
+    // ---------------------------------------------------------------- the world round an overlay, kept still
+
+    /** The game's own outline passes ({@code post_effect/entity_outline.json}, 26.2), which {@link #overlayChain} keeps first. */
+    private static final String OUTLINE_PASSES = """
+                {
+                  "vertex_shader": "minecraft:core/screenquad",
+                  "fragment_shader": "minecraft:post/entity_sobel",
+                  "inputs": [{"sampler_name": "In", "target": "minecraft:entity_outline"}],
+                  "output": "swap"
+                },
+                {
+                  "vertex_shader": "minecraft:core/screenquad",
+                  "fragment_shader": "minecraft:post/entity_outline_box_blur",
+                  "inputs": [{"sampler_name": "In", "target": "swap", "bilinear": true}],
+                  "output": "minecraft:entity_outline",
+                  "uniforms": {"BlurConfig": [{"name": "BlurDir", "type": "vec2", "value": [1.0, 0.0]}, {"name": "Radius", "type": "float", "value": 2.0}]}
+                },
+                {
+                  "vertex_shader": "minecraft:core/screenquad",
+                  "fragment_shader": "minecraft:post/entity_outline_box_blur",
+                  "inputs": [{"sampler_name": "In", "target": "minecraft:entity_outline", "bilinear": true}],
+                  "output": "swap",
+                  "uniforms": {"BlurConfig": [{"name": "BlurDir", "type": "vec2", "value": [0.0, 1.0]}, {"name": "Radius", "type": "float", "value": 2.0}]}
+                },
+                {
+                  "vertex_shader": "minecraft:core/screenquad",
+                  "fragment_shader": "minecraft:post/blit",
+                  "inputs": [{"sampler_name": "In", "target": "swap"}],
+                  "uniforms": {"BlitConfig": [{"name": "ColorModulate", "type": "vec4", "value": [1.0, 1.0, 1.0, 1.0]}]},
+                  "output": "minecraft:entity_outline"
+                }""";
 
     /**
-     * The post effect a blurred view's player sees: its camera is an invisible creeper ({@code Views}), and the game
-     * runs {@code post_effect/creeper.json} over the whole frame for a creeper camera ({@code GameRenderer
-     * .checkEntityPostEffect}), after the world and before the HUD and menus. This one is the menu blur's three
-     * rounds of a horizontal and a vertical box blur, at the player's own menu blur setting, but only outside the
-     * panel, which the view's own maps say where it is ({@code mcb_signature}). Without that signature (anyone
-     * spectating a real creeper) it passes the picture through. 26.2 only: the pack ships it in the 26.2 overlay.
+     * {@code post_effect/entity_outline.json}. The game runs it whenever a glowing entity was drawn
+     * ({@code LevelRenderer}: right after the world's main pass, sky, blocks and entities, maps included, before
+     * clouds and weather), with {@code minecraft:main} among its targets, whatever the camera. An overlay's
+     * player has a glowing display that draws nothing as the switch (see {@code Views}), and its signature map
+     * says where it is (text.fsh, {@code mcb_signature}). After the game's own outline passes, unchanged:
+     *
+     * <ol>
+     *   <li>While the overlay opens, and whenever the kept picture was dropped (a new window size), the world as
+     *   drawn is taken, blurred if the view asks (three rounds of a horizontal and a vertical box blur at the
+     *   player's own menu blur setting, as the game's menu blur), into {@code ov_kept}, which the chain keeps
+     *   from frame to frame. Otherwise these six passes draw nothing.</li>
+     *   <li>Everything not the view's own (its panel and pointer are at a depth nothing else reaches) is
+     *   replaced by the kept picture under the view's tint. So the world round the panel is still and lined up
+     *   with what the player saw, however their camera turns as the pointer moves.</li>
+     *   <li>The outlines are cleared: another entity's would be drawn where it is now.</li>
+     * </ol>
+     *
+     * <p>With no signature every pass of ours draws nothing: anybody not at an overlay sees the game's outlines
+     * alone. 26.2 only: the pack ships it in the 26.2 overlay.
      */
-    public static String overlayBlurChain() {
-        StringBuilder passes = new StringBuilder();
-        for (int round = 0; round < 3; round++) {
-            for (int vertical = 0; vertical < 2; vertical++) {
-                boolean last = round == 2 && vertical == 1;
-                if (passes.length() > 0) passes.append(",\n");
-                passes.append("""
-                            {
-                              "vertex_shader": "minecraft:core/screenquad",
-                              "fragment_shader": "uiengine:post/overlay_blur",
-                              "inputs": [{"sampler_name": "In", "target": "%s"}],
-                              "output": "%s",
-                              "uniforms": {"OverlayConfig": [
-                                {"name": "BlurDir", "type": "vec2", "value": [%s]},
-                                {"name": "Last", "type": "float", "value": %s}
-                              ]}
-                            }""".formatted(vertical == 0 ? "minecraft:main" : "swap", vertical == 0 ? "swap" : "minecraft:main",
-                        vertical == 0 ? "1.0, 0.0" : "0.0, 1.0", last ? "1.0" : "0.0"));
-            }
+    public static String overlayChain() {
+        StringBuilder passes = new StringBuilder(OUTLINE_PASSES);
+        String[] from = {"minecraft:main", "ov_a", "ov_b", "ov_a", "ov_b", "ov_a"};
+        String[] to = {"ov_a", "ov_b", "ov_a", "ov_b", "ov_a", "ov_kept"};
+        for (int k = 0; k < 6; k++) {
+            String dir = k % 2 == 0 ? "1.0, 0.0" : "0.0, 1.0";
+            String inputs = k == 0
+                    ? "{\"sampler_name\": \"In\", \"target\": \"minecraft:main\"}, {\"sampler_name\": \"Kept\", \"target\": \"ov_kept\"}"
+                    : "{\"sampler_name\": \"In\", \"target\": \"" + from[k] + "\"}, {\"sampler_name\": \"Main\", \"target\": \"minecraft:main\"}";
+            passes.append(",\n").append("""
+                    {
+                      "vertex_shader": "minecraft:core/screenquad",
+                      "fragment_shader": "uiengine:post/%s",
+                      "inputs": [%s],
+                      "output": "%s",
+                      "uniforms": {"OverlayConfig": [{"name": "BlurDir", "type": "vec2", "value": [%s]}, {"name": "Last", "type": "float", "value": %s}]}
+                    }""".formatted(k == 0 ? "overlay_take" : "overlay_blur", inputs, to[k], dir, k == 5 ? "1.0" : "0.0"));
         }
-        return "{\n  \"targets\": {\"swap\": {}},\n  \"passes\": [\n" + passes + "\n  ]\n}\n";
+        passes.append(",\n").append("""
+                    {
+                      "vertex_shader": "minecraft:core/screenquad",
+                      "fragment_shader": "uiengine:post/overlay_mask",
+                      "inputs": [{"sampler_name": "Main", "target": "minecraft:main"}, {"sampler_name": "MainDepth", "target": "minecraft:main", "use_depth_buffer": true}],
+                      "output": "ov_a"
+                    },
+                    {
+                      "vertex_shader": "minecraft:core/screenquad",
+                      "fragment_shader": "uiengine:post/overlay_compose",
+                      "inputs": [{"sampler_name": "In", "target": "ov_a"}, {"sampler_name": "Kept", "target": "ov_kept"}],
+                      "output": "minecraft:main"
+                    },
+                    {
+                      "vertex_shader": "minecraft:core/screenquad",
+                      "fragment_shader": "uiengine:post/overlay_outline",
+                      "inputs": [{"sampler_name": "In", "target": "ov_a"}],
+                      "output": "minecraft:entity_outline"
+                    }""");
+        return "{\n  \"targets\": {\"swap\": {}, \"ov_a\": {}, \"ov_b\": {}, \"ov_kept\": {\"persistent\": true}},\n  \"passes\": [\n"
+                + passes + "\n  ]\n}\n";
     }
 
-    /** The fragment shader of {@link #overlayBlurChain}, in the 26.2 dialect. */
-    public static String overlayBlurFsh() {
-        return emit("""
-                #version 330
+    /** What every fragment shader of {@link #overlayChain} starts with: reading the signature. */
+    private static final String OVERLAY_HEAD = """
+            #version 330
 
-                #moj_import <minecraft:globals.glsl>
+            #moj_import <minecraft:globals.glsl>
 
+            layout(std140) uniform SamplerInfo {
+                vec2 OutSize;
+            };
+
+            in vec2 texCoord;
+
+            out vec4 fragColor;
+
+            ivec3 ov_texel(sampler2D s, int x) { return ivec3(round(texelFetch(s, ivec2(x, 0), 0).rgb * 255.0)); }
+
+            // An overlay's signature in [s]'s four bottom-left texels (text.fsh, mcb_signature): its flags plus 8, or 0
+            // without one; [tint], the view's tint.
+            int ov_signature(sampler2D s, out vec4 tint) {
+                tint = vec4(0.0);
+                ivec3 c0 = ov_texel(s, 0), c3 = ov_texel(s, 3);
+                if (c0 != ivec3(@SIG0@) || c3 != ivec3(0, 0, @SIG3@)) return 0;
+                ivec3 c1 = ov_texel(s, 1), c2 = ov_texel(s, 2);
+                tint = vec4(vec3(c1), float(c2.r)) / 255.0;
+                return c2.g | 8;
+            }
+            """;
+
+    /** A box blur of [In] along BlurDir at the menu blur radius, or [In] itself; [signature]: the signature's four texels show the row above. */
+    private static final String OVERLAY_BLUR = """
+
+            vec3 ov_world(ivec2 p, bool signature) {
+                if (signature && p.y == 0 && p.x < 4) p.y = 1;
+                return texelFetch(InSampler, p, 0).rgb;
+            }
+
+            vec3 ov_blurred(ivec2 at, bool blur, bool signature) {
+                if (!blur) return ov_world(at, signature);
+                ivec2 dir = ivec2(BlurDir);
+                ivec2 edge = textureSize(InSampler, 0) - 1;
+                vec3 sum = vec3(0.0);
+                for (int k = -MenuBlurRadius; k <= MenuBlurRadius; k++) sum += ov_world(clamp(at + dir * k, ivec2(0), edge), signature);
+                return sum / float(2 * MenuBlurRadius + 1);
+            }
+            """;
+
+    private static String overlayShader(String body) {
+        return emit((OVERLAY_HEAD + body).replace("@SIG0@", (SIGNATURE_0 >> 16) + ", " + (SIGNATURE_0 >> 8 & 255) + ", " + (SIGNATURE_0 & 255))
+                .replace("@SIG3@", String.valueOf(SIGNATURE_3))
+                .replace("@BLUR@", String.valueOf(SIGNATURE_BLUR))
+                .replace("@KEPT@", String.valueOf(SIGNATURE_KEPT))
+                .replace("@REVERSED@", String.valueOf(SIGNATURE_REVERSED)), Dialect.V26_2);
+    }
+
+    /**
+     * {@link #overlayChain}'s first pass: the world as drawn, the first horizontal blur done, while the overlay
+     * opens or once the kept picture has been dropped. Its texel (0, 0) tells the passes after it whether a
+     * picture is being taken: alpha 1, or 0 for not.
+     */
+    public static String overlayTakeFsh() {
+        return overlayShader("""
                 uniform sampler2D InSampler;
-
-                layout(std140) uniform SamplerInfo {
-                    vec2 OutSize;
-                    vec2 InSize;
-                };
+                uniform sampler2D KeptSampler;
 
                 layout(std140) uniform OverlayConfig {
                     vec2 BlurDir;
                     float Last;
                 };
-
-                in vec2 texCoord;
-
-                out vec4 fragColor;
-
-                ivec3 ov_signature(int x) { return ivec3(round(texelFetch(InSampler, ivec2(x, 0), 0).rgb * 255.0)); }
-
-                // Whether texel [p] is world to blur: outside the panel [lo, hi), and not one of the signature's four.
-                bool ov_world(ivec2 p, vec2 lo, vec2 hi) {
-                    if (p.y == 0 && p.x < 4) return false;
-                    vec2 c = vec2(p) + 0.5;
-                    return any(lessThan(c, lo)) || any(greaterThanEqual(c, hi));
-                }
+                """ + OVERLAY_BLUR + """
 
                 void main() {
                     ivec2 at = ivec2(gl_FragCoord.xy);
-                    vec4 here = texelFetch(InSampler, at, 0);
-                    ivec3 s0 = ov_signature(0), s1 = ov_signature(1), s2 = ov_signature(2), s3 = ov_signature(3);
-                    if (s0 != ivec3(@SIG0@) || s3.b != @SIG3@) {
-                        fragColor = here;
+                    vec4 tint;
+                    int flags = ov_signature(InSampler, tint);
+                    if (flags == 0) discard;
+                    // A new window size drops the kept picture: its alpha is 0 until one is kept again.
+                    bool take = (flags & @KEPT@) == 0 || texelFetch(KeptSampler, ivec2(0), 0).a < 0.5;
+                    if (!take) {
+                        if (at != ivec2(0)) discard;
+                        fragColor = vec4(0.0);
                         return;
                     }
-                    // The panel's left, top, right and bottom as fractions of the view, from its top-left; rows count up here.
-                    vec4 e = vec4(s1.r * 256 + s1.g, s1.b * 256 + s2.r, s2.g * 256 + s2.b, s3.r * 256 + s3.g) / 65535.0;
-                    vec2 lo = vec2(e.x, 1.0 - e.w) * InSize, hi = vec2(e.z, 1.0 - e.y) * InSize;
-                    if (at.y == 0 && at.x < 4) {
-                        // The signature itself: kept for the next pass, and the row above it once the last is done.
-                        fragColor = Last > 0.5 ? texelFetch(InSampler, ivec2(at.x, 1), 0) : here;
-                        return;
-                    }
-                    if (!ov_world(at, lo, hi)) {
-                        fragColor = here;
-                        return;
-                    }
-                    // A box blur along BlurDir of the world alone: the panel never bleeds into it.
-                    ivec2 dir = ivec2(BlurDir);
-                    ivec2 edge = ivec2(InSize) - 1;
-                    vec4 sum = vec4(0.0);
-                    float n = 0.0;
-                    for (int k = -MenuBlurRadius; k <= MenuBlurRadius; k++) {
-                        ivec2 p = clamp(at + dir * k, ivec2(0), edge);
-                        if (!ov_world(p, lo, hi)) continue;
-                        sum += texelFetch(InSampler, p, 0);
-                        n += 1.0;
-                    }
-                    fragColor = n > 0.0 ? sum / n : here;
+                    fragColor = vec4(ov_blurred(at, (flags & @BLUR@) != 0, true), 1.0);
                 }
-                """.replace("@SIG0@", (SIGNATURE_0 >> 16) + ", " + (SIGNATURE_0 >> 8 & 255) + ", " + (SIGNATURE_0 & 255))
-                .replace("@SIG3@", String.valueOf(SIGNATURE_3)), Dialect.V26_2);
+                """);
+    }
+
+    /** {@link #overlayChain}'s next five passes, the last into the kept picture: nothing unless the first took one. */
+    public static String overlayBlurFsh() {
+        return overlayShader("""
+                uniform sampler2D InSampler;
+                uniform sampler2D MainSampler;
+
+                layout(std140) uniform OverlayConfig {
+                    vec2 BlurDir;
+                    float Last;
+                };
+                """ + OVERLAY_BLUR + """
+
+                void main() {
+                    ivec2 at = ivec2(gl_FragCoord.xy);
+                    vec4 tint;
+                    int flags = ov_signature(MainSampler, tint);
+                    if (flags == 0) discard;
+                    if (texelFetch(InSampler, ivec2(0), 0).a < 0.5) {
+                        // Not taking one: the kept picture stays as it is.
+                        if (Last > 0.5 || at != ivec2(0)) discard;
+                        fragColor = vec4(0.0);
+                        return;
+                    }
+                    fragColor = vec4(ov_blurred(at, (flags & @BLUR@) != 0, false), 1.0);
+                }
+                """);
+    }
+
+    /** The world as drawn, alpha 1 where it is the view's own (its panel, pointer and signature: nearer than anything else). */
+    public static String overlayMaskFsh() {
+        return overlayShader("""
+                uniform sampler2D MainSampler;
+                uniform sampler2D MainDepthSampler;
+
+                void main() {
+                    ivec2 at = ivec2(gl_FragCoord.xy);
+                    vec4 tint;
+                    int flags = ov_signature(MainSampler, tint);
+                    if (flags == 0) discard;
+                    float z = texelFetch(MainDepthSampler, at, 0).r;
+                    bool own = (flags & @REVERSED@) != 0 ? z > 0.99995 : z < 0.00005;
+                    fragColor = vec4(texelFetch(MainSampler, at, 0).rgb, own ? 1.0 : 0.0);
+                }
+                """);
+    }
+
+    /** Into main: the view's own where it is, the kept world under the tint everywhere else (the live one if none is kept). */
+    public static String overlayComposeFsh() {
+        return overlayShader("""
+                uniform sampler2D InSampler;
+                uniform sampler2D KeptSampler;
+
+                void main() {
+                    ivec2 at = ivec2(gl_FragCoord.xy);
+                    vec4 tint;
+                    if (ov_signature(InSampler, tint) == 0) discard;
+                    bool signature = at.y == 0 && at.x < 4;
+                    vec4 here = texelFetch(InSampler, at, 0);
+                    if (here.a > 0.5 && !signature) {
+                        fragColor = vec4(here.rgb, 1.0);
+                        return;
+                    }
+                    vec4 kept = texelFetch(KeptSampler, at, 0);
+                    vec3 world = kept.a > 0.5 ? kept.rgb : texelFetch(InSampler, signature ? ivec2(at.x, 1) : at, 0).rgb;
+                    fragColor = vec4(mix(world, tint.rgb, tint.a), 1.0);
+                }
+                """);
+    }
+
+    /** Clears the outlines while an overlay is open: another glowing entity's would be drawn where it is now, over the still world. */
+    public static String overlayOutlineFsh() {
+        return overlayShader("""
+                uniform sampler2D InSampler;
+
+                void main() {
+                    vec4 tint;
+                    if (ov_signature(InSampler, tint) == 0) discard;
+                    fragColor = vec4(0.0);
+                }
+                """);
+    }
+
+    /**
+     * {@code rendertype_clouds.vsh} (26.2), drawing nothing for an overlay's camera: clouds come after the
+     * overlay chain, so they would move over the still world as the camera turns with the pointer.
+     */
+    public static String cloudsVsh() {
+        return emit("""
+                #version 330
+
+                #moj_import <minecraft:fog.glsl>
+                #moj_import <minecraft:dynamictransforms.glsl>
+                #moj_import <minecraft:projection.glsl>
+                #moj_import <minecraft:globals.glsl>
+
+                const int FLAG_MASK_DIR = 7;
+                const int FLAG_INSIDE_FACE = 1 << 4;
+                const int FLAG_USE_TOP_COLOR = 1 << 5;
+                const int FLAG_EXTRA_Z = 1 << 6;
+                const int FLAG_EXTRA_X = 1 << 7;
+
+                layout(std140) uniform CloudInfo {
+                    vec4 CloudColor;
+                    vec3 CloudOffset;
+                    vec3 CellSize;
+                };
+
+                uniform isamplerBuffer CloudFaces;
+
+                out float vertexDistance;
+                out vec4 vertexColor;
+
+                const vec3[] vertices = vec3[](
+                    vec3(1, 0, 0), vec3(1, 0, 1), vec3(0, 0, 1), vec3(0, 0, 0),
+                    vec3(0, 1, 0), vec3(0, 1, 1), vec3(1, 1, 1), vec3(1, 1, 0),
+                    vec3(0, 0, 0), vec3(0, 1, 0), vec3(1, 1, 0), vec3(1, 0, 0),
+                    vec3(1, 0, 1), vec3(1, 1, 1), vec3(0, 1, 1), vec3(0, 0, 1),
+                    vec3(0, 0, 1), vec3(0, 1, 1), vec3(0, 1, 0), vec3(0, 0, 0),
+                    vec3(1, 0, 0), vec3(1, 1, 0), vec3(1, 1, 1), vec3(1, 0, 1)
+                );
+
+                const vec4[] faceColors = vec4[](
+                    vec4(0.7, 0.7, 0.7, 1.0), vec4(1.0, 1.0, 1.0, 1.0), vec4(0.8, 0.8, 0.8, 1.0),
+                    vec4(0.8, 0.8, 0.8, 1.0), vec4(0.9, 0.9, 0.9, 1.0), vec4(0.9, 0.9, 0.9, 1.0)
+                );
+
+                """ + helpers(VERTEX_HELPERS) + """
+
+                void main() {
+                    int quadVertex = gl_VertexID % 4;
+                    int index = (gl_VertexID / 4) * 3;
+                    int cellX = texelFetch(CloudFaces, index).r;
+                    int cellZ = texelFetch(CloudFaces, index + 1).r;
+                    int dirAndFlags = texelFetch(CloudFaces, index + 2).r;
+                    int direction = dirAndFlags & FLAG_MASK_DIR;
+                    bool isInsideFace = (dirAndFlags & FLAG_INSIDE_FACE) == FLAG_INSIDE_FACE;
+                    bool useTopColor = (dirAndFlags & FLAG_USE_TOP_COLOR) == FLAG_USE_TOP_COLOR;
+                    cellX = (cellX << 1) | ((dirAndFlags & FLAG_EXTRA_X) >> 7);
+                    cellZ = (cellZ << 1) | ((dirAndFlags & FLAG_EXTRA_Z) >> 6);
+                    vec3 faceVertex = vertices[(direction * 4) + (isInsideFace ? 3 - quadVertex : quadVertex)];
+                    vec3 pos = (faceVertex * CellSize) + (vec3(cellX, 0, cellZ) * CellSize) + CloudOffset;
+                    gl_Position = ProjMat * ModelViewMat * vec4(pos, 1.0);
+                    // An overlay's camera: outside the clip volume, so nothing is drawn.
+                    if (mcb_flag_axis() == 1) gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
+                    vertexDistance = fog_spherical_distance(pos);
+                    vertexColor = (useTopColor ? faceColors[1] : faceColors[direction]) * CloudColor;
+                }
+                """, Dialect.V26_2);
     }
 
     private static String uints(int[] values) {

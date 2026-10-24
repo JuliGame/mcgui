@@ -415,9 +415,9 @@ public final class Screens implements Listener {
         Seated old = views.put(player.getUniqueId(), seated);
         if (old != null && old.view != null) old.view.close();
         try {
-            // An overlay page keeps the world round its panel still, and one that asks for blur (ui:overlay "... blur")
-            // blurs it too, for as long as it is open.
-            seated.view = UIFramework.get().openView(player, seated, ViewOptions.DEFAULT.still(p.overlay()).blur(p.overlayBlur()));
+            // An overlay page shows the world round its panel as it was on opening, still, blurred too if it asks
+            // (ui:overlay "... blur"), for as long as it is open.
+            seated.view = UIFramework.get().openView(player, seated, ViewOptions.DEFAULT.overlay(p.overlay()).blur(p.overlayBlur()));
         } catch (IllegalStateException e) {
             views.remove(player.getUniqueId(), seated);
             session.dispose();

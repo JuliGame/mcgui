@@ -32,16 +32,19 @@ final class PrivateView {
     private final MapWall wall;
     private final Location camera;
     private final boolean clearBlocks;
+    /** Hide what is between the camera and the picture; not for an overlay, whose picture is no place in the world. */
+    private final boolean hideInView;
     /** Everything this player has been told is air, so all of it is put back. */
     private final Set<Position> cleared = new HashSet<>();
     /** Entities in the way that this player stops seeing meanwhile: another screen's frames, a mob. */
     private final Set<Entity> unseen = new HashSet<>();
     private Plugin plugin;
 
-    PrivateView(MapWall wall, Location camera, boolean clearBlocks) {
+    PrivateView(MapWall wall, Location camera, boolean clearBlocks, boolean hideInView) {
         this.wall = wall;
         this.camera = camera;
         this.clearBlocks = clearBlocks;
+        this.hideInView = hideInView;
     }
 
     void open(Plugin plugin, Player player) {
@@ -61,7 +64,7 @@ final class PrivateView {
                 player.sendMultiBlockChange(air);
             }
         }
-        if (plugin == null) return;
+        if (plugin == null || !hideInView) return;
         Pyramid p = pyramid();
         if (p == null) return;
         for (Entity e : wall.world.getNearbyEntities(p.bounds)) {

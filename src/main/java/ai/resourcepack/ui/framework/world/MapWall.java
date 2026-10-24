@@ -58,6 +58,16 @@ public final class MapWall {
     private volatile int[] entityIds = new int[0];
     /** Tile of each frame's entity id. */
     private volatile Map<Integer, Integer> tileOf = Map.of();
+    /**
+     * An overlay's panel (see {@link #sendOnly}): the tiles that are sent at all, or null for every tile. Read by
+     * the sender's thread; a new array whenever it grows.
+     */
+    private volatile boolean[] sent;
+    /** Which tiles' frames the owner's client has been shown. */
+    private boolean[] framed;
+    /** An overlay's signature frame, its entity id (see {@link #showSignature}); -1 for none. */
+    private int signatureFrame = -1;
+    private volatile int sendsVersion;
 
     public MapWall(World world, int anchorX, int anchorY, int anchorZ, BlockFace facing, int cols, int rows, int firstMapId) {
         if (!HORIZONTAL.contains(facing)) throw new IllegalArgumentException("A screen faces north, south, east or west");
@@ -215,23 +225,78 @@ public final class MapWall {
 
     /**
      * Brings a view's frames ({@link #spawnFor}) to its viewer, in bundles, each frame showing the map its
-     * tile owns (the viewer's pipeline points it elsewhere on the way when it shares another tile's map).
+     * tile owns (the viewer's pipeline points it elsewhere on the way when it shares another tile's map). Only
+     * the tiles {@link #sends} and that they have not been shown yet: called again once an overlay's panel has
+     * grown and the new tiles have reached them. Whether any were shown.
      */
-    public void showTo(Player viewer) {
+    public boolean showTo(Player viewer) {
         if (nms == null || viewer != owner) throw new IllegalStateException("Only a view's own viewer is shown its frames");
         int[] ids = entityIds;
+        if (framed == null || framed.length != ids.length) framed = new boolean[ids.length];
         BlockFace face = ownerStack == null ? facing : BlockFace.UP;
         ThreadLocalRandom random = ThreadLocalRandom.current();
         List<Object> out = new ArrayList<>();
+        boolean any = false;
         for (int t = 0; t < ids.length; t++) {
+            if (framed[t] || !sends(t)) continue;
+            framed[t] = true;
+            any = true;
             int[] b = ownerStack == null ? tileBlock(t % cols, t / cols) : ownerStack;
             out.addAll(nms.frameAppears(ids[t], new UUID(random.nextLong(), random.nextLong()), b[0], b[1], b[2], face, mapId(t)));
             // A client takes at most 4096 packets in one bundle.
-            if (out.size() >= BUNDLE_MAX || t == ids.length - 1) {
+            if (out.size() >= BUNDLE_MAX) {
                 nms.send(viewer, nms.bundle(out));
                 out = new ArrayList<>();
             }
         }
+        if (!out.isEmpty()) nms.send(viewer, nms.bundle(out));
+        shownToOwner = true;
+        return any;
+    }
+
+    /** Whether a frame of every tile {@link #sends} has been shown to the owner (see {@link #showTo}). */
+    public boolean allShown() {
+        int[] ids = entityIds;
+        for (int t = 0; t < ids.length; t++) if (sends(t) && (framed == null || !framed[t])) return false;
+        return true;
+    }
+
+    /**
+     * Sends only the tiles [tiles] says, and frames only those (an overlay's panel: nothing is drawn where the
+     * rest would be). Never fewer than before: a tile once shown keeps its frame.
+     */
+    public void sendOnly(boolean[] tiles) {
+        boolean[] was = sent;
+        boolean[] now = tiles.clone();
+        if (was != null) for (int t = 0; t < now.length; t++) now[t] |= was[t];
+        if (was != null && java.util.Arrays.equals(was, now)) return;
+        sent = now;
+        sendsVersion++;
+    }
+
+    /** Bumped each time {@link #sendOnly} grows what is sent. */
+    public int sendsVersion() {
+        return sendsVersion;
+    }
+
+    /** Whether tile [t] is sent at all (see {@link #sendOnly}). */
+    public boolean sends(int t) {
+        boolean[] s = sent;
+        return s == null || (t < s.length && s[t]);
+    }
+
+    /** The map an overlay's signature frame shows: one past the tiles', in the views' own range. */
+    public int signatureMapId() {
+        return mapId(tiles());
+    }
+
+    /** Brings an overlay's signature frame to the owner, with the view's own frames (see {@link #spawnFor}). */
+    public void showSignature(Player viewer) {
+        if (nms == null || viewer != owner || ownerStack == null) throw new IllegalStateException("Only an overlay's own viewer is shown its signature");
+        if (signatureFrame < 0) signatureFrame = nms.nextEntityId(world);
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        nms.send(viewer, nms.bundle(nms.frameAppears(signatureFrame, new UUID(random.nextLong(), random.nextLong()),
+                ownerStack[0], ownerStack[1], ownerStack[2], BlockFace.UP, signatureMapId())));
         shownToOwner = true;
     }
 
@@ -249,13 +314,22 @@ public final class MapWall {
         for (GlowItemFrame f : frames) f.remove();
         frames.clear();
         frameIds.clear();
-        if (shownToOwner && owner.isOnline()) nms.send(owner, nms.removeEntities(entityIds));
+        if (shownToOwner && owner.isOnline()) {
+            int[] ids = entityIds;
+            if (signatureFrame >= 0) {
+                ids = java.util.Arrays.copyOf(ids, ids.length + 1);
+                ids[ids.length - 1] = signatureFrame;
+            }
+            nms.send(owner, nms.removeEntities(ids));
+        }
         nms = null;
         owner = null;
         ownerStack = null;
         shownToOwner = false;
         entityIds = new int[0];
         tileOf = Map.of();
+        framed = null;
+        signatureFrame = -1;
     }
 
     /** A shared wall's frames are all still in the world. */

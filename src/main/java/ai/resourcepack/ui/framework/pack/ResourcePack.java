@@ -169,10 +169,15 @@ public final class ResourcePack implements AutoCloseable {
                 e.put(root + "position_tex_color.vsh", Shaders.positionTexColorVsh(d));
                 e.put(root + "position_tex_color.fsh", Shaders.positionTexColorFsh(d));
             }
-            // A blurred view's camera is a creeper, whose post effect blurs the world round the view's panel. Only in the
-            // 26.2 overlay: it is written in that dialect alone.
-            e.put(OVERLAY_26_2 + "/assets/minecraft/post_effect/creeper.json", Shaders.overlayBlurChain());
+            // The world round an overlay's panel, kept still: a pass of the outline post effect, which a glowing display
+            // switches on, and no clouds over it. Only in the 26.2 overlay: written in that dialect alone.
+            e.put(OVERLAY_26_2 + "/assets/minecraft/post_effect/entity_outline.json", Shaders.overlayChain());
+            e.put(OVERLAY_26_2 + "/assets/uiengine/shaders/post/overlay_take.fsh", Shaders.overlayTakeFsh());
             e.put(OVERLAY_26_2 + "/assets/uiengine/shaders/post/overlay_blur.fsh", Shaders.overlayBlurFsh());
+            e.put(OVERLAY_26_2 + "/assets/uiengine/shaders/post/overlay_mask.fsh", Shaders.overlayMaskFsh());
+            e.put(OVERLAY_26_2 + "/assets/uiengine/shaders/post/overlay_compose.fsh", Shaders.overlayComposeFsh());
+            e.put(OVERLAY_26_2 + "/assets/uiengine/shaders/post/overlay_outline.fsh", Shaders.overlayOutlineFsh());
+            e.put(OVERLAY_26_2 + "/assets/minecraft/shaders/core/rendertype_clouds.vsh", Shaders.cloudsVsh());
             // The pointer a seated player sees: one glyph per shape on a text display in front of the
             // view. Text, unlike an item, gets no directional shading, so the arrow stays white.
             // The server's own cursors (Pointer.custom) are a provider each, as tall as they are drawn, with the

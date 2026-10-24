@@ -91,7 +91,7 @@ public final class Framework implements UIFramework, Listener {
         pipeline = new Pipeline(nms, plugin.getLogger());
         wire = new ServerWire(nms, pipeline, settings.sharedCompression ? SharedCompression.create(ServerWire.packets(nms), plugin.getLogger()) : null);
         sender = new MapSender(wire, palette, settings.bytesPerSecond, plugin.getLogger());
-        views = new Views(plugin, settings, nms, pipeline, id -> pack != null && pack.has(id), sender, settings.mapIdBase);
+        views = new Views(plugin, settings, nms, pipeline, id -> pack != null && pack.has(id), sender, palette, settings.mapIdBase);
         walls = new Walls(plugin, settings.mapIdBase + VIEW_ID_SPAN, settings.viewDistance, settings.reach, views::seated);
         var pm = plugin.getServer().getPluginManager();
         pm.registerEvents(this, plugin);

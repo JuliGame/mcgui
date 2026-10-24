@@ -101,6 +101,8 @@ public final class MapSender implements AutoCloseable {
         int[] settledMaps;
         PointerSpot settledPointer;
         int settledForgets;
+        /** The wall's {@link MapWall#sendsVersion} when settled: an overlay's panel that grew has new tiles to send. */
+        int settledSends;
 
         Frame(Canvas canvas, int tiles) {
             this.canvas = canvas;
@@ -188,7 +190,7 @@ public final class MapSender implements AutoCloseable {
         int[] maps = maps(v, wall);
         Canvas.Snapshot snap = a.canvas.snapshot();
         for (int t = 0; t < wall.tiles(); t++) {
-            if (v.sent.get(maps[t]) != tileFor(a, v, snap, t)) return false;
+            if (wall.sends(t) && v.sent.get(maps[t]) != tileFor(a, v, snap, t)) return false;
         }
         return true;
     }
@@ -351,10 +353,11 @@ public final class MapSender implements AutoCloseable {
             int[] maps = maps(v, a.wall);
             int forgets = v.forgets.get();
             if (snap.sameAs(frame.settled) && maps == frame.settledMaps && forgets == frame.settledForgets
-                    && java.util.Objects.equals(a.pointer, frame.settledPointer)) return;
+                    && a.wall.sendsVersion() == frame.settledSends && java.util.Objects.equals(a.pointer, frame.settledPointer)) return;
             boolean changed = false;
             for (int t = 0; t < tiles; t++) {
-                frame.tile[t] = tileFor(a, v, snap, t);
+                // Outside an overlay's panel: never sent, as if the client had it already.
+                frame.tile[t] = a.wall.sends(t) ? tileFor(a, v, snap, t) : v.sent.get(maps[t]);
                 changed |= frame.tile[t] != v.sent.get(maps[t]);
             }
             if (!changed) {
@@ -362,6 +365,7 @@ public final class MapSender implements AutoCloseable {
                 frame.settledMaps = maps;
                 frame.settledPointer = a.pointer;
                 frame.settledForgets = forgets;
+                frame.settledSends = a.wall.sendsVersion();
                 return;
             }
             // Sending again: the client is no longer known to hold this drawing (a canvas can take back an

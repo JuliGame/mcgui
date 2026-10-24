@@ -91,32 +91,51 @@ class TransparencyTest {
     }
 
     @Test
-    void blurredViewsCarryThePanel() {
+    void overlaysSendOnlyTheTilesTheirPanelCovers() {
+        // The panel reaches into every tile; one in the bottom-right corner only into the last.
         Canvas c = new Canvas(PALETTE, COLS, ROWS);
         c.transparency(true);
         c.draw(panel(), 0, 0);
-        assertEquals(new Canvas.Panel(64, 64, 192, 192), c.snapshot().panel());
-        for (int t = 0; t < COLS * ROWS; t++) {
-            byte[] own = c.tile(t, Canvas.Encoding.HI_OWN_BLUR);
-            assertEquals(PALETTE.markerId[2], own[128], "a blurred view's marker");
-            assertEquals(PALETTE.markerId[2], own[129], "a blurred view's marker");
-            assertEquals(64, edge(own, 6), "left");
-            assertEquals(64, edge(own, 134), "top");
-            assertEquals(192, edge(own, 8), "right");
-            assertEquals(192, edge(own, 136), "bottom");
-        }
-        // Nothing transparent: the panel is the whole canvas. Nothing opaque: there is none.
+        for (int t = 0; t < COLS * ROWS; t++) assertTrue(c.snapshot().opaque(t), "tile " + t);
+        BufferedImage corner = new BufferedImage(W, H, BufferedImage.TYPE_INT_ARGB_PRE);
+        for (int y = 200; y < 220; y++) for (int x = 200; x < 220; x++) corner.setRGB(x, y, 0xFF336699);
+        Canvas small = new Canvas(PALETTE, COLS, ROWS);
+        small.transparency(true);
+        small.draw(corner, 0, 0);
+        for (int t = 0; t < COLS * ROWS; t++) assertEquals(t == 3, small.snapshot().opaque(t), "tile " + t);
+        // Nothing transparent: every tile. Nothing opaque: none.
         Canvas opaque = new Canvas(PALETTE, COLS, ROWS);
         opaque.draw(panel(), 0, 0);
-        assertEquals(new Canvas.Panel(0, 0, W, H), opaque.snapshot().panel());
+        for (int t = 0; t < COLS * ROWS; t++) assertTrue(opaque.snapshot().opaque(t));
         Canvas clear = new Canvas(PALETTE, COLS, ROWS);
         clear.transparency(true);
         clear.draw(new BufferedImage(W, H, BufferedImage.TYPE_INT_ARGB_PRE), 0, 0);
-        assertEquals(new Canvas.Panel(0, 0, 0, 0), clear.snapshot().panel());
+        for (int t = 0; t < COLS * ROWS; t++) assertFalse(clear.snapshot().opaque(t));
     }
 
-    private static int edge(byte[] own, int at) {
-        return symbolOf(own[at]) * Palette.SYMBOLS + symbolOf(own[at + 1]);
+    @Test
+    void signatureMapCarriesTintAndFlags() {
+        int tint = 0x8C0A0816;
+        byte[] sig = PALETTE.markSignature(10, 6, tint, 3);
+        // A tile of a client-placed view (both bottom markers the fourth), of the view's size, at the signature's place.
+        assertEquals(PALETTE.markerId[0], sig[0]);
+        assertEquals(PALETTE.markerId[1], sig[1]);
+        assertEquals(PALETTE.markerId[3], sig[128]);
+        assertEquals(PALETTE.markerId[3], sig[129]);
+        assertEquals(10, symbolOf(sig[2]));
+        assertEquals(6, symbolOf(sig[3]));
+        assertEquals(ai.resourcepack.ui.framework.pack.Shaders.SIGNATURE_TILE, symbolOf(sig[130]));
+        assertEquals(ai.resourcepack.ui.framework.pack.Shaders.SIGNATURE_TILE, symbolOf(sig[131]));
+        int[] want = {tint >> 16 & 255, tint >> 8 & 255, tint & 255, tint >>> 24};
+        int[] at = {4, 5, 132, 133};
+        for (int k = 0; k < 4; k++) assertEquals(Math.round(want[k] * (Palette.SYMBOLS - 1) / 255f), symbolOf(sig[at[k]]), "tint channel " + k);
+        assertEquals(3, symbolOf(sig[6]), "flags");
+        assertEquals(sig[6], PALETTE.signatureFlags(3));
+        // Nothing else: the map draws no picture.
+        for (int i = 0; i < sig.length; i++) {
+            boolean data = i < 7 || (i >= 128 && i < 134);
+            if (!data) assertEquals(Palette.CLEAR_ID, sig[i], "pixel " + i);
+        }
     }
 
     private static int symbolOf(byte id) {

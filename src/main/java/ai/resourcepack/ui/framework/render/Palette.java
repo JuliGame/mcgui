@@ -223,25 +223,23 @@ public final class Palette {
     }
 
     /**
-     * A copy of a HI tile marked as somebody's own fullscreen view whose world, round its panel, their client blurs: as
-     * {@link #markOwn}, but both bottom marker colours the third, and the 2×2 blocks after the tint the panel's
-     * left, top, right and bottom edges in canvas pixels, two symbols each (240 × high + low): left and top in the first,
-     * right and bottom in the second. Those four 2×2 blocks show the next one.
+     * An overlay's signature map for a view of [cols] × [rows] maps (see {@code Shaders.overlayChain}): transparent,
+     * marked as a tile of a view whose client places it ({@link #markTiled}) but at column and row
+     * {@code Shaders.SIGNATURE_TILE} ({@code SYMBOLS - 1}), which no tile has, with the view's [tint], and in pixel
+     * (6, 0) its [flags] ({@code Shaders.SIGNATURE_BLUR}, {@code SIGNATURE_KEPT}). The shader puts it over the
+     * window's four bottom-left pixels and writes the signature there.
      */
-    public byte[] markBlurred(byte[] hi, int cols, int rows, int tint, int left, int top, int right, int bottom) {
-        byte[] own = markOwn(hi, cols, rows, tint);
-        own[128] = markerId[2];
-        own[129] = markerId[2];
-        edge(own, 6, left);
-        edge(own, 134, top);
-        edge(own, 8, right);
-        edge(own, 136, bottom);
+    public byte[] markSignature(int cols, int rows, int tint, int flags) {
+        byte[] own = markTiled(new byte[128 * 128], cols, rows, SYMBOLS - 1, SYMBOLS - 1, tint);
+        own[0] = markerId[0];
+        own[1] = markerId[1];
+        own[6] = signatureFlags(flags);
         return own;
     }
 
-    private void edge(byte[] own, int at, int v) {
-        own[at] = symbolId[Math.min(SYMBOLS - 1, v / SYMBOLS)];
-        own[at + 1] = symbolId[v % SYMBOLS];
+    /** Signature pixel (6, 0) for [flags]: what a patch of that one pixel sends when they change. */
+    public byte signatureFlags(int flags) {
+        return symbolId[flags];
     }
 
     /** As {@link #encodeHi}, in plain colours, one pixel at a time: a transparent pixel is the transparent colour. */

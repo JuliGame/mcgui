@@ -14,16 +14,17 @@ import ai.resourcepack.ui.framework.net.Nms;
 import ai.resourcepack.ui.framework.net.Pipeline;
 import ai.resourcepack.ui.framework.pack.ResourcePack;
 import ai.resourcepack.ui.framework.pack.Shaders;
+import ai.resourcepack.ui.framework.render.Palette;
 import io.papermc.paper.event.player.AsyncChatEvent;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
-import net.kyori.adventure.util.TriState;
 import org.bukkit.Bukkit;
 import org.bukkit.Fluid;
 import org.bukkit.GameMode;
 import org.bukkit.Input;
 import org.bukkit.Location;
+import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.Registry;
 import org.bukkit.World;
@@ -33,7 +34,7 @@ import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.attribute.AttributeModifier;
 import org.bukkit.block.BlockFace;
 import org.bukkit.entity.ArmorStand;
-import org.bukkit.entity.Creeper;
+import org.bukkit.entity.BlockDisplay;
 import org.bukkit.entity.Display;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
@@ -100,6 +101,12 @@ import java.util.logging.Level;
  * {@link #hold}). Everyone else rides an invisible armour stand with their camera locked onto an
  * invisible mannequin looking at the wall; their rotation moves a pointer the server places.
  *
+ * <p>An overlay ({@code ViewOptions.overlay}) with the pack keeps the player where they are: their eye moves at
+ * most 1/32 of a block (to the flag on all three axes) and keeps its rotation, so the view does not jump. Their
+ * client takes the world as it is from the next frames, keeps it, and shows it round the panel, still, however
+ * their camera then turns with the client-placed pointer ({@code Shaders.overlayChain}, see take and keep). Only
+ * the maps the panel covers are sent and drawn. Closing puts them back exactly where they were.
+ *
  * <p>Players with the pack see the server-placed pointer as a text display in front of the picture,
  * which their client glides between updates; players without it get it drawn into the maps. The mouse
  * is read off the wire as each packet arrives and the pointer's move goes straight back, rather than
@@ -140,6 +147,14 @@ public final class Views implements Listener {
     private static final double PUSH_MARGIN = 2.0;
     /** Pixels across the screen a desktop pointer at Windows' default speed crosses in as many mouse counts: views.pointer-speed 1. */
     private static final double DESKTOP_WIDTH = 1920;
+    /**
+     * Ticks a kept overlay's client takes the world for (see take) after answering the ping sent with the signature:
+     * a new entity, the glowing switch, is first drawn a frame after it arrives, and the panel must not come before
+     * the world has been taken without it.
+     */
+    private static final int KEEP_AFTER = 2;
+    /** Ticks after which a kept overlay is kept regardless, if its client never answers. */
+    private static final int KEEP_TIMEOUT = 20;
 
     private final Plugin plugin;
     private final Settings settings;
@@ -148,19 +163,21 @@ public final class Views implements Listener {
     private final Predicate<UUID> hasPack;
     private final int firstMapId;
     private final MapSender sender;
+    private final Palette palette;
     private final Map<UUID, ViewImpl> views = new ConcurrentHashMap<>();
     private final NamespacedKey seatKey, returnKey, fovKey, stepKey, pointerKey;
     /** What each online player's mouse turns them by a count, being learned (server thread). */
     private final Map<UUID, MouseSteps> mice = new HashMap<>();
     private final EntityType mannequin;
 
-    public Views(Plugin plugin, Settings settings, Nms nms, Pipeline pipeline, Predicate<UUID> hasPack, MapSender sender, int firstMapId) {
+    public Views(Plugin plugin, Settings settings, Nms nms, Pipeline pipeline, Predicate<UUID> hasPack, MapSender sender, Palette palette, int firstMapId) {
         this.plugin = plugin;
         this.settings = settings;
         this.nms = nms;
         this.pipeline = pipeline;
         this.hasPack = hasPack;
         this.sender = sender;
+        this.palette = palette;
         this.firstMapId = firstMapId;
         this.seatKey = new NamespacedKey(plugin, "seated");
         this.returnKey = new NamespacedKey(plugin, "return-to");
@@ -182,6 +199,29 @@ public final class Views implements Listener {
         final boolean withPack;
         /** The player's client places the pointer (and the picture) itself, from where their own eye looks. */
         final boolean clientPointer;
+        /**
+         * An overlay whose client keeps the world round its panel as it was when it opened (see
+         * Shaders.overlayChain): a client-placed pointer whose camera is the player's own eye, where it was.
+         */
+        final boolean keeps;
+        /** A kept overlay's switch for that post effect: a glowing display that draws nothing anybody sees. */
+        final BlockDisplay glow;
+        /**
+         * A kept overlay: 0 until it opens, 1 while the client takes the world (the signature sent, no panel yet), 2
+         * once it keeps it (the panel shown). [takenSince]: the tick the client was known to be taking it, -1 before.
+         */
+        int stage;
+        volatile int takenSince = -1;
+        /** The tick a kept overlay is kept by at the latest, if the client never answers the ping. */
+        int keepBy;
+        /** A kept overlay's turn to the picture's axis, sent with the switch to keeping, until the client has answered the ping after it. */
+        volatile boolean aligning;
+        /** The tint and flags the signature map was last sent with. */
+        int signatureTint, signatureFlags = -1;
+        /** The drawing a kept overlay's panel was last worked out from (see panel). */
+        Canvas.Snapshot panelOf;
+        /** The canvas the last assignment showed (the content may hand over another). */
+        volatile Canvas shown;
         /** Pixels per degree of turn: for a client-placed pointer, the one the shader is told too. */
         final double speed;
         /** The yaw that looks straight at the picture's centre. */
@@ -248,8 +288,9 @@ public final class Views implements Listener {
         volatile boolean revealed, closed;
         volatile boolean caughtUp;
 
-        ViewImpl(Player p, ViewContent content, Canvas canvas, MapWall wall, ViewOptions options, boolean withPack, boolean clientPointer,
-                 double speed, ArmorStand vehicle, Location seat, LivingEntity camera, Interaction target, TextDisplay pointer, Location returnTo, Location cameraAt) {
+        ViewImpl(Player p, ViewContent content, Canvas canvas, MapWall wall, ViewOptions options, boolean withPack, boolean clientPointer, boolean keeps,
+                 double speed, ArmorStand vehicle, Location seat, LivingEntity camera, Interaction target, TextDisplay pointer, BlockDisplay glow,
+                 Location returnTo, Location cameraAt) {
             this.player = p.getUniqueId();
             this.content = content;
             this.canvas = canvas;
@@ -257,6 +298,9 @@ public final class Views implements Listener {
             this.options = options;
             this.withPack = withPack;
             this.clientPointer = clientPointer;
+            this.keeps = keeps;
+            this.glow = glow;
+            this.shown = canvas;
             this.speed = speed;
             this.refYaw = cameraAt.getYaw();
             this.vehicle = vehicle;
@@ -268,7 +312,7 @@ public final class Views implements Listener {
             this.previousWeather = p.getPlayerWeather();
             this.previousInvisibility = p.getPotionEffect(PotionEffectType.INVISIBILITY);
             this.returnTo = returnTo;
-            this.privateView = new PrivateView(wall, cameraAt, !withPack);
+            this.privateView = new PrivateView(wall, cameraAt, !withPack, !keeps);
             this.openedAt = Bukkit.getCurrentTick();
             this.deadline = openedAt + REVEAL_TIMEOUT;
             this.pointerId = pointer == null ? -1 : pointer.getEntityId();
@@ -283,6 +327,7 @@ public final class Views implements Listener {
             if (vehicle != null) out.add(vehicle);
             if (camera != null) out.add(camera);
             if (pointer != null) out.add(pointer);
+            if (glow != null) out.add(glow);
             return out;
         }
 
@@ -345,20 +390,25 @@ public final class Views implements Listener {
         boolean withPack = hasPack.test(player.getUniqueId());
         double fov = viewFov(player, withPack ? STRETCHED_FIT : 1.0);
         Location from = player.getLocation();
-        MapWall wall = inFront(player, canvas.cols(), canvas.rows(), fov);
+        // An overlay with the pack keeps the player's own eye as the camera, where it is to within the flag's 1/32 of a
+        // block, and their client keeps the world round the panel as it was (see Shaders.overlayChain): so the world
+        // neither moves when it opens nor turns with the pointer. Its frames lie at the camera and its maps place
+        // themselves in the window, so its wall is only a set of map ids.
+        // The signature map takes the id after the tiles', which must stay inside the views' 1024 (Framework.VIEW_ID_SPAN).
+        Location eye = withPack && settings.clientPointer && options.overlay() && canvas.cols() * canvas.rows() < 1024
+                ? overlayEye(player) : null;
+        boolean keeps = eye != null;
+        MapWall wall = keeps ? new MapWall(player.getWorld(), eye.getBlockX(), eye.getBlockY(), eye.getBlockZ(),
+                cardinal(player).getOppositeFace(), canvas.cols(), canvas.rows(), firstMapId) : inFront(player, canvas.cols(), canvas.rows(), fov);
         if (wall == null) throw new IllegalStateException("There isn't enough room around " + player.getName() + " for a view");
         World world = wall.world;
         Location cam = wall.cameraLocation(fov);
         // Where a client-placed picture really is no longer matters, only that the camera is flagged: so a
-        // spot by the player's own eye where they can be held (see clientEye). Without one, the server pointer.
-        // A blurred view always has the server's: the game blurs only a camera that is another entity (spawnCamera), a
-        // creeper, which Paper will not spawn on peaceful: there the view is tinted but not blurred. A still view (an
-        // overlay) has it too: the client-placed pointer turns the player's own camera, and the world round the panel
-        // would swing with every move of the mouse.
-        boolean blurred = withPack && options.blur() && world.getDifficulty() != org.bukkit.Difficulty.PEACEFUL;
-        boolean held = blurred || options.still();
-        Location eye = withPack && settings.clientPointer && !held ? clientEye(player, wall.facing) : null;
-        if (withPack && settings.clientPointer && !held && eye == null) debug("no room to hold " + player.getName() + " still: the server places their pointer");
+        // spot by the player's own eye where they can be held (see clientEye). Without one, the server pointer. An
+        // overlay with nowhere to hold the player has the server's too (the world shows live round it, still): a
+        // client-placed pointer turns the player's own camera, and only a kept world does not turn with it.
+        if (!keeps && withPack && settings.clientPointer && !options.overlay()) eye = clientEye(player, wall.facing);
+        if (withPack && settings.clientPointer && eye == null) debug("no room to hold " + player.getName() + " still: the server places their pointer");
         boolean clientPointer = eye != null;
         Location seat = null;
         if (clientPointer) {
@@ -373,7 +423,7 @@ public final class Views implements Listener {
         // With a client-placed pointer the camera is the player's own eye, which turns with the mouse:
         // they are held where it is on the flagged spot (see reveal). Otherwise a camera entity looks at
         // the wall and they sit out of the way.
-        LivingEntity camera = clientPointer ? null : spawnCamera(cam, blurred);
+        LivingEntity camera = clientPointer ? null : spawnCamera(cam);
         ArmorStand vehicle = clientPointer ? null : world.spawn(cam.clone().subtract(cam.getDirection().multiply(1.5)).subtract(0, 1.6, 0), ArmorStand.class, a -> {
             a.setMarker(true);
             a.setInvisible(true);
@@ -412,11 +462,21 @@ public final class Views implements Listener {
             d.setPersistent(false);
             d.setVisibleByDefault(false);
         });
+        // An overlay's switch for the post effect that keeps the world round it (Shaders.overlayChain): the game runs it
+        // only while a glowing entity is drawn. A display of no size is never culled (Display.updateCulling), and this
+        // one, a speck at the eye, draws nothing anybody sees.
+        BlockDisplay glow = !keeps ? null : world.spawn(cam.clone(), BlockDisplay.class, d -> {
+            d.setBlock(Material.STONE.createBlockData());
+            d.setTransformation(new Transformation(new Vector3f(), new Quaternionf(), new Vector3f(0.001f), new Quaternionf()));
+            d.setGlowing(true);
+            d.setPersistent(false);
+            d.setVisibleByDefault(false);
+        });
         player.showEntity(plugin, target);
         if (vehicle != null) player.showEntity(plugin, vehicle);
         if (camera != null) player.showEntity(plugin, camera);
 
-        ViewImpl view = new ViewImpl(player, content, canvas, wall, options, withPack, clientPointer, speed, vehicle, seat, camera, target, pointer, from, cam);
+        ViewImpl view = new ViewImpl(player, content, canvas, wall, options, withPack, clientPointer, keeps, speed, vehicle, seat, camera, target, pointer, glow, from, cam);
         views.put(player.getUniqueId(), view);
         // Remembered on the player, so a crash mid-view cannot leave them stuck in adventure mode or in the ground.
         player.getPersistentDataContainer().set(seatKey, PersistentDataType.STRING, player.getGameMode().name());
@@ -444,31 +504,9 @@ public final class Views implements Listener {
      * half each tick, so from a player to an armour stand (eyes at its feet) the picture slid into place
      * for most of a second, off the flagged position the whole time. Mannequins came in 1.21.9; before
      * that an armour stand is the nearest thing.
-     *
-     * <p>A [blurred] view's camera is a creeper instead, scaled to the same eye height: the game runs
-     * {@code post_effect/creeper.json} over everything a creeper camera sees, which the pack makes the blur
-     * round the view's panel ({@code Shaders.overlayBlurChain}). It has no AI, stays on peaceful and is
-     * shown to nobody else.
      */
-    private LivingEntity spawnCamera(Location eyes, boolean blurred) {
+    private LivingEntity spawnCamera(Location eyes) {
         World world = eyes.getWorld();
-        if (blurred) {
-            return world.spawn(eyes.clone().subtract(0, EYE_HEIGHT, 0), Creeper.class, c -> {
-                // Its own eye height (1.445) times the scale is a player's: no glide, and the camera is on the flagged spot.
-                AttributeInstance scale = c.getAttribute(Attribute.SCALE);
-                if (scale != null) scale.setBaseValue(EYE_HEIGHT / c.getEyeHeight());
-                c.setAI(false);
-                c.setInvisible(true);
-                c.setGravity(false);
-                c.setPersistent(false);
-                c.setSilent(true);
-                c.setInvulnerable(true);
-                c.setCollidable(false);
-                c.setVisibleByDefault(false);
-                c.setRotation(eyes.getYaw(), eyes.getPitch());
-                invoke(c, "setDespawnInPeacefulOverride", TriState.class, TriState.FALSE);
-            });
-        }
         if (mannequin != null && mannequin.getEntityClass() != null) {
             Entity e = world.spawn(eyes.clone().subtract(0, EYE_HEIGHT, 0), mannequin.getEntityClass(), m -> {
                 LivingEntity l = (LivingEntity) m;
@@ -500,7 +538,7 @@ public final class Views implements Listener {
         try {
             target.getClass().getMethod(method, type).invoke(target, arg);
         } catch (ReflectiveOperationException | RuntimeException ignored) {
-            // Only on newer servers: cosmetic, but for a blurred view's creeper camera, which peaceful removes without it.
+            // Only on newer servers, and cosmetic.
         }
     }
 
@@ -554,6 +592,51 @@ public final class Views implements Listener {
             return new Location(world, x, eyeY, z);
         }
         return null;
+    }
+
+    /**
+     * Where an overlay puts [player]'s eye: their own, standing, with each coordinate moved to a block fraction of
+     * k/16 + 3/128 (at most 1/32 of a block), the flag the shaders know an overlay's camera by. Of the eight such
+     * spots round it, the nearest where their standing box is clear of every collision and of lava, as for
+     * {@link #clientEye}: they are held there. Null if none is (squeezed into a gap).
+     */
+    static Location overlayEye(Player player) {
+        Location feet = player.getLocation();
+        World world = feet.getWorld();
+        double eyeHeight = standingEyeHeight(player);
+        float scale = scaleOf(player);
+        double half = 0.6f * scale / 2.0f - 1e-7, height = 1.8f * scale;
+        double[] xs = flagged(feet.getX()), ys = flagged(feet.getY() + eyeHeight), zs = flagged(feet.getZ());
+        Location best = null;
+        double bestDistance = Double.MAX_VALUE;
+        for (double x : xs) for (double y : ys) for (double z : zs) {
+            double d = sq(x - feet.getX()) + sq(y - eyeHeight - feet.getY()) + sq(z - feet.getZ());
+            if (d >= bestDistance) continue;
+            double bottom = y - eyeHeight;
+            if (bottom < world.getMinHeight() || bottom + height > world.getMaxHeight()) continue;
+            BoundingBox box = new BoundingBox(x - half, bottom + 1e-7, z - half, x + half, bottom + height - 1e-7, z + half);
+            if (world.hasCollisionsIn(box) || touchesLava(world, box)) continue;
+            best = new Location(world, x, y, z);
+            bestDistance = d;
+        }
+        return best;
+    }
+
+    /** The two flagged values (k/16 + 3/128) either side of [v], the nearer first. */
+    static double[] flagged(double v) {
+        double below = Math.floor((v - Shaders.FLAG_PHASE) / Shaders.FLAG_STEP) * Shaders.FLAG_STEP + Shaders.FLAG_PHASE;
+        double above = below + Shaders.FLAG_STEP;
+        return v - below <= above - v ? new double[]{below, above} : new double[]{above, below};
+    }
+
+    private static double sq(double v) {
+        return v * v;
+    }
+
+    /** The horizontal direction [player] faces most nearly. */
+    private static BlockFace cardinal(Player player) {
+        BlockFace toward = player.getFacing();
+        return MapWall.HORIZONTAL.contains(toward) ? toward : BlockFace.NORTH;
     }
 
     private static boolean touchesLava(World world, BoundingBox box) {
@@ -678,8 +761,7 @@ public final class Views implements Listener {
      * own block column. Its frames can be inside the ground: they are drawn in front of it.
      */
     private MapWall inFront(Player player, int cols, int rows, double fov) {
-        BlockFace toward = player.getFacing();
-        if (!MapWall.HORIZONTAL.contains(toward)) toward = BlockFace.NORTH;
+        BlockFace toward = cardinal(player);
         BlockFace facing = toward.getOppositeFace();
         World world = player.getWorld();
         int eyeY = (int) Math.floor(player.getEyeLocation().getY());
@@ -700,18 +782,37 @@ public final class Views implements Listener {
             Player p = Bukkit.getPlayer(v.player);
             if (p == null) continue;
             if (!v.revealed) {
-                if (now < v.deadline) {
-                    // Written to the network is not yet shown: wait for the client to have handled the tiles too.
-                    if (!v.pinged && sender.delivered(v.player, v.wall)) {
-                        v.pinged = true;
-                        pipeline.afterClientCaughtUp(p, () -> v.caughtUp = true);
+                if (v.stage == 1) {
+                    // Taking the world: kept once the client has had a few frames with the signature since it answered
+                    // the ping sent with it, or at the latest when keepBy is up.
+                    int since = v.takenSince;
+                    if ((since < 0 || now < since + KEEP_AFTER) && now < v.keepBy) continue;
+                    keep(p, v);
+                } else {
+                    if (now < v.deadline) {
+                        // Written to the network is not yet shown: wait for the client to have handled the tiles too.
+                        if (!v.pinged && sender.delivered(v.player, v.wall)) {
+                            v.pinged = true;
+                            pipeline.afterClientCaughtUp(p, () -> v.caughtUp = true);
+                        }
+                        if (!v.caughtUp) continue;
                     }
-                    if (!v.caughtUp) continue;
+                    if (v.keeps) {
+                        take(p, v);
+                        continue;
+                    }
+                    reveal(p, v);
                 }
-                reveal(p, v);
             }
-            // A client that never takes the teleport (another plugin cancelled it) must not leave the mouse dead.
+            if (v.keeps) {
+                signature(p, v);
+                // The panel grew (something opened past it): its new tiles' frames, once their maps have reached the client.
+                if (!v.wall.allShown() && sender.delivered(v.player, v.wall)) v.wall.showTo(p);
+            }
+            // A client that never takes the teleport (another plugin cancelled it), or a kept overlay's turn, must not
+            // leave the mouse dead.
             if (v.awaitingTeleport && now >= v.settleBy) v.awaitingTeleport = false;
+            if (v.aligning && now >= v.keepBy) v.aligning = false;
             if (v.clientPointer) {
                 keepStill(p, v);
                 settleClicks(v, now);
@@ -720,6 +821,68 @@ public final class Views implements Listener {
             movePointer(v);
             if (now % 40 == 0) v.privateView.refresh(p);
         }
+    }
+
+    /**
+     * A kept overlay, first step: the player is held where they are, their eye on the flag (at most 1/32 of a block
+     * off, their rotation untouched), and their client is sent the signature (map and frame) and the glowing switch,
+     * but not yet the panel. From the next frame it draws, the post effect takes the world as it is every frame
+     * (Shaders.overlayChain), which is still exactly what the player was looking at.
+     */
+    private void take(Player p, ViewImpl v) {
+        v.stage = 1;
+        v.keepBy = Bukkit.getCurrentTick() + KEEP_TIMEOUT;
+        v.settleBy = Bukkit.getCurrentTick() + SETTLE_TIMEOUT;
+        v.awaitingTeleport = true;
+        hold(p);
+        p.setGliding(false);
+        nms.teleportKeepingRotation(p, v.seat.getX(), v.seat.getY(), v.seat.getZ());
+        // The map before its frame, or the frame shows the map item.
+        signature(p, v);
+        v.wall.showSignature(p);
+        p.showEntity(plugin, v.glow);
+        pipeline.afterClientCaughtUp(p, () -> v.takenSince = Bukkit.getCurrentTick());
+    }
+
+    /**
+     * A kept overlay, second step: the signature says the world is kept, and the player is turned to face the
+     * picture's axis, level, which the client pointer starts from (the camera turning is not seen: the world round
+     * the panel is the kept one), in one bundle, so the first frame after it shows both or neither. Then the panel
+     * and the pointer, which shows once the turn has been taken.
+     */
+    private void keep(Player p, ViewImpl v) {
+        v.stage = 2;
+        v.keepBy = Bukkit.getCurrentTick() + SETTLE_TIMEOUT;
+        v.aligning = true;
+        v.serverTurns.incrementAndGet();
+        v.revealed = true;
+        int flags = signatureFlags(v);
+        v.signatureFlags = flags;
+        nms.send(p, nms.bundle(List.of(
+                nms.mapPatch(v.wall.signatureMapId(), 6, 0, 1, 1, new byte[]{palette.signatureFlags(flags)}),
+                nms.rotate(v.refYaw, false, 0f, false))));
+        v.wall.showTo(p);
+        v.privateView.open(plugin, p);
+        movePointer(v);
+        p.showEntity(plugin, v.pointer);
+        pipeline.afterClientCaughtUp(p, () -> {
+            v.aligning = false;
+            v.serverTurns.incrementAndGet();
+        });
+    }
+
+    /** A kept overlay's signature flags: blur if asked, and kept once it has been taken. */
+    private static int signatureFlags(ViewImpl v) {
+        return (v.options.blur() ? Shaders.SIGNATURE_BLUR : 0) | (v.stage >= 2 ? Shaders.SIGNATURE_KEPT : 0);
+    }
+
+    /** Sends a kept overlay's signature map whenever its tint or flags change (the tint follows the canvas's). */
+    private void signature(Player p, ViewImpl v) {
+        int tint = v.shown.tint(), flags = signatureFlags(v);
+        if (tint == v.signatureTint && flags == v.signatureFlags) return;
+        v.signatureTint = tint;
+        v.signatureFlags = flags;
+        nms.send(p, nms.mapPatch(v.wall.signatureMapId(), 0, 0, 128, 128, palette.markSignature(v.wall.cols, v.wall.rows, tint, flags)));
     }
 
     private void reveal(Player p, ViewImpl v) {
@@ -827,9 +990,9 @@ public final class Views implements Listener {
     private void turned(ViewImpl v, float yaw, float pitch) {
         synchronized (v) {
             if (!v.revealed || v.closed) return;
-            // Until the client has taken the teleport to the seat, its rotation is from before it, and
-            // starting from that would throw the pointer by the difference the moment the view appears.
-            if (v.awaitingTeleport) return;
+            // Until the client has taken the teleport to the seat (or a kept overlay's turn to its axis), its rotation
+            // is from before it, and starting from that would throw the pointer by the difference the moment it appears.
+            if (v.awaitingTeleport || v.aligning) return;
             if (v.clientPointer) {
                 turnedClient(v, yaw, pitch);
                 return;
@@ -1040,7 +1203,9 @@ public final class Views implements Listener {
     private void movePointer(ViewImpl v) {
         TextDisplay pointer = v.pointer;
         if (pointer == null) return;
-        Pointer shape = v.shape;
+        // A kept overlay's pointer shows once the turn to its axis has been taken: before that it is drawn from wherever
+        // the player was looking.
+        Pointer shape = v.aligning ? Pointer.HIDDEN : v.shape;
         if (shape != v.shownShape) {
             v.shownShape = shape;
             int size = v.options.pointerSize() > 0 ? v.options.pointerSize() : Math.max(16, v.canvas.height() / 40);
@@ -1081,11 +1246,28 @@ public final class Views implements Listener {
             // Nothing to show yet (the content is still drawing it): nothing is sent, and the switch waits for it.
             if (canvas == null) continue;
             if (canvas.cols() != v.wall.cols || canvas.rows() != v.wall.rows) canvas = v.canvas;
-            Canvas.Encoding hi = v.clientPointer ? Canvas.Encoding.HI_TILED : v.camera instanceof Creeper ? Canvas.Encoding.HI_OWN_BLUR : Canvas.Encoding.HI_OWN;
+            v.shown = canvas;
+            if (v.keeps) panel(v, canvas.snapshot());
+            Canvas.Encoding hi = v.clientPointer ? Canvas.Encoding.HI_TILED : Canvas.Encoding.HI_OWN;
             if (v.withPack) out.add(new MapSender.Assignment(p, v.wall, canvas, hi, null));
             else out.add(new MapSender.Assignment(p, v.wall, canvas, Canvas.Encoding.PLAIN,
                     v.revealed ? new MapSender.PointerSpot((int) v.cursorX, (int) v.cursorY, v.shape) : null));
         }
+    }
+
+    /**
+     * A kept overlay sends and frames only the tiles with something opaque in them, its panel, and nothing is drawn
+     * where the rest would be: the world shows there because nothing covers it. Only ever more of them: a tile the
+     * panel leaves keeps its frame, and shows nothing.
+     */
+    private void panel(ViewImpl v, Canvas.Snapshot snap) {
+        if (snap.sameAs(v.panelOf)) return;
+        v.panelOf = snap;
+        boolean[] tiles = new boolean[v.wall.tiles()];
+        for (int t = 0; t < tiles.length; t++) tiles[t] = snap.opaque(t);
+        int before = v.wall.sendsVersion();
+        v.wall.sendOnly(tiles);
+        if (v.wall.sendsVersion() != before) sender.wake();
     }
 
     public void close(Player player, CloseReason reason) {
@@ -1099,6 +1281,10 @@ public final class Views implements Listener {
             nms.setCamera(player, player);
             v.vehicle.removePassenger(player);
         }
+        // Back where they were, facing where they faced, before the frames and the overlay's signature go: a kept
+        // overlay's client shows the world as it was until then, so the first live frame is from the same spot.
+        // Not when they have already gone to another world (the move closed the view): that is where they were sent.
+        if (player.isOnline() && player.getWorld() == v.wall.world) player.teleport(v.returnTo);
         for (Entity e : v.entities()) e.remove();
         PotionEffect own = v.previousInvisibility;
         if (own != null && !own.isInfinite()) {
@@ -1113,8 +1299,6 @@ public final class Views implements Listener {
         // Players still seated stay hidden from everyone (see open), whatever this view hid of them.
         v.privateView.close(plugin, player, e -> e instanceof Player other && views.containsKey(other.getUniqueId()));
         v.wall.despawn();
-        // Not when they have already gone to another world (the move closed the view): that is where they were sent.
-        if (player.isOnline() && player.getWorld() == v.wall.world) player.teleport(v.returnTo);
         player.getPersistentDataContainer().remove(returnKey);
         for (Map.Entry<Key, Boolean> held : v.held.entrySet()) {
             if (!held.getValue()) continue;
