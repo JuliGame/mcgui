@@ -213,6 +213,45 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
   `sh gradlew firstPictureBench` gives the CPU per new session both ways, and
   `sh gradlew sessionBench` the server thread's CPU and allocation per new
   viewer and the live heap per watching session.
+- **Hover repaints are shared by every session** (`SharedRepaints`, one per plugin, LRU by bytes): keyed by
+  document (by identity), page revision, size, scale, scroll and the hover/press state drawn and wanted
+  (`HoverAhead.key`). `Session.submit` claims the key on the server thread; a session whose hover another is
+  drawing does not hold a render thread but re-submits when it lands (`repaintLanded`, as FirstPictures'
+  `landed`). A repaint known not partial is kept as null (drawn whole by the next without trying). Drawing ahead
+  puts into the same table, so nothing is drawn ahead twice for two sessions. Pages that move, or whose images
+  arrive late, key by the picture itself, which nobody else has (never shared; forgotten on `drop`).
+  `SharedHoverTest`, `SharedRepaintsTest`.
+- **Personal pages share what is not the player's own** (`html/Personal`, `sharing.personal-pages`). The
+  invariant is pixels: a player's picture is, to the pixel, what their own copy draws (a fresh picture for a first
+  picture; the player's own session's repaint, which is within a level of fresh as every repaint chain is, for
+  hovers), and their frame, hit regions and commands are their own copy's. Copies of one template
+  (`Placeholders.Filled.template`) match element by element by document order (`Personal.Copy`); an element is
+  the player's own if its own text holds a personal value, or a drawn attribute does (`src`, `value`... or any a
+  selector reads; `data-*`, `href` and the like are not). A first picture of a personal page is kept under its
+  template (`FirstPictures.Key.PERSONAL`), never adopted as it is: the taker retargets its frame to its own copy
+  and repaints its own elements over it with `Repaint.retext`, which also takes in whatever the new layout moves
+  (a flex spacer beside a longer name) and falls back to a whole picture if that is too much; the canvas shows
+  the other's tiles with the patch drawn in as one change (`Canvas.show(from, patch, x, y)`), so their name is
+  never published to this canvas. A hover repaint is kept under a template key (`Personal.Key`) with the picture
+  it was worked out over (`Prepared.origin`); a taker uses it only if both pictures are laid out alike round what
+  it changes (`Personal.translate`: every box near `Personal.zone`, the changed pixels grown by the blurs the
+  repaint and the page read, the same by place and painting order) and neither player's own values paint into
+  that zone (`Personal.clear`); its frame is then built from the repaint's boxes near it and the taker's own
+  elsewhere. A repaint whose zone a player's values reach is kept as `own` (`SharedRepaints.putOwn`): each copy
+  draws its own, nobody waits. `PersonalShareTest` guards it: two names of different lengths in a fixed header
+  (shared, every picture checked against a fresh one), a name that wraps and pushes the cards down (nothing
+  shared), a click on a shared picture (the clicker's own command), six players opening at once (one whole
+  picture), and the shipped market.
+- **Drawing ahead ranks by where the next report lands** (`HoverAhead.rank`): points spread evenly over a disc
+  round the pointer (`REACH` 56 CSS px at rest; ahead of it and wider when it moves) are looked up as a hover
+  would be, and each state scores the share of the disc it covers; the current state is left out. Up to `most`
+  repaints that change pixels are drawn (one that changes none, a card only raised, takes no turn), trying at most
+  twice as many. All of it, every session's together, uses at most `hover-ahead-cpu` of a core on average in
+  bursts of half a second (`HoverAhead.budget`), on top of the one-at-a-time rule and `Renders.idle`. Offline
+  coverage: `AheadCheck` (test sources) on the hover-latency trials in `rigs/hl/targets.json`: crates
+  went from 16 to 23 of 23 trials drawn ahead at rest (4 to 23 after a jump), market, quests and auction stayed at
+  all of them while drawing 25/28/43 repaints instead of 56/44/68. `HoverAheadTest.theRowThePointerGlidesOntoIsDrawnAhead`.
+  `/ui stats` prints how many drawn ahead were used and the CPU drawing ahead took.
 - **A partial repaint takes in every blurred layer its region meets** that
   something which changed is inside or round (`Repaint.region`): a `filter:
   blur()` layer that the clip cuts would blur with a cut edge. A blurred layer

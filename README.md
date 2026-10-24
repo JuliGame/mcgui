@@ -211,9 +211,25 @@ The first picture of each page at each screen size is kept (`first-pictures` in
 config.yml), so the next player to open that page there is sent the picture at
 once rather than waiting for it to be drawn: a private wall sends each map once,
 the page, and a fullscreen page opens already drawn. Every placed screen's page
-is drawn for it when the plugin starts. A page with a player's own values in it
-(`{player}`, `{x}`, PlaceholderAPI) is drawn for each player as before; its
-screens still show nothing until the page is drawn, rather than black first.
+is drawn for it when the plugin starts. Players who open a page at the same
+moment wait for one drawing of it rather than each drawing their own.
+
+A page with a player's own values in it (`{player}`, `{x}`, PlaceholderAPI) is
+shared too, except where it shows those values (`sharing.personal-pages`, on by
+default): the next player's first picture is the last one's with only their own
+values drawn in (the market: about a tenth of a whole picture), and a hover one
+player drew is taken by another whose picture is laid out the same round it, as
+long as neither player's values are within reach of it. What each player sees is,
+to the pixel, what their own page draws, and a click always runs their own
+command. A value that moves the rest of the page (a long name that wraps a line
+and pushes the boxes below it down) gets that player a picture of their own.
+Values only in attributes nothing draws (`data-console="give {player} ..."`)
+share everything.
+
+Hovers are shared between players on any page (`hover-repaints` in config.yml):
+everyone in the same state on the same page takes the one drawing of a hover, and
+drawing ahead is never done twice for two players. Drawing ahead together uses at
+most `hover-ahead-cpu` of a core (0.5 by default).
 
 ## What the renderer supports
 
@@ -283,8 +299,13 @@ arriving before the highlight does. What decides it:
   background box with nothing inside it (`<div class="bg"></div>` under
   `filter: blur()`, with no border or shadow) is blurred once per page and kept;
   put the content in a box of its own above it, not inside it.
-- **Keep targets a reasonable size.** Only four hovers are drawn ahead, so in a
-  dense grid of small targets fewer of the pointer's next stops are ready.
+- **Keep targets a reasonable size.** Only four hovers are drawn ahead, the ones
+  the pointer's next move most likely lands on, so in a dense grid of small
+  targets fewer of its next stops are ready. A hover that changes nothing (a
+  card only raised with `z-index`) takes no turn.
+- **Keep a player's own values away from what they hover.** On a page with
+  `{player}` in it, a hover within reach of the name (or of a blur that reads it)
+  is drawn for each player alone; everything further off is drawn once for all.
 
 `sh gradlew hoverCost -Ppages=path/to/page.html` prints what each hover on a
 page costs to redraw and how many fell back to a whole redraw (`not partial`). It
