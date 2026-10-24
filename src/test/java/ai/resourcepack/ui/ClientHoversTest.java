@@ -234,6 +234,42 @@ class ClientHoversTest {
     }
 
     /**
+     * A hover the client shows by itself is drawn into the picture once the pointer rests on it, from what was drawn
+     * ahead, and not while the pointer still moves: the next hover the client cannot show is then one change from the
+     * picture the player sees, not two.
+     */
+    @Test
+    void thePictureCatchesUpWithAHoverTheClientShowsOnceThePointerRests() throws Exception {
+        Page page = rig.pages.loaded("cards");
+        Session s = rig.open(rig.plugin(0), "cards", COLS, ROWS, H);
+        rig.quiet();
+        Client client = new Client();
+        onServer(() -> s.layers(client));
+        Rectangle2D one = bounds(page, ".card", 0);
+        onServer(() -> s.pointer((int) one.getX() - 10, (int) one.getY() + 30));
+        HtmlRenderer.Frame before = get(s, "frame");
+        // A tick as the pointer gets there (it has not rested): no picture.
+        onServer(() -> {
+            s.pointer((int) one.getCenterX(), (int) one.getY() + 30);
+            s.tick(1001);
+        });
+        assertSame(before, get(s, "frame"), "the server drew a hover the client shows by itself, or caught up while the pointer moved");
+        ai.resourcepack.ui.html.HoverAhead ahead = get(s, "hoverAhead");
+        long taken = ahead.taken.get();
+        Thread.sleep(150);
+        onServer(() -> s.tick(1002));
+        HtmlRenderer.Frame after = get(s, "frame");
+        assertTrue(after != before, "the picture did not catch up");
+        assertEquals(taken + 1, ahead.taken.get(), "caught up by drawing, not from what was drawn ahead");
+        Element hover = get(s, "hover");
+        assertEquals(page.styles.stateKey(hover, false), get(s, "drawnHover"));
+        Document d = page.document.clone();
+        Element same = d.getAllElements().get(hover.ownerDocument().getAllElements().indexOf(hover));
+        int[] fresh = pixels(HtmlRenderer.render(page, d, W, H, 1, 0, HtmlRenderer.state(same, null)));
+        assertSamePicture(fresh, client.shown(pixels(after), (int) one.getCenterX(), (int) one.getY() + 30), "caught up");
+    }
+
+    /**
      * Two players on one page, their pointers resting in one place: the second's layers are the first's, armed without
      * being worked out again.
      */

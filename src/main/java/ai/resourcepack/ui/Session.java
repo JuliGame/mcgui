@@ -159,6 +159,8 @@ public final class Session {
     private final Runnable lookAgain;
     /** The hovers the client shows by itself, without a picture (a view with hover layers); null without. */
     private volatile ClientHovers hovers;
+    /** How long the pointer rests on a hover the client shows by itself before the picture catches up with it ({@link #catchUp}). */
+    private static final long CATCH_UP_NANOS = 100_000_000L;
     /** When the pointer last moved (nanoTime), and how fast, canvas pixels a second. */
     private long pointerAt;
     private double pointerVx, pointerVy;
@@ -235,6 +237,26 @@ public final class Session {
         boolean done = h.arm(f, drawn, ready, pointerX, pointerY, stop);
         HoverAhead.charge(CPU.getCurrentThreadCpuTime() - c0);
         if (!done) hoverAhead.again();
+    }
+
+    /**
+     * With hover layers the client shows a hover by itself over a picture drawn in another state, and nothing is drawn
+     * ({@link #pointer}). Once the pointer has rested there for {@link #CATCH_UP_NANOS} and the render threads have
+     * nothing else to do, the picture catches up: the hover was drawn ahead (its layer is made of it), so this only
+     * applies it, and the player sees no change. Else the next hover the client cannot show by itself is drawn from the
+     * old state, undoing that too: two changes as far apart as the two targets, which on the market is the whole picture
+     * (off the close button, then onto the trade button), and what is drawn ahead meanwhile is drawn over the old state.
+     * Server thread, every tick.
+     */
+    private synchronized void catchUp() {
+        ClientHovers h = hovers;
+        if (h == null || closed || rendering || page == null || pointerX < 0 || System.nanoTime() - pointerAt < CATCH_UP_NANOS) return;
+        HtmlRenderer.Frame f = frame;
+        if (f == null || f.image() == null || !idle()) return;
+        // Render-thread fields, settled while nothing is drawn.
+        List<Element> hoverKey = key(hover, false);
+        if (hoverKey.equals(drawnHover) || !key(pressed, true).equals(drawnPress) || !h.armed(f, hoverKey)) return;
+        render();
     }
 
     // ---------------------------------------------------------------- pages
@@ -395,6 +417,7 @@ public final class Session {
         // Something on the page is moving: the next picture of it, so many times a second.
         Page shown = page;
         if (shown != null && shown.moves() && motion.active() && now % plugin.animationTicks() == 0) render();
+        catchUp();
         ScrollCache c = cache;
         if (c != null && c.idleNanos() > CACHE_IDLE_NANOS) cache = null;
         if (now % 20 == 0) park();
