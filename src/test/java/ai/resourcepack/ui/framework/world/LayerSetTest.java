@@ -86,13 +86,14 @@ class LayerSetTest {
             assertArrayEquals(include, rect(t, 6));
             assertArrayEquals(exclude, rect(t, 10));
         }
-        // The first map from the first opaque pixel, 128 x 126 of the canvas; the second where the first ends.
-        assertArrayEquals(new int[]{200, 100}, places[0]);
-        assertArrayEquals(new int[]{328, 128}, places[1]);
-        // A map's row 2 is the canvas row it starts at: canvas (330, 130) is the second map's (2, 4), opaque; canvas
-        // (300, 110), the first map's (100, 12), is not.
-        assertTrue(snap.tile(1, Canvas.Encoding.HI)[4 * 128 + 2] != Palette.CLEAR_ID);
-        assertEquals(Palette.CLEAR_ID, snap.tile(0, Canvas.Encoding.HI)[12 * 128 + 100]);
+        // The first map from a row 2 above the first opaque pixel (a map starts 2 below a multiple of 4), 128 x 126 of
+        // the canvas; the second where the first ends, from the even block row at or above its first opaque pixel.
+        assertArrayEquals(new int[]{200, 98}, places[0]);
+        assertArrayEquals(new int[]{328, 126}, places[1]);
+        // A map's row 2 is the canvas row it starts at: canvas (330, 130) is the second map's (2, 6), opaque; canvas
+        // (300, 110), the first map's (100, 14), is not.
+        assertTrue(snap.tile(1, Canvas.Encoding.HI)[6 * 128 + 2] != Palette.CLEAR_ID);
+        assertEquals(Palette.CLEAR_ID, snap.tile(0, Canvas.Encoding.HI)[14 * 128 + 100]);
         assertTrue(snap.tile(0, Canvas.Encoding.HI)[4 * 128 + 2] != Palette.CLEAR_ID);
     }
 
@@ -102,10 +103,50 @@ class LayerSetTest {
         int x = 524, y = 596, w = 456, h = 68;
         List<int[]> places = LayerSet.places(solid(w, h, 0xFFFFFFFF), x, y, w, x, y, x + w, y + h);
         assertEquals(4, places.size());
-        for (int i = 0; i < 4; i++) assertArrayEquals(new int[]{x + 128 * i, y}, places.get(i));
+        // From a row 2 below a multiple of 4: two rows above the buttons.
+        for (int i = 0; i < 4; i++) assertArrayEquals(new int[]{x + 128 * i, y - 2}, places.get(i));
         // A tall one: a map holds 126 rows.
         assertEquals(2, LayerSet.places(solid(100, 127, 0xFFFFFFFF), 0, 0, 100, 0, 0, 100, 127).size());
         assertEquals(1, LayerSet.places(solid(100, 126, 0xFFFFFFFF), 0, 0, 100, 0, 0, 100, 126).size());
+    }
+
+    /**
+     * Wherever a layer lies, each pixel of it comes out of its map as the view's own tile has it once the picture catches
+     * up (the same 4 x 4 dither cell and 2 x 2 colour block): a gradient under a layer does not shimmer as the picture
+     * arrives under it.
+     */
+    @Test
+    void aLayerEncodesItsPixelsAsTheViewDoes() {
+        Canvas view = new Canvas(PALETTE, COLS, ROWS);
+        int cw = COLS * 128, ch = ROWS * 128;
+        int[] picture = new int[cw * ch];
+        for (int j = 0; j < ch; j++) for (int i = 0; i < cw; i++) picture[j * cw + i] = 0xFF000000 | (i * 255 / cw) << 16 | (j * 255 / ch) << 8 | ((i ^ j) & 255);
+        view.draw(picture, cw, ch, 0, 0);
+        Canvas.Snapshot shown = view.snapshot();
+        Canvas maps = new Canvas(PALETTE, 8, 1);
+        LayerSet set = new LayerSet(PALETTE, maps, null, COLS, ROWS, 12.5, 0);
+        for (int[] at : new int[][]{{301, 207}, {130, 5}, {642, 389}, {1000, 902}}) {
+            int x = at[0] & ~1, y = at[1] & ~1, w = 150, h = 90;
+            int[] px = new int[w * h];
+            for (int j = 0; j < h; j++) System.arraycopy(picture, (y + j) * cw + x, px, j * w, w);
+            LayerSet.Prepared p = (LayerSet.Prepared) set.prepare(px, x, y, w, h, () -> false);
+            for (int k = 0; k < p.maps(); k++) {
+                int mx = p.places()[k][0], my = p.places()[k][1];
+                assertEquals(0, mx % 4, "a map's first column");
+                assertEquals(2, my % 4, "a map's first picture row");
+                byte[] t = p.tiles()[k];
+                for (int r = 2; r < 128; r++) {
+                    for (int c = 0; c < 128; c++) {
+                        if (t[r * 128 + c] == Palette.CLEAR_ID) continue;
+                        int vx = mx + c, vy = my + r - 2;
+                        // A view tile's own top-left 2 x 2 block holds its markers, which the shader never draws.
+                        if (vx % 128 < 2 && vy % 128 < 2) continue;
+                        byte own = shown.tile(vy / 128 * COLS + vx / 128, Canvas.Encoding.HI)[vy % 128 * 128 + vx % 128];
+                        assertEquals(own, t[r * 128 + c], "canvas pixel (" + vx + ", " + vy + ") of the layer at " + x + "," + y);
+                    }
+                }
+            }
+        }
     }
 
     @Test

@@ -236,9 +236,16 @@ final class LayerSet implements HoverLayers {
      * every 2 × 2 block with a pixel half opaque or more. Greedy: the first such block not yet covered, row by row, starts
      * a map's band of rows, which reaches as far left as it can while keeping that block. A row of buttons 456 pixels
      * across takes 4 maps this way where the view's tiles under it number 8.
+     *
+     * <p>Each map starts on a column that is a multiple of 4 and a row 2 below one (its picture starts on its third row),
+     * so its 4 × 4 dither cells and 2 × 2 colour blocks ({@link Palette#encodeHi}) fall where the view's own tiles have
+     * them, and a pixel comes out of the layer as the view's own picture has it once it catches up: anywhere else a
+     * gradient or a soft edge shimmers as the picture arrives under the layer. Only a layer in the canvas's top two rows
+     * cannot start there (a map's place is never above the canvas).
      */
     static List<int[]> places(int[] argb, int x, int y, int w, int x0, int y0, int x1, int y1) {
-        int gx = x0 & ~1, gy = y0 & ~1;
+        boolean aligned = y0 >= 2;
+        int gx = x0 & ~3, gy = aligned ? ((y0 - 2) & ~3) + 2 : y0 & ~1;
         int bw = (x1 - gx + 1) / 2, bh = (y1 - gy + 1) / 2;
         boolean[] want = new boolean[bw * bh];
         for (int py = y0; py < y1; py++) {
@@ -250,19 +257,23 @@ final class LayerSet implements HoverLayers {
         for (int by = 0; by < bh; by++) {
             for (int bx = 0; bx < bw; bx++) {
                 if (!want[by * bw + bx]) continue;
+                // An even block, so the map's place keeps the view's phase; the row above is all covered by now.
+                int top = aligned ? by & ~1 : by;
                 int left = bx;
-                for (int r = by; r < Math.min(bh, by + down); r++) {
-                    for (int c = Math.max(0, bx - across + 1); c < left; c++) {
+                for (int r = top; r < Math.min(bh, top + down); r++) {
+                    // From where the left edge, made even, still reaches this block.
+                    for (int c = Math.max(0, bx - across + 2); c < left; c++) {
                         if (want[r * bw + c]) {
                             left = c;
                             break;
                         }
                     }
                 }
-                for (int r = by; r < Math.min(bh, by + down); r++) {
+                left &= ~1;
+                for (int r = top; r < Math.min(bh, top + down); r++) {
                     for (int c = left; c < Math.min(bw, left + across); c++) want[r * bw + c] = false;
                 }
-                places.add(new int[]{gx + left * 2, gy + by * 2});
+                places.add(new int[]{gx + left * 2, gy + top * 2});
             }
         }
         return places;
