@@ -671,10 +671,13 @@ public final class Session {
                 if (d == null) {
                     d = fill.copy();
                     // Worked out here, off the server thread, while nothing else reads the copy.
-                    if (personalShared(fill, p)) copyOf(d, fill, p);
+                    Personal.Copy made = personalShared(fill, p) ? copyOf(d, fill, p) : null;
                     // The session's from now on, unless another page or fill was shown meanwhile.
                     synchronized (Session.this) {
-                        if (doc == null && filled == fill) doc = d;
+                        if (doc == null && filled == fill) {
+                            doc = d;
+                            if (made != null) ownCopy = made;
+                        }
                     }
                 }
                 long t0 = System.nanoTime();
@@ -957,8 +960,16 @@ public final class Session {
         Placeholders.Filled f = filled;
         Page p = page;
         if (d == null || p == null || !pristine || !personalShared(f, p)) return null;
-        return copyOf(d, f, p);
+        Personal.Copy c = ownCopy;
+        if (c != null && c.doc == d) return c;
+        return ownCopy = copyOf(d, f, p);
     }
+
+    /**
+     * The {@link Personal.Copy} of this session's document, held here for as long as it shows it: Personal finds copies
+     * by their document only while something holds them.
+     */
+    private volatile Personal.Copy ownCopy;
 
     /** [d], a copy of [p] made from [f] and not changed since, as a {@link Personal.Copy}: worked out the first time. */
     private static Personal.Copy copyOf(Document d, Placeholders.Filled f, Page p) {
@@ -976,7 +987,7 @@ public final class Session {
      */
     private Repaint.Result overTheirs(FirstPictures.Picture theirs, Page p, Document d, Placeholders.Filled fill, double scale,
                                       Selector.State state, long timeout) {
-        Personal.Copy from = Personal.copy(theirs.document());
+        Personal.Copy from = theirs.copy;
         if (from == null || !personalShared(fill, p) || theirs.frame.page() != p) return null;
         Personal.Copy mine = copyOf(d, fill, p);
         if (!mine.template.equals(from.template)) return null;

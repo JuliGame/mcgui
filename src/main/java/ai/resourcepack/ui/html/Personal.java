@@ -66,8 +66,9 @@ public final class Personal {
         /** The elements whose drawing may be the player's own (see the class). */
         private final Set<Element> personal;
 
-        // The last picture measured (guarded by this), and where the player's own values paint in it.
-        private HtmlRenderer.Frame measured;
+        // The last picture measured (guarded by this), and where the player's own values paint in it. Only its identity
+        // is wanted: held weakly, so a copy kept by a first picture does not keep a whole picture of some session's.
+        private java.lang.ref.WeakReference<HtmlRenderer.Frame> measured;
         private List<Rectangle2D> ink;
 
         private Copy(Document doc, Page page, String template, Element[] order, Map<Element, Integer> index, Set<Element> personal) {
@@ -108,23 +109,29 @@ public final class Personal {
 
         /** Where the player's own values paint in [f] ({@link #ink}): worked out once a picture. */
         private synchronized void measure(HtmlRenderer.Frame f) {
-            if (measured == f) return;
+            if (measured != null && measured.get() == f) return;
             ink = ink(f, personal);
-            measured = f;
+            measured = new java.lang.ref.WeakReference<>(f);
         }
     }
 
-    /** The copy [doc] is, if one was made of it ({@link #of}) and it is still as filled. */
-    private static final Map<Document, Copy> COPIES = Collections.synchronizedMap(new WeakHashMap<>());
+    /**
+     * The copy each document is, if one was made of it, held weakly both ways: a copy refers to its document (and to
+     * every element in it), so a copy held strongly here would keep its document, and every copy ever made, for good.
+     * It lives as long as something that needs it holds it: the session showing the document, a first picture of it
+     * (FirstPictures), and a repaint drawn over it and shared with other copies ({@link #share}).
+     */
+    private static final Map<Document, java.lang.ref.WeakReference<Copy>> COPIES = Collections.synchronizedMap(new WeakHashMap<>());
     /** The attributes each page revision's style sheet reads (null: it reads them all, through attr()). */
     private static final Map<Page, Set<String>> READ = Collections.synchronizedMap(new WeakHashMap<>());
 
     /**
      * [doc] (a copy of [page] filled from [template], not changed since) as a {@link Copy}, whose player's own values
-     * are in the own text of [text] and in the attributes [attrs] names. Kept for as long as [doc] is.
+     * are in the own text of [text] and in the attributes [attrs] names. {@link #copy} finds it for as long as something
+     * holds it (see {@link #COPIES}).
      */
     public static Copy of(Document doc, Page page, String template, Set<Element> text, Map<Element, List<String>> attrs) {
-        Copy known = COPIES.get(doc);
+        Copy known = copy(doc);
         if (known != null) return known;
         Elements all = doc.getAllElements();
         Element[] order = all.toArray(new Element[0]);
@@ -142,13 +149,14 @@ public final class Personal {
             }
         }
         Copy c = new Copy(doc, page, template, order, index, personal);
-        COPIES.put(doc, c);
+        COPIES.put(doc, new java.lang.ref.WeakReference<>(c));
         return c;
     }
 
     /** The {@link Copy} [doc] is, or null. */
     public static Copy copy(Document doc) {
-        return doc == null ? null : COPIES.get(doc);
+        java.lang.ref.WeakReference<Copy> c = doc == null ? null : COPIES.get(doc);
+        return c == null ? null : c.get();
     }
 
     private static boolean drawn(String attr, Set<String> read) {
@@ -280,9 +288,12 @@ public final class Personal {
                 to.doc, to.page));
     }
 
-    /** [p], worked out over [before] (a picture of a personal copy), as one that other copies may take ({@link #translate}). */
+    /**
+     * [p], worked out over [before] (a picture of a personal copy), as one that other copies may take ({@link #translate}),
+     * holding that copy, which those find by its document ({@link #copy}), for as long as it is kept.
+     */
     public static Repaint.Prepared share(Repaint.Prepared p, HtmlRenderer.Frame before) {
-        return p.over(before);
+        return p.over(before, copy(before.document()));
     }
 
     /** Marks in [near] (by place in [c]) every element with a box in [f] that, with what it paints outside itself, reaches [zone]. */

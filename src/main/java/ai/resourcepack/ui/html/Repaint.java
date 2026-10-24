@@ -259,12 +259,16 @@ public final class Repaint {
         }
 
         private HtmlRenderer.Frame origin;
+        /** What must live as long as it does: the personal copy it was worked out over (see Personal.share), or null. */
+        @SuppressWarnings({"unused", "FieldCanBeLocal"})
+        private Object keeps;
 
-        /** The same, worked out over [before] (see {@link #origin}). */
-        Prepared over(HtmlRenderer.Frame before) {
+        /** The same, worked out over [before] (see {@link #origin}), keeping [keeps] alive as long as it is. */
+        Prepared over(HtmlRenderer.Frame before, Object keeps) {
             Prepared p = new Prepared(frame, changed, paint, at, pixels, motion);
             p.origin = new HtmlRenderer.Frame(null, before.scale(), before.viewportWidth(), before.viewportHeight(), before.pageHeight(),
                     before.scrollY(), before.hits(), before.styles(), before.document(), before.page());
+            p.keeps = keeps;
             return p;
         }
 

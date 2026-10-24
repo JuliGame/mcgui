@@ -197,6 +197,11 @@ final class FirstPictures {
          * {@link Motion#copyAt}); else null.
          */
         final Motion motion;
+        /**
+         * The personal copy the picture's document is (see Personal), which a taker's own copy is matched with; held here,
+         * as {@code Personal} holds copies only weakly. Null for a page with nothing of a player's own.
+         */
+        final ai.resourcepack.ui.html.Personal.Copy copy;
         final long bytes;
 
         private Picture(Key key, HtmlRenderer.Frame frame, Canvas canvas, Motion motion) {
@@ -204,6 +209,7 @@ final class FirstPictures {
             this.frame = frame;
             this.canvas = canvas;
             this.motion = motion;
+            this.copy = ai.resourcepack.ui.html.Personal.copy(frame.document());
             BufferedImage img = frame.image();
             // Its pixels, the canvas's colours (3 bytes a pixel) and tiles (1), and a little for each region and style.
             long pixels = (long) img.getWidth() * img.getHeight();
