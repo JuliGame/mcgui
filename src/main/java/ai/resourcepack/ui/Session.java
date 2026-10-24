@@ -564,9 +564,11 @@ public final class Session {
                     ai.resourcepack.ui.html.ParkedPicture pp = ai.resourcepack.ui.html.ParkedPicture.of(shown.image());
                     HtmlRenderer.Frame bare = new HtmlRenderer.Frame(null, shown.scale(), shown.viewportWidth(), shown.viewportHeight(), shown.pageHeight(),
                             shown.scrollY(), shown.hits(), shown.styles(), shown.document(), shown.page());
-                    // Nothing keeps the image from now on: drawing ahead forgets the pictures it worked from, and the
-                    // image goes back to the pool.
+                    // Nothing keeps the image from now on: drawing ahead forgets the pictures it worked from, hover
+                    // layers come off (they are armed again over the picture put back), and the image goes back to the pool.
                     hoverAhead.letGo();
+                    ClientHovers layers = hovers;
+                    if (layers != null) layers.reset();
                     parked = pp;
                     frame = bare;
                     pooled.start(bare);
