@@ -54,11 +54,12 @@ public final class HoverTimeline {
             }
             for (String tag : new String[]{"off", "on"}) {
                 List<double[]> rs = tag.equals("off") ? off : on;
-                System.out.printf("SUMMARY %-7s %-3s enter p50 %6.1f p90 %6.1f ahead %d/%d busy %d   leave p50 %6.1f p90 %6.1f ahead %d/%d   arm cpu mean %.1f ms%n",
+                System.out.printf("SUMMARY %-7s %-3s enter p50 %6.1f p90 %6.1f ahead %d/%d busy %d   leave p50 %6.1f p90 %6.1f ahead %d/%d   arm cpu mean %.1f ms"
+                                + "   server cpu %.1f ms a trial%n",
                         page, tag, q(rs, 0, 0.5), q(rs, 0, 0.9), (int) rs.stream().filter(r -> r[1] > 0).count(), rs.size(),
                         (int) rs.stream().filter(r -> r[8] > 0).count(),
                         q(rs, 2, 0.5), q(rs, 2, 0.9), (int) rs.stream().filter(r -> r[3] > 0).count(), rs.size(),
-                        rs.stream().mapToDouble(r -> r[4]).average().orElse(0));
+                        rs.stream().mapToDouble(r -> r[4]).average().orElse(0), rs.stream().mapToDouble(r -> r[9]).average().orElse(0));
             }
         }
         System.exit(0);
@@ -67,6 +68,18 @@ public final class HoverTimeline {
     private static double q(List<double[]> rs, int k, double p) {
         double[] v = rs.stream().mapToDouble(r -> r[k]).filter(x -> x >= 0).sorted().toArray();
         return v.length == 0 ? -1 : v[Math.min(v.length - 1, (int) (p * v.length))];
+    }
+
+    /** CPU (ns) every thread but this one has used: the session's server thread, render threads and ticks, not the rig's waiting. */
+    private static long othersCpu() {
+        var mx = java.lang.management.ManagementFactory.getThreadMXBean();
+        long me = Thread.currentThread().threadId(), sum = 0;
+        for (long id : mx.getAllThreadIds()) {
+            if (id == me) continue;
+            long t = mx.getThreadCpuTime(id);
+            if (t > 0) sum += t;
+        }
+        return sum;
     }
 
     /**
@@ -94,6 +107,7 @@ public final class HoverTimeline {
             int start = rnd.nextInt(ts.size());
             for (int i = 0; i < warm + per; i++) {
                 int k = (start + i) % ts.size();
+                long cpu0 = othersCpu();
                 int[][] t = ts.get(k);
                 ClientHovers h = layersOn ? get(s, "hovers") : null;
                 long arm0 = h == null ? 0 : h.armNs;
@@ -116,7 +130,7 @@ public final class HoverTimeline {
                 double[] o = glide(rig, s, c, r, box, false);
                 // As ih_pc.py: half a second before the next look, so the jump to the next rest is not a report's move.
                 Thread.sleep(500);
-                if (i >= warm) out.add(new double[]{in[0], in[1], o[0], o[1], arm, armed, used, k, in[2]});
+                if (i >= warm) out.add(new double[]{in[0], in[1], o[0], o[1], arm, armed, used, k, in[2], (othersCpu() - cpu0) / 1e6});
             }
             ticker.shutdownNow();
             rig.quiet();

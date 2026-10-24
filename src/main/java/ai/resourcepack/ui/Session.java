@@ -514,11 +514,12 @@ public final class Session {
         if (Math.abs(f.scrollY() - Math.max(0, Math.min(scrollY, f.maxScroll()))) >= 0.01) return;
         double x = pointerX / scale, y = pointerY / scale;
         if (hoverAhead.done(f, x, y)) return;
-        // The picture shows the state now (no picture is being drawn, so the render thread's fields are settled), or the
-        // client shows it over the picture by itself (ClientHovers): what is drawn ahead is drawn over the picture.
+        // The picture shows the state now (no picture is being drawn, so the render thread's fields are settled). Not while
+        // the client shows a hover by itself over a picture of another state (ClientHovers): all drawn ahead from there
+        // would undo that state too, and the layers armed already serve the pointer's next move. Once it rests the
+        // picture catches up (catchUp), and drawing ahead goes on from what the player sees.
         List<Element> hoverKey = key(hover, false), pressKey = key(pressed, true);
-        ClientHovers h = hovers;
-        if (!hoverKey.equals(drawnHover) && (h == null || !h.armed(f, hoverKey)) || !pressKey.equals(drawnPress)) return;
+        if (!hoverKey.equals(drawnHover) || !pressKey.equals(drawnPress)) return;
         if (!HoverAhead.claim(lookAgain)) return;
         hoverAhead.personal(personalCopy());
         // From here every way out releases the turn: one kept by mistake would stop drawing ahead for every session.
