@@ -145,6 +145,26 @@ def headless(b):
     return res
 
 
+def config_yaml(settings):
+    """config.yml text for dotted [settings] ({'views.hover-layers': 32}): nested, two spaces a level."""
+    tree = {}
+    for k, v in settings.items():
+        *path, last = k.split('.')
+        node = tree
+        for p in path:
+            node = node.setdefault(p, {})
+        node[last] = v
+
+    def lines(node, depth):
+        for k, v in node.items():
+            if isinstance(v, dict):
+                yield '  ' * depth + f'{k}:'
+                yield from lines(v, depth + 1)
+            else:
+                yield '  ' * depth + f'{k}: {v}'
+    return '\n'.join(lines(tree, 0)) + '\n'
+
+
 # ----------------------------------------------------------------------------------------------------- the server
 
 class Server:
@@ -169,7 +189,7 @@ class Server:
         shutil.copy(self.jar, f'{self.dir}/plugins/MCGUI.jar')
         shutil.copy(self.arcade, f'{self.dir}/plugins/Arcade.jar')
         shutil.copy(a.probe, f'{self.dir}/plugins/Probe.jar')
-        open(f'{self.dir}/plugins/MCGUI/config.yml', 'w').write(f'resource-pack:\n  port: {self.pack_port}\n')
+        open(f'{self.dir}/plugins/MCGUI/config.yml', 'w').write(config_yaml({'resource-pack.port': self.pack_port, **dict(s.split('=', 1) for s in a.set)}))
         pages = f'{self.dir}/plugins/MCGUI/pages'
         shutil.copytree(f'{REPO}/src/main/resources/pages', pages, dirs_exist_ok=True)
         shutil.copytree(f'{REPO}/bench/pages', pages, dirs_exist_ok=True)
@@ -425,10 +445,10 @@ def views(b):
 
 
 def hover(b):
-    """Players hovering round the market fullscreen: the server's CPU, ticks and bytes, at 10 and 50."""
+    """Players hovering round the market fullscreen: the server's CPU, ticks and bytes, at 1, 10 and 50."""
     s = b.srv
     res = {}
-    for n in (10, 50):
+    for n in (1, 10, 50):
         fakes(b, n)
         rx = received(b)
         s.P('fakedo cmd 5 mcgui open market {name}')
@@ -440,8 +460,8 @@ def hover(b):
         s.P('fakedo still')
         s.P('fakedo cmd 10 mcgui close {name}')
         time.sleep(3)
-        res.update(pick(w, 'cores', 'cpu_pool_ms_s', 'tick_ms_p50', 'tick_ms_p99', 'rx_mb_s', 'pictures', 'ahead', 'picture_run_ms',
-                        'timed_out', 'uie_tick_us', suffix=f'.{n}'))
+        res.update(pick(w, 'cores', 'cpu_pool_ms_s', 'send_ms_s', 'netty_ms_s', 'tick_ms_p50', 'tick_ms_p99', 'rx_mb_s', 'pictures', 'ahead',
+                        'picture_run_ms', 'timed_out', 'uie_tick_us', suffix=f'.{n}'))
     return res
 
 
@@ -664,6 +684,8 @@ def main():
     p.add_argument('--keep', action='store_true', help='keep the server copy afterwards')
     p.add_argument('--jfr', help='record the server with JFR (settings=profile) to this file: `jfr print --events jdk.ExecutionSample`')
     p.add_argument('--tag', default='')
+    p.add_argument('--set', action='append', default=[], metavar='KEY=VALUE',
+                   help='a config.yml setting for the server, dotted (views.hover-layers=32); repeatable')
     a = p.parse_args()
     cells = [c for c in (a.only.split(',') if a.only else (QUICK if a.quick else CELLS)) if c]
     for c in cells:

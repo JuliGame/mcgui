@@ -274,15 +274,12 @@ class SharedRepaintsTest {
         for (Painter.Hit h : a.hits()) if (h.element() == t || t.children().contains(h.element())) on = h.shape().getBounds2D();
         assertNotNull(on);
         HoverAhead one = new HoverAhead(4, shared), two = new HoverAhead(4, shared);
-        int[] ready = {0};
-        one.onReady(() -> ready[0]++);
         one.run(one.job(page, doc, W, H, SCALE, a, List.of(), List.of(), List.of(), null, List.of(), on.getMinX() - 4, on.getCenterY(), 0, 0, 0));
         assertTrue(one.prepared.get() > 0);
-        assertEquals(one.keys().size(), ready[0], "told of each repaint drawn ahead");
         two.run(two.job(page, doc, W, H, SCALE, b, List.of(), List.of(), List.of(), null, List.of(), on.getMinX() - 4, on.getCenterY(), 0, 0, 0));
         assertEquals(0, two.prepared.get(), "drawn ahead again for the second session");
         assertEquals(one.prepared.get(), shared.ahead());
-        List<HoverAhead.Ready> r = two.ready(b, List.of(), List.of(), List.of());
+        List<HoverAhead.Ready> r = two.ready(b, List.of(), List.of(), List.of(), k -> true);
         assertEquals(one.keys().size(), r.size(), "ready for the second session: what the first drew ahead");
         List<Element> key = page.styles.stateKey(t, false);
         assertNotNull(two.take(b, List.of(), List.of(), key, List.of()));

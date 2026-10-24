@@ -215,16 +215,26 @@ public final class Session {
      */
     void layers(ai.resourcepack.ui.framework.api.HoverLayers layers) {
         hovers = layers == null ? null : new ClientHovers(layers);
-        hoverAhead.onReady(layers == null ? null : this::armLayers);
     }
 
-    /** A hover was drawn ahead: on the render thread, during the drawing ahead, when nothing draws into the picture. */
-    private void armLayers() {
+    /**
+     * Arms layers for what [job] drew ahead, and what other sessions drew of this picture, which it found kept: on the
+     * render thread, once the drawing ahead is over, when nothing draws into the picture. The least urgent work there is:
+     * it stops the moment this session asks for a real picture (the job is stopped then) or any other work waits for a
+     * render thread, and a drawing ahead from where it stopped then arms the rest. Its CPU comes out of drawing ahead's.
+     */
+    private void armLayers(HoverAhead.Job job) {
         ClientHovers h = hovers;
         HtmlRenderer.Frame f = frame;
         // While something on the page moves its picture changes many times a second, and every change takes the layers off.
-        if (h == null || f == null || !still()) return;
-        h.arm(f, drawnHover, hoverAhead.ready(f, drawnHover, drawnPress, drawnPress), pointerX, pointerY);
+        if (h == null || f == null || !still() || job.stopped()) return;
+        java.util.function.BooleanSupplier stop = () -> job.stopped() || renderers.queued() || !HoverAhead.quiet();
+        long c0 = CPU.getCurrentThreadCpuTime();
+        List<Element> drawn = drawnHover;
+        var ready = hoverAhead.ready(f, drawn, drawnPress, drawnPress, k -> !k.equals(drawn) && h.wants(f, k));
+        boolean done = h.arm(f, drawn, ready, pointerX, pointerY, stop);
+        HoverAhead.charge(CPU.getCurrentThreadCpuTime() - c0);
+        if (!done) hoverAhead.again();
     }
 
     // ---------------------------------------------------------------- pages
@@ -504,8 +514,7 @@ public final class Session {
                         Motion.set(m);
                     }
                     hoverAhead.run(job);
-                    // Also what other sessions drew of this picture, which this job found kept and did not draw.
-                    armLayers();
+                    armLayers(job);
                 } catch (RuntimeException | Error e) {
                     // It may have left nothing usable; real pictures draw as ever.
                     hoverAhead.drop();
@@ -1381,6 +1390,7 @@ public final class Session {
         // With hover layers the client may already show this hover over the picture by itself: then nothing is drawn,
         // unless a picture is on its way, which the layers are not of.
         boolean shown = h.shows(frame, x, y, key(e, false), drawnHover);
+        if (shown && differs && !drawing()) ClientHovers.SHOWN.incrementAndGet();
         if (shown && !drawing()) lookAhead();
         else if (differs || !shown) render();
         else lookAhead();

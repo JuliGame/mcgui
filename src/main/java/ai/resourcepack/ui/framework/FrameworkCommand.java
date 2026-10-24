@@ -200,7 +200,7 @@ public final class FrameworkCommand implements TabExecutor {
         }
         int[] px = new int[(r - l) * (b - t)];
         java.util.Arrays.fill(px, 0xFF000000 | rgb);
-        boolean ok = layers.arm("debug " + l + "," + t, new int[]{l, t, r, b}, null, 1, px, l, t, r - l, b - t);
+        boolean ok = layers.arm("debug " + l + "," + t, new int[]{l, t, r, b}, null, 1, layers.prepare(px, l, t, r - l, b - t, () -> false));
         return ok ? "Armed a layer over " + l + "," + t + " to " + r + "," + b + " (" + layers.used() + " of " + layers.capacity() + " maps)"
                 : "Not enough layer maps free (" + layers.used() + " of " + layers.capacity() + ")";
     }

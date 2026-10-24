@@ -98,7 +98,7 @@ public final class LayerBench {
                 if (System.getProperty("why") != null && on && !got) {
                     ai.resourcepack.ui.html.HoverAhead ha = get(s, "hoverAhead");
                     List<Element> dh = get(s, "drawnHover"), dp = get(s, "drawnPress");
-                    var ready = ha.ready(get(s, "frame"), dh, dp, dp);
+                    var ready = ha.ready(get(s, "frame"), dh, dp, dp, k -> true);
                     boolean has = ready.stream().anyMatch(r -> r.hoverKey().equals(t.key));
                     System.out.println("  not armed: ready " + ready.size() + " has-target " + has + " refused " + h.refused + " drawnHover " + dh.size()
                             + (has ? " motion " + ready.stream().filter(r -> r.hoverKey().equals(t.key)).findFirst().get().prepared().motion() : ""));
@@ -238,14 +238,18 @@ public final class LayerBench {
             @Override public boolean armed(Object key) { return layers.armed(key); }
             @Override public void disarm(Object key) { layers.disarm(key); }
             @Override public void clear() { layers.clear(); }
-            @Override public boolean arm(Object key, int[] include, int[] exclude, int priority, int[] argb, int x, int y, int w, int h) {
-                int before = layers.used();
-                boolean was = layers.armed(key);
-                boolean ok = layers.arm(key, include, exclude, priority, argb, x, y, w, h);
+            @Override public Layer prepare(int[] argb, int x, int y, int w, int h, java.util.function.BooleanSupplier stop) {
                 int opaque = 0;
                 for (int p : argb) if (p >>> 24 >= 128) opaque++;
-                System.out.printf("  arm %s at %d,%d %dx%d (%d opaque px) include %s -> %s, maps %d%n", ok ? "ok" : "NO", x, y, w, h, opaque,
-                        java.util.Arrays.toString(include), was ? "re-armed" : "new", layers.used() - before);
+                System.out.printf("  prepare at %d,%d %dx%d (%d opaque px)%n", x, y, w, h, opaque);
+                return layers.prepare(argb, x, y, w, h, stop);
+            }
+            @Override public boolean arm(Object key, int[] include, int[] exclude, int priority, Layer layer) {
+                int before = layers.used();
+                boolean was = layers.armed(key);
+                boolean ok = layers.arm(key, include, exclude, priority, layer);
+                System.out.printf("  arm %s include %s -> %s, maps %d%n", ok ? "ok" : "NO", java.util.Arrays.toString(include), was ? "re-armed" : "new",
+                        layers.used() - before);
                 return ok;
             }
         };

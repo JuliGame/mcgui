@@ -83,6 +83,11 @@ public final class HoverAhead {
         spent += ns;
     }
 
+    /** [ns] of CPU spent on work that, like drawing ahead, is only a guess (arming hover layers): from the same budget. */
+    public static void charge(long ns) {
+        spend(ns);
+    }
+
     /** CPU (ns) every drawing ahead has used since the plugin started. */
     private static long spent;
 
@@ -127,8 +132,6 @@ public final class HoverAhead {
     public final int most;
     /** Where repaints are kept, for every session (and taken from). */
     private final SharedRepaints shared;
-    /** Told on the render thread after each repaint drawn ahead is kept. */
-    private volatile Runnable onReady = () -> {};
     /** See {@link #personal}. */
     private volatile Personal.Copy copy;
 
@@ -183,11 +186,6 @@ public final class HoverAhead {
         return shared;
     }
 
-    /** [r] runs on the render thread each time a repaint drawn ahead by this session is kept. */
-    public void onReady(Runnable r) {
-        onReady = r == null ? () -> {} : r;
-    }
-
     /** Whether nothing else is drawing a whole picture: a drawing ahead would take a core from its bands. */
     public static boolean quiet() {
         return HtmlRenderer.painting() == 0;
@@ -222,6 +220,11 @@ public final class HoverAhead {
     /** Whether a drawing ahead from (x, y) over [f] would draw nothing new: one finished there, and nothing has changed. */
     public synchronized boolean done(HtmlRenderer.Frame f, double x, double y) {
         return doneOf == f && Math.abs(x - doneX) < 8 && Math.abs(y - doneY) < 8;
+    }
+
+    /** What the last drawing ahead finished is not all there is to do from there (its layers were not all armed): look again. */
+    public synchronized void again() {
+        doneOf = null;
     }
 
     /**
@@ -289,13 +292,17 @@ public final class HoverAhead {
     }
 
     /**
-     * Every repaint kept from [before]'s state ([drawnHover], [drawnPress], [pressKey]) to one of its hover targets,
-     * with where that target is: what is ready for whatever the pointer reaches next. Takes nothing.
+     * Every repaint kept from [before]'s state ([drawnHover], [drawnPress], [pressKey]) to one of its hover targets whose
+     * key is [wanted], with where that target is: what is ready for whatever the pointer reaches next. Takes nothing.
+     * Another player's copy of a personal page is compared round each one it finds (Personal), so ask only for those
+     * still wanted.
      */
-    public List<Ready> ready(HtmlRenderer.Frame before, List<Element> drawnHover, List<Element> drawnPress, List<Element> pressKey) {
+    public List<Ready> ready(HtmlRenderer.Frame before, List<Element> drawnHover, List<Element> drawnPress, List<Element> pressKey,
+                             java.util.function.Predicate<List<Element>> wanted) {
         List<Ready> out = new ArrayList<>();
         Personal.Copy c = copyOf(before.document());
         for (Target t : targets(before)) {
+            if (!wanted.test(t.key)) continue;
             SharedRepaints.Entry e = shared.peek(key(before, drawnHover, drawnPress, t.key, pressKey));
             if (e == null && c != null) {
                 // Another copy's, whose pixels are this one's as long as the pictures are alike round them and nothing
@@ -428,6 +435,11 @@ public final class HoverAhead {
         public void cancel() {
             budget.cancel();
         }
+
+        /** Whether it was told to stop (real work came), or to stop after the repaint it is drawing. */
+        public boolean stopped() {
+            return budget.cancelled() || last;
+        }
     }
 
     /** Draws ahead for [job], nearest target first, until done, stopped, out of budget, or every one is known. On a render thread. */
@@ -491,7 +503,6 @@ public final class HoverAhead {
                     settled = true;
                     drew.add(t.key);
                     if (p != null && !empty(p)) useful++;
-                    if (p != null) onReady.run();
                 } catch (RenderAbandoned e) {
                     abandoned.incrementAndGet();
                     return;

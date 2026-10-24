@@ -7,8 +7,10 @@ import ai.resourcepack.ui.framework.render.Palette;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.BooleanSupplier;
 
 /**
  * A view's {@link HoverLayers}: a row of [capacity] hidden maps (its own {@link #canvas}, sent in HI), each shown by a
@@ -20,6 +22,12 @@ import java.util.Map;
  * <p>Only a held map has a frame on the client ({@link #framed}, which the view brings into line once the maps have
  * reached it): every map frame the client has costs it a draw call each frame, about 9 µs, even when the shader puts
  * its quad where nothing is drawn.
+ *
+ * <p>A layer's maps are encoded once for every view on the server ({@link #prepare}, kept by their pixels in
+ * {@link #KEPT}) and only marked per view: fifty players looking at one picture encode its layers once, and a layer
+ * whose pixels come out the same over a new picture is not encoded again. Armed again where the client still has its
+ * maps (a layer taken off as the picture changed, and armed once more over the next), it goes back into them, so the
+ * client is sent only their marks.
  */
 final class LayerSet implements HoverLayers {
     private static final int[] NOWHERE = {0, 0, 0, 0};
@@ -30,11 +38,11 @@ final class LayerSet implements HoverLayers {
     private final int cols, rows, speed, side;
     /**
      * By map: the key of the layer holding it (null for none), the canvas pixel its first picture row starts at (see
-     * markLayer), and the bytes it was last given.
+     * markLayer), the bytes it was last given, and the unmarked picture they were marked from (a {@link Prepared}'s).
      */
     private final Object[] owner;
     private final int[] atX, atY;
-    private final byte[][] shown;
+    private final byte[][] shown, source;
     private final Map<Object, int[]> held = new HashMap<>();
     private int used;
     /** Bumped whenever which maps are held changes. */
@@ -54,6 +62,7 @@ final class LayerSet implements HoverLayers {
         atX = new int[n];
         atY = new int[n];
         shown = new byte[n][];
+        source = new byte[n][];
         // Every map starts as a layer that never shows: a plain blank tile would be a screen, drawn where its frame lies.
         byte[] ycc = new byte[Canvas.TILE * 3];
         byte[] empty = new byte[Canvas.TILE];
@@ -83,11 +92,30 @@ final class LayerSet implements HoverLayers {
         return out;
     }
 
-    /** One converted map's colours, per thread: 48 KB, used by one {@link #arm} at a time. */
+    /** One converted map's colours, per thread: 48 KB, used by one {@link #prepare} at a time. */
     private static final ThreadLocal<byte[]> YCC = ThreadLocal.withInitial(() -> new byte[Canvas.TILE * 3]);
 
     /** Picture rows a layer's map holds: its top two are its data's. */
     static final int MAP_ROWS = 126;
+
+    /**
+     * A layer worked out for views of [cols] × [rows] maps: where each of its maps goes (the canvas pixel of its first
+     * picture row) and its picture, encoded and not marked. Shared by every view that arms it: never written to.
+     */
+    record Prepared(int cols, int rows, int[][] places, byte[][] tiles) implements Layer {
+        @Override public int maps() { return tiles.length; }
+    }
+
+    /** What a layer's pixels are kept under in {@link #KEPT}: its place, the views' size, and two hashes of its pixels. */
+    private record Pixels(Palette palette, int cols, int rows, int x, int y, int w, int h, long a, long b) {}
+
+    /**
+     * Layers worked out lately, by their pixels, for every view: at most {@link #KEPT_BYTES} of maps, the least recently
+     * used let go first.
+     */
+    private static final LinkedHashMap<Pixels, Prepared> KEPT = new LinkedHashMap<>(64, 0.75f, true);
+    static final long KEPT_BYTES = 16L << 20;
+    private static long keptBytes;
 
     @Override
     public int mapsFor(int[] argb, int x, int y, int w, int h) {
@@ -96,29 +124,20 @@ final class LayerSet implements HoverLayers {
     }
 
     @Override
-    public boolean arm(Object key, int[] include, int[] exclude, int priority, int[] argb, int x, int y, int w, int h) {
+    public Layer prepare(int[] argb, int x, int y, int w, int h, BooleanSupplier stop) {
         int x0 = Math.max(0, x), y0 = Math.max(0, y), x1 = Math.min(cols * 128, x + w), y1 = Math.min(rows * 128, y + h);
-        if (x1 <= x0 || y1 <= y0) return false;
-        int[] in = include, out = exclude == null ? NOWHERE : exclude;
-        int prio = Math.max(0, Math.min(PRIORITIES - 1, priority));
-        // Where its maps go, first: a layer with no room is turned down before the work of encoding it.
+        if (x1 <= x0 || y1 <= y0) return new Prepared(cols, rows, new int[0][], new byte[0][]);
+        Pixels key = pixels(palette, cols, rows, argb, x, y, w, h);
+        synchronized (KEPT) {
+            Prepared kept = KEPT.get(key);
+            if (kept != null) return kept;
+        }
         List<int[]> places = places(argb, x, y, w, x0, y0, x1, y1);
-        if (places.isEmpty() || places.size() > owner.length / 2) {
-            disarm(key);
-            return false;
-        }
-        synchronized (this) {
-            int[] mine = held.get(key);
-            if (owner.length - used + (mine == null ? 0 : mine.length) < places.size()) {
-                disarm(key);
-                return false;
-            }
-        }
-        // Encoded outside the lock: it is most of the work, and touches nothing shared.
-        List<byte[]> tiles = new ArrayList<>();
+        byte[][] tiles = new byte[places.size()][];
         byte[] ycc = YCC.get();
-        for (int[] place : places) {
-            int cx = place[0], cy = place[1];
+        for (int k = 0; k < tiles.length; k++) {
+            if (stop.getAsBoolean()) return null;
+            int cx = places.get(k)[0], cy = places.get(k)[1];
             java.util.Arrays.fill(ycc, (byte) 0);
             for (int py = Math.max(y0, cy); py < Math.min(y1, cy + MAP_ROWS); py++) {
                 int s = (py - y) * w - x, d = ((py - cy + 2) * 128 - cx) * 3;
@@ -128,34 +147,86 @@ final class LayerSet implements HoverLayers {
                     if (p >>> 24 >= 128) Palette.rgbToYcc(p, ycc, d + px * 3);
                 }
             }
-            byte[] hi = new byte[Canvas.TILE];
-            palette.encodeHi(ycc, 128, 0, 0, hi, true);
-            tiles.add(palette.markLayer(hi, cols, rows, cx, cy, speed, side, prio, in, out));
+            tiles[k] = new byte[Canvas.TILE];
+            palette.encodeHi(ycc, 128, 0, 0, tiles[k], true);
         }
+        Prepared made = new Prepared(cols, rows, places.toArray(new int[0][]), tiles);
+        synchronized (KEPT) {
+            if (KEPT.put(key, made) == null) keptBytes += (long) tiles.length * Canvas.TILE;
+            for (var it = KEPT.values().iterator(); keptBytes > KEPT_BYTES && it.hasNext(); ) {
+                keptBytes -= (long) it.next().tiles.length * Canvas.TILE;
+                it.remove();
+            }
+        }
+        return made;
+    }
+
+    /** [argb]'s key in {@link #KEPT}: two 64-bit hashes of its pixels, with different mixes, so two that differ never meet. */
+    private static Pixels pixels(Palette palette, int cols, int rows, int[] argb, int x, int y, int w, int h) {
+        long a = 0x9E3779B97F4A7C15L, b = 0xC2B2AE3D27D4EB4FL;
+        for (int p : argb) {
+            a = (a ^ p) * 0xFF51AFD7ED558CCDL;
+            a ^= a >>> 29;
+            b = Long.rotateLeft(b + p * 0x165667B19E3779F9L, 31) * 0x85EBCA77C2B2AE63L;
+        }
+        return new Pixels(palette, cols, rows, x, y, w, h, a, b);
+    }
+
+    /** Layers kept for every view, and their bytes (tests). */
+    static long keptBytes() {
+        synchronized (KEPT) {
+            return keptBytes;
+        }
+    }
+
+    @Override
+    public boolean arm(Object key, int[] include, int[] exclude, int priority, Layer layer) {
+        Prepared p = (Prepared) layer;
+        if (p.cols != cols || p.rows != rows) throw new IllegalArgumentException("a layer of a view of another size");
+        int[] in = include, out = exclude == null ? NOWHERE : exclude;
+        int prio = Math.max(0, Math.min(PRIORITIES - 1, priority));
+        int n = p.tiles.length;
         synchronized (this) {
             Map<Integer, byte[]> given = new HashMap<>();
             release(key, given);
-            if (owner.length - used < tiles.size()) {
+            if (n == 0 || n > owner.length / 2 || owner.length - used < n) {
                 canvas.put(given);
                 return false;
             }
-            int[] slots = new int[tiles.size()];
-            int k = 0;
-            for (int i = 0; i < owner.length && k < slots.length; i++) {
-                if (owner[i] != null) continue;
-                owner[i] = key;
-                atX[i] = places.get(k)[0];
-                atY[i] = places.get(k)[1];
-                shown[i] = tiles.get(k);
-                given.put(i, shown[i]);
-                slots[k++] = i;
+            int[] slots = new int[n];
+            java.util.Arrays.fill(slots, -1);
+            // First the maps the client still has this layer's pictures in: only their marks are sent.
+            for (int k = 0; k < n; k++) {
+                for (int i = 0; i < owner.length; i++) {
+                    if (owner[i] == null && source[i] == p.tiles[k] && atX[i] == p.places[k][0] && atY[i] == p.places[k][1]) {
+                        take(i, k, key, p, prio, in, out, given);
+                        slots[k] = i;
+                        break;
+                    }
+                }
             }
-            used += slots.length;
+            for (int k = 0, i = 0; k < n; k++) {
+                if (slots[k] >= 0) continue;
+                while (owner[i] != null) i++;
+                take(i, k, key, p, prio, in, out, given);
+                slots[k] = i;
+            }
+            used += n;
             changes++;
             held.put(key, slots);
             canvas.put(given);
             return true;
         }
+    }
+
+    /** Map [i] takes map [k] of [p], as layer [key]. Under the lock. */
+    private void take(int i, int k, Object key, Prepared p, int prio, int[] in, int[] out, Map<Integer, byte[]> given) {
+        owner[i] = key;
+        atX[i] = p.places[k][0];
+        atY[i] = p.places[k][1];
+        source[i] = p.tiles[k];
+        shown[i] = palette.markLayer(p.tiles[k].clone(), cols, rows, atX[i], atY[i], speed, side, prio, in, out);
+        given.put(i, shown[i]);
     }
 
     /**

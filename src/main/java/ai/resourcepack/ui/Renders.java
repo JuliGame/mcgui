@@ -117,11 +117,20 @@ class Renders implements Executor {
 
     /** Whether a pool thread is free and nothing waits for one: work that is only a guess may run now without delaying anyone's. */
     boolean idle() {
+        ForkJoinPool pool = Cpu.pool();
+        return !queued() && pool.getRunningThreadCount() < pool.getParallelism();
+    }
+
+    /**
+     * Whether any work waits for a pool thread: a job here, or a picture's bands and tiles in the pool's own queue. Work
+     * that is only a guess, under way, stops for it.
+     */
+    boolean queued() {
         synchronized (this) {
-            for (ArrayDeque<Runnable> q : waiting) if (!q.isEmpty()) return false;
+            for (ArrayDeque<Runnable> q : waiting) if (!q.isEmpty()) return true;
         }
         ForkJoinPool pool = Cpu.pool();
-        return pool.getRunningThreadCount() < pool.getParallelism() && pool.getQueuedSubmissionCount() == 0 && pool.getQueuedTaskCount() == 0;
+        return pool.getQueuedSubmissionCount() > 0 || pool.getQueuedTaskCount() > 0;
     }
 
     /**

@@ -11,6 +11,11 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -43,6 +48,11 @@ class LayerSetTest {
         return px;
     }
 
+    /** [px] prepared and armed as layer [key] of [set]. */
+    private static boolean arm(LayerSet set, String key, int[] include, int[] exclude, int priority, int[] px, int x, int y, int w, int h) {
+        return set.arm(key, include, exclude, priority, set.prepare(px, x, y, w, h, () -> false));
+    }
+
     @Test
     void aLayerTakesAMapForEachPartItIsOpaqueIn() {
         Canvas canvas = new Canvas(PALETTE, 8, 1);
@@ -57,7 +67,7 @@ class LayerSetTest {
             }
         }
         int[] include = {210, 110, 380, 190}, exclude = {250, 120, 260, 130};
-        assertTrue(set.arm("a", include, exclude, 7, px, x, y, w, h));
+        assertTrue(arm(set, "a", include, exclude, 7, px, x, y, w, h));
         assertEquals(2, set.used());
         Canvas.Snapshot snap = canvas.snapshot();
         int[][] places = new int[2][];
@@ -103,7 +113,7 @@ class LayerSetTest {
         Canvas canvas = new Canvas(PALETTE, 8, 1);
         LayerSet set = new LayerSet(PALETTE, canvas, null, COLS, ROWS, 8, 0);
         assertArrayEquals(new boolean[8], set.framed());
-        assertTrue(set.arm("a", new int[]{0, 0, 300, 100}, null, 1, solid(300, 100, 0xFFFF0000), 0, 0, 300, 100));
+        assertTrue(arm(set, "a", new int[]{0, 0, 300, 100}, null, 1, solid(300, 100, 0xFFFF0000), 0, 0, 300, 100));
         // Only its three held maps want frames on the client; a map no layer holds has none.
         boolean[] framed = set.framed();
         assertArrayEquals(new boolean[]{true, true, true, false, false, false, false, false}, framed);
@@ -116,7 +126,7 @@ class LayerSetTest {
     void disarmingEmptiesTheRectangleAndFreesTheMaps() {
         Canvas canvas = new Canvas(PALETTE, 8, 1);
         LayerSet set = new LayerSet(PALETTE, canvas, null, COLS, ROWS, 8, 0);
-        assertTrue(set.arm("a", new int[]{0, 0, 300, 100}, null, 1, solid(300, 100, 0xFFFF0000), 0, 0, 300, 100));
+        assertTrue(arm(set, "a", new int[]{0, 0, 300, 100}, null, 1, solid(300, 100, 0xFFFF0000), 0, 0, 300, 100));
         assertEquals(3, set.used());
         byte[] before = canvas.snapshot().tile(0, Canvas.Encoding.HI);
         int changes = set.changes();
@@ -138,16 +148,16 @@ class LayerSetTest {
     void aLayerWithNoRoomArmsNothing() {
         Canvas canvas = new Canvas(PALETTE, 6, 1);
         LayerSet set = new LayerSet(PALETTE, canvas, null, COLS, ROWS, 8, 0);
-        assertTrue(set.arm("a", new int[]{0, 0, 384, 100}, null, 1, solid(384, 100, 0xFF00FF00), 0, 0, 384, 100));
-        assertTrue(set.arm("c", new int[]{0, 200, 384, 300}, null, 1, solid(384, 100, 0xFF00FF00), 0, 200, 384, 100));
-        assertFalse(set.arm("b", new int[]{0, 400, 256, 500}, null, 1, solid(256, 100, 0xFF00FF00), 0, 400, 256, 100));
+        assertTrue(arm(set, "a", new int[]{0, 0, 384, 100}, null, 1, solid(384, 100, 0xFF00FF00), 0, 0, 384, 100));
+        assertTrue(arm(set, "c", new int[]{0, 200, 384, 300}, null, 1, solid(384, 100, 0xFF00FF00), 0, 200, 384, 100));
+        assertFalse(arm(set, "b", new int[]{0, 400, 256, 500}, null, 1, solid(256, 100, 0xFF00FF00), 0, 400, 256, 100));
         assertFalse(set.armed("b"));
         assertEquals(6, set.used());
         // Armed again in its own place, a layer may use the maps it had.
-        assertTrue(set.arm("a", new int[]{0, 0, 256, 100}, null, 1, solid(256, 100, 0xFF00FF00), 0, 0, 256, 100));
+        assertTrue(arm(set, "a", new int[]{0, 0, 256, 100}, null, 1, solid(256, 100, 0xFF00FF00), 0, 0, 256, 100));
         assertEquals(5, set.used());
         // Nothing opaque: nothing to arm.
-        assertFalse(set.arm("d", new int[]{0, 0, 10, 10}, null, 1, new int[100], 0, 0, 10, 10));
+        assertFalse(arm(set, "d", new int[]{0, 0, 10, 10}, null, 1, new int[100], 0, 0, 10, 10));
         set.clear();
         assertEquals(0, set.used());
     }
@@ -158,8 +168,62 @@ class LayerSetTest {
         LayerSet set = new LayerSet(PALETTE, canvas, null, COLS, ROWS, 8, 0);
         int[] wide = solid(512, 100, 0xFF00FF00);
         assertEquals(4, set.mapsFor(wide, 0, 0, 512, 100));
-        assertFalse(set.arm("a", new int[]{0, 0, 512, 100}, null, 1, wide, 0, 0, 512, 100));
+        assertFalse(arm(set, "a", new int[]{0, 0, 512, 100}, null, 1, wide, 0, 0, 512, 100));
         assertEquals(0, set.used());
         assertEquals(3, set.mapsFor(solid(384, 100, 0xFF00FF00), 0, 0, 384, 100));
+    }
+
+    /**
+     * Two views of one size given the same pixels share one layer, encoded once: each only marks its maps, so the maps of
+     * two views alike come out byte for byte the same.
+     */
+    @Test
+    void aLayerIsEncodedOnceForEveryView() {
+        LayerSet one = new LayerSet(PALETTE, new Canvas(PALETTE, 8, 1), null, COLS, ROWS, 8, 0);
+        LayerSet two = new LayerSet(PALETTE, new Canvas(PALETTE, 8, 1), null, COLS, ROWS, 8, 0);
+        int[] px = solid(300, 100, 0xFF4080C0);
+        var a = one.prepare(px, 0, 0, 300, 100, () -> false);
+        var b = two.prepare(px.clone(), 0, 0, 300, 100, () -> false);
+        assertSame(a, b, "worked out twice");
+        assertNotSame(a, one.prepare(solid(300, 100, 0xFF4080C1), 0, 0, 300, 100, () -> false), "other pixels found the same layer");
+        int[] include = {0, 0, 300, 100};
+        assertTrue(one.arm("a", include, null, 1, a));
+        assertTrue(two.arm("a", include, null, 1, b));
+        for (int i = 0; i < 3; i++) assertArrayEquals(one.canvas.snapshot().tile(i, Canvas.Encoding.HI), two.canvas.snapshot().tile(i, Canvas.Encoding.HI));
+        // A view of another size cannot take it.
+        LayerSet other = new LayerSet(PALETTE, new Canvas(PALETTE, 8, 1), null, 8, 4, 8, 0);
+        assertThrows(IllegalArgumentException.class, () -> other.arm("a", include, null, 1, a));
+    }
+
+    /** A layer taken off as the picture under it changes, and armed again over the next, goes back into its maps: only marks are sent. */
+    @Test
+    void armedAgainItsMapsAreSentOnlyTheirMarks() {
+        Canvas canvas = new Canvas(PALETTE, 8, 1);
+        LayerSet set = new LayerSet(PALETTE, canvas, null, COLS, ROWS, 8, 0);
+        assertTrue(arm(set, "x", new int[]{0, 200, 256, 300}, null, 1, solid(256, 100, 0xFF00FF00), 0, 200, 256, 100));
+        assertTrue(arm(set, "a", new int[]{0, 0, 300, 100}, null, 1, solid(300, 100, 0xFFFF0000), 0, 0, 300, 100));
+        Canvas.Snapshot before = canvas.snapshot();
+        set.clear();
+        // Over the next picture, in another order and with another rectangle: the same pixels.
+        assertTrue(arm(set, "a", new int[]{0, 0, 290, 100}, null, 2, solid(300, 100, 0xFFFF0000), 0, 0, 300, 100));
+        Canvas.Snapshot after = canvas.snapshot();
+        for (int i = 2; i < 5; i++) {
+            byte[] p = before.tile(i, Canvas.Encoding.HI), q = after.tile(i, Canvas.Encoding.HI);
+            int differ = 0;
+            for (int k = 0; k < Canvas.TILE; k++) if (p[k] != q[k]) differ++;
+            assertTrue(differ <= 16, "map " + i + ": " + differ + " bytes changed");
+        }
+        assertArrayEquals(new int[]{0, 0, 290, 100}, rect(after.tile(2, Canvas.Encoding.HI), 6));
+    }
+
+    /** Preparing stops between maps when told to, and keeps nothing. */
+    @Test
+    void preparingStopsWhenToldTo() {
+        LayerSet set = new LayerSet(PALETTE, new Canvas(PALETTE, 8, 1), null, COLS, ROWS, 8, 0);
+        int[] px = solid(300, 100, 0xFF102030);
+        assertNull(set.prepare(px, 0, 0, 300, 100, () -> true));
+        int[] asked = {0};
+        assertNotNull(set.prepare(px, 0, 0, 300, 100, () -> asked[0]++ < 0));
+        assertEquals(3, asked[0], "asked between maps");
     }
 }

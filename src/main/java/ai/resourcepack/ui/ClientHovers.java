@@ -17,6 +17,7 @@ import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.BooleanSupplier;
 
 /**
  * The hovers a view's client shows by itself ({@link HoverLayers}): each hover drawn ahead over the picture on the
@@ -29,6 +30,12 @@ import java.util.Map;
  * layer only if its rectangle is where the pointer is over it, give or take a few rounded corners; where the client then
  * shows a layer the pointer is not over (a corner, or something over the target), the server takes it off as soon as it
  * hears where the pointer is ({@link #shows}).
+ *
+ * <p>Arming is the last thing a drawing ahead does and the least urgent work there is: it stops between layers (and a
+ * layer between maps) the moment any real picture is asked for ({@link #arm}'s stop), and never holds this object's lock
+ * while it works, so the server thread asking {@link #shows} never waits for it. What working a layer out comes to is
+ * kept with the repaint it is of ({@link #WORKED}), so every session that takes that repaint, as every player on the same
+ * page in the same state does, arms it without working it out again.
  */
 final class ClientHovers {
     /** Canvas pixels between the points tried when checking a target's rectangle, at the least. */
@@ -58,10 +65,26 @@ final class ClientHovers {
 
     /**
      * Counters, for the bench and debug output: layers armed, targets whose rectangle would not do, layers taken off by
-     * the server, and the render threads' CPU time spent arming, ns.
+     * the server, the render threads' CPU time spent arming, ns, and armings stopped for real work.
      */
-    long armedCount, refused, corrected, armNs;
+    long armedCount, refused, corrected, armNs, stopped;
     private static final java.lang.management.ThreadMXBean THREADS = java.lang.management.ManagementFactory.getThreadMXBean();
+
+    /**
+     * Every session's together, for {@code /mcgui stats}: layers armed; repaints whose layer was worked out, and those
+     * found worked out by another session; hovers the client showed by itself ({@link Session#pointer}); armings
+     * stopped for real work; and arming's CPU, ns.
+     */
+    static final java.util.concurrent.atomic.AtomicLong ARMED = new java.util.concurrent.atomic.AtomicLong(),
+            WORKED_OUT = new java.util.concurrent.atomic.AtomicLong(), REUSED = new java.util.concurrent.atomic.AtomicLong(),
+            SHOWN = new java.util.concurrent.atomic.AtomicLong(), STOPPED = new java.util.concurrent.atomic.AtomicLong(),
+            ARM_NS = new java.util.concurrent.atomic.AtomicLong();
+
+    /** The counters above, as JSON. */
+    static String json() {
+        return String.format(java.util.Locale.ROOT, "{\"armed\":%d,\"worked_out\":%d,\"reused\":%d,\"shown\":%d,\"stopped\":%d,\"arm_cpu_s\":%.3f}",
+                ARMED.get(), WORKED_OUT.get(), REUSED.get(), SHOWN.get(), STOPPED.get(), ARM_NS.get() / 1e9);
+    }
 
     ClientHovers(HoverLayers layers) {
         this.layers = layers;
@@ -77,80 +100,168 @@ final class ClientHovers {
         layers.clear();
     }
 
+    /** Whether hover [key] over [f] still wants a layer: it has none, and is not known never to have one. */
+    synchronized boolean wants(HtmlRenderer.Frame f, List<Element> key) {
+        return f != of || !armed.containsKey(key) && !never.contains(key);
+    }
+
     /**
-     * Arms a layer for each hover in [ready] drawn ahead over [f], drawn in [drawnHover], that has none yet: on the render
-     * thread, while [f]'s picture is not being drawn into. [px], [py]: the pointer, in canvas pixels; when the maps run
-     * out, the layers furthest from it go first.
+     * Arms a layer for each hover in [ready] drawn ahead over [f], drawn in [drawnHover], that has none yet, nearest the
+     * pointer first: on the render thread, while [f]'s picture is not being drawn into. [px], [py]: the pointer, in canvas
+     * pixels; when the maps run out, the layers furthest from it go first. Gives up as soon as [stop] says so; false then.
      */
-    synchronized void arm(HtmlRenderer.Frame f, List<Element> drawnHover, List<HoverAhead.Ready> ready, int px, int py) {
+    boolean arm(HtmlRenderer.Frame f, List<Element> drawnHover, List<HoverAhead.Ready> ready, int px, int py, BooleanSupplier stop) {
         long t0 = THREADS.getCurrentThreadCpuTime();
         try {
-            armEach(f, drawnHover, ready, px, py);
+            boolean done = armEach(f, drawnHover, ready, px, py, stop);
+            if (!done) {
+                stopped++;
+                STOPPED.incrementAndGet();
+            }
+            return done;
         } finally {
-            armNs += THREADS.getCurrentThreadCpuTime() - t0;
+            long ns = THREADS.getCurrentThreadCpuTime() - t0;
+            armNs += ns;
+            ARM_NS.addAndGet(ns);
         }
     }
 
-    private void armEach(HtmlRenderer.Frame f, List<Element> drawnHover, List<HoverAhead.Ready> ready, int px, int py) {
-        if (f != of) {
-            if (of != null || !armed.isEmpty()) layers.clear();
-            armed.clear();
-            never.clear();
-            worked.clear();
-            of = f;
-            ofHover = drawnHover;
+    private boolean armEach(HtmlRenderer.Frame f, List<Element> drawnHover, List<HoverAhead.Ready> ready, int px, int py, BooleanSupplier stop) {
+        synchronized (this) {
+            if (f != of) {
+                if (of != null || !armed.isEmpty()) layers.clear();
+                armed.clear();
+                never.clear();
+                worked.clear();
+                of = f;
+                ofHover = drawnHover;
+            }
         }
-        if (ready.isEmpty()) return;
+        if (ready.isEmpty()) return true;
         BufferedImage img = f.image();
         // A parked picture (no image kept): nothing to work layers out over until it is drawn again.
-        if (img == null) return;
-        int cw = img.getWidth(), ch = img.getHeight();
+        if (img == null) return true;
         double s = f.scale();
+        List<HoverAhead.Ready> nearest = new ArrayList<>(ready);
+        nearest.sort(java.util.Comparator.comparingDouble(r -> distance(r.boxes(), s, px, py)));
         Map<Element, List<Element>> keys = new IdentityHashMap<>();
-        int[] drawnBox = drawnHover.isEmpty() ? null : box(boxesOf(f, drawnHover, keys), s, cw, ch);
-        for (HoverAhead.Ready r : ready) {
-            if (armed.containsKey(r.hoverKey()) || never.contains(r.hoverKey()) || r.hoverKey().equals(drawnHover)) continue;
-            Worked w = worked.get(r.hoverKey());
+        int[] drawnBox = null;
+        boolean drawnKnown = false;
+        for (HoverAhead.Ready r : nearest) {
+            if (stop.getAsBoolean()) return false;
+            List<Element> key = r.hoverKey();
+            Worked w;
+            synchronized (this) {
+                if (of != f) return true;
+                if (armed.containsKey(key) || never.contains(key) || key.equals(drawnHover)) continue;
+                w = worked.get(key);
+            }
             if (w == null) {
-                int[] include = box(r.boxes(), s, cw, ch);
-                // Over the drawn state's own target (unless this one is inside it), the picture is right as it is.
-                int[] exclude = include == null || drawnBox == null || !overlaps(drawnBox, include) || inside(include, drawnBox) ? null : drawnBox;
-                // A hover that starts a transition is animated by the server: the client could show only its first frame.
-                if (include == null || r.prepared().motion() != null && r.prepared().motion().active() || !fits(f, r.hoverKey(), include, exclude, keys)) {
-                    never.add(r.hoverKey());
-                    refused++;
-                    continue;
+                if (!drawnKnown) {
+                    drawnBox = drawnHover.isEmpty() ? null : box(boxesOf(f, drawnHover, keys), s, img.getWidth(), img.getHeight());
+                    drawnKnown = true;
                 }
-                int priority = priority(f, r.hoverKey(), keys);
-                int[] place = new int[4];
-                int[] layer = layerPixels(img, r.prepared(), place);
-                if (layer == null) {
+                Shared sh = work(f, img, r, drawnBox, keys, stop);
+                if (sh == null) return false;
+                synchronized (this) {
+                    if (of != f) return true;
+                    // Its rectangle will not do, nothing it changes is opaque, or it needs more than half the maps (a hover
+                    // that changes a large panel), which would leave room for no other.
+                    if (!sh.fits || sh.maps.count < 0 || sh.maps.count > layers.capacity() / 2) {
+                        never.add(key);
+                        refused++;
+                        continue;
+                    }
+                    w = new Worked(new Armed(key, sh.include, sh.exclude, sh.priority), sh.maps.layer);
+                    worked.put(key, w);
+                }
+            }
+            synchronized (this) {
+                if (of != f) return true;
+                Armed a = w.armed;
+                if (w.layer == null) {
                     // It changes nothing: the client shows it as it is, with no layer at all.
-                    armed.put(r.hoverKey(), new Armed(r.hoverKey(), include, exclude, priority));
+                    armed.put(key, a);
                     continue;
                 }
-                // One that needs more than half the maps would leave room for no other (a hover that changes a large panel).
-                if (layers.mapsFor(layer, place[0], place[1], place[2], place[3]) > layers.capacity() / 2) {
-                    never.add(r.hoverKey());
-                    refused++;
-                    continue;
+                while (!layers.arm(a.key, a.include, a.exclude, a.priority, w.layer)) {
+                    if (!evict(px, py, a.include)) break;
                 }
-                w = new Worked(new Armed(r.hoverKey(), include, exclude, priority), layer, place);
-                worked.put(r.hoverKey(), w);
+                // No room near the pointer now: armed from what was worked out when the pointer comes closer.
+                if (!layers.armed(a.key)) continue;
+                armed.put(a.key, a);
+                armedCount++;
+                ARMED.incrementAndGet();
             }
-            Armed a = w.armed;
-            while (!layers.arm(a.key, a.include, a.exclude, a.priority, w.layer, w.place[0], w.place[1], w.place[2], w.place[3])) {
-                if (!evict(px, py, a.include)) break;
-            }
-            // No room near the pointer now: armed from what was worked out when the pointer comes closer.
-            if (!layers.armed(a.key)) continue;
-            armed.put(a.key, a);
-            armedCount++;
         }
+        return true;
     }
 
-    /** A layer worked out over the picture the layers are of: where it shows, its pixels and their place. */
-    private record Worked(Armed armed, int[] layer, int[] place) {}
+    /** A layer worked out over the picture the layers are of: where it shows, and its maps (null: it changes nothing). */
+    private record Worked(Armed armed, HoverLayers.Layer layer) {}
+
+    /**
+     * A repaint's layer: the maps it takes ([count]: 0 if it changes nothing, -1 if nothing it changes is opaque, as a
+     * hover that clears pixels of an overlay, which no layer can show) and the layer itself, null unless it is 1 to half
+     * the maps.
+     */
+    private record Maps(int count, HoverLayers.Layer layer) {}
+
+    /**
+     * What working out the layer of a repaint over the picture it was drawn over came to, the same for every session that
+     * takes that repaint over its own picture of the same state: where it shows and its priority, worked out from [doc]'s
+     * elements, whether the pointer is over its target there ([fits]; it is not armed otherwise, nor if it starts a
+     * transition), and its [maps] (null if not worked out). A player's own copy of a personal page works out where it
+     * shows for itself, and takes only the maps, which go by pixels alone.
+     */
+    private record Shared(Object doc, int[] include, int[] exclude, int priority, boolean fits, Maps maps) {}
+
+    /**
+     * {@link Shared}, by the pixels of the repaint it is of ({@link Repaint.Prepared#pixels}, an array every copy of that
+     * repaint shares, by identity): for as long as the repaint is kept or shown.
+     */
+    private static final Map<int[], Shared> WORKED = java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>());
+
+    /** {@link Shared} for [r] over [f] (its picture [img]), worked out or found; null if [stop] said to stop first. */
+    private Shared work(HtmlRenderer.Frame f, BufferedImage img, HoverAhead.Ready r, int[] drawnBox, Map<Element, List<Element>> keys, BooleanSupplier stop) {
+        int[] pixels = r.prepared().pixels();
+        Shared found = WORKED.get(pixels);
+        Shared where = found != null && found.doc == f.document() ? found : where(f, img, r, drawnBox, keys);
+        Maps maps = found == null ? null : found.maps;
+        // Worked out by a session whose layers take fewer maps, it may lack the layer this one can take.
+        if (where.fits && (maps == null || maps.layer == null && maps.count > 0 && maps.count <= layers.capacity() / 2)) {
+            maps = maps(img, r.prepared(), stop);
+            if (maps == null) return null;
+            WORKED_OUT.incrementAndGet();
+        } else if (found != null) {
+            REUSED.incrementAndGet();
+        }
+        Shared out = new Shared(where.doc, where.include, where.exclude, where.priority, where.fits, maps);
+        WORKED.put(pixels, out);
+        return out;
+    }
+
+    /** Where [r]'s layer shows over [f] (its picture [img], drawn in a state whose target is [drawnBox]), with no maps. */
+    private static Shared where(HtmlRenderer.Frame f, BufferedImage img, HoverAhead.Ready r, int[] drawnBox, Map<Element, List<Element>> keys) {
+        int[] include = box(r.boxes(), f.scale(), img.getWidth(), img.getHeight());
+        // Over the drawn state's own target (unless this one is inside it), the picture is right as it is.
+        int[] exclude = include == null || drawnBox == null || !overlaps(drawnBox, include) || inside(include, drawnBox) ? null : drawnBox;
+        // A hover that starts a transition is animated by the server: the client could show only its first frame.
+        boolean fits = include != null && (r.prepared().motion() == null || !r.prepared().motion().active()) && fits(f, r.hoverKey(), include, exclude, keys);
+        return new Shared(f.document(), include, exclude, fits ? priority(f, r.hoverKey(), keys) : 0, fits, null);
+    }
+
+    /** [p]'s layer over [img]: its maps worked out and, if it may be armed, prepared; null if [stop] said to stop first. */
+    private Maps maps(BufferedImage img, Repaint.Prepared p, BooleanSupplier stop) {
+        int[] place = new int[4];
+        int[] layer = layerPixels(img, p, place);
+        if (layer == null) return new Maps(0, null);
+        int count = layers.mapsFor(layer, place[0], place[1], place[2], place[3]);
+        if (count == 0) return new Maps(-1, null);
+        if (count > layers.capacity() / 2) return new Maps(count, null);
+        HoverLayers.Layer made = layers.prepare(layer, place[0], place[1], place[2], place[3], stop);
+        return made == null ? null : new Maps(count, made);
+    }
 
     /**
      * The pixels of [p]'s hover over [img] (the picture it was worked out over) in the 2x2 blocks it changes, transparent
@@ -255,6 +366,16 @@ final class ClientHovers {
 
     private static double distance(int[] r, int px, int py) {
         return Math.hypot(Math.max(r[0], Math.min(px, r[2])) - px, Math.max(r[1], Math.min(py, r[3])) - py);
+    }
+
+    /** How far (canvas pixels) the nearest of [boxes] (CSS pixels of the view, at [scale]) is from (px, py). */
+    private static double distance(List<Rectangle2D> boxes, double scale, int px, int py) {
+        double best = Double.MAX_VALUE;
+        for (Rectangle2D b : boxes) {
+            double nx = Math.max(b.getMinX() * scale, Math.min(px, b.getMaxX() * scale)), ny = Math.max(b.getMinY() * scale, Math.min(py, b.getMaxY() * scale));
+            best = Math.min(best, Math.hypot(nx - px, ny - py));
+        }
+        return best;
     }
 
     /** The bounds of [boxes] (CSS pixels of the view) in canvas pixels, {left, top, right, bottom}, inside the canvas; null if empty. */

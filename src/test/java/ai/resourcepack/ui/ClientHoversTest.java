@@ -77,19 +77,29 @@ class ClientHoversTest {
 
     /** The client's layers, as the client would hold them. */
     private static final class Client implements HoverLayers {
+        record Pixels(int[] argb, int x, int y, int w, int h) implements HoverLayers.Layer {
+            @Override public int maps() { return 1; }
+        }
         record Layer(int[] include, int[] exclude, int priority, int[] argb, int x, int y, int w, int h) {}
 
         final Map<Object, Layer> layers = new LinkedHashMap<>();
-        int arms;
+        int arms, prepares;
 
         @Override public int capacity() { return 1000; }
         @Override public synchronized int used() { return layers.size(); }
         @Override public int mapsFor(int[] argb, int x, int y, int w, int h) { return 1; }
 
         @Override
-        public synchronized boolean arm(Object key, int[] include, int[] exclude, int priority, int[] argb, int x, int y, int w, int h) {
+        public synchronized HoverLayers.Layer prepare(int[] argb, int x, int y, int w, int h, java.util.function.BooleanSupplier stop) {
             assertTrue(x % 2 == 0 && y % 2 == 0 && w % 2 == 0 && h % 2 == 0, "a layer not in whole 2x2 blocks");
-            layers.put(key, new Layer(include.clone(), exclude == null ? null : exclude.clone(), priority, argb.clone(), x, y, w, h));
+            prepares++;
+            return new Pixels(argb.clone(), x, y, w, h);
+        }
+
+        @Override
+        public synchronized boolean arm(Object key, int[] include, int[] exclude, int priority, HoverLayers.Layer layer) {
+            Pixels p = (Pixels) layer;
+            layers.put(key, new Layer(include.clone(), exclude == null ? null : exclude.clone(), priority, p.argb, p.x, p.y, p.w, p.h));
             arms++;
             return true;
         }
@@ -221,5 +231,52 @@ class ClientHoversTest {
         assertTrue(after != before, "the press drew no picture");
         ClientHovers h = get(s, "hovers");
         assertEquals(h.count(), client.used(), "layers left over from the picture before");
+    }
+
+    /**
+     * Two players on one page, their pointers resting in one place: the second's layers are the first's, armed without
+     * being worked out again.
+     */
+    @Test
+    void layersAreWorkedOutOnceForEveryPlayerInTheSameState() {
+        Page page = rig.pages.loaded("cards");
+        var plugin = rig.plugin(4);
+        Session one = rig.open(plugin, "cards", COLS, ROWS, H);
+        rig.quiet();
+        Session two = rig.open(plugin, "cards", COLS, ROWS, H);
+        rig.quiet();
+        Client first = new Client(), second = new Client();
+        onServer(() -> one.layers(first));
+        onServer(() -> two.layers(second));
+        Rectangle2D card = bounds(page, ".card", 0);
+        onServer(() -> one.pointer((int) card.getX() - 10, (int) card.getCenterY()));
+        assertTrue(first.arms > 0 && first.prepares > 0, "nothing armed for the first");
+        onServer(() -> two.pointer((int) card.getX() - 10, (int) card.getCenterY()));
+        assertEquals(first.arms, second.arms, "the second armed other layers");
+        assertEquals(0, second.prepares, "the second worked its layers out again");
+    }
+
+    /** Arming gives way: told to stop (a real picture is asked for), it arms nothing more. */
+    @Test
+    void armingStopsWhenToldTo() {
+        Page page = rig.pages.loaded("cards");
+        Session s = rig.open(rig.plugin(0), "cards", COLS, ROWS, H);
+        rig.quiet();
+        Client client = new Client();
+        onServer(() -> s.layers(client));
+        Rectangle2D card = bounds(page, ".card", 0);
+        onServer(() -> s.pointer((int) card.getX() - 10, (int) card.getCenterY()));
+        assertTrue(client.arms > 0);
+        HtmlRenderer.Frame f = get(s, "frame");
+        List<Element> drawnHover = get(s, "drawnHover"), drawnPress = get(s, "drawnPress");
+        ai.resourcepack.ui.html.HoverAhead ahead = get(s, "hoverAhead");
+        var ready = ahead.ready(f, drawnHover, drawnPress, drawnPress, k -> true);
+        assertTrue(!ready.isEmpty());
+        Client other = new Client();
+        ClientHovers h = new ClientHovers(other);
+        assertTrue(!h.arm(f, drawnHover, ready, 0, 0, () -> true), "went on when told to stop");
+        assertEquals(0, other.arms);
+        assertTrue(h.arm(f, drawnHover, ready, 0, 0, () -> false));
+        assertTrue(other.arms > 0);
     }
 }
