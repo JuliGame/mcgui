@@ -97,13 +97,6 @@ Closing your own page needs no permission, just as sneaking out of it needs
 none. `mcgui.admin` is only a parent: the plugin checks the nodes it grants,
 never `mcgui.admin` itself. Tab completion offers only what you may run.
 
-**Telemetry.** Every 30 seconds MC GUI sends an anonymous usage count to
-resourcepack.ai: a random id, how many players are online and the names of
-plugins that depend on it. And `/mcgui import` tells mcgui.dev which server is
-importing: its port, its `server-ip` if set, its MOTD, the players online and
-who ran the command, beside the address the request comes from anyway.
-`telemetry: false` in `config.yml` turns both off; importing still works.
-
 **The mcgui.dev mark.** A page made on mcgui.dev carries
 `<meta name="generator" content="mcgui.dev">`, and MC GUI draws it with a
 faint mark: some blocks of plain colour are one chroma level bluer, in a
