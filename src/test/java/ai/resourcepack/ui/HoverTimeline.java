@@ -70,8 +70,9 @@ public final class HoverTimeline {
     }
 
     /**
-     * One session, as the PC rig keeps one page open: [warm] untimed trials, then [per] timed ones, each on a target of
-     * [ts] picked at random. Per trial {enter ms, ahead, leave ms, ahead, arm ms, armed, used, target, busy at entry}.
+     * One session, as the PC rig keeps one page open: [warm] untimed trials, then [per] timed ones, on the targets of [ts]
+     * in turn from one picked at random (as ih_pc.py goes). Per trial {enter ms, ahead, leave ms, ahead, arm ms, armed,
+     * used, target, busy at entry}.
      */
     private static List<double[]> block(Path dir, String page, List<int[][]> ts, boolean layersOn, int capacity, int threads, int warm, int per,
                                         long seed) throws Exception {
@@ -86,8 +87,13 @@ public final class HoverTimeline {
             Random rnd = new Random(seed);
             rig.onServer(() -> s.pointer(6, 1146));
             rig.quiet();
+            // The server's ticks, as a session gets them (Screens.tick): what it does at rest happens on them.
+            var ticker = java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
+            long[] tick = {0};
+            ticker.scheduleAtFixedRate(() -> rig.onServer(() -> s.tick(++tick[0])), 50, 50, java.util.concurrent.TimeUnit.MILLISECONDS);
+            int start = rnd.nextInt(ts.size());
             for (int i = 0; i < warm + per; i++) {
-                int k = rnd.nextInt(ts.size());
+                int k = (start + i) % ts.size();
                 int[][] t = ts.get(k);
                 ClientHovers h = layersOn ? get(s, "hovers") : null;
                 long arm0 = h == null ? 0 : h.armNs;
@@ -96,6 +102,15 @@ public final class HoverTimeline {
                 Thread.sleep((long) (700 + 300 * rnd.nextDouble()));
                 double arm = h == null ? 0 : (h.armNs - arm0) / 1e6;
                 int armed = h == null ? 0 : h.count(), used = layers == null ? 0 : layers.used();
+                if (Boolean.getBoolean("restdebug")) {
+                    HtmlRenderer.Frame f = get(s, "frame");
+                    HoverAhead ha = get(s, "hoverAhead");
+                    List<Element> dh = get(s, "drawnHover"), dp = get(s, "drawnPress"), restKey = keyAt(s, r[0], r[1]), want = keyAt(s, c[0], c[1]);
+                    boolean ready = ha.ready(f, dh, dp, dp, x -> true).stream().anyMatch(x -> x.hoverKey().equals(want));
+                    System.out.printf("REST %s drawn %d rest %d restArmed %s done %s ready %s rendering %s%n", java.util.Arrays.toString(box),
+                            dh.size(), restKey.size(), h != null && h.armed(f, restKey), ha.done(f, r[0] / f.scale(), r[1] / f.scale()), ready,
+                            get(s, "rendering"));
+                }
                 double[] in = glide(rig, s, r, c, box, true);
                 Thread.sleep(500);
                 double[] o = glide(rig, s, c, r, box, false);
@@ -103,6 +118,7 @@ public final class HoverTimeline {
                 Thread.sleep(500);
                 if (i >= warm) out.add(new double[]{in[0], in[1], o[0], o[1], arm, armed, used, k, in[2]});
             }
+            ticker.shutdownNow();
             rig.quiet();
         }
         return out;
