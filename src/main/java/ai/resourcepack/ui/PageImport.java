@@ -33,12 +33,21 @@ import java.util.regex.Pattern;
  * stylesheets, pictures) as JSON from {@code import-url} + code, checks every name itself (a server
  * trusts no website to keep names inside its folder), and writes them, replacing files of the same
  * name. Live reload then shows them, and the sender is offered the page to open.
+ *
+ * <p>A share says which builder project it came from, and {@code imports.json} remembers what each
+ * project's last import wrote. Importing a project again removes the files its last import wrote and
+ * this one no longer has (a page renamed or deleted on mcgui.dev), but only those still exactly as
+ * imported: a file somebody has edited on the server since stays, and so does one another project's
+ * import now owns.
  */
 final class PageImport {
     /** What a shared code looks like: eight letters and digits, none that read as each other. */
     static final Pattern CODE = Pattern.compile("[a-hjkmnp-z2-9]{8}");
     /** A file name the builder may share: lower case, no folders, a page, a stylesheet or a picture. */
     private static final Pattern NAME = Pattern.compile("[a-z0-9][a-z0-9_-]{0,47}\\.(?:html|css|png|jpe?g|gif|svg)");
+    /** A builder project's id, as mcgui.dev makes them. */
+    private static final Pattern PROJECT = Pattern.compile("[a-z0-9]{1,24}");
+    private static final Object LEDGER_LOCK = new Object();
     private static final Pattern PICTURE = Pattern.compile("data:image/(?:png|jpeg|gif|svg\\+xml);base64,([A-Za-z0-9+/=]+)");
     private static final int MAX_BYTES = 4 * 1024 * 1024;
     private static final int MAX_FILES = 40;
@@ -75,6 +84,8 @@ final class PageImport {
         http.sendAsync(request, HttpResponse.BodyHandlers.ofByteArray()).whenComplete((res, error) -> {
             List<String> written = new ArrayList<>();
             List<String> newCursors = new ArrayList<>();
+            List<String> removed = new ArrayList<>();
+            List<String> kept = new ArrayList<>();
             String problem = null;
             String entry = null;
             try {
@@ -96,6 +107,8 @@ final class PageImport {
                     Files.write(target, f.getValue());
                     written.add(f.getKey());
                 }
+                String project = body.has("project") && body.get("project").isJsonPrimitive() ? body.get("project").getAsString() : null;
+                if (project != null && PROJECT.matcher(project).matches()) tidy(plugin.getDataFolder().toPath().resolve("imports.json"), root, project, files, removed, kept);
                 newCursors.addAll(cursors(files));
             } catch (Exception e) {
                 problem = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
@@ -111,6 +124,14 @@ final class PageImport {
                 }
                 plugin.getLogger().info(sender.getName() + " imported " + key + " from mcgui.dev: " + String.join(", ", written));
                 say(sender, "Imported " + written.size() + " file" + (written.size() == 1 ? "" : "s") + " from " + key + ".", NamedTextColor.GREEN);
+                if (!removed.isEmpty()) {
+                    plugin.getLogger().info("Removed what the last import of that project left behind: " + String.join(", ", removed));
+                    say(sender, "Removed " + String.join(", ", removed) + ": no longer in the project.", NamedTextColor.GRAY);
+                }
+                if (!kept.isEmpty()) {
+                    say(sender, "Kept " + String.join(", ", kept) + ": no longer in the project, but changed on the server since the last import. Delete "
+                            + (kept.size() == 1 ? "it" : "them") + " by hand if you don't need " + (kept.size() == 1 ? "it." : "them."), NamedTextColor.YELLOW);
+                }
                 // Every page, as something to click: the one being worked on first.
                 List<String> pages = new ArrayList<>();
                 if (open != null) pages.add(open);
@@ -157,6 +178,57 @@ final class PageImport {
     private static String ascii(String value, int max) {
         String clean = value.replaceAll("[^\\x20-\\x7e]", "");
         return clean.length() > max ? clean.substring(0, max) : clean;
+    }
+
+    /**
+     * Removes the files [project]'s last import wrote that [files] no longer has, if they are still as
+     * imported and no other project's import lists them, then remembers [files] as its last import.
+     */
+    static void tidy(Path ledger, Path root, String project, Map<String, byte[]> files, List<String> removed, List<String> kept) throws IOException {
+        synchronized (LEDGER_LOCK) {
+            JsonObject all = new JsonObject();
+            if (Files.isRegularFile(ledger)) {
+                try {
+                    JsonElement read = JsonParser.parseString(Files.readString(ledger));
+                    if (read.isJsonObject()) all = read.getAsJsonObject();
+                } catch (RuntimeException e) {
+                    // A broken record forgets what was imported: nothing is removed this time.
+                }
+            }
+            JsonObject before = all.has(project) && all.get(project).isJsonObject() ? all.getAsJsonObject(project) : new JsonObject();
+            for (String name : before.keySet()) {
+                if (files.containsKey(name) || !NAME.matcher(name).matches() || ownedElsewhere(all, project, name)) continue;
+                Path target = root.resolve(name).normalize();
+                if (!root.normalize().equals(target.getParent()) || !Files.isRegularFile(target)) continue;
+                JsonElement hash = before.get(name);
+                if (hash.isJsonPrimitive() && hash.getAsString().equals(sha256(Files.readAllBytes(target)))) {
+                    Files.delete(target);
+                    removed.add(name);
+                } else {
+                    kept.add(name);
+                }
+            }
+            JsonObject now = new JsonObject();
+            for (Map.Entry<String, byte[]> f : files.entrySet()) now.addProperty(f.getKey(), sha256(f.getValue()));
+            all.add(project, now);
+            Files.createDirectories(ledger.getParent());
+            Files.writeString(ledger, all.toString());
+        }
+    }
+
+    private static boolean ownedElsewhere(JsonObject all, String project, String name) {
+        for (Map.Entry<String, JsonElement> e : all.entrySet()) {
+            if (!e.getKey().equals(project) && e.getValue().isJsonObject() && e.getValue().getAsJsonObject().has(name)) return true;
+        }
+        return false;
+    }
+
+    private static String sha256(byte[] bytes) {
+        try {
+            return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(bytes));
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     /** A cursor picture a page or stylesheet asks for: cursor: url(name.png). */

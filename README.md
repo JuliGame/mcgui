@@ -54,7 +54,7 @@ sprites and pre-rendered 3D models, and a Trade button that runs a console
 | `/ui place <page> [cols] [rows] [name] [shared]` | Puts a page on the wall you look at (the block becomes the top-left corner) |
 | `/ui remove [name]` | Takes a wall screen down (or the one you look at) |
 | `/ui list` · `/ui reload` | Pages and screens · read the config and every page again |
-| `/ui import <code>` | Writes pages made on [mcgui.dev](https://mcgui.dev) into the pages folder (the code is on its Send to server screen) |
+| `/ui import <code>` | Writes pages made on [mcgui.dev](https://mcgui.dev) into the pages folder (the code is on its Send to server screen). Importing the same project again removes the files it no longer has, unless they were changed on the server |
 | `/ui test wall\|view [cols] [rows] [player]` | Puts a test picture on the wall you look at, or opens one fullscreen: the framework working with no page at all |
 | `/ui fov <degrees>` | Fits views to your FOV setting, for players without the pack (the server cannot read it) |
 | `/ui pointer [speed]` | Your pointer speed in views, 0.25 to 4 times the server's (`views.pointer-speed`); without a number, shows it and the mouse sensitivity read from your turning |
