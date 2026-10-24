@@ -10,6 +10,7 @@ import ai.resourcepack.ui.framework.api.Pointer;
 import ai.resourcepack.ui.framework.api.View;
 import ai.resourcepack.ui.framework.api.ViewContent;
 import ai.resourcepack.ui.framework.api.ViewOptions;
+import ai.resourcepack.ui.framework.net.ClientVersion;
 import ai.resourcepack.ui.framework.net.MapSender;
 import ai.resourcepack.ui.framework.net.Nms;
 import ai.resourcepack.ui.framework.net.Pipeline;
@@ -393,6 +394,17 @@ public final class Views implements Listener {
         return fill >= 1 ? fov : Math.toDegrees(2 * Math.atan(fill * Math.tan(Math.toRadians(fov / 2))));
     }
 
+    /**
+     * Whether [player]'s client is a version the pack's overlay chain was seen to run in ({@link Shaders.Dialect#of}).
+     * Any other may load the pack but not the chain, and then a kept overlay's world would turn with the pointer.
+     */
+    private boolean runsOverlayChain(Player player) {
+        int protocol = ClientVersion.protocol(player);
+        if (Shaders.Dialect.of(protocol) != null) return true;
+        debug(player.getName() + "'s client (protocol " + protocol + ") is no version the overlay chain was checked in");
+        return false;
+    }
+
     public View open(Player player, ViewContent content, ViewOptions options) {
         close(player, CloseReason.CLOSED);
         Canvas canvas = content.canvas();
@@ -405,7 +417,7 @@ public final class Views implements Listener {
         // themselves in the window, so its wall is only a set of map ids.
         // The signature map takes the id after the tiles', which must stay inside the views' 1024 (VIEW_ID_SPAN).
         Location eye = withPack && settings.clientPointer && options.overlay() && canvas.cols() * canvas.rows() < 1024
-                ? overlayEye(player) : null;
+                && runsOverlayChain(player) ? overlayEye(player) : null;
         boolean keeps = eye != null;
         MapWall wall = keeps ? new MapWall(player.getWorld(), eye.getBlockX(), eye.getBlockY(), eye.getBlockZ(),
                 cardinal(player).getOppositeFace(), canvas.cols(), canvas.rows(), firstMapId) : inFront(player, canvas.cols(), canvas.rows(), fov);
@@ -417,7 +429,7 @@ public final class Views implements Listener {
         // overlay with nowhere to hold the player has the server's too (the world shows live round it, still): a
         // client-placed pointer turns the player's own camera, and only a kept world does not turn with it.
         if (!keeps && withPack && settings.clientPointer && !options.overlay()) eye = clientEye(player, wall.facing);
-        if (withPack && settings.clientPointer && eye == null) debug("no room to hold " + player.getName() + " still: the server places their pointer");
+        if (withPack && settings.clientPointer && eye == null) debug("no room to hold " + player.getName() + " still, or no overlay chain: the server places their pointer");
         boolean clientPointer = eye != null;
         Location seat = null;
         if (clientPointer) {

@@ -355,6 +355,24 @@ bot is no use here. Use a real client and drive the view from the console:
 wide for a default view). `/mcgui place <page> <cols> <rows> <name> <x> <y> <z>
 <facing> [world]` places a wall without anybody aiming.
 
+**A 26.3 client** (shaders, post effects, the pointer): the pack ships both
+dialects and only a real client of each version can judge them. On the test PC 26.3 is installed beside 26.2 and runs
+as its own account with its own game folder: `client-start.sh Bot263 26.3`
+(options and server list copied from the 26.2 one, or
+it stops at the resource pack prompt), `client-stop.sh Bot263`. Its probe
+agent is the same source built against the 26.3 `client.jar`
+(port 25612; `launch.ps1 -Version` picks
+it); `snap`, `ptrwatch`, `mouse` and `gui` all work. The PC's server is 26.2,
+so put ViaVersion (5.12.2 knows 26.3) in its plugins for the session: a 26.3
+client then joins it cleanly (the plugin turns shared compression off for a
+connection Via handles). `pc-restore.sh` removes it again. Improved
+transparency (26.3's part of Fabulous) is `improvedTransparency` in the 26.3
+game folder's `options.txt`. To see what a version the chain was never
+checked in gets, build with that dialect's protocol in `Shaders.Dialect`
+changed: the overlay must open on the server pointer, the world must not turn
+with it. The rig and every result of the 26.3 port are in
+`rigs/r4/Ver263/` (`pc263.py`, `validate.py`).
+
 ## Measuring: `/mcgui stats` and the bench
 
 - **`/mcgui stats` is what the plugin costs a live server** (`Stats`; `/mcgui stats json` for scripts).
@@ -428,15 +446,26 @@ wide for a default view). `/mcgui place <page> <cols> <rows> <name> <x> <y> <z>
   `max_format` of 97 covers 97.1 (checked against 26.3's own codec). A third
   dialect means a third overlay and a look at `include/globals.glsl` and
   `dynamictransforms.glsl` for that version: std140 member order IS the layout.
-- **The pack replaces `text.fsh`/`text.vsh` and `position_tex_color`**, and in
-  its 26.2 overlay `post_effect/entity_outline.json`, `post_effect/blur.json`
-  and `rendertype_clouds.vsh` (overlays and menus, below). So do other plugins
+  26.3 compiles every shader with shaderc as Vulkan GLSL into SPIR-V (and back
+  to GLSL 330 through SPIRV-Cross on OpenGL; `renderpearl` `GlslCompiler`,
+  `GlPipelineRecompiler`), so a 26.3 post shader needs the same `layout`s, and
+  every uniform it declares must be one the pass binds (`PipelineBuilder`:
+  "Unable to find shader defined uniform"): its inputs' `<name>Sampler`s,
+  `SamplerInfo`, its own uniform blocks and `Globals`. The post-effect JSON
+  (`PostChainConfig`, persistent targets, `LevelTargetBundle.OUTLINE_TARGETS`
+  and `MAIN_TARGETS`) and the game's own `entity_outline.json` and `blur.json`
+  did not change, so each chain is one file at the pack root and only its
+  shaders come in two dialects. `glslangValidator -V --amb` checks the 26.3
+  form offline the way shaderc does (`-S frag` without `-V` the 26.2 one).
+- **The pack replaces `text.fsh`/`text.vsh` and `position_tex_color`**,
+  `post_effect/entity_outline.json` and `post_effect/blur.json`, and in its
+  26.2 overlay `rendertype_clouds.vsh` (overlays and menus, below). So do other plugins
   that draw effects through the text shader. Two packs that both replace
   `text.fsh` (or a post chain) on one client cannot both work: whichever is
   applied last wins and the other's feature silently draws nothing. Nothing
   composes them yet.
 - **The pointer leaves the frame under the menu blur, and only there**
-  (`Shaders.menuBlurChain`, 26.2). A vanilla screen frees the mouse and the
+  (`Shaders.menuBlurChain`, 26.2 and 26.3). A vanilla screen frees the mouse and the
   system cursor appears, but the pointer is drawn in the level pass, before
   the GUI, and nothing the level draws knows a screen is open: `Globals` has no
   such flag (`MenuBlurRadius` is the option, sent every frame), and in
@@ -451,7 +480,7 @@ wide for a default view). `/mcgui place <page> <cols> <rows> <name> <x> <y> <z>
   draws no background, containers (`isInGameUi`) a gradient, and blur 0 none:
   nothing can hide it for those. Depth would mark the pointer, but the game
   clears it before the GUI, and alpha cannot (blending over opaque gives 1). So
-  26.2's `text.fsh` gives every opaque pointer fragment a code in the low two
+  `text.fsh` gives every opaque pointer fragment a code in the low two
   bits of each channel, a hash of its window pixel (`mcb_code`, at most 3/255
   off), and the chain's first three passes find pixels whose code matches with
   at least two coded neighbours, grow that by two pixels and fill it from the
@@ -512,7 +541,7 @@ wide for a default view). `/mcgui place <page> <cols> <rows> <name> <x> <y> <z>
   at 720p and 1080p (two rounds each); keeping that work per pixel in the
   fragment shader was the slowest variant at 1080p (284 FPS against 310).
 - **An overlay keeps the world it opened on** (`ViewOptions.overlay`, every
-  `ui:overlay` page; 26.2). Its camera is the player's own eye where it was
+  `ui:overlay` page; 26.2 and 26.3). Its camera is the player's own eye where it was
   (`Views.overlayEye`, their rotation untouched) and its pointer the client's,
   at frame rate. Only the tiles with something opaque in them are sent and
   framed (`Canvas.Snapshot.opaque`, `MapWall.sendOnly`; grow-only, new frames
@@ -520,7 +549,7 @@ wide for a default view). `/mcgui place <page> <cols> <rows> <name> <x> <y> <z>
   client-placed view (`HI_TILED`), opaque or not drawn, never blended with the
   world. What does the rest is the pack's `post_effect/entity_outline.json`
   (`Shaders.overlayChain`): the game runs it whenever a glowing entity was
-  drawn (`LevelRenderer`, right after the main pass), whatever the camera, and
+  drawn (`LevelRenderer.render`, right after the main pass), whatever the camera, and
   may write `minecraft:main` (`LevelTargetBundle.OUTLINE_TARGETS`). The switch
   is a glowing block display at the eye, a speck that draws nothing anybody
   sees and is never culled (a display with no width is not). An extra map,
@@ -535,12 +564,25 @@ wide for a default view). `/mcgui place <page> <cols> <rows> <name> <x> <y> <z>
   0.99999, pointer and signature at 1) by that picture under the tint, and
   clears the outline target (another glowing entity's outline would be drawn
   where it is now). A new window size drops the persistent target (alpha 0),
-  and it is taken again from the frame then. Clouds are drawn after the chain,
-  so the pack's 26.2 `rendertype_clouds.vsh` draws none for an overlay's
-  camera. Without the signature every pass of ours discards: nobody else's game
-  changes. With no room to hold the player, or `views.client-pointer` off, an
-  overlay falls back to the server pointer with a mannequin camera (the world
-  live round it); without the pack, to a wall with the world showing through.
+  and it is taken again from the frame then. 26.2 draws clouds, weather and
+  particles after the chain, so its `rendertype_clouds.vsh` draws no clouds for
+  an overlay's camera (and under Fabulous, water and particles stay live). 26.3
+  draws all of the world in its main pass (clouds, weather, improved
+  transparency's blend included) before the chain, so they are in the kept
+  picture and the pack leaves 26.3's clouds alone. Measured on a 26.3 client
+  (classic and improved transparency): opening moves the world 0 px, a 6°
+  turn changes no pixel outside the panel, the pointer shows in about 1 ms.
+  Without the signature every pass of ours discards: nobody else's game
+  changes. With no room to hold the player, `views.client-pointer` off, or a
+  client version the chain was never seen to run in (`Shaders.Dialect.of` the
+  protocol `net/ClientVersion` reads: ViaVersion's word where it is installed,
+  else the handshake's), an overlay falls back to the server pointer with a
+  mannequin camera (the world live round it); without the pack, to a wall with
+  the world showing through. A client that loads the pack but not the chain
+  would otherwise see the world turn with the pointer (main's jar on 26.3 did:
+  opening the market overlay swung the world about 115 px, and moving the
+  pointer changed a quarter of the window round the panel). A new dialect adds its
+  protocol to `Dialect` only once a real client of it has passed the checks.
   The frozen world is the price of the frame-rate pointer: with the camera on
   another entity the local player is never drawn (`LevelExtractor` skips it
   unless it is the camera), and the only thing still drawn from its rotation

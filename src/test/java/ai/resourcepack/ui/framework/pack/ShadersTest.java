@@ -40,6 +40,14 @@ class ShadersTest {
         }
     }
 
+    @Test
+    void onlyTheClientsThePackWasCheckedInKeepTheWorld() {
+        assertEquals(Shaders.Dialect.V26_2, Shaders.Dialect.of(776));
+        assertEquals(Shaders.Dialect.V26_3, Shaders.Dialect.of(777));
+        assertEquals(null, Shaders.Dialect.of(778));
+        assertEquals(null, Shaders.Dialect.of(-1));
+    }
+
     private static final Pattern VARYING = Pattern.compile("layout\\(location = (\\d+)\\) (flat )?(in|out) (\\w+) (\\w+);");
 
     @Test
@@ -84,10 +92,14 @@ class ShadersTest {
         }
         assertEquals(java.util.Set.of("uiengine:post/overlay_take", "uiengine:post/overlay_blur", "uiengine:post/overlay_mask",
                 "uiengine:post/overlay_compose", "uiengine:post/overlay_outline"), shaders);
-        for (String s : new String[]{Shaders.overlayTakeFsh(), Shaders.overlayBlurFsh(), Shaders.overlayMaskFsh(), Shaders.overlayComposeFsh(),
-                Shaders.overlayOutlineFsh(), Shaders.cloudsVsh()}) {
-            assertFalse(s.contains("@"), "a placeholder was left in " + s);
+        for (Shaders.Dialect d : Shaders.Dialect.values()) {
+            for (String s : new String[]{Shaders.overlayTakeFsh(d), Shaders.overlayBlurFsh(d), Shaders.overlayMaskFsh(d), Shaders.overlayComposeFsh(d),
+                    Shaders.overlayOutlineFsh(d)}) {
+                assertFalse(s.contains("@"), "a placeholder was left in " + s);
+                assertEquals(d == Shaders.Dialect.V26_3, s.contains("layout(location = 0) out vec4 fragColor;"), s);
+            }
         }
+        assertFalse(Shaders.cloudsVsh().contains("@"));
     }
 
     /**
@@ -120,11 +132,13 @@ class ShadersTest {
             assertEquals(0.0, config.get(1).getAsJsonObject().get("value").getAsDouble());
         }
         assertEquals("minecraft:main", passes.get(2).getAsJsonObject().get("output").getAsString());
-        for (String s : new String[]{Shaders.pointerFindFsh(), Shaders.pointerGrowFsh(), Shaders.pointerFillFsh()}) {
-            assertFalse(s.contains("@"), "a placeholder was left in " + s);
+        for (Shaders.Dialect d : Shaders.Dialect.values()) {
+            for (String s : new String[]{Shaders.pointerFindFsh(d), Shaders.pointerGrowFsh(d), Shaders.pointerFillFsh(d)}) {
+                assertFalse(s.contains("@"), "a placeholder was left in " + s);
+                assertEquals(d == Shaders.Dialect.V26_3, s.contains("layout(location = 0) in vec2 texCoord;"), s);
+            }
+            // The code goes on the pointer in both versions, outside 26.3's order-independent transparency.
+            assertTrue(Shaders.textFsh(d, PALETTE).contains("mcb_pointer_code(fragColor.rgb)"));
         }
-        // The code goes on the pointer in 26.2 only, where the chain ships.
-        assertTrue(Shaders.textFsh(Shaders.Dialect.V26_2, PALETTE).contains("mcb_pointer_code(fragColor.rgb)"));
-        assertFalse(Shaders.textFsh(Shaders.Dialect.V26_3, PALETTE).contains("mcb_pointer_code"));
     }
 }

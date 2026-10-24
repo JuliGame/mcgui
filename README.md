@@ -152,7 +152,7 @@ the pointer is faster than asked.
 ### The pointer and Minecraft's own menus
 
 When a player opens a Minecraft screen over a page, the game frees the mouse
-and their computer's own cursor appears. On Minecraft 26.2 with the resource
+and their computer's own cursor appears. On Minecraft 26.2 and 26.3 with the resource
 pack, the page's pointer goes away while the pause menu (or an options screen
 opened from it) is up, and comes back where it was the moment they return to
 the game. That works while "Menu Background Blur" is 1 or more, which is the
@@ -247,7 +247,7 @@ it closes, and the player is back exactly where they were, facing the same way.
 Only the maps the panel covers are sent and drawn. Add `blur`
 (`content="rgba(8, 10, 22, 0.3) blur"`) to blur the world round the panel, as
 the game blurs it behind a menu, at the player's own menu blur setting. All of
-that needs a 26.2 client; where the player has no room to be held still, the
+that needs a 26.2 or 26.3 client; on any other version, or where the player has no room to be held still, the
 world shows live round the panel and the server places the pointer (up to a
 tick behind the mouse). On a wall, the wall behind shows through, untinted.
 Players without the pack see the world round the panel too, without a tint.
@@ -486,7 +486,7 @@ runs on the server thread. A wall can show each viewer their own canvas.
 A canvas with `canvas.transparency(true)` lets the world show through where an
 image's alpha is under half, and `canvas.tint(argb)` is what a view lays over
 the world there; `ViewOptions.DEFAULT.blur(true)` blurs the world round the
-opaque part too (26.2 clients, not on peaceful).
+opaque part too (26.2 and 26.3 clients).
 
 The [examples](examples/) are whole plugins built this way:
 [arcade](examples/arcade/) (thirteen games, on cabinets and fullscreen),

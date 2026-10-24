@@ -163,26 +163,30 @@ public final class ResourcePack implements AutoCloseable {
                     }
                     """.formatted(FORMAT_26_2, FORMAT_26_3, OVERLAY_26_2, FORMAT_26_2, FORMAT_26_3 - 1));
             for (Shaders.Dialect d : Shaders.Dialect.values()) {
-                String root = (d == Shaders.Dialect.V26_3 ? "" : OVERLAY_26_2 + "/") + "assets/minecraft/shaders/core/";
+                String assets = (d == Shaders.Dialect.V26_3 ? "" : OVERLAY_26_2 + "/") + "assets/";
+                String root = assets + "minecraft/shaders/core/";
                 e.put(root + "text.vsh", Shaders.textVsh(d, palette));
                 e.put(root + "text.fsh", Shaders.textFsh(d, palette));
                 e.put(root + "position_tex_color.vsh", Shaders.positionTexColorVsh(d));
                 e.put(root + "position_tex_color.fsh", Shaders.positionTexColorFsh(d));
+                // The world round an overlay's panel, kept still: passes of the outline post effect, which a glowing
+                // display switches on.
+                String post = assets + "uiengine/shaders/post/";
+                e.put(post + "overlay_take.fsh", Shaders.overlayTakeFsh(d));
+                e.put(post + "overlay_blur.fsh", Shaders.overlayBlurFsh(d));
+                e.put(post + "overlay_mask.fsh", Shaders.overlayMaskFsh(d));
+                e.put(post + "overlay_compose.fsh", Shaders.overlayComposeFsh(d));
+                e.put(post + "overlay_outline.fsh", Shaders.overlayOutlineFsh(d));
+                // The pointer taken out of the menu blur, so the pause menu shows only the system's cursor.
+                e.put(post + "pointer_find.fsh", Shaders.pointerFindFsh(d));
+                e.put(post + "pointer_grow.fsh", Shaders.pointerGrowFsh(d));
+                e.put(post + "pointer_fill.fsh", Shaders.pointerFillFsh(d));
             }
-            // The world round an overlay's panel, kept still: a pass of the outline post effect, which a glowing display
-            // switches on, and no clouds over it. Only in the 26.2 overlay: written in that dialect alone.
-            e.put(OVERLAY_26_2 + "/assets/minecraft/post_effect/entity_outline.json", Shaders.overlayChain());
-            e.put(OVERLAY_26_2 + "/assets/uiengine/shaders/post/overlay_take.fsh", Shaders.overlayTakeFsh());
-            e.put(OVERLAY_26_2 + "/assets/uiengine/shaders/post/overlay_blur.fsh", Shaders.overlayBlurFsh());
-            e.put(OVERLAY_26_2 + "/assets/uiengine/shaders/post/overlay_mask.fsh", Shaders.overlayMaskFsh());
-            e.put(OVERLAY_26_2 + "/assets/uiengine/shaders/post/overlay_compose.fsh", Shaders.overlayComposeFsh());
-            e.put(OVERLAY_26_2 + "/assets/uiengine/shaders/post/overlay_outline.fsh", Shaders.overlayOutlineFsh());
+            // The two post effects read the same in both versions, so the 26.2 overlay needs no copy.
+            e.put("assets/minecraft/post_effect/entity_outline.json", Shaders.overlayChain());
+            e.put("assets/minecraft/post_effect/blur.json", Shaders.menuBlurChain());
+            // 26.2 draws clouds after the outline effect, over the still world: none for an overlay's camera there.
             e.put(OVERLAY_26_2 + "/assets/minecraft/shaders/core/rendertype_clouds.vsh", Shaders.cloudsVsh());
-            // The pointer taken out of the menu blur, so the pause menu shows only the system's cursor. 26.2 only, too.
-            e.put(OVERLAY_26_2 + "/assets/minecraft/post_effect/blur.json", Shaders.menuBlurChain());
-            e.put(OVERLAY_26_2 + "/assets/uiengine/shaders/post/pointer_find.fsh", Shaders.pointerFindFsh());
-            e.put(OVERLAY_26_2 + "/assets/uiengine/shaders/post/pointer_grow.fsh", Shaders.pointerGrowFsh());
-            e.put(OVERLAY_26_2 + "/assets/uiengine/shaders/post/pointer_fill.fsh", Shaders.pointerFillFsh());
             // The pointer a seated player sees: one glyph per shape on a text display in front of the
             // view. Text, unlike an item, gets no directional shading, so the arrow stays white.
             // The server's own cursors (Pointer.custom) are a provider each, as tall as they are drawn, with the

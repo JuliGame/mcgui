@@ -18,11 +18,12 @@ import java.util.regex.Pattern;
  *       seated player.</li>
  *   <li>A post effect, {@code post_effect/entity_outline.json}, which the game runs whenever a glowing
  *       entity is drawn: besides the outlines, it keeps the world an overlay page's player saw when it
- *       opened and shows it, still, round the panel ({@link #overlayChain}; 26.2 only).</li>
- *   <li>{@code rendertype_clouds.vsh} draws no clouds over that still world (26.2 only).</li>
+ *       opened and shows it, still, round the panel ({@link #overlayChain}).</li>
+ *   <li>{@code rendertype_clouds.vsh} draws no clouds over that still world (26.2 only: 26.3 draws its
+ *       clouds before the outline effect, so they are in the kept picture).</li>
  *   <li>A post effect, {@code post_effect/blur.json}, the game's menu blur, which first takes the pointer out
  *       of the picture, so it does not show under the pause menu beside the system's own cursor
- *       ({@link #menuBlurChain}; 26.2 only).</li>
+ *       ({@link #menuBlurChain}).</li>
  * </ol>
  *
  * <p>"Seated" is read from {@code Globals.CameraOffset}: the engine puts a seated player's camera at a
@@ -42,7 +43,26 @@ public final class Shaders {
         if (Palette.DIGITS != 8) throw new AssertionError("text.fsh assumes 8 digits a symbol");
     }
 
-    public enum Dialect { V26_2, V26_3 }
+    /** The dialects the pack ships, each with the protocol version of the client it was checked in. */
+    public enum Dialect {
+        V26_2(776), V26_3(777);
+
+        public final int protocol;
+
+        Dialect(int protocol) {
+            this.protocol = protocol;
+        }
+
+        /**
+         * The dialect a client of [protocol] reads, or null for a version nobody has seen the pack's post effects
+         * run in: a newer one may load the pack but not the overlay's chain, and then its world would turn with
+         * the pointer, so it gets an overlay with the server's pointer and the world live round it.
+         */
+        public static Dialect of(int protocol) {
+            for (Dialect d : values()) if (d.protocol == protocol) return d;
+            return null;
+        }
+    }
 
     /** A seated camera's coordinate along its view's normal is always k/16 + 3/128 of a block. */
     public static final double FLAG_STEP = 1.0 / 16;
@@ -770,6 +790,11 @@ public final class Shaders {
                     color = apply_fog(color, sphericalVertexDistance, cylindricalVertexDistance, FogEnvironmentalStart, FogEnvironmentalEnd, FogRenderDistanceStart, FogRenderDistanceEnd, fogColor);
                 #endif
                     fragColor = color;
+                #if !defined(IS_GUI) && !defined(OIT_ACCUMULATE)
+                    // The pointer carries a code the menu blur finds it by, to take it out (menuBlurChain). Not in the
+                    // accumulate pass of improved transparency, whose output is a weighted share, not a colour.
+                    if (mcbPointer > 0.5 && fragColor.a > 0.99) fragColor.rgb = mcb_pointer_code(fragColor.rgb);
+                #endif
                 #endif
                 }
                 """ : """
@@ -804,7 +829,7 @@ public final class Shaders {
                 #endif
                 }
                 """;
-        return emit(head + decoder + (d == Dialect.V26_2 ? POINTER_CODE : "") + mainHead + tail, d);
+        return emit(head + decoder + POINTER_CODE + mainHead + tail, d);
     }
 
     // ---------------------------------------------------------------- the pointer, out of the menu blur
@@ -840,7 +865,7 @@ public final class Shaders {
     static final int POINTER_REACH = 128;
 
     /**
-     * {@code post_effect/blur.json}, the game's menu blur (26.2). The game runs it over the frame, world drawn,
+     * {@code post_effect/blur.json}, the game's menu blur, the same in 26.2 and 26.3. The game runs it over the frame, world drawn,
      * when a screen asks for a blurred background: the pause menu and the option screens it leads to, with
      * "Menu Background Blur" at 1 or more ({@code Screen.extractBlurredBackground}, {@code GuiRenderer.draw}).
      * Those are the times the system's own cursor is out, so the pointer would be a second one. Three passes
@@ -895,6 +920,7 @@ public final class Shaders {
 
     private static final String POINTER_HEAD = """
             #version 330
+            #extension GL_ARB_separate_shader_objects : require
 
             uniform sampler2D InSampler;
 
@@ -902,13 +928,13 @@ public final class Shaders {
                 vec2 OutSize;
             };
 
-            in vec2 texCoord;
+            layout(location = 0) in vec2 texCoord;
 
-            out vec4 fragColor;
+            layout(location = 0) out vec4 fragColor;
             """;
 
     /** {@link #menuBlurChain}'s first pass: the frame, alpha 1 where it is the pointer. */
-    public static String pointerFindFsh() {
+    public static String pointerFindFsh(Dialect d) {
         return emit(POINTER_HEAD + CODE_GLSL + """
 
                 bool coded(ivec2 p) {
@@ -930,11 +956,11 @@ public final class Shaders {
                     }
                     fragColor = vec4(here, pointer ? 1.0 : 0.0);
                 }
-                """, Dialect.V26_2);
+                """, d);
     }
 
     /** The second: alpha 1 within two pixels of the pointer. */
-    public static String pointerGrowFsh() {
+    public static String pointerGrowFsh(Dialect d) {
         return emit(POINTER_HEAD + """
 
                 void main() {
@@ -946,11 +972,11 @@ public final class Shaders {
                     }
                     fragColor = vec4(texelFetch(InSampler, at, 0).rgb, near);
                 }
-                """, Dialect.V26_2);
+                """, d);
     }
 
     /** The third: the frame with the pointer filled from round it. */
-    public static String pointerFillFsh() {
+    public static String pointerFillFsh(Dialect d) {
         return emit(POINTER_HEAD + """
 
                 // The first pixel from [at] along [dir] that stays, and how far it is; 0 if there is none in reach.
@@ -988,12 +1014,12 @@ public final class Shaders {
                     }
                     fragColor = vec4(weights > 0.0 ? sum / weights : here.rgb, 1.0);
                 }
-                """.replace("@REACH@", String.valueOf(POINTER_REACH)), Dialect.V26_2);
+                """.replace("@REACH@", String.valueOf(POINTER_REACH)), d);
     }
 
     // ---------------------------------------------------------------- the world round an overlay, kept still
 
-    /** The game's own outline passes ({@code post_effect/entity_outline.json}, 26.2), which {@link #overlayChain} keeps first. */
+    /** The game's own outline passes ({@code post_effect/entity_outline.json}, the same in 26.2 and 26.3), which {@link #overlayChain} keeps first. */
     private static final String OUTLINE_PASSES = """
                 {
                   "vertex_shader": "minecraft:core/screenquad",
@@ -1024,9 +1050,10 @@ public final class Shaders {
                 }""";
 
     /**
-     * {@code post_effect/entity_outline.json}. The game runs it whenever a glowing entity was drawn
-     * ({@code LevelRenderer}: right after the world's main pass, sky, blocks and entities, maps included, before
-     * clouds and weather), with {@code minecraft:main} among its targets, whatever the camera. An overlay's
+     * {@code post_effect/entity_outline.json}. The game runs it whenever a glowing entity was drawn, with
+     * {@code minecraft:main} among its targets, whatever the camera ({@code LevelRenderer.render}): in 26.2 right
+     * after the world's main pass, sky, blocks and entities, maps included, before clouds and weather; in 26.3 after
+     * all of the world, clouds, weather and particles too. An overlay's
      * player has a glowing display that draws nothing as the switch (see {@code Views}), and its signature map
      * says where it is (text.fsh, {@code mcb_signature}). After the game's own outline passes, unchanged:
      *
@@ -1042,7 +1069,7 @@ public final class Shaders {
      * </ol>
      *
      * <p>With no signature every pass of ours draws nothing: anybody not at an overlay sees the game's outlines
-     * alone. 26.2 only: the pack ships it in the 26.2 overlay.
+     * alone.
      */
     public static String overlayChain() {
         StringBuilder passes = new StringBuilder(OUTLINE_PASSES);
@@ -1088,16 +1115,17 @@ public final class Shaders {
     /** What every fragment shader of {@link #overlayChain} starts with: reading the signature. */
     private static final String OVERLAY_HEAD = """
             #version 330
+            #extension GL_ARB_separate_shader_objects : require
 
-            #moj_import <minecraft:globals.glsl>
+            #include <minecraft:globals.glsl>
 
             layout(std140) uniform SamplerInfo {
                 vec2 OutSize;
             };
 
-            in vec2 texCoord;
+            layout(location = 0) in vec2 texCoord;
 
-            out vec4 fragColor;
+            layout(location = 0) out vec4 fragColor;
 
             ivec3 ov_texel(sampler2D s, int x) { return ivec3(round(texelFetch(s, ivec2(x, 0), 0).rgb * 255.0)); }
 
@@ -1131,12 +1159,12 @@ public final class Shaders {
             }
             """;
 
-    private static String overlayShader(String body) {
+    private static String overlayShader(Dialect d, String body) {
         return emit((OVERLAY_HEAD + body).replace("@SIG0@", (SIGNATURE_0 >> 16) + ", " + (SIGNATURE_0 >> 8 & 255) + ", " + (SIGNATURE_0 & 255))
                 .replace("@SIG3@", String.valueOf(SIGNATURE_3))
                 .replace("@BLUR@", String.valueOf(SIGNATURE_BLUR))
                 .replace("@KEPT@", String.valueOf(SIGNATURE_KEPT))
-                .replace("@REVERSED@", String.valueOf(SIGNATURE_REVERSED)), Dialect.V26_2);
+                .replace("@REVERSED@", String.valueOf(SIGNATURE_REVERSED)), d);
     }
 
     /**
@@ -1144,8 +1172,8 @@ public final class Shaders {
      * opens or once the kept picture has been dropped. Its texel (0, 0) tells the passes after it whether a
      * picture is being taken: alpha 1, or 0 for not.
      */
-    public static String overlayTakeFsh() {
-        return overlayShader("""
+    public static String overlayTakeFsh(Dialect d) {
+        return overlayShader(d, """
                 uniform sampler2D InSampler;
                 uniform sampler2D KeptSampler;
 
@@ -1173,8 +1201,8 @@ public final class Shaders {
     }
 
     /** {@link #overlayChain}'s next five passes, the last into the kept picture: nothing unless the first took one. */
-    public static String overlayBlurFsh() {
-        return overlayShader("""
+    public static String overlayBlurFsh(Dialect d) {
+        return overlayShader(d, """
                 uniform sampler2D InSampler;
                 uniform sampler2D MainSampler;
 
@@ -1201,8 +1229,8 @@ public final class Shaders {
     }
 
     /** The world as drawn, alpha 1 where it is the view's own (its panel, pointer and signature: nearer than anything else). */
-    public static String overlayMaskFsh() {
-        return overlayShader("""
+    public static String overlayMaskFsh(Dialect d) {
+        return overlayShader(d, """
                 uniform sampler2D MainSampler;
                 uniform sampler2D MainDepthSampler;
 
@@ -1219,8 +1247,8 @@ public final class Shaders {
     }
 
     /** Into main: the view's own where it is, the kept world under the tint everywhere else (the live one if none is kept). */
-    public static String overlayComposeFsh() {
-        return overlayShader("""
+    public static String overlayComposeFsh(Dialect d) {
+        return overlayShader(d, """
                 uniform sampler2D InSampler;
                 uniform sampler2D KeptSampler;
 
@@ -1242,8 +1270,8 @@ public final class Shaders {
     }
 
     /** Clears the outlines while an overlay is open: another glowing entity's would be drawn where it is now, over the still world. */
-    public static String overlayOutlineFsh() {
-        return overlayShader("""
+    public static String overlayOutlineFsh(Dialect d) {
+        return overlayShader(d, """
                 uniform sampler2D InSampler;
 
                 void main() {
@@ -1255,8 +1283,9 @@ public final class Shaders {
     }
 
     /**
-     * {@code rendertype_clouds.vsh} (26.2), drawing nothing for an overlay's camera: clouds come after the
-     * overlay chain, so they would move over the still world as the camera turns with the pointer.
+     * {@code rendertype_clouds.vsh} (26.2 only), drawing nothing for an overlay's camera: 26.2 draws clouds after the
+     * overlay chain, so they would move over the still world as the camera turns with the pointer. 26.3 draws them
+     * before it, into the kept picture.
      */
     public static String cloudsVsh() {
         return emit("""
