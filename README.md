@@ -99,6 +99,13 @@ importing: its port, its `server-ip` if set, its MOTD, the players online and
 who ran the command, beside the address the request comes from anyway.
 `telemetry: false` in `config.yml` turns both off; importing still works.
 
+**The mcgui.dev mark.** A page made on mcgui.dev carries
+`<meta name="generator" content="mcgui.dev">`, and UI Engine draws it with a
+faint mark: some blocks of plain colour are one chroma level bluer, in a
+pattern mcgui.dev can read back from a PNG screenshot to tell the page came
+from it. It holds a fixed tag and nothing about the player or the server.
+`builder-mark: false` in `config.yml` draws every page exactly as written.
+
 Wall screens are kept in `screens.yml`; a screen's name cannot contain a `.`.
 A screen in a world that is not loaded when the server starts (one a
 multiworld plugin loads later) goes up when that world loads. Each player

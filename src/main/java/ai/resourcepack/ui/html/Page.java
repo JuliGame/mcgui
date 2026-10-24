@@ -738,6 +738,12 @@ public final class Page implements Resources {
         return m == null ? null : m.attr("content");
     }
 
+    /** Whether the page says it was made on mcgui.dev, {@code <meta name="generator" content="mcgui.dev">}, as its exports do. */
+    public boolean madeOnBuilder() {
+        String g = meta("generator");
+        return g != null && g.toLowerCase(java.util.Locale.ROOT).contains("mcgui.dev");
+    }
+
     /** What {@code <meta name="ui:overlay">} says (see {@link #overlay()}); [on] false for a page without it. */
     private record Overlay(boolean on, int tint, boolean blur) {}
 

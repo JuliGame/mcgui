@@ -16,6 +16,11 @@ import-url: https://mcgui.dev/api/builder/ui/page/
 # so we can see where pages made there are used. Off, neither is sent and /ui import still works.
 telemetry: true
 
+# Pages made on mcgui.dev say so (a generator meta tag), and are drawn with a faint mark that mcgui.dev can
+# read back from a screenshot to tell that a page came from it: some blocks of plain colour are a shade
+# bluer than they would be. Nothing about the player or the server is in it. Off, pages are drawn exactly.
+builder-mark: true
+
 # Let pages load stylesheets, fonts and images from the web (Google Fonts, image hosts). They are
 # fetched once and kept in plugins/UIEngine/cache/. Each fetch may take 15 seconds and 16 MB at most.
 allow-web: true

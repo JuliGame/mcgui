@@ -250,6 +250,11 @@ public final class UIEnginePlugin extends JavaPlugin {
         return cfg.getBoolean("debug", false);
     }
 
+    /** Whether [page] is drawn with mcgui.dev's mark: made there, and {@code builder-mark} on in config.yml. */
+    boolean builderMark(Page page) {
+        return page.madeOnBuilder() && cfg.getBoolean("builder-mark", true);
+    }
+
     /** Whether the usage count and the import's server details are sent ({@code telemetry} in config.yml). */
     boolean telemetry() {
         return cfg.getBoolean("telemetry", true);
@@ -399,6 +404,7 @@ public final class UIEnginePlugin extends JavaPlugin {
                             null, null, renderTimeout());
                     var canvas = UIFramework.get().canvas(size[0], size[1]);
                     canvas.transparency(page.overlay());
+                    canvas.builderMark(builderMark(page));
                     canvas.tint(page.overlayTint());
                     canvas.draw(frame.image(), 0, 0);
                     picture = FirstPictures.Picture.of(key, frame, canvas, motion);

@@ -1,5 +1,6 @@
 package ai.resourcepack.ui.framework.api;
 
+import ai.resourcepack.ui.framework.render.BuilderMark;
 import ai.resourcepack.ui.framework.render.Palette;
 
 import java.awt.Rectangle;
@@ -62,6 +63,8 @@ public final class Canvas {
     private volatile long version;
     /** Drawings' pixels less than half opaque are transparent (see {@link #transparency(boolean)}). */
     private volatile boolean transparent;
+    /** Later drawings carry mcgui.dev's mark (see {@link #builderMark(boolean)}). */
+    private volatile boolean builderMark;
     /**
      * What a view lays over the world where the picture is transparent (ARGB; see {@link #tint(int)}): as published,
      * always written just before [tiles], so whoever reads [tiles] first sees the tint that came with them.
@@ -131,6 +134,7 @@ public final class Canvas {
         this.tiles = from.tiles;
         this.version = from.version;
         this.transparent = from.transparent;
+        this.builderMark = from.builderMark;
         this.tint = from.tint;
         this.nextTint = from.tint;
     }
@@ -206,6 +210,14 @@ public final class Canvas {
      */
     public void transparency(boolean on) {
         transparent = on;
+    }
+
+    /**
+     * Whether later drawings carry mcgui.dev's faint mark ({@link ai.resourcepack.ui.framework.render.BuilderMark}):
+     * on for a page made there, while the server leaves {@code builder-mark} on.
+     */
+    public void builderMark(boolean on) {
+        builderMark = on;
     }
 
     public boolean transparency() {
@@ -342,6 +354,13 @@ public final class Canvas {
                     run(() -> bands.parallelStream().forEach(b -> convert(rgb, offset, stride, x, y, b[0], b[2], b[1], b[3], dirty, alpha)));
                 } else {
                     for (int[] b : bands) convert(rgb, offset, stride, x, y, b[0], b[2], b[1], b[3], dirty, alpha);
+                }
+                if (builderMark) {
+                    if (areas == null) BuilderMark.apply(palette, ycc, width, height, cols, x0, y0, x1, y1, dirty);
+                    else for (Rectangle a : areas) {
+                        BuilderMark.apply(palette, ycc, width, height, cols, Math.max(x0, a.x), Math.max(y0, a.y),
+                                Math.min(x1, a.x + a.width), Math.min(y1, a.y + a.height), dirty);
+                    }
                 }
                 for (int t = 0; t < dirty.length; t++) if (dirty[t]) changed.add(t);
             }

@@ -162,6 +162,11 @@ public final class Palette {
         return bx1 < 0 ? NO_BOUNDS : boundsOf(bx0, by0, bx1, by1);
     }
 
+    /** The 64-level chroma HI sends for a block whose four Cb (or Cr) bytes add up to [sum]. */
+    public int chromaLevelOf(int sum) {
+        return chromaLevel[Math.max(0, Math.min(chromaLevel.length - 1, sum))];
+    }
+
     /** Whether the YCbCr pixel at ycc[i] is the transparent mark: Cb and Cr both 0, which no RGB colour gives. */
     public static boolean isClear(byte[] ycc, int i) {
         return (ycc[i + 1] | ycc[i + 2]) == 0;

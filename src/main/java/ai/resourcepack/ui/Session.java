@@ -808,6 +808,7 @@ public final class Session {
                 // An overlay page is transparent where it paints nothing, and its view tints the world there: both
                 // go out with this drawing.
                 canvas.transparency(f.page().overlay());
+                canvas.builderMark(plugin.builderMark(f.page()));
                 canvas.tint(f.page().overlayTint());
                 if (partial) {
                     // Only the changed rectangle goes to the canvas, so only its tiles are re-encoded and re-sent.
