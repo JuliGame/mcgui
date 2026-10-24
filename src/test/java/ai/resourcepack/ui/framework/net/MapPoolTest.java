@@ -192,7 +192,7 @@ class MapPoolTest {
         // Wall 1 wants what wall 0's first map holds everywhere: every frame of it shows that map.
         byte[][] wantA = new byte[TILES][];
         Arrays.fill(wantA, a);
-        int[] to = MapSender.pooled(walls.get(1), pool, maps1, wantA, w -> w.ownMaps(), sent, Set.of(), counts);
+        int[] to = MapSender.pooled(walls.get(1), pool, maps1, wantA, w -> w.ownMaps(), sent, Map.of(), counts);
         assertTrue(to == null, "every frame already shows its tile");
         // Wall 0's tiles 0 and 1 now want b: one free map each would do, but they want the same tile, so they share one.
         byte[][] want = wantA.clone();
@@ -200,10 +200,10 @@ class MapPoolTest {
         want[1] = b;
         int[] shared = new int[TILES];
         for (int t = 0; t < TILES; t++) shared[t] = maps0[0];
-        to = MapSender.pooled(walls.get(1), pool, shared, wantA, w -> w == walls.get(0) ? maps0 : shared, sent, Set.of(), counts);
+        to = MapSender.pooled(walls.get(1), pool, shared, wantA, w -> w == walls.get(0) ? maps0 : shared, sent, Map.of(), counts);
         assertTrue(to == null);
         // Wall 1 shows map maps0[0] in every frame, so maps1's are free; wall 0's first two frames move to one of them.
-        to = MapSender.pooled(walls.get(0), pool, maps0, want, w -> shared, sent, Set.of(), counts);
+        to = MapSender.pooled(walls.get(0), pool, maps0, want, w -> shared, sent, Map.of(), counts);
         assertEquals(to[0], to[1]);
         assertTrue(to[0] != maps0[0], "a map another frame shows is never sent another tile");
         for (int t = 2; t < TILES; t++) assertEquals(maps0[t], to[t]);
@@ -211,10 +211,26 @@ class MapPoolTest {
         sent.put(maps1[5], c);
         byte[][] wantC = wantA.clone();
         wantC[3] = c;
-        to = MapSender.pooled(walls.get(0), pool, maps0, wantC, w -> shared, sent, Set.of(maps1[5]), counts);
+        byte[] d = new byte[1];
+        to = MapSender.pooled(walls.get(0), pool, maps0, wantC, w -> shared, sent, Map.of(maps1[5], d), counts);
         assertTrue(to == null, "sent in place, not shown from a map about to be sent another tile");
-        to = MapSender.pooled(walls.get(0), pool, maps0, wantC, w -> shared, sent, Set.of(), counts);
+        to = MapSender.pooled(walls.get(0), pool, maps0, wantC, w -> shared, sent, Map.of(), counts);
         assertEquals(maps1[5], to[3]);
+        // A tile on its way to another map: wait for it rather than send it a second time.
+        byte[][] wantD = wantA.clone();
+        wantD[3] = d;
+        assertTrue(MapSender.pooled(walls.get(0), pool, maps0, wantD, w -> shared, sent, Map.of(maps1[5], d), counts) == MapSender.WAIT);
+    }
+
+    /** Walls of one page coming into view together, a few tiles a pass: each distinct tile is sent once. */
+    @Test
+    void wallsOfOnePageComingIntoViewTogetherSendItOnce() {
+        walls(4, 100_000);
+        for (Canvas c : canvases) c.draw(tiles(0, 1, 2, 3, 4, 5), W, H, 0, 0);
+        settle();
+        assertShowCanvases();
+        assertEquals(6L * 128 * 128, client.patchedBytes, "bytes of map patches sent");
+        assertEquals(6, client.distinctShown(walls));
     }
 
     // ---------------------------------------------------------------- helpers
@@ -291,6 +307,7 @@ class MapPoolTest {
         private record Write(List<Object> packets, Consumer<Boolean> done) {}
 
         final Map<Integer, byte[]> maps = new HashMap<>();
+        long patchedBytes;
         private final Map<MapWall, int[]> shows = new HashMap<>();
         private final Map<MapWall, int[]> pointing = new HashMap<>();
         private final ArrayDeque<Write> queue = new ArrayDeque<>();
@@ -337,6 +354,7 @@ class MapPoolTest {
                         shows.computeIfAbsent(r.wall, k -> k.ownMaps().clone())[r.tile] = r.id;
                     } else {
                         Patch q = (Patch) p;
+                        patchedBytes += (long) q.w * q.h;
                         byte[] map = maps.computeIfAbsent(q.id, k -> new byte[128 * 128]);
                         for (int y = 0; y < q.h; y++) System.arraycopy(q.colors, y * q.w, map, (q.y + y) * 128 + q.x, q.w);
                     }

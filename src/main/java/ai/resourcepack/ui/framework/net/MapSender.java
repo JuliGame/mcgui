@@ -388,7 +388,12 @@ public final class MapSender implements AutoCloseable {
                 to = repointed(maps, frame.tile, v.sent);
             } else if (v.pointing != null) {
                 if (counts.length < pool.end() - pool.base) counts = new int[pool.end() - pool.base];
-                to = pooled(a.wall, pool, maps, frame.tile, w -> maps(v, w), v.sent, busy(v), counts);
+                to = pooled(a.wall, pool, maps, frame.tile, w -> maps(v, w), v.sent, pending(v), counts);
+                // A tile another wall is about to send: shown from there once it is out, rather than sent twice.
+                if (to == WAIT) {
+                    again = true;
+                    return;
+                }
             }
             // Pointing never changes while a snapshot is part sent, so its tiles all go where it was taken.
             if (to != null) {
@@ -494,8 +499,9 @@ public final class MapSender implements AutoCloseable {
     /**
      * Where to point the frames of [wall], a wall of [pool], so that the client holds one map for each distinct tile
      * across the pool: [maps] is what each frame shows now, [want] what each should, [mapsOf] what another wall's
-     * frames show, [sent] what each map holds, [busy] maps waiting to be sent another tile. Canvases share tiles of
-     * the same colours (Canvas#shareAlike), so the same tile is the same array wherever it is.
+     * frames show, [sent] what each map holds, [pending] the maps waiting to be sent a tile and the tile each waits
+     * for. Canvases share tiles of the same colours (Canvas#shareAlike), so the same tile is the same array wherever
+     * it is.
      *
      * <p>A frame that shows its tile keeps its map. One whose tile a map of the pool holds is pointed at that map, any
      * wall's, whatever other frames show it. The rest take a map no frame shows (the tile's own when it can) and it is
@@ -503,10 +509,11 @@ public final class MapSender implements AutoCloseable {
      * is never sent anything, and whoever changes moves to a free map. There always is one: there are as many maps as
      * frames, and a frame left without one means another map is shown twice or not at all. [counts] is scratch, at
      * least {@code pool.end() - pool.base} long. Null if no frame moves: then each frame's map is sent its tile in place,
-     * and only that frame shows it.
+     * and only that frame shows it. {@link #WAIT} if a tile no map holds yet is on its way to one: the wall then shows
+     * it from there once it is out (walls of one page coming into view together send it once, not once each).
      */
     static int[] pooled(MapWall wall, MapPool pool, int[] maps, byte[][] want, Function<MapWall, int[]> mapsOf,
-                        Map<Integer, byte[]> sent, Set<Integer> busy, int[] counts) {
+                        Map<Integer, byte[]> sent, Map<Integer, byte[]> pending, int[] counts) {
         int base = pool.base, size = pool.end() - base, n = maps.length;
         Arrays.fill(counts, 0, size, 0);
         MapWall[] walls = pool.walls();
@@ -532,7 +539,7 @@ public final class MapSender implements AutoCloseable {
         for (MapWall w : walls) {
             for (int id : w.ownMaps()) {
                 byte[] s = sent.get(id);
-                if (s == null || busy.contains(id)) continue;
+                if (s == null || pending.containsKey(id)) continue;
                 Integer had = holder.putIfAbsent(s, id);
                 if (had != null && counts[had - base] == 0 && counts[id - base] > 0) holder.put(s, id);
             }
@@ -544,6 +551,11 @@ public final class MapSender implements AutoCloseable {
             to[t] = id;
             counts[id - base]++;
         }
+        if (!pending.isEmpty()) {
+            Set<byte[]> coming = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+            coming.addAll(pending.values());
+            for (int t = 0; t < n; t++) if (to[t] < 0 && coming.contains(want[t])) return WAIT;
+        }
         Map<byte[], Integer> claimed = new IdentityHashMap<>();
         int cursor = 0;
         for (int t = 0; t < n; t++) {
@@ -552,12 +564,12 @@ public final class MapSender implements AutoCloseable {
             int id = same != null ? same : -1;
             // A free map: the tile's own first, so every player's frames come back to the same maps and a patch is
             // compressed once for all of them; then the one it shows, this wall's others, any other wall's.
-            if (id < 0 && free(wall.mapId(t), base, size, counts, busy)) id = wall.mapId(t);
-            if (id < 0 && free(maps[t], base, size, counts, busy)) id = maps[t];
-            for (int i = 0; id < 0 && i < n; i++) if (free(wall.mapId(i), base, size, counts, busy)) id = wall.mapId(i);
+            if (id < 0 && free(wall.mapId(t), base, size, counts, pending)) id = wall.mapId(t);
+            if (id < 0 && free(maps[t], base, size, counts, pending)) id = maps[t];
+            for (int i = 0; id < 0 && i < n; i++) if (free(wall.mapId(i), base, size, counts, pending)) id = wall.mapId(i);
             for (; id < 0 && cursor < walls.length; cursor++) {
                 for (int other : walls[cursor].ownMaps()) {
-                    if (free(other, base, size, counts, busy)) {
+                    if (free(other, base, size, counts, pending)) {
                         id = other;
                         break;
                     }
@@ -573,14 +585,20 @@ public final class MapSender implements AutoCloseable {
     }
 
     /** Whether no frame shows map [id] and none waits to send it a tile. */
-    private static boolean free(int id, int base, int size, int[] counts, Set<Integer> busy) {
-        return id >= base && id - base < size && counts[id - base] == 0 && !busy.contains(id);
+    private static boolean free(int id, int base, int size, int[] counts, Map<Integer, byte[]> pending) {
+        return id >= base && id - base < size && counts[id - base] == 0 && !pending.containsKey(id);
     }
 
-    /** The maps [v]'s frames still have tiles to send to: what {@link #pooled} must not count on keeping their tiles. */
-    private static Set<Integer> busy(Viewer v) {
-        Set<Integer> out = new HashSet<>();
-        for (Frame f : v.frames.values()) for (int t : f.queue) out.add(f.maps[t]);
+    /** {@link #pooled}'s answer when a tile the wall wants is still on its way to another map: ask again next pass. */
+    static final int[] WAIT = new int[0];
+
+    /**
+     * The maps [v]'s frames still have tiles to send to, each with the tile it waits for: what {@link #pooled} must
+     * not count on keeping their tiles, and must wait for rather than send again.
+     */
+    private static Map<Integer, byte[]> pending(Viewer v) {
+        Map<Integer, byte[]> out = new HashMap<>();
+        for (Frame f : v.frames.values()) for (int t : f.queue) out.put(f.maps[t], f.tile[t]);
         return out;
     }
 
@@ -597,7 +615,11 @@ public final class MapSender implements AutoCloseable {
             if (p == null) return false;
             packets.add(p);
         }
-        if (v.budget <= 0 || v.inFlight.get() >= maxInFlight) return true; // all of it next run, from a fresh snapshot
+        if (v.budget <= 0 || v.inFlight.get() >= maxInFlight) {
+            // All of it next run, from a fresh snapshot: soon, as the budget refills, since nothing is queued to wake for.
+            again = true;
+            return true;
+        }
         AtomicLong wallInFlight = v.wallInFlight.computeIfAbsent(a.wall, w -> new AtomicLong());
         List<Patch> patches = new ArrayList<>();
         List<Wire.MapPatch> made = new ArrayList<>();
