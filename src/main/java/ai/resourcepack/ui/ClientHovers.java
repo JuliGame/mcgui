@@ -56,8 +56,11 @@ final class ClientHovers {
     private final java.util.Set<List<Element>> never = new java.util.HashSet<>();
     private final Map<List<Element>, Worked> worked = new HashMap<>();
 
-    /** A layer: its target's key, where it shows (canvas pixels; [exclude] may be null) and its priority. */
-    private record Armed(List<Element> key, int[] include, int[] exclude, int priority) {
+    /**
+     * A layer: its target's key, where it shows (canvas pixels; [exclude] may be null), its priority, and whether it has
+     * maps (the client shows it): one whose hover changes nothing has none.
+     */
+    private record Armed(List<Element> key, int[] include, int[] exclude, int priority, boolean maps) {
         boolean showsAt(int x, int y) {
             return in(include, x, y) && (exclude == null || !in(exclude, x, y));
         }
@@ -145,8 +148,8 @@ final class ClientHovers {
         List<HoverAhead.Ready> nearest = new ArrayList<>(ready);
         nearest.sort(java.util.Comparator.comparingDouble(r -> distance(r.boxes(), s, px, py)));
         Map<Element, List<Element>> keys = new IdentityHashMap<>();
-        int[] drawnBox = null;
-        boolean drawnKnown = false;
+        // By element of the drawn hover: the rectangle of the view where the pointer is over it (or anything inside it).
+        Map<Element, int[]> within = new IdentityHashMap<>();
         for (HoverAhead.Ready r : nearest) {
             if (stop.getAsBoolean()) return false;
             List<Element> key = r.hoverKey();
@@ -157,11 +160,7 @@ final class ClientHovers {
                 w = worked.get(key);
             }
             if (w == null) {
-                if (!drawnKnown) {
-                    drawnBox = drawnHover.isEmpty() ? null : box(boxesOf(f, drawnHover, keys), s, img.getWidth(), img.getHeight());
-                    drawnKnown = true;
-                }
-                Shared sh = work(f, img, r, drawnBox, keys, stop);
+                Shared sh = work(f, img, r, drawnHover, within, keys, stop);
                 if (sh == null) return false;
                 synchronized (this) {
                     if (of != f) return true;
@@ -172,7 +171,7 @@ final class ClientHovers {
                         refused++;
                         continue;
                     }
-                    w = new Worked(new Armed(key, sh.include, sh.exclude, sh.priority), sh.maps.layer);
+                    w = new Worked(new Armed(key, sh.include, sh.exclude, sh.priority, sh.maps.layer != null), sh.maps.layer);
                     worked.put(key, w);
                 }
             }
@@ -223,10 +222,11 @@ final class ClientHovers {
     private static final Map<int[], Shared> WORKED = java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>());
 
     /** {@link Shared} for [r] over [f] (its picture [img]), worked out or found; null if [stop] said to stop first. */
-    private Shared work(HtmlRenderer.Frame f, BufferedImage img, HoverAhead.Ready r, int[] drawnBox, Map<Element, List<Element>> keys, BooleanSupplier stop) {
+    private Shared work(HtmlRenderer.Frame f, BufferedImage img, HoverAhead.Ready r, List<Element> drawnHover, Map<Element, int[]> within,
+                        Map<Element, List<Element>> keys, BooleanSupplier stop) {
         int[] pixels = r.prepared().pixels();
         Shared found = WORKED.get(pixels);
-        Shared where = found != null && found.doc == f.document() ? found : where(f, img, r, drawnBox, keys);
+        Shared where = found != null && found.doc == f.document() ? found : where(f, img, r, drawnHover, within, keys);
         Maps maps = found == null ? null : found.maps;
         // Worked out by a session whose layers take fewer maps, it may lack the layer this one can take.
         if (where.fits && (maps == null || maps.layer == null && maps.count > 0 && maps.count <= layers.capacity() / 2)) {
@@ -241,14 +241,39 @@ final class ClientHovers {
         return out;
     }
 
-    /** Where [r]'s layer shows over [f] (its picture [img], drawn in a state whose target is [drawnBox]), with no maps. */
-    private static Shared where(HtmlRenderer.Frame f, BufferedImage img, HoverAhead.Ready r, int[] drawnBox, Map<Element, List<Element>> keys) {
+    /**
+     * Where [r]'s layer shows over [f] (its picture [img], drawn in [drawnHover]), with no maps. Not where the pointer is
+     * still over an element of the drawn hover that [r]'s leaves: there that element stays hovered, and the layer would
+     * undo it. So the layer of nothing hovered, over a picture of a button in a card, shows nowhere in the card (not only
+     * off the button): moving from the button onto the card, where the card's own hover changes nothing more and so has
+     * no layer, showed the card unhovered until the server's picture came. {@link #within} is the outermost such
+     * element's rectangle (the hover key runs from the innermost out); unless [r]'s target lies inside it (a target
+     * painted over it, which a rectangle cannot tell apart).
+     */
+    private static Shared where(HtmlRenderer.Frame f, BufferedImage img, HoverAhead.Ready r, List<Element> drawnHover, Map<Element, int[]> within,
+                                Map<Element, List<Element>> keys) {
         int[] include = box(r.boxes(), f.scale(), img.getWidth(), img.getHeight());
-        // Over the drawn state's own target (unless this one is inside it), the picture is right as it is.
-        int[] exclude = include == null || drawnBox == null || !overlaps(drawnBox, include) || inside(include, drawnBox) ? null : drawnBox;
+        Element left = null;
+        for (Element e : drawnHover) if (!r.hoverKey().contains(e)) left = e;
+        Element gone = left;
+        int[] still = gone == null ? null : within.computeIfAbsent(gone, e -> within(f, e, keys, img.getWidth(), img.getHeight()));
+        int[] exclude = include == null || still == null || !overlaps(still, include) || inside(include, still) ? null : still;
         // A hover that starts a transition is animated by the server: the client could show only its first frame.
         boolean fits = include != null && (r.prepared().motion() == null || !r.prepared().motion().active()) && fits(f, r.hoverKey(), include, exclude, keys);
         return new Shared(f.document(), include, exclude, fits ? priority(f, r.hoverKey(), keys) : 0, fits, null);
+    }
+
+    /**
+     * The rectangle of [f]'s pointer regions where the pointer is over [e] or anything inside it (whose key holds [e]),
+     * in canvas pixels inside a canvas [cw] × [ch]; null if there are none.
+     */
+    private static int[] within(HtmlRenderer.Frame f, Element e, Map<Element, List<Element>> keys, int cw, int ch) {
+        List<Rectangle2D> out = new ArrayList<>();
+        for (Painter.Hit h : f.hits()) {
+            if (h.pointer() && keyOf(f, h.element(), keys).contains(e)) out.add(regionBox(f, h));
+        }
+        out.removeIf(Rectangle2D::isEmpty);
+        return box(out, f.scale(), cw, ch);
     }
 
     /** [p]'s layer over [img]: its maps worked out and, if it may be armed, prepared; null if [stop] said to stop first. */
@@ -264,17 +289,27 @@ final class ClientHovers {
     }
 
     /**
-     * The pixels of [p]'s hover over [img] (the picture it was worked out over) in the 2x2 blocks it changes, transparent
-     * in the rest, cut to those blocks: the view's own picture shows where the layer is transparent, a map with nothing
-     * changed is not taken at all, and what is sent compresses to nearly nothing. Its place in [place] (x, y, width,
-     * height, all even); null if it changes nothing.
+     * The pixels of [p]'s hover over [img] (the picture it was worked out over) in the 2x2 blocks it changes and the ring
+     * of blocks round them, transparent in the rest, cut to those blocks: the view's own picture shows where the layer is
+     * transparent, a map with nothing changed is not taken at all, and what is sent compresses to nearly nothing. Its
+     * place in [place] (x, y, width, height, all even); null if it changes nothing.
+     *
+     * <p>The ring (the picture's own pixels, the same in both states) is there for the client: it draws a map by
+     * averaging the texels under each screen pixel, within that map only, and a layer only where it covers half that
+     * footprint or more. Next to a changed pixel, a layer cut to the changed blocks then shows their average where the
+     * view's picture, once it catches up, mixes in the pixels round them, and the view's maps are cut on other lines
+     * than the layer's: a thin border lost a tenth of its pixels on the test PC (1280 × 720, 1.6 canvas pixels a screen
+     * pixel) until the picture arrived. The footprint is at most 2 texels across, so one block of the picture round every
+     * changed one makes each screen pixel the layer changes the view's own.
      */
-    private static int[] layerPixels(BufferedImage img, Repaint.Prepared p, int[] place) {
+    static int[] layerPixels(BufferedImage img, Repaint.Prepared p, int[] place) {
         Rectangle at = p.at();
         int cw = img.getWidth(), ch = img.getHeight();
-        int x0 = Math.max(0, at.x & ~1), y0 = Math.max(0, at.y & ~1);
-        int x1 = Math.min(cw, (at.x + at.width + 1) & ~1), y1 = Math.min(ch, (at.y + at.height + 1) & ~1);
-        if (x1 <= x0 || y1 <= y0) return null;
+        int cx0 = Math.max(0, at.x & ~1), cy0 = Math.max(0, at.y & ~1);
+        int cx1 = Math.min(cw, (at.x + at.width + 1) & ~1), cy1 = Math.min(ch, (at.y + at.height + 1) & ~1);
+        if (cx1 <= cx0 || cy1 <= cy0) return null;
+        // The blocks of the repaint, and one more all round for the ring (an odd-sized canvas's last pixel is never one).
+        int x0 = Math.max(0, cx0 - 2), y0 = Math.max(0, cy0 - 2), x1 = Math.min(cw & ~1, cx1 + 2), y1 = Math.min(ch & ~1, cy1 + 2);
         // The picture may be cut from a taller one (ScrollCache): its rows start where its raster says.
         java.awt.image.WritableRaster raster = img.getRaster();
         int stride = ((java.awt.image.SinglePixelPackedSampleModel) raster.getSampleModel()).getScanlineStride();
@@ -283,27 +318,37 @@ final class ClientHovers {
         int[] base = db.getData(), px = p.pixels();
         int bw = (x1 - x0) / 2, bh = (y1 - y0) / 2;
         boolean[] changed = new boolean[bw * bh];
-        int bx0 = bw, by0 = bh, bx1 = -1, by1 = -1;
-        for (int y = Math.max(y0, at.y); y < Math.min(y1, at.y + at.height); y++) {
+        boolean any = false;
+        for (int y = Math.max(cy0, at.y); y < Math.min(cy1, at.y + at.height); y++) {
             int b = offset + y * stride, s = (y - at.y) * at.width - at.x, row = (y - y0) / 2 * bw;
-            for (int x = Math.max(x0, at.x); x < Math.min(x1, at.x + at.width); x++) {
+            for (int x = Math.max(cx0, at.x); x < Math.min(cx1, at.x + at.width); x++) {
                 if (px[s + x] == base[b + x]) continue;
-                int bx = (x - x0) / 2, by = (y - y0) / 2;
-                changed[row + bx] = true;
-                bx0 = Math.min(bx0, bx);
-                bx1 = Math.max(bx1, bx);
-                by0 = Math.min(by0, by);
-                by1 = Math.max(by1, by);
+                changed[row + (x - x0) / 2] = true;
+                any = true;
             }
         }
-        if (bx1 < 0) return null;
+        if (!any) return null;
+        boolean[] shown = new boolean[bw * bh];
+        int bx0 = bw, by0 = bh, bx1 = -1, by1 = -1;
+        for (int by = 0; by < bh; by++) {
+            for (int bx = 0; bx < bw; bx++) {
+                if (!changed[by * bw + bx]) continue;
+                for (int ry = Math.max(0, by - 1); ry <= Math.min(bh - 1, by + 1); ry++) {
+                    for (int rx = Math.max(0, bx - 1); rx <= Math.min(bw - 1, bx + 1); rx++) shown[ry * bw + rx] = true;
+                }
+                bx0 = Math.min(bx0, Math.max(0, bx - 1));
+                bx1 = Math.max(bx1, Math.min(bw - 1, bx + 1));
+                by0 = Math.min(by0, Math.max(0, by - 1));
+                by1 = Math.max(by1, Math.min(bh - 1, by + 1));
+            }
+        }
         int lx = x0 + bx0 * 2, ly = y0 + by0 * 2, lw = (bx1 - bx0 + 1) * 2, lh = (by1 - by0 + 1) * 2;
         int[] out = new int[lw * lh];
         for (int y = ly; y < ly + lh; y++) {
             int b = offset + y * stride, s = (y - at.y) * at.width - at.x, row = (y - y0) / 2 * bw, o = (y - ly) * lw - lx;
             boolean inY = y >= at.y && y < at.y + at.height;
             for (int x = lx; x < lx + lw; x++) {
-                if (!changed[row + (x - x0) / 2]) continue;
+                if (!shown[row + (x - x0) / 2]) continue;
                 out[o + x] = inY && x >= at.x && x < at.x + at.width ? px[s + x] : base[b + x];
             }
         }
@@ -316,23 +361,39 @@ final class ClientHovers {
 
     /**
      * Whether the client, its pointer at canvas pixel (x, y) over [f] (drawn in [drawnHover]), shows the picture of hover
-     * [key] as it is: the layer of that key in front, or no layer at all if [key] is what the picture was drawn in. Any
-     * layer in front that the pointer is not over is taken off first. On the server thread, as the pointer is reported.
+     * [key] as it is: the layer of that key in front, or no layer at all if [key] is what the picture was drawn in or
+     * changes nothing. Any layer in front that the pointer is not over is taken off first. On the server thread, as the
+     * pointer is reported.
      */
     synchronized boolean shows(HtmlRenderer.Frame f, int x, int y, List<Element> key, List<Element> drawnHover) {
         if (f != of || armed.isEmpty()) return key.equals(drawnHover);
         while (true) {
+            // Only a layer with maps shows on the client: one that changes nothing hides nothing under it.
             Armed top = null;
-            for (Armed a : armed.values()) if (a.showsAt(x, y) && (top == null || a.priority > top.priority)) top = a;
-            if (top == null) return key.equals(ofHover);
+            for (Armed a : armed.values()) if (a.maps && a.showsAt(x, y) && (top == null || a.priority > top.priority)) top = a;
+            if (top == null) {
+                Armed same = armed.get(key);
+                return key.equals(ofHover) || same != null && same.showsAt(x, y);
+            }
             if (top.key.equals(key)) return true;
-            // The pointer is inside it (an element of its own in the target): part of the picture is right, and the
-            // server draws the rest.
-            if (key.containsAll(top.key) && !key.equals(ofHover)) return false;
+            // The pointer is inside it (an element of its own in the target), and it undoes nothing the pointer is still
+            // over: part of the picture is right, and the server draws the rest.
+            if (partly(top.key, key) && !key.equals(ofHover)) return false;
             armed.remove(top.key);
             layers.disarm(top.key);
             corrected++;
         }
+    }
+
+    /**
+     * Whether the picture of hover [shown] over the one the layers are of, drawn in {@link #ofHover}, is part of the way
+     * to that of [key]: every element hovered in [shown] is in [key], and every element of the drawn hover still in [key]
+     * is in [shown].
+     */
+    private boolean partly(List<Element> shown, List<Element> key) {
+        if (!key.containsAll(shown)) return false;
+        for (Element e : ofHover) if (key.contains(e) && !shown.contains(e)) return false;
+        return true;
     }
 
     /** Whether hover [key] has a layer over [f]. */
@@ -352,6 +413,8 @@ final class ClientHovers {
         Armed far = null;
         double best = distance(include, px, py);
         for (Armed a : armed.values()) {
+            // One that changes nothing holds no maps: taking it off frees none.
+            if (!a.maps) continue;
             double d = distance(a.include, px, py);
             if (d > best) {
                 best = d;
@@ -392,20 +455,15 @@ final class ClientHovers {
         return r > l && b > t ? new int[]{l, t, r, b} : null;
     }
 
-    /** The boxes of [f]'s pointer regions whose key is [key], in CSS pixels of the view. */
-    private static List<Rectangle2D> boxesOf(HtmlRenderer.Frame f, List<Element> key, Map<Element, List<Element>> keys) {
-        List<Rectangle2D> out = new ArrayList<>();
-        for (Painter.Hit h : f.hits()) {
-            if (!h.pointer() || !keyOf(f, h.element(), keys).equals(key)) continue;
-            Rectangle2D b = h.shape().getBounds2D();
-            Rectangle2D box = new Rectangle2D.Double(b.getX(), b.getY() - f.scrollY(), b.getWidth(), b.getHeight());
-            if (h.clip() != null) {
-                Rectangle2D c = h.clip().getBounds2D();
-                Rectangle2D.intersect(box, new Rectangle2D.Double(c.getX(), c.getY() - f.scrollY(), c.getWidth(), c.getHeight()), box);
-            }
-            if (!box.isEmpty()) out.add(box);
+    /** Where pointer region [h] of [f] is, in CSS pixels of the view, inside its clip (empty if none of it shows). */
+    private static Rectangle2D regionBox(HtmlRenderer.Frame f, Painter.Hit h) {
+        Rectangle2D b = h.shape().getBounds2D();
+        Rectangle2D box = new Rectangle2D.Double(b.getX(), b.getY() - f.scrollY(), b.getWidth(), b.getHeight());
+        if (h.clip() != null) {
+            Rectangle2D c = h.clip().getBounds2D();
+            Rectangle2D.intersect(box, new Rectangle2D.Double(c.getX(), c.getY() - f.scrollY(), c.getWidth(), c.getHeight()), box);
         }
-        return out;
+        return box;
     }
 
     private static List<Element> keyOf(HtmlRenderer.Frame f, Element e, Map<Element, List<Element>> keys) {

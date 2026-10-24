@@ -292,6 +292,78 @@ class ClientHoversTest {
         assertEquals(0, second.prepares, "the second worked its layers out again");
     }
 
+    /**
+     * From a hover inside another onto the outer one alone, where the inner one changed nothing: the client shows the
+     * picture as it is (the outer one's hover), not the layer of nothing hovered, which undoes the outer one too; and the
+     * server, which knows what the client shows, draws nothing.
+     */
+    @Test
+    void offAnInnerHoverOntoTheOuterOneTheClientKeepsTheOuterOne() throws Exception {
+        Files.writeString(dir.resolve("nest.html"), "<html><head><style>html,body{margin:0;height:100%;overflow:hidden;background:#203040}"
+                + ".box{position:absolute;left:40px;top:60px;width:300px;height:200px;background:#2a4a6a}.box:hover{background:#ffffff}"
+                + ".mark{position:absolute;left:20px;top:20px;width:60px;height:60px;background:#123456}.mark:hover{z-index:3}"
+                + "</style></head><body><div class=box><div class=mark></div></div></body></html>");
+        assertNotNull(rig.pages.load("nest").get(30, TimeUnit.SECONDS));
+        Page page = rig.pages.loaded("nest");
+        Session s = rig.open(rig.plugin(0), "nest", COLS, ROWS, H);
+        rig.quiet();
+        Client client = new Client();
+        onServer(() -> s.layers(client));
+        Rectangle2D mark = bounds(page, ".mark", 0);
+        int[] in = {(int) mark.getCenterX(), (int) mark.getCenterY()}, box = {(int) mark.getMaxX() + 12, (int) mark.getCenterY()};
+        // On the mark: drawn in its hover (and the box's), then, resting there, the hovers round it handed to the client.
+        onServer(() -> s.pointer(in[0], in[1]));
+        onServer(() -> s.pointer(in[0], in[1]));
+        assertEquals(2, ((List<?>) get(s, "drawnHover")).size(), "not drawn in the mark's hover");
+        assertTrue(client.used() > 0, "nothing handed to the client");
+        HtmlRenderer.Frame before = get(s, "frame");
+        Document d = page.document.clone();
+        int[] fresh = pixels(HtmlRenderer.render(page, d, W, H, 1, 0, HtmlRenderer.state(d.selectFirst(".box"), null)));
+        assertSamePicture(fresh, client.shown(pixels(before), box[0], box[1]), "off the mark, before the server hears");
+        onServer(() -> s.pointer(box[0], box[1]));
+        assertSame(before, get(s, "frame"), "the server drew what the client shows");
+    }
+
+    /**
+     * A layer holds the picture's own pixels for one 2x2 block all round what its hover changes: the client averages
+     * the texels under each screen pixel within one map, and shows a layer only where it covers half of them, so without
+     * them a thin border came out unlike the picture that later arrives under it.
+     */
+    @Test
+    void aLayerKeepsABlockOfThePictureRoundWhatItChanges() {
+        Page page = rig.pages.loaded("cards");
+        Session s = rig.open(rig.plugin(0), "cards", COLS, ROWS, H);
+        rig.quiet();
+        Client client = new Client();
+        onServer(() -> s.layers(client));
+        Rectangle2D one = bounds(page, ".card", 0);
+        onServer(() -> s.pointer((int) one.getX() - 10, (int) one.getCenterY()));
+        int[] picture = pixels(get(s, "frame"));
+        assertTrue(!client.layers.isEmpty(), "nothing armed");
+        for (Client.Layer l : client.layers.values()) {
+            int changed = 0;
+            for (int by = l.y(); by < l.y() + l.h(); by += 2) {
+                for (int bx = l.x(); bx < l.x() + l.w(); bx += 2) {
+                    boolean differs = false;
+                    for (int k = 0; k < 4; k++) {
+                        int x = bx + (k & 1), y = by + (k >> 1), v = l.argb()[(y - l.y()) * l.w() + x - l.x()];
+                        if (v >>> 24 >= 128 && v != picture[y * W + x]) differs = true;
+                    }
+                    if (!differs) continue;
+                    changed++;
+                    for (int ny = by - 2; ny <= by + 2; ny += 2) {
+                        for (int nx = bx - 2; nx <= bx + 2; nx += 2) {
+                            if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+                            assertTrue(nx >= l.x() && ny >= l.y() && nx < l.x() + l.w() && ny < l.y() + l.h()
+                                    && l.argb()[(ny - l.y()) * l.w() + nx - l.x()] >>> 24 >= 128, "no picture round changed block " + bx + "," + by);
+                        }
+                    }
+                }
+            }
+            assertTrue(changed > 0, "a layer that changes nothing");
+        }
+    }
+
     /** Arming gives way: told to stop (a real picture is asked for), it arms nothing more. */
     @Test
     void armingStopsWhenToldTo() {
