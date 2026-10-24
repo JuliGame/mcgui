@@ -28,8 +28,16 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
 | `html/paint` | `Painter` (stacking order, hit regions), backgrounds and gradients, shadows and blur, filters, transforms, form controls |
 | `html/text` | Fonts (bundled OFL fonts, `@font-face`, fallback per character) and text measuring |
 | `html` | `Page` (a file and everything it loads), `HtmlRenderer` (one call: style, lay out, paint) |
-| top level | The plugin: `PageStore` (the folder, live reload), `Session` (one player's page on one screen), `Screens` (walls and views), `Placeholders`, `Sounds`, `UiCommand` |
+| top level | The plugin: `MCGUIPlugin` and the `MCGUI` API, `PageStore` (the folder, live reload), `Session` (one player's page on one screen) and what it draws with (`FirstPictures`, `AnimFrames`, `ClientHovers`, `Renders`, `Forms`, `Keys`), `Screens` (walls and views), `Placeholders`, `Sounds`, `Heads`, `UiCommand` with `Stats` and `PageImport` |
+| `chat` | `Chat`: the plugin's messages in its palette (`chat:` in config.yml) |
+| `event` | `PageClickEvent`, `PageOpenEvent`, `PageCloseEvent`: the Bukkit events other plugins listen for |
 | `framework` | The pictures on walls and in views that pages are drawn through, and other plugins' API; its own notes are below |
+
+The top level stays one package on purpose. Its classes are package-private and lean on each other's
+package-private members (`Session` on `FirstPictures`, `AnimFrames` and `Forms`; `Screens` on `Session`;
+the command, `Stats` and `PageImport` on `MCGUIPlugin`'s accessors), and the tests sit in the same package.
+Splitting it into `command`, `session` and `page` would make all of that public, `MCGUIPlugin`'s accessors
+included, which other plugins can see.
 
 ## Things that are not obvious
 

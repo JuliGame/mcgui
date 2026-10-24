@@ -19,15 +19,24 @@ tasks.withType(JavaCompile).configureEach {
 repositories {
     mavenCentral()
     maven { url = 'https://repo.papermc.io/repository/maven-public/' }
+    // ai.resourcepack:common, which MC GUI depends on: the tests run the games with MC GUI's classes on the classpath.
+    exclusiveContent {
+        forRepository {
+            maven { url = 'https://repo.resourcepack.ai' }
+        }
+        filter {
+            includeGroup 'ai.resourcepack'
+        }
+    }
 }
 
 dependencies {
     compileOnly 'io.papermc.paper:paper-api:1.21.8-R0.1-SNAPSHOT'
     // A plugin of its own on the server, so never shaded.
-    compileOnly 'ai.resourcepack:ui-engine:0.1.0'
+    compileOnly 'ai.resourcepack:mcgui:0.2.0'
     // ArcadeBench and the tests run the games with no server: the engine's canvas, and Bukkit's types on the classpath.
     testImplementation 'io.papermc.paper:paper-api:1.21.8-R0.1-SNAPSHOT'
-    testImplementation 'ai.resourcepack:ui-engine:0.1.0'
+    testImplementation 'ai.resourcepack:mcgui:0.2.0'
     testImplementation 'org.junit.jupiter:junit-jupiter:5.11.0'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }

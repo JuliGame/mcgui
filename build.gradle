@@ -76,7 +76,7 @@ build {
 publishing {
     publications {
         plugin(MavenPublication) {
-            artifactId = 'ui-engine'
+            artifactId = 'mcgui'
             from components.shadow
             artifact sourcesJar
         }
