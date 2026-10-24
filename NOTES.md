@@ -410,12 +410,38 @@ wide for a default view). `/ui place <page> <cols> <rows> <name> <x> <y> <z>
   dialect means a third overlay and a look at `include/globals.glsl` and
   `dynamictransforms.glsl` for that version: std140 member order IS the layout.
 - **The pack replaces `text.fsh`/`text.vsh` and `position_tex_color`**, and in
-  its 26.2 overlay `post_effect/entity_outline.json` and
-  `rendertype_clouds.vsh` (overlays, below). So do other plugins that draw
-  effects through the text shader. Two packs that both replace `text.fsh` (or
-  the outline chain) on one client cannot both work: whichever is applied last
-  wins and the other's feature silently draws nothing. Nothing composes them
-  yet.
+  its 26.2 overlay `post_effect/entity_outline.json`, `post_effect/blur.json`
+  and `rendertype_clouds.vsh` (overlays and menus, below). So do other plugins
+  that draw effects through the text shader. Two packs that both replace
+  `text.fsh` (or a post chain) on one client cannot both work: whichever is
+  applied last wins and the other's feature silently draws nothing. Nothing
+  composes them yet.
+- **The pointer leaves the frame under the menu blur, and only there**
+  (`Shaders.menuBlurChain`, 26.2). A vanilla screen frees the mouse and the
+  system cursor appears, but the pointer is drawn in the level pass, before
+  the GUI, and nothing the level draws knows a screen is open: `Globals` has no
+  such flag (`MenuBlurRadius` is the option, sent every frame), and in
+  multiplayer the level renders the same and the server is sent nothing for
+  chat, pause or the inventory (`Gui.setScreen` only frees the mouse and
+  releases keys; the inventory key sends a packet only when riding a
+  `HasCustomInventoryScreen`, `Minecraft.handleKeybinds`). After the level only
+  the GUI draws, and its shaders cannot read the frame: the one pass that can is
+  `post_effect/blur.json`, which `GuiRenderer.draw` runs over the main target when
+  a screen asks for a blurred background (`Screen.extractBlurredBackground`:
+  the pause menu, the option screens, with the blur option at 1 or more). Chat
+  draws no background, containers (`isInGameUi`) a gradient, and blur 0 none:
+  nothing can hide it for those. Depth would mark the pointer, but the game
+  clears it before the GUI, and alpha cannot (blending over opaque gives 1). So
+  26.2's `text.fsh` gives every opaque pointer fragment a code in the low two
+  bits of each channel, a hash of its window pixel (`mcb_code`, at most 3/255
+  off), and the chain's first three passes find pixels whose code matches with
+  at least two coded neighbours, grow that by two pixels and fill it from the
+  nearest kept pixels on each side, before the game's six box-blur passes. A
+  natural picture matches in about 1 pixel in 10,000 (tested on real frames),
+  refilled from beside it and then blurred. Riding a packet-only horse would
+  make the inventory key send a packet instead of opening the screen, but a
+  passenger's view yaw follows `yHeadRot`, a tick behind (the pointer lag the
+  held seat removed).
 - **"Seated" is a camera position, not a uniform.** The view's camera sits at
   k/16 + 3/128 of a block along the picture's normal and on a 0/0.5 grid on the
   other axes; an overlay's at k/16 + 3/128 on all three (`mcb_flag_axis` 1), so

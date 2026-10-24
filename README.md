@@ -151,6 +151,21 @@ pointer is never slower than half the view's height per 75° of pitch. At the
 default speed that only makes a difference above about 120% sensitivity, where
 the pointer is faster than asked.
 
+### The pointer and Minecraft's own menus
+
+When a player opens a Minecraft screen over a page, the game frees the mouse
+and their computer's own cursor appears. On Minecraft 26.2 with the resource
+pack, the page's pointer goes away while the pause menu (or an options screen
+opened from it) is up, and comes back where it was the moment they return to
+the game. That works while "Menu Background Blur" is 1 or more, which is the
+game's default (5).
+
+For everything else players see both cursors until they close the screen:
+chat, the inventory and other containers, and the pause menu with the blur at
+0. Minecraft tells neither the server nor the resource pack when those are
+open, so nothing can hide the pointer for them (NOTES.md has the reasons).
+Mouse clicks go to the screen, not the page, while it is open.
+
 ## Custom cursors
 
 The pointer is an arrow, a hand over anything clickable, a text caret or
