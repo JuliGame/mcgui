@@ -365,6 +365,35 @@ for that by eye. `sh gradlew animBench -Pdir=path/to/pages -Ppages=page` prints
 what a page's animations cost the server a second at 1, 10 and 50 viewers
 (`page:hover:.card` hovers each viewer over the cards in turn).
 
+## Frame rate
+
+What a page costs the player's own client, per frame, is mostly how many maps
+are on their screen: every map is drawn on its own, however small it looks, at
+about 10 µs of frame time each on a mid-range PC. The page's content, hovers and
+animations hardly matter. Measured in the real client on a Ryzen 7 9700X with an
+RTX 5060 (1280×720 window, no frame cap):
+
+| On screen | Maps | FPS | Frame time |
+|---|--:|--:|--:|
+| The world alone | 0 | 1,890 | 0.53 ms |
+| A fullscreen page at 16×9 (the default) | 144 | 400 | 2.5 ms |
+| at 12×7 | 84 | 630 | 1.6 ms |
+| at 11×6 | 66 | 750 | 1.3 ms |
+| at 8×5 | 40 | 990 | 1.0 ms |
+
+- **A fullscreen page's size is its frame rate.** `views.size` in `config.yml`
+  sets every page's, `<meta name="ui:size" content="12x7">` one page's. The
+  trade is sharpness: a view is drawn at 128 pixels a map, so 16×9 (2048×1152)
+  is about one map pixel per screen pixel in a 1080p window, and 12×7
+  (1536×896) is a little soft there, though fine at 720p. A menu of a few big
+  buttons loses nothing at 12×7 or smaller; small text wants 16×9.
+- **Wall screens add up.** Each map of a wall in sight is drawn on its own too,
+  and the client draws wall screens as far away as the server sends their
+  frames (Paper's `entity-tracking-range.misc` in `spigot.yml`, 96 blocks by
+  default), so many screens in view cost the sum of their maps.
+- **Overlay pages** (`ui:overlay`) cost about what an opaque page of the same
+  size does; the world behind them is drawn as usual.
+
 ## For plugin developers
 
 Add `depend: [UIEngine]` to your `plugin.yml` and compile against the plugin
