@@ -4,7 +4,7 @@ main: ai.resourcepack.ui.UIEnginePlugin
 api-version: '1.21'
 softdepend: [PlaceholderAPI]
 description: HTML pages in game, on walls of maps and fullscreen, for vanilla clients; and a framework for other plugins to draw on them.
-website: https://resourcepack.ai
+website: https://mcgui.dev/
 commands:
   ui:
     description: Open, place and reload HTML pages; test screens, set your field of view and pointer speed, re-send the pack.
