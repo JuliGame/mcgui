@@ -612,22 +612,38 @@ with it. The rig and every result of the 26.3 port are in
     delivered, so a new frame never shows the map item and a removed one was
     already marked to show nothing. Nothing armed: no extra frames at all.
   - A layer needing more than half the maps is never armed (market's slot
-    hovers change the whole detail panel: 20–38 maps each). Layers are worked
-    out once per picture (`ClientHovers.worked`) and re-armed from that after
-    giving way for room.
-  - Measured on Josh's PC (120 FPS cap, 32 maps, pixel-timed, layers off and
-    on interleaved, two sessions): quests hover 34–38 → 8 ms median (one
-    frame), p90 50–58 → 8; crates 50–54 → 8 ms (p90 84–101 → 50); leaving both
-    one frame. The market got no better and somewhat worse on entering (median
-    42 → 54 ms in the second session): its slot hovers are refused, and arming
-    its small targets competes with its pictures. Frame rate, uncapped: nothing
-    armed, no extra frames (market resting 352 against 355 FPS); quests resting
-    with 20 layer maps armed 375 → 348 FPS (about 10 µs a map, as predicted).
-    Server CPU per target (`gradle layerBench`, VPS) rose on quests (51 → 75 ms)
-    and market (135 → 190 ms) and fell on crates (85 → 69 ms): arming encodes
-    about 7 maps per layer, about 4 layers again after each picture change. Not
-    done: sharing encoded layers across players (SharedRepaints keys would do).
-    Rig: `rigs/r4/InstantHover/ih_pc.py`; raw results there.
+    hovers change the whole detail panel: 20–38 maps each). Arming runs after a
+    drawing ahead, on its job, and stops between layers (and between maps) the
+    moment the session asks for a picture or any work waits for a pool thread
+    (`Renders.queued`); it never holds `ClientHovers`' lock while it works, and
+    its CPU comes out of the drawing-ahead budget. What a layer comes to is
+    kept by its repaint's pixels (`ClientHovers.WORKED`) and its encoded maps by
+    a hash of its pixels (`LayerSet.KEPT`, 16 MB), so every player in the same
+    state arms it without working it out again, and a map the client still
+    holds is sent only its marks. Arming is about 0.1% of the server's CPU.
+  - **The picture catches up** (`Session.catchUp`): while the client shows a
+    hover by itself the server's picture is of another state. Once the pointer
+    rests 100 ms and the pool is idle the server applies the hover (drawn
+    ahead, so cheap); nothing is drawn ahead from a picture the client has
+    moved past. Without it the next hover the client cannot show was drawn
+    from the old state, undoing it too: off the close button then onto the
+    trade button was the whole market picture (60 ms on the PC), which was the
+    market's "worse with layers".
+  - Layer maps start on a column ≡ 0 and a picture row ≡ 2 (mod 4)
+    (`LayerSet.places`), so their dither cells and colour blocks are the view's
+    and the picture arriving under a layer changes no pixel.
+  - Measured on Josh's PC (120 FPS cap, 32 maps, pixel-timed, off and on
+    interleaved, 16 trials each, catch-up build): market enter 41.9/59.1 →
+    33.3/58.5 ms (p50/p90), leave 59.2/101.4 → 37.7/100.6; quests enter
+    33.4/50.7 → 8.3/8.3, leave 42.1/58.3 → 8.3/8.3; crates enter 50.7/92.9 →
+    8.3/58.3, leave 20.8/59.2 → 8.3/16.6, but crates' disabled button (its
+    hover inside the crate card's) did not reach 90% of its pixels in 2 of 16
+    and a second session saw crates leave p90 178 ms: not yet same-or-better
+    on every page, so it stays off by default. Server CPU, `bench.py` hover
+    cell (fakes sweeping), ABBA twice: 50 players market 0.98×, quests 0.85–
+    0.91× of layers off. Frame rate: about 10 µs a held layer map.
+    Rigs: `rigs/r4/InstantHover5/ih5_pc.py`, `HoverTimeline` (headless,
+    `-Dpages= -Dblocks= -Dper=`); raw results in `rigs/r4/InstantHover5/`.
 - **The mouse skips the tick.** `Pipeline.watch` reads a seated player's
   rotation packets on the netty thread as they arrive, and the pointer's move
   is written straight back (`Pipeline.sendNow`); the server's own position
