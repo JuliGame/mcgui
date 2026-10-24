@@ -193,8 +193,8 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
   finds it kept takes it on the server thread, copying nothing: `Canvas.show`
   hands its canvas the same tile arrays and colour buffer, and the session's
   frame and document are the picture's own, shared with every session that
-  took it. Whatever draws copies first, on the render thread: the canvas its
-  colours (`Canvas.detach`, at its first drawing), a repaint the frame's image
+  took it. Whatever draws copies first, on the render thread: the canvas the
+  maps it draws into (`Canvas.own`, per 128x128 map), a repaint the frame's image
   (`borrowed`, `FirstPictures.own`). Documents and frames are never written to
   by drawing; a click that changes the document gives the session a copy
   (`Session.editable`). `Placeholders.fill` only works the values out (on the
@@ -242,6 +242,25 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
   (shared, every picture checked against a fresh one), a name that wraps and pushes the cards down (nothing
   shared), a click on a shared picture (the clicker's own command), six players opening at once (one whole
   picture), and the shipped market.
+- **What an open view holds** (round 4, Memory). A canvas keeps its colours a map at a time (`Canvas.ycc`, one
+  128x128x3 block per tile, null for black), shared copy-on-write per map by `copy`/`show`; a session's canvas also
+  shares alike (`Canvas.shareAlike`, `Canvas.Alike`): every tile it encodes is looked up by its colours (and palette,
+  size, transparency) among every live tile, so players' views of one page publish one `Tile` (its HI, HI_OWN,
+  HI_TILED, PLAIN and colours) wherever they look alike, and a viewer who has it is sent nothing. A shared map is
+  never drawn into in place: each changed map costs a 48 KB copy on the next drawing (why arcade canvases do not
+  share alike). HI_TILED is kept on the `Tile` for the first place asked (`Tile.tiled`), per canvas only elsewhere.
+  A session's frame image is put away after `park-pictures-after` (5 s) with nothing drawn and the pointer still
+  (`Session.park`, a `PARK` render job): `ParkedPicture` keeps it in 128x128 int blocks, each shared with every
+  parked block of the same pixels (weakly held, by hash then content), the frame keeps no image, and
+  `HoverAhead.letGo` drops the frames it held. `Session.submit` puts it back first, on a render thread, then submits
+  again (a few ms, once per rest); `lookAhead` waits for that. Not parked: a borrowed (shared) image, a page that
+  moves or is schemed, a frame with a scroll cache. `Personal.COPIES` holds copies weakly (a `Copy` refers to its
+  document, so a strong value kept every copy ever made with its last measured picture, a leak of about 9 MB a copy); the
+  session (`ownCopy`), a first picture (`Picture.copy`) and a shared repaint (`Prepared.keeps`) hold them, and
+  `Copy.measured` is weak. Tests: `SharedTilesTest`, `ParkedPictureTest`, `PersonalCopiesTest`,
+  `PersonalShareTest.aPictureParkedAtRestComesBackAsItWas`. Measuring: `rigs/r4/Memory/mem.py` (class
+  histograms with views opened for a third of the players, then the rest: the difference per added view leaves the
+  plugin's own caches out) and `Hprof.java` there (dominator tree of a heap dump, by owner and field).
 - **Drawing ahead ranks by where the next report lands** (`HoverAhead.rank`): points spread evenly over a disc
   round the pointer (`REACH` 56 CSS px at rest; ahead of it and wider when it moves) are looked up as a hover
   would be, and each state scores the share of the disc it covers; the current state is left out. Up to `most`

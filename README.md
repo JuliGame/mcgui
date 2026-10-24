@@ -298,6 +298,13 @@ everyone in the same state on the same page takes the one drawing of a hover, an
 drawing ahead is never done twice for two players. Drawing ahead together uses at
 most `hover-ahead-cpu` of a core (0.5 by default).
 
+Open screens cost little memory. Players' pictures of one page share every map
+where they look alike, and a screen nobody has drawn on for `park-pictures-after`
+seconds (5) with a still pointer puts its picture away in pieces shared the same
+way; the next hover puts it back first, in a few milliseconds. On the VPS an idle
+fullscreen market costs under 1 MB a player (it was about 19 MB), and 100 players
+hovering it run in a 3 GB heap at 20 TPS (before, the server ran out of memory).
+
 ## What the renderer supports
 
 Selectors (all combinators, attribute selectors, structural pseudo-classes,
