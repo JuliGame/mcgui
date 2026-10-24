@@ -67,11 +67,11 @@ final class PageImport {
             return;
         }
         say(sender, "Fetching " + key + "...", NamedTextColor.GRAY);
-        HttpRequest request = HttpRequest.newBuilder(URI.create(base + key))
+        HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(base + key))
                 .timeout(Duration.ofSeconds(20))
-                .header("User-Agent", "UIEngine/" + plugin.getPluginMeta().getVersion())
-                .GET()
-                .build();
+                .header("User-Agent", "UIEngine/" + plugin.getPluginMeta().getVersion());
+        if (plugin.telemetry()) about(builder, sender);
+        HttpRequest request = builder.GET().build();
         http.sendAsync(request, HttpResponse.BodyHandlers.ofByteArray()).whenComplete((res, error) -> {
             List<String> written = new ArrayList<>();
             List<String> newCursors = new ArrayList<>();
@@ -135,6 +135,28 @@ final class PageImport {
                 }
             });
         });
+    }
+
+    /**
+     * Says which server is importing, so mcgui.dev can list where its pages are used: the port it listens
+     * on, its {@code server-ip} if set, its MOTD, the players online and who ran the command. Only while
+     * {@code telemetry} is on; the request's own address is the rest.
+     */
+    private static void about(HttpRequest.Builder request, CommandSender sender) {
+        request.header("X-Server-Port", Integer.toString(Bukkit.getPort()));
+        String ip = Bukkit.getIp();
+        if (ip != null && !ip.isBlank()) request.header("X-Server-Ip", ip.trim());
+        String motd = net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer.plainText()
+                .serialize(Bukkit.motd()).replaceAll("\\s+", " ").trim();
+        if (!motd.isEmpty()) request.header("X-Server-Motd", ascii(motd, 200));
+        request.header("X-Server-Players", Integer.toString(Bukkit.getOnlinePlayers().size()));
+        request.header("X-Imported-By", sender instanceof org.bukkit.entity.Player ? sender.getName() : "console");
+    }
+
+    /** A header value: printable ASCII only (Java's client refuses anything else), at most [max] characters. */
+    private static String ascii(String value, int max) {
+        String clean = value.replaceAll("[^\\x20-\\x7e]", "");
+        return clean.length() > max ? clean.substring(0, max) : clean;
     }
 
     /** A cursor picture a page or stylesheet asks for: cursor: url(name.png). */

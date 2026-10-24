@@ -10,6 +10,12 @@ live-reload: true
 # with the code put on the end. Blank turns /ui import off.
 import-url: https://mcgui.dev/api/builder/ui/page/
 
+# Usage count: every 30 seconds UI Engine sends a random id, how many players are online and the names
+# of plugins that depend on it. And when somebody runs /ui import, the request to mcgui.dev also says
+# this server's port, its server-ip (if set), its MOTD, how many players are on and who ran the command,
+# so we can see where pages made there are used. Off, neither is sent and /ui import still works.
+telemetry: true
+
 # Let pages load stylesheets, fonts and images from the web (Google Fonts, image hosts). They are
 # fetched once and kept in plugins/UIEngine/cache/. Each fetch may take 15 seconds and 16 MB at most.
 allow-web: true

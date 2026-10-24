@@ -5,7 +5,7 @@ plugins {
 }
 
 group = 'ai.resourcepack'
-version = '0.1.0'
+version = '0.1.1'
 
 java {
     toolchain {
@@ -22,6 +22,17 @@ tasks.withType(JavaCompile).configureEach {
 repositories {
     mavenCentral()
     maven { url = 'https://repo.papermc.io/repository/maven-public/' }
+    // ai.resourcepack:common, the small library our plugins share (the usage
+    // count). Exclusive: the ai.resourcepack group is looked for here and
+    // nowhere else, so a look-alike on Central cannot stand in for it.
+    exclusiveContent {
+        forRepository {
+            maven { url = 'https://repo.resourcepack.ai' }
+        }
+        filter {
+            includeGroup 'ai.resourcepack'
+        }
+    }
 }
 
 dependencies {
@@ -32,6 +43,8 @@ dependencies {
     // HTML parsing, and SVG drawing for <svg> and .svg images. Shaded and relocated below.
     implementation 'org.jsoup:jsoup:1.23.2'
     implementation 'com.github.weisj:jsvg:2.2.0'
+    // The anonymous usage count. Shaded and relocated below, so it never meets another plugin's copy.
+    implementation 'ai.resourcepack:common:0.4.0'
 
     testImplementation 'org.junit.jupiter:junit-jupiter:5.11.0'
     // Tests that drive the map sender need the API's types (a wall, a player) on the classpath, as the server provides them.
@@ -43,6 +56,7 @@ shadowJar {
     archiveClassifier.set('')
     relocate 'org.jsoup', 'ai.resourcepack.ui.libs.jsoup'
     relocate 'com.github.weisj.jsvg', 'ai.resourcepack.ui.libs.jsvg'
+    relocate 'ai.resourcepack.common', 'ai.resourcepack.ui.libs.common'
 }
 
 base { archivesName = 'UIEngine' }

@@ -92,6 +92,13 @@ Closing your own page needs no permission, just as sneaking out of it needs
 none. `uiengine.admin` is only a parent: the plugin checks the nodes it grants,
 never `uiengine.admin` itself. Tab completion offers only what you may run.
 
+**Telemetry.** Every 30 seconds UI Engine sends an anonymous usage count to
+resourcepack.ai: a random id, how many players are online and the names of
+plugins that depend on it. And `/ui import` tells mcgui.dev which server is
+importing: its port, its `server-ip` if set, its MOTD, the players online and
+who ran the command, beside the address the request comes from anyway.
+`telemetry: false` in `config.yml` turns both off; importing still works.
+
 Wall screens are kept in `screens.yml`; a screen's name cannot contain a `.`.
 A screen in a world that is not loaded when the server starts (one a
 multiworld plugin loads later) goes up when that world loads. Each player

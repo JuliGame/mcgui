@@ -54,6 +54,7 @@ public final class UIEnginePlugin extends JavaPlugin {
     private final AnimFrames frames = new AnimFrames();
     /** Hover repaints every session takes from (see {@link SharedRepaints}); one for the plugin's life, sized by the config. */
     private final SharedRepaints repaints = new SharedRepaints(0);
+    private ai.resourcepack.common.telemetry.Heartbeat heartbeat;
 
     @Override
     public void onEnable() {
@@ -102,6 +103,10 @@ public final class UIEnginePlugin extends JavaPlugin {
             }
         }, 1, 1));
         watch();
+        // The anonymous usage count: a random id, the players online and the plugins that depend on this one.
+        heartbeat = ai.resourcepack.common.telemetry.Heartbeat.of(this, "ui-engine")
+                .enabledWhen(this::telemetry)
+                .start();
         UIEngine.instance = this;
         enableMillis = (System.nanoTime() - t0) / 1e6;
     }
@@ -109,6 +114,7 @@ public final class UIEnginePlugin extends JavaPlugin {
     @Override
     public void onDisable() {
         UIEngine.instance = null;
+        if (heartbeat != null) heartbeat.stop();
         Page.SCHEMES.remove("head");
         tasks.forEach(BukkitTask::cancel);
         tasks.clear();
@@ -242,6 +248,11 @@ public final class UIEnginePlugin extends JavaPlugin {
 
     boolean debug() {
         return cfg.getBoolean("debug", false);
+    }
+
+    /** Whether the usage count and the import's server details are sent ({@code telemetry} in config.yml). */
+    boolean telemetry() {
+        return cfg.getBoolean("telemetry", true);
     }
 
     /** Where {@code /ui import <code>} fetches shared pages from, the code appended; blank turns importing off. */
