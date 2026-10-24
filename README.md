@@ -404,11 +404,12 @@ what a page's animations cost the server a second at 1, 10 and 50 viewers
 
 ## Frame rate
 
-What a page costs the player's own client, per frame, is mostly how many maps
-are on their screen: every map is drawn on its own, however small it looks, at
-about 10 µs of frame time each on a mid-range PC. The page's content, hovers and
-animations hardly matter. Measured in the real client on a Ryzen 7 9700X with an
-RTX 5060 (1280×720 window, no frame cap):
+What a page costs the player's own client, per frame, is mostly how many
+different maps are on their screen: every map is drawn on its own, however
+small it looks, at about 10 µs of frame time each at 720p and 15–20 µs at 1080p
+on a mid-range PC, and frames that show the same map are drawn together. The
+page's content, hovers and animations hardly matter. Measured in the real
+client on a Ryzen 7 9700X with an RTX 5060 (1280×720 window, no frame cap):
 
 | On screen | Maps | FPS | Frame time |
 |---|--:|--:|--:|
@@ -418,18 +419,37 @@ RTX 5060 (1280×720 window, no frame cap):
 | at 11×6 | 66 | 750 | 1.3 ms |
 | at 8×5 | 40 | 990 | 1.0 ms |
 
+At 1920×1080 (median of 3 rounds):
+
+| On screen | FPS | Frame time |
+|---|--:|--:|
+| The world alone | 2,230 | 0.45 ms |
+| A fullscreen page at 16×9 | 330 | 3.0 ms |
+| A still overlay page | 330 | 3.0 ms |
+| 48 wall screens of 4×3, one page on all | 1,050 | 0.95 ms |
+| 48 wall screens of 4×3, 48 different pictures | 150 | 6.6 ms |
+
 - **A fullscreen page's size is its frame rate.** `views.size` in `config.yml`
   sets every page's, `<meta name="ui:size" content="12x7">` one page's. The
   trade is sharpness: a view is drawn at 128 pixels a map, so 16×9 (2048×1152)
-  is about one map pixel per screen pixel in a 1080p window, and 12×7
-  (1536×896) is a little soft there, though fine at 720p. A menu of a few big
-  buttons loses nothing at 12×7 or smaller; small text wants 16×9.
-- **Wall screens add up.** Each map of a wall in sight is drawn on its own too,
-  and the client draws wall screens as far away as the server sends their
-  frames (Paper's `entity-tracking-range.misc` in `spigot.yml`, 96 blocks by
-  default), so many screens in view cost the sum of their maps.
+  is about one map pixel per screen pixel in a 1080p window. At 1080p, against
+  16×9:
+  - **14×8 is the safe step:** about 25% more FPS, the layout within 2%, and
+    text only a side-by-side shows is a little softer.
+  - **12×7 or 11×6** (50–80% more) suit pages of big buttons and pictures;
+    keep 16×9 for pages of small text.
+  - **Avoid 8×5:** the window is 16:9, so an 8:5 view is stretched 11% wide
+    and its page is laid out narrower. 9×5 is faster than 12×7 without that.
+  - At 720p every size from 12×7 up looks the same as 16×9.
+- **Wall screens cost their different maps.** Screens showing the same page
+  share their maps, so one page on 48 screens costs about one screen. A screen
+  is drawn only for players within `screens.view-distance` (48 blocks, and 8
+  more once they have it), and only once its picture has arrived; further off
+  it is not there at all. Screens behind the player cost nothing. A lobby full
+  of different pages is the expensive case: lower `screens.view-distance` to
+  draw fewer of them.
 - **Overlay pages** (`ui:overlay`) cost about what an opaque page of the same
-  size does; the world behind them is drawn as usual.
+  size does; the world round them is a still picture.
 
 ## For plugin developers
 

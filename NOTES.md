@@ -572,8 +572,14 @@ with it. The rig and every result of the 26.3 port are in
   picture and the pack leaves 26.3's clouds alone. Measured on a 26.3 client
   (classic and improved transparency): opening moves the world 0 px, a 6°
   turn changes no pixel outside the panel, the pointer shows in about 1 ms.
-  Without the signature every pass of ours discards: nobody else's game
-  changes. With no room to hold the player, `views.client-pointer` off, or a
+  Without the signature no pass of ours draws a pixel: nobody else's game
+  changes. Each of our passes has its own vertex shader (`overlayTakeVsh`,
+  `overlayBlurVsh`, `overlaySignedVsh`) that reads the signature (and whether a
+  picture is being taken) and gives the game's window-sized triangle only what
+  the pass writes: the window, the one-pixel "not taking" mark the take passes
+  hand on, or nothing. A fragment that discards still costs: the six take
+  passes over the window were about 0.2 ms of a still overlay's 3.4 ms at 1080p.
+  With no room to hold the player, `views.client-pointer` off, or a
   client version the chain was never seen to run in (`Shaders.Dialect.of` the
   protocol `net/ClientVersion` reads: ViaVersion's word where it is installed,
   else the handshake's), an overlay falls back to the server pointer with a
@@ -724,10 +730,28 @@ with it. The rig and every result of the 26.3 port are in
   a queue is never counted on for what it holds now; a tile on its way to
   another map is waited for (`WAIT`), not sent twice, so walls of one page that
   come into view together cost one wall's bytes. Frames are counted from the
-  pointing of every placed wall, in range or not, since a wall's frames stay
-  on clients up to Paper's tracking range. Views keep their own maps. Measured
-  (Josh's PC, 1080p, 48 walls of 4×3 in view): one page on every wall 75 → 184
-  FPS, 48 different pictures 76 → 88 (their plain areas repeat).
+  pointing of every placed wall, in range or not: a client keeps a wall's maps
+  after its frames go, and frames shown again are pointed where they were.
+  Views keep their own maps. Measured (Josh's PC, 1080p, 48 walls of 4×3 in
+  view): one page on every wall 75 → 184 FPS, 48 different pictures 76 → 88
+  (their plain areas repeat).
+- **Placed walls' frames exist on clients only, and only once pictured**
+  (`MapWall.share`, `showFrames`, `hideFrames`). As server entities they were
+  tracked out to Paper's `entity-tracking-range.misc` (96 blocks) while
+  pictures go only to players within `screens.view-distance` (48), so walls
+  beyond it showed the filled map item. Now `Framework.work` brings a wall's
+  frames to a player in range once `MapSender.delivered` says its picture is
+  out (the frames ride the same connection after the maps, so they never show
+  the item), and `Walls.tick` takes them off beyond the view-distance plus
+  `Walls.KEEP_BEYOND` (8 blocks; a player with the frames stays in range,
+  and keeps getting pictures, until then), from a player whose open view's
+  cone reaches them (`Views.hides`, `PrivateView.hides`: what entity hiding
+  did for the old frames), and when the wall goes. A client drops them itself
+  on quit, world change and respawn (`Walls.forgetFrames`: shown again once back
+  in range). A right click on one reaches the server as an entity it does not
+  know (`PlayerUseUnknownEntityEvent`, interact and interact-at, taken as one
+  click); a left click is the swing, as before. No entity, so no chunk tickets,
+  no tracker work and nothing to protect from damage or breaking.
 - **Content is not trusted.** Every call into a `WallContent` or
   `ViewContent` from the tick, the sender or `Views.close` is guarded and
   logged, `LinkageError` included: a content whose plugin was disabled first
