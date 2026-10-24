@@ -420,7 +420,7 @@ pack, the map ids and the seats). From a tag of this repository with
 
 ```groovy
 repositories { maven { url 'https://jitpack.io' } }
-dependencies { compileOnly 'com.github.resourcepack-ai:ui-engine:<tag>' }
+dependencies { compileOnly 'com.github.resourcepack-ai:mcgui:<tag>' }
 ```
 
 Pages, from `plugins/MCGUI/pages/`:
