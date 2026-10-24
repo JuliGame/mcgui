@@ -84,6 +84,17 @@ public final class Shaders {
     public static final double CLIENT_POINTER_MAX_SPEED = 255;
 
     /**
+     * A hover layer's map ({@code Palette.markLayer}) carries the view's pointer speed times this, as a whole number in
+     * three symbols: the server rounds the view's speed to it first, so the shader and the server's cursor agree.
+     */
+    public static final int LAYER_SPEED_SCALE = 32768;
+
+    /** The view's speed as a hover layer carries it: [pixelsPerDegree] rounded to {@link #LAYER_SPEED_SCALE}ths. */
+    public static double layerSpeed(double pixelsPerDegree) {
+        return Math.round(pixelsPerDegree * LAYER_SPEED_SCALE) / (double) LAYER_SPEED_SCALE;
+    }
+
+    /**
      * An overlay's signature (see {@code mcb_signature} in text.fsh and {@link #overlayChain}): the RGB of the
      * window's bottom-left pixel, and the fourth pixel along, red and green 0 and blue this. Colours the world is
      * all but certain never to put in both places at once. The second pixel is the view's tint, the third its
@@ -330,12 +341,22 @@ public final class Shaders {
                     return vec4(ndc * c.w, c.z, c.w);
                 }
 
+                // Where the pointer the seated player's client places itself is on a view [size] pixels big: the
+                // view's centre plus [speed] (pixels per degree of turn) times how far the camera has turned from
+                // [ahead] (the axis towards the view), held inside the view. The server works the cursor out the
+                // same way from the rotations the client sends.
+                vec2 mcb_hot(vec2 size, vec3 ahead, float speed) {
+                    vec3 right = vec3(-ahead.z, 0.0, ahead.x);
+                    // ModelViewMat is the camera's rotation alone; its third row is minus the look direction.
+                    vec3 look = normalize(-vec3(ModelViewMat[0][2], ModelViewMat[1][2], ModelViewMat[2][2]));
+                    vec2 turn = degrees(vec2(atan(dot(look, right), dot(look, ahead)), asin(clamp(-look.y, -1.0, 1.0))));
+                    return clamp(size * 0.5 + turn * speed, vec2(0.0), size - 1.0);
+                }
+
                 // The pointer the seated player's client places itself, on a view [size] pixels big. Its text
                 // sits ahead of the camera on the flagged axis, towards the view, 0.5 + speed / 512 blocks away
                 // (speed in pixels per degree of turn), square to that axis: so a vertex's offset across the axis
-                // is the glyph's own, from its hot pixel, at 128 pixels to a block. The hot pixel is the view's
-                // centre plus the speed times how far the camera has turned from that axis, held inside the
-                // view; the server works the cursor out the same way from the rotations the client sends.
+                // is the glyph's own, from its hot pixel (mcb_hot), at 128 pixels to a block.
                 // On an overlay (flag 1) every axis is flagged: the text's own offset says which is ahead, as the glyph
                 // is far smaller than its distance.
                 vec2 mcb_client_pointer(vec2 size) {
@@ -345,13 +366,25 @@ public final class Shaders {
                     float along = dot(Position, axis);
                     vec3 ahead = axis * sign(along);
                     vec3 right = vec3(-ahead.z, 0.0, ahead.x);
-                    float speed = (abs(along) - 0.5) * 512.0;
-                    // ModelViewMat is the camera's rotation alone; its third row is minus the look direction.
-                    vec3 look = normalize(-vec3(ModelViewMat[0][2], ModelViewMat[1][2], ModelViewMat[2][2]));
-                    vec2 turn = degrees(vec2(atan(dot(look, right), dot(look, ahead)), asin(clamp(-look.y, -1.0, 1.0))));
-                    vec2 hot = clamp(size * 0.5 + turn * speed, vec2(0.0), size - 1.0);
+                    vec2 hot = mcb_hot(size, ahead, (abs(along) - 0.5) * 512.0);
                     vec2 px = hot + vec2(dot(Position, right), -Position.y) * 128.0;
                     return vec2(px.x / size.x * 2.0 - 1.0, 1.0 - px.y / size.y * 2.0);
+                }
+
+                // A hover layer's rectangle in canvas pixels, [left, right) x [top, bottom), from the four 2x2 blocks'
+                // worth of symbols from x = [at] (Palette.markLayer): each edge two symbols, high then low.
+                float mcb_layer_edge(int x, int y) { return float(mcb_symbol(ivec2(x, y)) * @SYMBOLS@ + mcb_symbol(ivec2(x + 1, y))); }
+                vec4 mcb_layer_rect(int at) { return vec4(mcb_layer_edge(at, 0), mcb_layer_edge(at, 1), mcb_layer_edge(at + 2, 0), mcb_layer_edge(at + 2, 1)); }
+                bool mcb_layer_in(vec2 p, vec4 r) { return p.x >= r.x && p.y >= r.y && p.x < r.z && p.y < r.w; }
+
+                // Whether a hover layer shows now: the client's pointer, worked out as the pointer's own from the speed,
+                // axis and side the layer carries ([flags]: 2 for z, 1 for facing it from the positive side), is inside
+                // its include rectangle and outside its exclude one.
+                bool mcb_layer_on(vec2 size, int flags) {
+                    float speed = float((mcb_symbol(ivec2(4, 0)) * @SYMBOLS@ + mcb_symbol(ivec2(5, 0))) * @SYMBOLS@ + mcb_symbol(ivec2(4, 1))) / @LAYERSPEED@;
+                    vec3 axis = (flags & 2) == 0 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 0.0, 1.0);
+                    vec2 hot = mcb_hot(size, (flags & 1) == 1 ? -axis : axis, speed);
+                    return mcb_layer_in(hot, mcb_layer_rect(6)) && !mcb_layer_in(hot, mcb_layer_rect(10));
                 }
                 #endif
 
@@ -367,8 +400,8 @@ public final class Shaders {
                 #else
                     int mcbMap = mcb_screen_map();
                 #endif
-                    mcbMapInfo = vec2(float(mcbMap), mcbMap > 0 ? mcb_fill_right(mcb_info(mcbMap)) : 0.0);
-                    mcbViewTint = mcbMap >= 2 ? mcb_tint() : vec4(0.0);
+                    mcbMapInfo = vec2(float(mcbMap), mcbMap > 0 && mcbMap != 7 ? mcb_fill_right(mcb_info(mcbMap)) : 0.0);
+                    mcbViewTint = mcbMap >= 2 && mcbMap != 7 ? mcb_tint() : vec4(0.0);
                 #ifdef IS_GUI
                     mcbSeated = mcb_seated_now();
                     vertexColor = Color;
@@ -409,6 +442,19 @@ public final class Shaders {
                                 vec2 mcbAt = (mcbTile + UV0) / mcbViewGrid;
                                 gl_Position = mcb_flat(vec2(mcbAt.x * 2.0 - 1.0, 1.0 - mcbAt.y * 2.0));
                             }
+                        } else if (mcbMap == 7) {
+                            // A hover layer (Palette.markLayer): placed by the canvas pixel its third row starts at, 128
+                            // canvas pixels to its side, but only while this client's pointer is over its element, and
+                            // then with its priority plus one in place of the fill flag, for text.fsh's depth. Otherwise
+                            // it goes behind the far plane, below.
+                            int mcbFlags = mcb_symbol(ivec2(5, 1));
+                            vec2 mcbViewGrid = vec2(float(mcb_symbol(ivec2(2, 0))), float(mcb_symbol(ivec2(3, 0))));
+                            if (mcb_layer_on(mcbViewGrid * 128.0, mcbFlags)) {
+                                mcbMapInfo.y = float(mcbFlags >> 2) + 1.0;
+                                vec2 mcbOrigin = vec2(mcb_layer_edge(2, 1), mcb_layer_edge(14, 0) - 2.0);
+                                vec2 mcbAt = (mcbOrigin + UV0 * 128.0) / (mcbViewGrid * 128.0);
+                                gl_Position = mcb_flat(vec2(mcbAt.x * 2.0 - 1.0, 1.0 - mcbAt.y * 2.0));
+                            }
                         }
                         // Both fill the window whatever its shape and whatever the player's FOV. The picture is centred
                         // on the camera's axis and square to it, so how far a vertex is from that axis, in blocks, as a
@@ -418,6 +464,8 @@ public final class Shaders {
                             gl_Position.xy = mcbBlocks / (mcbGrid * 0.5) * gl_Position.w;
                         }
                     }
+                    // A hover layer not shown, or not seated: every vertex behind the far plane, so it draws no pixel.
+                    if (mcbMap == 7 && mcbMapInfo.y < 0.5) gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
                 #ifdef IS_SEE_THROUGH
                     vertexColor = mcbTint;
                 #else
@@ -428,7 +476,9 @@ public final class Shaders {
                 #endif
                 }
                 """.replace("@PR@", String.valueOf(POINTER_RED)).replace("@PC@", String.valueOf(CLIENT_POINTER_RED))
-                .replace("@SIGTILE@", SIGNATURE_TILE + ".0"), d);
+                .replace("@SIGTILE@", SIGNATURE_TILE + ".0")
+                .replace("@SYMBOLS@", String.valueOf(Palette.SYMBOLS))
+                .replace("@LAYERSPEED@", String.format(Locale.ROOT, "%.1f", (double) LAYER_SPEED_SCALE)), d);
     }
 
     /**
@@ -458,12 +508,15 @@ public final class Shaders {
                 // 0: not ours. 1: a screen. 2: the view of whoever is seated at it (bottom markers swapped).
                 // 3: such a view whose pointer their client places, each map carrying its place (both the fourth).
                 // text.vsh then tells two kinds of 3 apart for text.fsh: 5, an overlay's signature map, and 6, a map of
-                // an overlay's panel.
+                // an overlay's panel. 7: a hover layer of a view as 3 (Palette.markLayer): top markers swapped too.
                 int mcb_screen_map() {
-                    if (textureSize(Sampler0, 0) != ivec2(128, 128)
-                        || mcb_fetch(ivec2(0, 0)) != @M0@ || mcb_fetch(ivec2(1, 0)) != @M1@) return 0;
+                    if (textureSize(Sampler0, 0) != ivec2(128, 128)) return 0;
+                    ivec3 m0 = mcb_fetch(ivec2(0, 0)), m1 = mcb_fetch(ivec2(1, 0));
+                    bool layer = m0 == @M1@ && m1 == @M0@;
+                    if (!layer && (m0 != @M0@ || m1 != @M1@)) return 0;
                     ivec3 a = mcb_fetch(ivec2(0, 1));
                     ivec3 b = mcb_fetch(ivec2(1, 1));
+                    if (layer) return a == @M3@ && b == @M3@ ? 7 : 0;
                     if (a == @M2@ && b == @M3@) return 1;
                     if (a == @M3@ && b == @M2@) return 2;
                     if (a == @M3@ && b == @M3@) return 3;
@@ -477,8 +530,9 @@ public final class Shaders {
                                 float(mcb_symbol(ivec2(4, 1))), float(mcb_symbol(ivec2(5, 1)))) / @SYMMAX@;
                 }
 
-                // How many 2x2 blocks after the marker hold data, not picture: a view's size, place and tint (2).
-                int mcb_info(int kind) { return kind >= 2 ? 2 : 0; }
+                // How many 2x2 blocks after the marker hold data, not picture: a view's size, place and tint (2); a
+                // hover layer's size, place, speed, flags and two rectangles (7, the top two rows, never shown).
+                int mcb_info(int kind) { return kind == 7 ? 7 : kind >= 2 ? 2 : 0; }
 
                 // A 2x2 block's mean luma and its chroma, and 1 (0 for all four when it is transparent).
                 vec4 mcb_block(ivec2 b) {
@@ -650,14 +704,17 @@ public final class Shaders {
                             if (gl_FragCoord.y >= 1.0 || gl_FragCoord.x >= 4.0) discard;
                             mcbColor = vec4(mcb_signature(int(gl_FragCoord.x)), 1.0);
                         } else {
+                            // A hover layer (7) shows only while text.vsh places it, and never its top two rows, its
+                            // data: there, and wherever it is transparent, the view under it shows.
+                            if (mcbMap == 7 && (mcbMapInfo.y < 0.5 || texCoord0.y < 2.0 / 128.0)) discard;
                             // A screen emits its own light: no lightmap, tint or fog, so colours are exact day and night.
-                            vec4 mcbPicture = mcb_sample(texCoord0 * 128.0, mcbFootprint, mcb_info(mcbMap), mcbMapInfo.y > 0.5);
+                            vec4 mcbPicture = mcb_sample(texCoord0 * 128.0, mcbFootprint, mcb_info(mcbMap), mcbMap != 7 && mcbMapInfo.y > 0.5);
                             // An overlay's panel (6) is there or not, never blended with the world behind it: round it the
-                            // post effect shows the world as it was, tinted there.
-                            if (mcbMap == 6) mcbPicture = mcbPicture.a < 0.5 ? vec4(0.0) : vec4(mcbPicture.rgb, 1.0);
+                            // post effect shows the world as it was, tinted there. A hover layer likewise over its view.
+                            if (mcbMap >= 6) mcbPicture = mcbPicture.a < 0.5 ? vec4(0.0) : vec4(mcbPicture.rgb, 1.0);
                             // Where the picture is transparent the world behind shows, on someone's own view under its
                             // tint: the picture over the tint over the world, as one colour blended over the world.
-                            vec4 mcbTint = mcbMap >= 2 && mcbMap != 6 && mcbPicture.a < 1.0 ? mcbViewTint : vec4(0.0);
+                            vec4 mcbTint = mcbMap >= 2 && mcbMap < 6 && mcbPicture.a < 1.0 ? mcbViewTint : vec4(0.0);
                             float mcbAlpha = 1.0 - (1.0 - mcbPicture.a) * (1.0 - mcbTint.a);
                             if (mcbAlpha < 0.002) discard;
                             mcbColor = vec4((mcbPicture.rgb * mcbPicture.a + mcbTint.rgb * (mcbTint.a * (1.0 - mcbPicture.a))) / max(mcbAlpha, 0.002), mcbAlpha);
@@ -665,9 +722,12 @@ public final class Shaders {
                 #ifndef IS_GUI
                         if (mcbMap >= 2 && mcbSeated > 0.5) {
                             // A view the client places (3, 6) is just behind its pointer, in front of all else: its
-                            // frames are at the camera, so its own depth means nothing. A signature (5) is nearest.
+                            // frames are at the camera, so its own depth means nothing. A signature (5) is nearest. A
+                            // hover layer (7) is a step or more in front of its view, the higher its priority (mcbMapInfo.y,
+                            // which is that plus one) the nearer, and still behind the pointer, whichever is drawn first.
+                            float mcbStep = mcbMap == 7 ? mcbMapInfo.y * 1.2e-7 : 0.0;
                             mcbDepth = mcbMap == 5 ? (mcbReversed > 0.5 ? 1.0 : 0.0)
-                                : mcbMap == 3 || mcbMap == 6 ? (mcbReversed > 0.5 ? 0.99999 : 0.00001) : mcb_in_front(64.0);
+                                : mcbMap == 3 || mcbMap >= 6 ? (mcbReversed > 0.5 ? 0.99999 + mcbStep : 0.00001 - mcbStep) : mcb_in_front(64.0);
                             gl_FragDepth = mcbDepth;
                         }
                 #endif

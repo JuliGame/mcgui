@@ -105,6 +105,8 @@ final class SessionRig implements AutoCloseable {
     private final AtomicLong posted = new AtomicLong(), ran = new AtomicLong(), queued = new AtomicLong(), drawn = new AtomicLong();
     /** CPU (ns) and bytes allocated on the server thread by what sessions handed it, and by {@link #open}. */
     final AtomicLong serverCpu = new AtomicLong(), serverBytes = new AtomicLong();
+    /** CPU (ns) of the render threads' jobs, by kind. */
+    final java.util.Map<Renders.Kind, AtomicLong> renderCpu = new java.util.concurrent.ConcurrentHashMap<>();
     /** What sessions are given as the server thread: the rig's thread, counting what it is handed. */
     final java.util.concurrent.Executor serverThread = task -> {
         posted.incrementAndGet();
@@ -132,9 +134,11 @@ final class SessionRig implements AutoCloseable {
             public void execute(Kind kind, Runnable job) {
                 queued.incrementAndGet();
                 super.execute(kind, () -> {
+                    long cpu = THREADS.getCurrentThreadCpuTime();
                     try {
                         job.run();
                     } finally {
+                        renderCpu.computeIfAbsent(kind, k -> new AtomicLong()).addAndGet(THREADS.getCurrentThreadCpuTime() - cpu);
                         drawn.incrementAndGet();
                     }
                 });

@@ -227,6 +227,20 @@ tasks.register('hoverCost', JavaExec) {
     maxHeapSize = '2g'
 }
 
+// What hover layers cost and save the server per target of a page, layers off against on (LayerBench).
+// -Pdir=<pages folder> (default the shipped one), -Ppages=market,quests, -Players=<maps a view gets>, -Ptargets=<most per page>,
+// -Pgeom=1 (print each layer's place and maps), -Pwhy=1 (why a target got no layer).
+tasks.register('layerBench', JavaExec) {
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'ai.resourcepack.ui.LayerBench'
+    systemProperty 'java.awt.headless', 'true'
+    systemProperty 'dir', project.findProperty('dir') ?: file('src/main/resources/pages').absolutePath
+    ['pages', 'layers', 'targets', 'geom', 'why'].each { k ->
+        if (project.hasProperty(k)) systemProperty k, project.property(k)
+    }
+    maxHeapSize = '3g'
+}
+
 // The test runtime classpath, for bench/bench.py: it builds under one lock and runs the benches under another.
 tasks.register('benchClasspath') {
     dependsOn 'testClasses'

@@ -527,6 +527,46 @@ wide for a default view). `/mcgui place <page> <cols> <rows> <name> <x> <y> <z>
   unless it is the camera), and the only thing still drawn from its rotation
   is the hand's sway, a difference with no absolute yaw
   (`ItemInHandRenderer.submitHandsWithItems`).
+- **Hover layers: the client switches to a hover by itself** (`views.hover-layers`,
+  off by default; `api/HoverLayers`, `world/LayerSet`, `ClientHovers`). Each
+  hover drawn ahead near the pointer is handed to the client as hidden maps of
+  the 2×2 blocks it changes, map kind 7 in the text shaders: top markers swapped
+  (`Palette.markLayer`), then the view's size, the canvas pixel the map's third
+  row starts at (a layer map lies anywhere, 128 × 126 of the canvas, not on a
+  tile: half the maps of tile-aligned ones for a row of buttons), the pointer
+  speed, priority and side (x or z, which way), and the rectangle where the
+  pointer must be. `text.vsh` works the pointer out as `mcb_client_pointer`
+  does (`mcb_hot`) and puts the map in the window only while the pointer is
+  inside, priority + 1 in `mcbMapInfo.y`; otherwise behind the far plane.
+  `text.fsh` draws it all or nothing at 0.99999 + (priority + 1) × 1.2e-7 (still
+  inside the overlay mask's > 0.99995), never its top two rows. The server then
+  hears the pointer, finds the client already shows that hover
+  (`ClientHovers.shows`) and draws nothing; a layer the pointer is in but should
+  not be is taken off. Every picture change clears the layers, in the same
+  sender pass (layers are assigned after the view's own tiles).
+  - **A frame costs the client a draw call every frame, even one whose quad the
+    shader throws away** (about 9 µs; FPS's measurement). So a layer map only
+    has a frame while a layer holds it: `Views.frameLayers` spawns and removes
+    them per map (`MapWall.frameOnly`) once the maps as they are now are
+    delivered, so a new frame never shows the map item and a removed one was
+    already marked to show nothing. Nothing armed: no extra frames at all.
+  - A layer needing more than half the maps is never armed (market's slot
+    hovers change the whole detail panel: 20–38 maps each). Layers are worked
+    out once per picture (`ClientHovers.worked`) and re-armed from that after
+    giving way for room.
+  - Measured on Josh's PC (120 FPS cap, 32 maps, pixel-timed, layers off and
+    on interleaved, two sessions): quests hover 34–38 → 8 ms median (one
+    frame), p90 50–58 → 8; crates 50–54 → 8 ms (p90 84–101 → 50); leaving both
+    one frame. The market got no better and somewhat worse on entering (median
+    42 → 54 ms in the second session): its slot hovers are refused, and arming
+    its small targets competes with its pictures. Frame rate, uncapped: nothing
+    armed, no extra frames (market resting 352 against 355 FPS); quests resting
+    with 20 layer maps armed 375 → 348 FPS (about 10 µs a map, as predicted).
+    Server CPU per target (`gradle layerBench`, VPS) rose on quests (51 → 75 ms)
+    and market (135 → 190 ms) and fell on crates (85 → 69 ms): arming encodes
+    about 7 maps per layer, about 4 layers again after each picture change. Not
+    done: sharing encoded layers across players (SharedRepaints keys would do).
+    Rig: `rigs/r4/InstantHover/ih_pc.py`; raw results there.
 - **The mouse skips the tick.** `Pipeline.watch` reads a seated player's
   rotation packets on the netty thread as they arrive, and the pointer's move
   is written straight back (`Pipeline.sendNow`); the server's own position

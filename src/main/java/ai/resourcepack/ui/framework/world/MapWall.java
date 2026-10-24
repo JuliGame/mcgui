@@ -262,6 +262,38 @@ public final class MapWall {
     }
 
     /**
+     * Brings the owner's client the frames of exactly the tiles [tiles] says, in one bundle: the ones missing appear,
+     * the rest go (a view's hover layers, see LayerSet: a frame on the client costs it a draw call every frame, even one
+     * whose map shows nothing). Each map must have reached the client before its frame does, or the frame shows the
+     * map item.
+     */
+    public void frameOnly(Player viewer, boolean[] tiles) {
+        if (nms == null || viewer != owner) throw new IllegalStateException("Only a view's own viewer is shown its frames");
+        int[] ids = entityIds;
+        if (framed == null || framed.length != ids.length) framed = new boolean[ids.length];
+        BlockFace face = ownerStack == null ? facing : BlockFace.UP;
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        List<Object> out = new ArrayList<>();
+        int[] gone = new int[ids.length];
+        int g = 0;
+        for (int t = 0; t < ids.length; t++) {
+            boolean want = t < tiles.length && tiles[t];
+            if (want == framed[t]) continue;
+            framed[t] = want;
+            if (!want) {
+                gone[g++] = ids[t];
+                continue;
+            }
+            int[] b = ownerStack == null ? tileBlock(t % cols, t / cols) : ownerStack;
+            out.addAll(nms.frameAppears(ids[t], new UUID(random.nextLong(), random.nextLong()), b[0], b[1], b[2], face, mapId(t)));
+        }
+        if (g > 0) out.add(0, nms.removeEntities(java.util.Arrays.copyOf(gone, g)));
+        if (out.isEmpty()) return;
+        for (int i = 0; i < out.size(); i += BUNDLE_MAX) nms.send(viewer, nms.bundle(out.subList(i, Math.min(out.size(), i + BUNDLE_MAX))));
+        shownToOwner = true;
+    }
+
+    /**
      * Sends only the tiles [tiles] says, and frames only those (an overlay's panel: nothing is drawn where the
      * rest would be). Never fewer than before: a tile once shown keeps its frame.
      */

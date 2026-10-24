@@ -2,6 +2,7 @@ package ai.resourcepack.ui.framework;
 
 import ai.resourcepack.ui.framework.api.Canvas;
 import ai.resourcepack.ui.framework.api.Click;
+import ai.resourcepack.ui.framework.api.HoverLayers;
 import ai.resourcepack.ui.framework.api.Pointer;
 import ai.resourcepack.ui.framework.api.View;
 import ai.resourcepack.ui.framework.api.ViewContent;
@@ -154,14 +155,17 @@ public final class FrameworkCommand implements TabExecutor {
     }
 
     /**
-     * /mcgui debug &lt;player&gt; point &lt;x&gt; &lt;y&gt; | click [right] | scroll &lt;notches&gt; | speed | close: drive a
-     * player's view from the console, for testing without anybody at the mouse.
+     * /mcgui debug &lt;player&gt; point &lt;x&gt; &lt;y&gt; | click [right] | scroll &lt;notches&gt; | speed | layer
+     * &lt;left&gt; &lt;top&gt; &lt;right&gt; &lt;bottom&gt; [rrggbb] | layer clear | close: drive a player's view from the
+     * console, for testing without anybody at the mouse. A debug layer is a block of colour over that rectangle that
+     * their client shows while its pointer is in it.
      */
     private void debug(CommandSender sender, String[] args) {
         Player p = args.length > 1 ? org.bukkit.Bukkit.getPlayerExact(args[1]) : null;
         View view = p == null ? null : plugin.viewOf(p);
         if (view == null || args.length < 3) {
-            say(sender, "/mcgui debug <player> point <x> <y> | click [right] | scroll <n> | speed | close (the player needs an open view)", NamedTextColor.RED);
+            say(sender, "/mcgui debug <player> point <x> <y> | click [right] | scroll <n> | speed | layer <l> <t> <r> <b> [rrggbb] | layer clear | close"
+                    + " (the player needs an open view)", NamedTextColor.RED);
             return;
         }
         if (p != sender && !permitted(sender, othersPermissionFor("debug"))) return;
@@ -171,9 +175,34 @@ public final class FrameworkCommand implements TabExecutor {
             case "scroll" -> view.content().scroll(view, view.pointerX(), view.pointerY(), parse(args, 3, 1, 64));
             case "speed" -> say(sender, plugin.views().pointerSpeedReport(p), NamedTextColor.GRAY);
             case "close" -> view.close();
-            default -> say(sender, "point, click, scroll, speed or close", NamedTextColor.RED);
+            case "layer" -> say(sender, debugLayer(view, args), NamedTextColor.GRAY);
+            default -> say(sender, "point, click, scroll, speed, layer or close", NamedTextColor.RED);
         }
         say(sender, "pointer " + view.pointerX() + "," + view.pointerY() + " shown=" + view.shown(), NamedTextColor.GRAY);
+    }
+
+    private static String debugLayer(View view, String[] args) {
+        HoverLayers layers = view.layers();
+        if (layers == null) return "This view has no hover layers (views.hover-layers, the pack and a client-placed pointer).";
+        if (args.length > 3 && args[3].equalsIgnoreCase("clear")) {
+            layers.clear();
+            return "Hover layers cleared.";
+        }
+        if (args.length < 7) return "layer <left> <top> <right> <bottom> [rrggbb]";
+        int l = parse(args, 3, 0, 1 << 16) & ~1, t = parse(args, 4, 0, 1 << 16) & ~1;
+        int r = (parse(args, 5, 0, 1 << 16) + 1) & ~1, b = (parse(args, 6, 0, 1 << 16) + 1) & ~1;
+        if (r <= l || b <= t) return "An empty rectangle.";
+        int rgb;
+        try {
+            rgb = args.length > 7 ? Integer.parseInt(args[7], 16) : 0xFF3030;
+        } catch (NumberFormatException e) {
+            return "Not a colour: " + args[7];
+        }
+        int[] px = new int[(r - l) * (b - t)];
+        java.util.Arrays.fill(px, 0xFF000000 | rgb);
+        boolean ok = layers.arm("debug " + l + "," + t, new int[]{l, t, r, b}, null, 1, px, l, t, r - l, b - t);
+        return ok ? "Armed a layer over " + l + "," + t + " to " + r + "," + b + " (" + layers.used() + " of " + layers.capacity() + " maps)"
+                : "Not enough layer maps free (" + layers.used() + " of " + layers.capacity() + ")";
     }
 
     private static int parse(String[] args, int i, int fallback, int max) {

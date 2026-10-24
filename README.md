@@ -375,6 +375,19 @@ arriving before the highlight does. What decides it:
   `{player}` in it, a hover within reach of the name (or of a blur that reads it)
   is drawn for each player alone; everything further off is drawn once for all.
 
+**Hovers at frame rate (opt-in):** with `views.hover-layers: 32` in
+`config.yml`, the hovers drawn ahead are also sent to the player's client in
+advance, and the client shows each the frame the pointer gets there, with no
+wait for the server at all: on the test PC a hover on the quests and crates
+pages went from about 35–55 ms to one frame (8 ms at 120 FPS). It suits hovers
+that change a small area (buttons, rows, cards). A hover that changes a large
+panel (the market's item slots, which redraw the whole detail panel) is left to
+the server, and on such a page it is a little slower than without (market
+median 42 against 54 ms). The cost: each map in use costs the player about
+10 µs a frame while a hover near the pointer is ready (quests: 375 against 348
+FPS uncapped; nothing when none is), and the server spends more CPU per
+picture preparing them (about +45% on quests and the market, -20% on crates).
+
 `sh gradlew hoverCost -Ppages=path/to/page.html` prints what each hover on a
 page costs to redraw and how many fell back to a whole redraw (`not partial`). It
 calls the redraw directly, so it does not see the `+`/`~` switch above: check

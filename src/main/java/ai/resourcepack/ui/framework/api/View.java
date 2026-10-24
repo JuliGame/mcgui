@@ -30,6 +30,14 @@ public interface View {
     /** Whether the picture is on the player's screen yet (the view waits until it has arrived). */
     boolean shown();
 
+    /**
+     * Pictures the player's client switches to by itself when the pointer goes over part of the view ({@link HoverLayers});
+     * null when this view has none (no resource pack, a pointer the server places, or {@code views.hover-layers} 0).
+     */
+    default HoverLayers layers() {
+        return null;
+    }
+
     boolean open();
 
     void close();

@@ -28,6 +28,11 @@ public final class Settings {
     public final double pointerSpeed;
     /** With the pack: the client draws the pointer itself every frame from where the player looks. */
     public final boolean clientPointer;
+    /**
+     * Hidden maps each client-placed view gets for hover layers (api/HoverLayers): pictures its client switches to by
+     * itself when the pointer goes over an element. 0: none.
+     */
+    public final int hoverLayers;
     /** Log each click's resolved spot and each pointer correction ({@code [pointer]} lines), for testing. */
     public final boolean debugPointer;
     public final int mapIdBase;
@@ -48,6 +53,7 @@ public final class Settings {
         defaultFov = c.getInt("views.default-fov", 70);
         pointerSpeed = Math.max(0.05, c.getDouble("views.pointer-speed", 1.0));
         clientPointer = c.getBoolean("views.client-pointer", true);
+        hoverLayers = Math.max(0, Math.min(512, c.getInt("views.hover-layers", 0)));
         debugPointer = c.getBoolean("views.debug-pointer", false);
         mapIdBase = c.getInt("map-id-base", 2_000_000_000);
         cpuThreads = Math.max(0, c.getInt("cpu-threads", 0));

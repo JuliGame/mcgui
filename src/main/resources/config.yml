@@ -115,6 +115,12 @@ views:
   # With the pack, the player's own client draws the pointer every frame from where they look, so it has
   # no network or tick lag. Off: the server moves the pointer as their rotation arrives (20 times a second).
   client-pointer: true
+  # With a client-drawn pointer: the most hidden maps each view may use for hovers its client shows by itself, the
+  # frame the pointer gets there, without waiting for the server (hover layers). The hovers drawn ahead near the
+  # pointer are sent in advance, each on a map for every 128x126 part of what it changes; a hover that needs more
+  # than half of them (one that changes a large panel) is left to the server. Each map in use costs the player's
+  # client about 10 us a frame and the server more CPU per picture. 32 is a good start. 0: off.
+  hover-layers: 0
   # Log where each click on a client-drawn pointer lands, and every correction, as [pointer] lines. For testing.
   debug-pointer: false
 

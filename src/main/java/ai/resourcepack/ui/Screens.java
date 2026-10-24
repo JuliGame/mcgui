@@ -424,6 +424,7 @@ public final class Screens implements Listener {
             throw e;
         }
         seated.view.pointer(Pointer.ARROW);
+        session.layers(seated.view.layers());
         return true;
     }
 

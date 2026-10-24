@@ -44,9 +44,6 @@ import java.util.logging.Level;
  * and after them.
  */
 public final class Framework implements UIFramework, Listener {
-    /** View walls share one range: each player only ever sees their own view's frames. */
-    private static final int VIEW_ID_SPAN = 1024;
-
     private final JavaPlugin plugin;
     private Settings settings;
     private Nms nms;
@@ -92,7 +89,7 @@ public final class Framework implements UIFramework, Listener {
         wire = new ServerWire(nms, pipeline, settings.sharedCompression ? SharedCompression.create(ServerWire.packets(nms), plugin.getLogger()) : null);
         sender = new MapSender(wire, palette, settings.bytesPerSecond, plugin.getLogger());
         views = new Views(plugin, settings, nms, pipeline, id -> pack != null && pack.has(id), sender, palette, settings.mapIdBase);
-        walls = new Walls(plugin, settings.mapIdBase + VIEW_ID_SPAN, settings.viewDistance, settings.reach, views::seated);
+        walls = new Walls(plugin, settings.mapIdBase + Views.VIEW_ID_SPAN, settings.viewDistance, settings.reach, views::seated);
         var pm = plugin.getServer().getPluginManager();
         pm.registerEvents(this, plugin);
         pm.registerEvents(walls, plugin);

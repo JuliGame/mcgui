@@ -157,6 +157,8 @@ public final class Session {
     private HoverAhead.Job ahead;
     /** Looks ahead again, on the server thread: when another session's drawing ahead is over. */
     private final Runnable lookAgain;
+    /** The hovers the client shows by itself, without a picture (a view with hover layers); null without. */
+    private volatile ClientHovers hovers;
     /** When the pointer last moved (nanoTime), and how fast, canvas pixels a second. */
     private long pointerAt;
     private double pointerVx, pointerVy;
@@ -202,6 +204,24 @@ public final class Session {
 
     private Player player() {
         return viewer == null ? null : Bukkit.getPlayer(viewer);
+    }
+
+    /**
+     * Hands the hovers drawn ahead to the client as hover layers ({@link ClientHovers}), so it shows each the frame its
+     * pointer gets there. A view's, once it is open; null for none.
+     */
+    void layers(ai.resourcepack.ui.framework.api.HoverLayers layers) {
+        hovers = layers == null ? null : new ClientHovers(layers);
+        hoverAhead.onReady(layers == null ? null : this::armLayers);
+    }
+
+    /** A hover was drawn ahead: on the render thread, during the drawing ahead, when nothing draws into the picture. */
+    private void armLayers() {
+        ClientHovers h = hovers;
+        HtmlRenderer.Frame f = frame;
+        // While something on the page moves its picture changes many times a second, and every change takes the layers off.
+        if (h == null || f == null || !still()) return;
+        h.arm(f, drawnHover, hoverAhead.ready(f, drawnHover, drawnPress, drawnPress), pointerX, pointerY);
     }
 
     // ---------------------------------------------------------------- pages
@@ -456,9 +476,11 @@ public final class Session {
         if (Math.abs(f.scrollY() - Math.max(0, Math.min(scrollY, f.maxScroll()))) >= 0.01) return;
         double x = pointerX / scale, y = pointerY / scale;
         if (hoverAhead.done(f, x, y)) return;
-        // The picture shows the state now (no picture is being drawn, so the render thread's fields are settled).
+        // The picture shows the state now (no picture is being drawn, so the render thread's fields are settled), or the
+        // client shows it over the picture by itself (ClientHovers): what is drawn ahead is drawn over the picture.
         List<Element> hoverKey = key(hover, false), pressKey = key(pressed, true);
-        if (!hoverKey.equals(drawnHover) || !pressKey.equals(drawnPress)) return;
+        ClientHovers h = hovers;
+        if (!hoverKey.equals(drawnHover) && (h == null || !h.armed(f, hoverKey)) || !pressKey.equals(drawnPress)) return;
         if (!HoverAhead.claim(lookAgain)) return;
         hoverAhead.personal(personalCopy());
         // From here every way out releases the turn: one kept by mistake would stop drawing ahead for every session.
@@ -477,6 +499,8 @@ public final class Session {
                         Motion.set(m);
                     }
                     hoverAhead.run(job);
+                    // Also what other sessions drew of this picture, which this job found kept and did not draw.
+                    armLayers();
                 } catch (RuntimeException | Error e) {
                     // It may have left nothing usable; real pictures draw as ever.
                     hoverAhead.drop();
@@ -849,6 +873,8 @@ public final class Session {
                     }
                 }
                 hoverAhead.drop();
+                // The layers were of the picture before: the new one's are drawn ahead from it.
+                resetLayers();
                 if (publish != null && !partial && c == null && f.document() == d && f.scrollY() == 0) {
                     // This session's first picture of the page, drawn as any session's would be: kept for the next to
                     // show it here, with the canvas as it is now. Its image (and document) are shared from now on, so the
@@ -880,6 +906,7 @@ public final class Session {
                 if (plugin.debug()) e.printStackTrace();
                 // Its pixels may be half painted: nothing drawn ahead over them will do.
                 hoverAhead.drop();
+                resetLayers();
                 // A page that cannot be drawn at all leaves the last picture, of another page, on the screen,
                 // where clicks would find nothing: go back to that page, so the screen still works.
                 HtmlRenderer.Frame shown = frame;
@@ -1135,6 +1162,7 @@ public final class Session {
         drawnName = name;
         cache = null;
         frame = f;
+        resetLayers();
         FAILURES.remove(f.page());
         if (plugin.debug()) {
             plugin.getLogger().info(String.format("Took the first picture of %s for %s in %.3f ms (%s)", name, viewer, (System.nanoTime() - t0) / 1e6,
@@ -1178,6 +1206,12 @@ public final class Session {
             if (ahead != null) ahead.cancel();
         }
         hoverAhead.drop();
+        resetLayers();
+    }
+
+    private void resetLayers() {
+        ClientHovers h = hovers;
+        if (h != null) h.reset();
     }
 
     // ---------------------------------------------------------------- input
@@ -1221,8 +1255,23 @@ public final class Session {
         boolean differs = e != hover && !key(hover, false).equals(key(e, false));
         hover = e;
         hoverSound(e);
-        if (differs) render();
+        ClientHovers h = hovers;
+        if (h == null) {
+            if (differs) render();
+            else lookAhead();
+            return;
+        }
+        // With hover layers the client may already show this hover over the picture by itself: then nothing is drawn,
+        // unless a picture is on its way, which the layers are not of.
+        boolean shown = h.shows(frame, x, y, key(e, false), drawnHover);
+        if (shown && !drawing()) lookAhead();
+        else if (differs || !shown) render();
         else lookAhead();
+    }
+
+    /** Whether a picture (not a drawing ahead) is being drawn or waited for. */
+    private synchronized boolean drawing() {
+        return rendering && ahead == null;
     }
 
     /** The pointer is over [e]: the hover sound of the element with one it is in, if it has just come into it. */
@@ -1242,6 +1291,7 @@ public final class Session {
             if (ahead != null) ahead.cancel();
         }
         hoverAhead.drop();
+        resetLayers();
         if (hover != null) {
             boolean differs = !key(hover, false).isEmpty();
             hover = null;

@@ -314,6 +314,20 @@ public final class Canvas {
         apply(tiles, 0, rgb, 0, w, w, h, x, y, false, null);
     }
 
+    /**
+     * Publish finished map colour bytes as tiles, as one change: index to bytes, sent as they are in {@link Encoding#HI}.
+     * For a view's hover layers, whose tiles carry more than a picture ({@code Palette.markLayer}): a canvas used this
+     * way is never drawn into, and only sent in HI. The arrays must never change once given.
+     */
+    public void put(Map<Integer, byte[]> given) {
+        if (given.isEmpty()) return;
+        Tile[] next = tiles.clone();
+        for (Map.Entry<Integer, byte[]> e : given.entrySet()) next[e.getKey()] = new Tile(e.getValue(), Palette.FULL_BOUNDS);
+        tiles = next;
+        version++;
+        published.run();
+    }
+
     /** Rows per piece of work when converting a big drawing on several cores. */
     private static final int BAND = 32;
 

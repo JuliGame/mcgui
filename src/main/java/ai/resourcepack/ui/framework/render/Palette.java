@@ -242,6 +242,61 @@ public final class Palette {
         return symbolId[flags];
     }
 
+    /** The most a {@link #markLayer} edge can be: two symbols' worth. */
+    public static final int MAX_EDGE = SYMBOLS * SYMBOLS - 1;
+
+    /** {@link #markLayer}'s [side]: the view is along z (else x) from the player's eye; they look towards decreasing x or z. */
+    public static final int LAYER_ALONG_Z = 2, LAYER_LOOKS_NEGATIVE = 1;
+
+    /** {@link #markLayer}'s priorities run from 0 to one less than this: four of them, with the [side], fit in a symbol. */
+    public static final int LAYER_PRIORITIES = SYMBOLS / 4;
+
+    /**
+     * A HI map marked as part of a hover layer of somebody's own fullscreen view of [cols] × [rows] maps whose pointer
+     * their client draws (see {@link #markTiled}): its rows 2 to 127 are the canvas from pixel ([x], [y]) on, 128 across,
+     * wherever that is (not one of the view's tiles), and it shows only while that pointer is inside [include] and
+     * outside [exclude] (each {left, top, right, bottom} in canvas pixels, right and bottom not included). Its top two
+     * marker colours are swapped and its bottom two both the fourth; then the view's columns and rows, and below them
+     * [x] (two symbols, high first); then the pointer's speed in pixels per degree times
+     * {@code Shaders.LAYER_SPEED_SCALE} ([speed], three symbols, high first) and a fourth symbol: four times the
+     * [priority] plus the [side] the view is on ({@link #LAYER_ALONG_Z}, {@link #LAYER_LOOKS_NEGATIVE}); then the two
+     * rectangles, each edge two symbols (high, low) and each rectangle two 2×2 blocks (left and top, then right and
+     * bottom), include from x = 6 and exclude from x = 10; then [y] (two symbols, top row). Eight 2×2 blocks in all; the
+     * shader never shows the top two rows. Not a copy: [hi] is marked in place.
+     */
+    public byte[] markLayer(byte[] hi, int cols, int rows, int x, int y, int speed, int side, int priority, int[] include, int[] exclude) {
+        hi[0] = markerId[1];
+        hi[1] = markerId[0];
+        hi[128] = markerId[3];
+        hi[129] = markerId[3];
+        hi[2] = symbolId[Math.min(SYMBOLS - 1, cols)];
+        hi[3] = symbolId[Math.min(SYMBOLS - 1, rows)];
+        edge(hi, 130, x);
+        edge(hi, 14, y);
+        int s = Math.max(0, Math.min(SYMBOLS * SYMBOLS * SYMBOLS - 1, speed));
+        hi[4] = symbolId[s / (SYMBOLS * SYMBOLS)];
+        hi[5] = symbolId[s / SYMBOLS % SYMBOLS];
+        hi[132] = symbolId[s % SYMBOLS];
+        hi[133] = symbolId[Math.max(0, Math.min(LAYER_PRIORITIES - 1, priority)) * 4 + (side & 3)];
+        rect(hi, 6, include);
+        rect(hi, 10, exclude);
+        return hi;
+    }
+
+    private void rect(byte[] hi, int x, int[] r) {
+        edge(hi, x, r[0]);
+        edge(hi, 128 + x, r[1]);
+        edge(hi, x + 2, r[2]);
+        edge(hi, 128 + x + 2, r[3]);
+    }
+
+    /** Canvas pixel [v] as two symbols at hi[at] and the next: high, then low. */
+    private void edge(byte[] hi, int at, int v) {
+        int e = Math.max(0, Math.min(MAX_EDGE, v));
+        hi[at] = symbolId[e / SYMBOLS];
+        hi[at + 1] = symbolId[e % SYMBOLS];
+    }
+
     /** As {@link #encodeHi}, in plain colours, one pixel at a time: a transparent pixel is the transparent colour. */
     public void encodePlain(byte[] ycc, int stride, int ox, int oy, byte[] out, boolean clear) {
         for (int y = 0; y < 128; y++) {

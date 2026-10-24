@@ -4,6 +4,7 @@ import ai.resourcepack.ui.framework.Settings;
 import ai.resourcepack.ui.framework.api.Canvas;
 import ai.resourcepack.ui.framework.api.Click;
 import ai.resourcepack.ui.framework.api.CloseReason;
+import ai.resourcepack.ui.framework.api.HoverLayers;
 import ai.resourcepack.ui.framework.api.Key;
 import ai.resourcepack.ui.framework.api.Pointer;
 import ai.resourcepack.ui.framework.api.View;
@@ -155,6 +156,8 @@ public final class Views implements Listener {
     private static final int KEEP_AFTER = 2;
     /** Ticks after which a kept overlay is kept regardless, if its client never answers. */
     private static final int KEEP_TIMEOUT = 20;
+    /** Map ids every view shares, from map-id-base (each player only ever sees their own view's frames): its own maps, then its hover layers'. */
+    public static final int VIEW_ID_SPAN = 1024;
 
     private final Plugin plugin;
     private final Settings settings;
@@ -240,6 +243,8 @@ public final class Views implements Listener {
         final PotionEffect previousInvisibility;
         final Location returnTo;
         final PrivateView privateView;
+        /** Hover layers (see {@link HoverLayers}); null without. */
+        final LayerSet layers;
         final int openedAt, deadline;
         final int pointerId;
         /** Written under the view's lock on the netty thread as the mouse moves, read by the server thread. */
@@ -285,12 +290,14 @@ public final class Views implements Listener {
         /** A pointer report is waiting for the server thread (see turned). */
         final java.util.concurrent.atomic.AtomicBoolean reportQueued = new java.util.concurrent.atomic.AtomicBoolean();
         boolean pinged;
+        /** The hover layers' {@code changes()} their frames on the client last matched (see frameLayers). */
+        int layersFramed;
         volatile boolean revealed, closed;
         volatile boolean caughtUp;
 
         ViewImpl(Player p, ViewContent content, Canvas canvas, MapWall wall, ViewOptions options, boolean withPack, boolean clientPointer, boolean keeps,
                  double speed, ArmorStand vehicle, Location seat, LivingEntity camera, Interaction target, TextDisplay pointer, BlockDisplay glow,
-                 Location returnTo, Location cameraAt) {
+                 Location returnTo, Location cameraAt, LayerSet layers) {
             this.player = p.getUniqueId();
             this.content = content;
             this.canvas = canvas;
@@ -313,6 +320,7 @@ public final class Views implements Listener {
             this.previousInvisibility = p.getPotionEffect(PotionEffectType.INVISIBILITY);
             this.returnTo = returnTo;
             this.privateView = new PrivateView(wall, cameraAt, !withPack, !keeps);
+            this.layers = layers;
             this.openedAt = Bukkit.getCurrentTick();
             this.deadline = openedAt + REVEAL_TIMEOUT;
             this.pointerId = pointer == null ? -1 : pointer.getEntityId();
@@ -343,6 +351,7 @@ public final class Views implements Listener {
         @Override public Pointer pointer() { return shape; }
         @Override public void pointer(Pointer shape) { this.shape = shape == null ? Pointer.ARROW : shape; }
         @Override public boolean shown() { return revealed; }
+        @Override public HoverLayers layers() { return layers; }
 
         @Override
         public void restSlot(int slot) {
@@ -394,7 +403,7 @@ public final class Views implements Listener {
         // block, and their client keeps the world round the panel as it was (see Shaders.overlayChain): so the world
         // neither moves when it opens nor turns with the pointer. Its frames lie at the camera and its maps place
         // themselves in the window, so its wall is only a set of map ids.
-        // The signature map takes the id after the tiles', which must stay inside the views' 1024 (Framework.VIEW_ID_SPAN).
+        // The signature map takes the id after the tiles', which must stay inside the views' 1024 (VIEW_ID_SPAN).
         Location eye = withPack && settings.clientPointer && options.overlay() && canvas.cols() * canvas.rows() < 1024
                 ? overlayEye(player) : null;
         boolean keeps = eye != null;
@@ -419,6 +428,18 @@ public final class Views implements Listener {
         // On their client only, and not yet: the maps go out first, and the frames only appear once they can show them.
         wall.spawnFor(nms, player, clientPointer ? stackBlock(cam) : null);
         double speed = speedFor(player, canvas, clientPointer);
+        LayerSet layers = null;
+        // After the tiles' ids and an overlay's signature's (MapWall.signatureMapId).
+        int layerMaps = Math.min(settings.hoverLayers, VIEW_ID_SPAN - canvas.tiles() - 1);
+        if (clientPointer && layerMaps > 0) {
+            // Hover layers carry the speed to the shader in steps: the server's cursor goes by the same.
+            speed = Shaders.layerSpeed(speed);
+            MapWall row = new MapWall(world, wall.anchorX, wall.anchorY, wall.anchorZ, wall.facing, layerMaps, 1, firstMapId + canvas.tiles() + 1);
+            row.spawnFor(nms, player, stackBlock(cam));
+            int side = (wall.facing.getModZ() != 0 ? Palette.LAYER_ALONG_Z : 0)
+                    | (wall.facing.getModX() + wall.facing.getModZ() > 0 ? Palette.LAYER_LOOKS_NEGATIVE : 0);
+            layers = new LayerSet(palette, new Canvas(palette, layerMaps, 1, sender::wake), row, canvas.cols(), canvas.rows(), speed, side);
+        }
 
         // With a client-placed pointer the camera is the player's own eye, which turns with the mouse:
         // they are held where it is on the flagged spot (see reveal). Otherwise a camera entity looks at
@@ -476,7 +497,7 @@ public final class Views implements Listener {
         if (vehicle != null) player.showEntity(plugin, vehicle);
         if (camera != null) player.showEntity(plugin, camera);
 
-        ViewImpl view = new ViewImpl(player, content, canvas, wall, options, withPack, clientPointer, keeps, speed, vehicle, seat, camera, target, pointer, glow, from, cam);
+        ViewImpl view = new ViewImpl(player, content, canvas, wall, options, withPack, clientPointer, keeps, speed, vehicle, seat, camera, target, pointer, glow, from, cam, layers);
         views.put(player.getUniqueId(), view);
         // Remembered on the player, so a crash mid-view cannot leave them stuck in adventure mode or in the ground.
         player.getPersistentDataContainer().set(seatKey, PersistentDataType.STRING, player.getGameMode().name());
@@ -809,6 +830,7 @@ public final class Views implements Listener {
                 // The panel grew (something opened past it): its new tiles' frames, once their maps have reached the client.
                 if (!v.wall.allShown() && sender.delivered(v.player, v.wall)) v.wall.showTo(p);
             }
+            if (v.layers != null && v.revealed) frameLayers(p, v);
             // A client that never takes the teleport (another plugin cancelled it), or a kept overlay's turn, must not
             // leave the mouse dead.
             if (v.awaitingTeleport && now >= v.settleBy) v.awaitingTeleport = false;
@@ -821,6 +843,21 @@ public final class Views implements Listener {
             movePointer(v);
             if (now % 40 == 0) v.privateView.refresh(p);
         }
+    }
+
+    /**
+     * Gives the client a frame for each hover-layer map a layer holds, and takes the rest away (LayerSet), once the maps
+     * as they are now have been written to it: a new frame then shows its layer's map, and one taken away was already
+     * marked to show nothing, in the same pass as the picture that made its layer stale.
+     */
+    private void frameLayers(Player p, ViewImpl v) {
+        int changes = v.layers.changes();
+        if (changes == v.layersFramed) return;
+        // Read before the check, so a layer armed after it waits for the next tick rather than going out unsent.
+        boolean[] held = v.layers.framed();
+        if (!sender.delivered(v.player, v.layers.wall)) return;
+        v.layers.wall.frameOnly(p, held);
+        v.layersFramed = changes;
     }
 
     /**
@@ -1249,9 +1286,14 @@ public final class Views implements Listener {
             v.shown = canvas;
             if (v.keeps) panel(v, canvas.snapshot());
             Canvas.Encoding hi = v.clientPointer ? Canvas.Encoding.HI_TILED : Canvas.Encoding.HI_OWN;
-            if (v.withPack) out.add(new MapSender.Assignment(p, v.wall, canvas, hi, null));
-            else out.add(new MapSender.Assignment(p, v.wall, canvas, Canvas.Encoding.PLAIN,
-                    v.revealed ? new MapSender.PointerSpot((int) v.cursorX, (int) v.cursorY, v.shape) : null));
+            if (v.withPack) {
+                out.add(new MapSender.Assignment(p, v.wall, canvas, hi, null));
+                // After the view's own, so a layer taken off as the picture under it changes goes out in the same pass.
+                if (v.layers != null) out.add(new MapSender.Assignment(p, v.layers.wall, v.layers.canvas, Canvas.Encoding.HI, null));
+            } else {
+                out.add(new MapSender.Assignment(p, v.wall, canvas, Canvas.Encoding.PLAIN,
+                        v.revealed ? new MapSender.PointerSpot((int) v.cursorX, (int) v.cursorY, v.shape) : null));
+            }
         }
     }
 
@@ -1299,6 +1341,7 @@ public final class Views implements Listener {
         // Players still seated stay hidden from everyone (see open), whatever this view hid of them.
         v.privateView.close(plugin, player, e -> e instanceof Player other && views.containsKey(other.getUniqueId()));
         v.wall.despawn();
+        if (v.layers != null) v.layers.wall.despawn();
         player.getPersistentDataContainer().remove(returnKey);
         for (Map.Entry<Key, Boolean> held : v.held.entrySet()) {
             if (!held.getValue()) continue;
