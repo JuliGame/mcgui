@@ -409,16 +409,19 @@ wide for a default view). `/ui place <page> <cols> <rows> <name> <x> <y> <z>
   `max_format` of 97 covers 97.1 (checked against 26.3's own codec). A third
   dialect means a third overlay and a look at `include/globals.glsl` and
   `dynamictransforms.glsl` for that version: std140 member order IS the layout.
-- **The pack replaces `text.fsh`/`text.vsh` and `position_tex_color`**. So do
-  other plugins that draw effects through the text shader. Two
-  packs that both replace `text.fsh` on one client cannot both work: whichever
-  is applied last wins and the other's feature silently draws nothing. Nothing
-  composes them yet.
+- **The pack replaces `text.fsh`/`text.vsh` and `position_tex_color`**, and in
+  its 26.2 overlay `post_effect/entity_outline.json` and
+  `rendertype_clouds.vsh` (overlays, below). So do other plugins that draw
+  effects through the text shader. Two packs that both replace `text.fsh` (or
+  the outline chain) on one client cannot both work: whichever is applied last
+  wins and the other's feature silently draws nothing. Nothing composes them
+  yet.
 - **"Seated" is a camera position, not a uniform.** The view's camera sits at
   k/16 + 3/128 of a block along the picture's normal and on a 0/0.5 grid on the
-  other axes; the shaders read that back from `Globals.CameraOffset`. That flag
-  is what hides the HUD and draws the view in front of the world, for that
-  player only.
+  other axes; an overlay's at k/16 + 3/128 on all three (`mcb_flag_axis` 1), so
+  it is the player's own eye moved at most 1/32 of a block on each. The shaders
+  read that back from `Globals.CameraOffset`. That flag is what hides the HUD
+  and draws the view in front of the world, for that player only.
 - **A view fills the window because `text.vsh` puts it there.** Its maps carry
   the view's columns and rows in the two pixels right of the marker, and the
   pointer is text whose red is `Shaders.POINTER_RED` with the columns and rows
@@ -437,7 +440,7 @@ wide for a default view). `/ui place <page> <cols> <rows> <name> <x> <y> <z>
   never sent again. A view's tint travels in its maps (the 2×2 block after its
   size, `Palette.markTint`) and `text.fsh` blends it over the world.
 - **A map's top-left blocks are data, not picture** (the marker, a view's size
-  and place, its tint, a blurred view's panel), so the shader paints them from
+  and place, its tint), so the shader paints them from
   a neighbour: the block right of the data when an edge runs between the top
   two block rows just past it (`mcb_fill_right`, worked out once per map in
   `text.vsh`), else each the block below it. Always copying the block to the
@@ -461,21 +464,41 @@ wide for a default view). `/ui place <page> <cols> <rows> <name> <x> <y> <z>
   batch them) and about 0.4 ms the decode. Map count is the lever (see the
   README's "Frame rate"); moving per-pixel tint decoding to the vertex shader
   made overlay views about 6 % faster.
-- **A blurred view's camera is an invisible creeper** (`ViewOptions.blur`):
-  the game runs `post_effect/creeper.json` over a creeper camera's whole frame,
-  and the pack's (26.2 overlay only, in that dialect) is the menu blur outside
-  the view's panel. The maps carry the panel's edges (`HI_OWN_BLUR`, marker
-  third and third) and `text.fsh` writes them into the window's four
-  bottom-left pixels, between two check colours, for the post effect to read;
-  without them it passes the frame through. Paper spawns no creeper on
-  peaceful, so there the view is only tinted. The camera is not the player's,
-  so the server places the pointer.
-- **An overlay view is still** (`ViewOptions.still`, set for every `ui:overlay`
-  page): its camera is another entity and the server places the pointer. A
-  client-placed pointer is drawn from the player's own camera, so turning the
-  mouse turns the world seen through the transparent pixels, and the world
-  round the panel swings with the pointer. The shader only sees the camera,
-  so a frame-rate pointer and a still world cannot both be had.
+- **An overlay keeps the world it opened on** (`ViewOptions.overlay`, every
+  `ui:overlay` page; 26.2). Its camera is the player's own eye where it was
+  (`Views.overlayEye`, their rotation untouched) and its pointer the client's,
+  at frame rate. Only the tiles with something opaque in them are sent and
+  framed (`Canvas.Snapshot.opaque`, `MapWall.sendOnly`; grow-only, new frames
+  once their maps are delivered), placed in the window by their tile like any
+  client-placed view (`HI_TILED`), opaque or not drawn, never blended with the
+  world. What does the rest is the pack's `post_effect/entity_outline.json`
+  (`Shaders.overlayChain`): the game runs it whenever a glowing entity was
+  drawn (`LevelRenderer`, right after the main pass), whatever the camera, and
+  may write `minecraft:main` (`LevelTargetBundle.OUTLINE_TARGETS`). The switch
+  is a glowing block display at the eye, a speck that draws nothing anybody
+  sees and is never culled (a display with no width is not). An extra map,
+  the signature (tile 239, 239; `Palette.markSignature`), goes over the
+  window's four bottom-left pixels and `text.fsh` writes there a check, the
+  tint, the flags (blur, kept, reversed depth) and a second check. The chain
+  keeps the game's four outline passes, then: while the overlay opens
+  (`Views.take`: no panel yet) it copies the world, blurred if asked, into a
+  persistent target every frame; once kept (`Views.keep`: the flag flipped and
+  the player turned to the picture's axis in one bundle, then the panel and
+  pointer) it replaces everything not at the view's own depth (the panel at
+  0.99999, pointer and signature at 1) by that picture under the tint, and
+  clears the outline target (another glowing entity's outline would be drawn
+  where it is now). A new window size drops the persistent target (alpha 0),
+  and it is taken again from the frame then. Clouds are drawn after the chain,
+  so the pack's 26.2 `rendertype_clouds.vsh` draws none for an overlay's
+  camera. Without the signature every pass of ours discards: nobody else's game
+  changes. With no room to hold the player, or `views.client-pointer` off, an
+  overlay falls back to the server pointer with a mannequin camera (the world
+  live round it); without the pack, to a wall with the world showing through.
+  The frozen world is the price of the frame-rate pointer: with the camera on
+  another entity the local player is never drawn (`LevelExtractor` skips it
+  unless it is the camera), and the only thing still drawn from its rotation
+  is the hand's sway, a difference with no absolute yaw
+  (`ItemInHandRenderer.submitHandsWithItems`).
 - **The mouse skips the tick.** `Pipeline.watch` reads a seated player's
   rotation packets on the netty thread as they arrive, and the pointer's move
   is written straight back (`Pipeline.sendNow`); the server's own position

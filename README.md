@@ -226,14 +226,18 @@ your own: put an `.ogg` in `plugins/UIEngine/sounds/` and restart, and
 An overlay page (`ui:overlay`) is drawn on nothing instead of white: leave
 `html` and `body` transparent and put the page in a panel, and fullscreen the
 player sees the world round it, under the tint the meta gives (`none` for
-none). The world stays still: the view's camera is not the player's own, so
-the server places the pointer (up to a tick behind the mouse) rather than
-the player's client, which would turn the world with every move of the
-pointer. Add `blur` (`content="rgba(8, 10, 22, 0.3) blur"`) to blur the world
-round the panel too, as the game blurs it behind a menu: that needs a 26.2
-client and a world that is not on peaceful (on peaceful the world is only
-tinted). On a wall, the wall behind shows through, untinted. Players
-without the pack see the world round the panel too, without a tint.
+none). Opening it does not move their view at all, and the world round the
+panel is the picture of it their game took as the overlay opened, so it stays
+perfectly still while the pointer follows the mouse as fast as on any page.
+It is frozen, too: water, mobs and other players behind the panel stop until
+it closes, and the player is back exactly where they were, facing the same way.
+Only the maps the panel covers are sent and drawn. Add `blur`
+(`content="rgba(8, 10, 22, 0.3) blur"`) to blur the world round the panel, as
+the game blurs it behind a menu, at the player's own menu blur setting. All of
+that needs a 26.2 client; where the player has no room to be held still, the
+world shows live round the panel and the server places the pointer (up to a
+tick behind the mouse). On a wall, the wall behind shows through, untinted.
+Players without the pack see the world round the panel too, without a tint.
 
 Controls while a page is open: mouse moves the pointer, either button clicks,
 the wheel (or W/S) scrolls, F goes back, sneak closes; and any key the page
