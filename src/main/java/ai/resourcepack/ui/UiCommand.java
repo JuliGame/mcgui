@@ -1,5 +1,6 @@
 package ai.resourcepack.ui;
 
+import ai.resourcepack.ui.chat.Chat;
 import ai.resourcepack.ui.framework.FrameworkCommand;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -60,8 +61,7 @@ final class UiCommand implements TabExecutor {
     }
 
     private static boolean say(CommandSender to, String text, NamedTextColor color) {
-        to.sendMessage(Component.text(text, color));
-        return true;
+        return Chat.say(to, text, color);
     }
 
     @Override
@@ -70,7 +70,13 @@ final class UiCommand implements TabExecutor {
         if (sub.equals("stats")) {
             if (!permitted(sender, permissionFor(sub))) return true;
             if (args.length > 1 && args[1].equalsIgnoreCase("json")) sender.sendMessage(Stats.json(plugin));
-            else for (String line : Stats.lines(plugin)) say(sender, line, NamedTextColor.GRAY);
+            else {
+                List<String> lines = Stats.lines(plugin);
+                for (int i = 0; i < lines.size(); i++) {
+                    if (i == 0) say(sender, lines.get(i), NamedTextColor.GRAY);
+                    else Chat.detail(sender, lines.get(i).strip());
+                }
+            }
             return true;
         }
         if (FrameworkCommand.SUBCOMMANDS.contains(sub)) return framework.onCommand(sender, command, label, args);
@@ -87,10 +93,11 @@ final class UiCommand implements TabExecutor {
             case "list" -> {
                 if (!permitted(sender, permissionFor("list"))) return true;
                 List<String> names = plugin.pages().names();
-                say(sender, names.isEmpty() ? "No pages yet: put .html files in " + plugin.pages().root() : "Pages: " + String.join(", ", names), NamedTextColor.GRAY);
+                if (names.isEmpty()) say(sender, "No pages yet: put .html files in " + plugin.pages().root(), NamedTextColor.GRAY);
+                else sender.sendMessage(Chat.prefix().append(Component.text("Pages ", Chat.BODY)).append(pageLinks(names, label)));
                 for (Screens.Wall w : plugin.screens().walls()) {
-                    say(sender, "  screen " + w.name + ": " + w.page + ", " + w.cols + "x" + w.rows + (w.shared ? " shared" : "") + " in "
-                            + w.topLeft.getWorld().getName() + " at " + w.topLeft.getBlockX() + " " + w.topLeft.getBlockY() + " " + w.topLeft.getBlockZ(), NamedTextColor.GRAY);
+                    Chat.detail(sender, "Screen '" + w.name + "' shows '" + w.page + "', " + w.cols + "x" + w.rows + (w.shared ? " shared" : "") + " in "
+                            + w.topLeft.getWorld().getName() + " at " + w.topLeft.getBlockX() + " " + w.topLeft.getBlockY() + " " + w.topLeft.getBlockZ());
                 }
             }
             case "import" -> {
@@ -103,10 +110,58 @@ final class UiCommand implements TabExecutor {
                 plugin.reload();
                 say(sender, "Reloaded the config and every page.", NamedTextColor.GREEN);
             }
-            default -> say(sender, "/mcgui open <page> [player] · close [player] · place <page> [cols] [rows] [name] [shared] · remove [name] · list · reload · import <code>"
-                    + " · test wall|view [cols] [rows] · fov <degrees> · pointer [speed] · pack · stats · clear", NamedTextColor.GRAY);
+            default -> help(sender, label);
         }
         return true;
+    }
+
+    /** Each subcommand: its words after the root, what it does, and the subcommand its permission is named after (null: anyone). */
+    private record Help(String usage, String what, String sub) {}
+
+    private static final List<Help> HELP = List.of(
+            new Help("open <page> [player]", "Show a page fullscreen", "open"),
+            new Help("close [player]", "Close the page that is open", null),
+            new Help("place <page> [cols] [rows] [name] [shared]", "Put a page on the wall you look at", "place"),
+            new Help("remove [name]", "Take a wall screen down", "remove"),
+            new Help("list", "Every page and screen", "list"),
+            new Help("import <code>", "Bring in pages made on mcgui.dev", "import"),
+            new Help("reload", "Read the config and every page again", "reload"),
+            new Help("test wall|view [cols] [rows]", "A test picture on a wall or fullscreen", "test"),
+            new Help("fov <degrees>", "Fit views to your field of view", "fov"),
+            new Help("pointer [speed]", "How fast the pointer moves", "pointer"),
+            new Help("pack", "Send the resource pack again", "pack"),
+            new Help("stats", "What the plugin costs the server", "stats"),
+            new Help("clear", "Remove every test wall", "clear"));
+
+    /** The commands the sender may run, one a line, each to click, under the plugin's name and version. */
+    private void help(CommandSender sender, String label) {
+        String root = "/" + label.toLowerCase(Locale.ROOT).replaceFirst("^mcgui:", "");
+        sender.sendMessage(Chat.prefix()
+                .append(Component.text(plugin.getPluginMeta().getVersion(), Chat.MUTED))
+                .append(Component.text(" · ", Chat.SEPARATOR))
+                .append(Component.text("mcgui.dev", Chat.ACCENT)
+                        .clickEvent(net.kyori.adventure.text.event.ClickEvent.openUrl("https://mcgui.dev/"))
+                        .hoverEvent(net.kyori.adventure.text.event.HoverEvent.showText(Component.text("Make pages in your browser", Chat.MUTED)))));
+        for (Help h : HELP) {
+            if (h.sub() != null && !sender.hasPermission(permissionFor(h.sub()))) continue;
+            sender.sendMessage(Component.text("  ")
+                    .append(Chat.command(root + " " + h.usage()))
+                    .append(Component.text("  " + h.what(), Chat.MUTED)));
+        }
+    }
+
+    /** [pages] as names to click, each opening its page for the sender, with dots between. */
+    static Component pageLinks(List<String> pages, String label) {
+        String root = "/" + (label == null ? "mcgui" : label.toLowerCase(Locale.ROOT).replaceFirst("^mcgui:", ""));
+        Component line = Component.empty();
+        for (int i = 0; i < pages.size(); i++) {
+            String page = pages.get(i);
+            if (i > 0) line = line.append(Component.text(" · ", Chat.SEPARATOR));
+            line = line.append(Component.text(page, Chat.ACCENT)
+                    .clickEvent(net.kyori.adventure.text.event.ClickEvent.runCommand(root + " open " + page))
+                    .hoverEvent(net.kyori.adventure.text.event.HoverEvent.showText(Component.text("Open " + page, Chat.MUTED))));
+        }
+        return line;
     }
 
     private void open(CommandSender sender, String[] args) {

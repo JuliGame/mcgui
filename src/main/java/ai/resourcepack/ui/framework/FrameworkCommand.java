@@ -222,8 +222,7 @@ public final class FrameworkCommand implements TabExecutor {
     }
 
     private static boolean say(CommandSender sender, String text, NamedTextColor color) {
-        sender.sendMessage(Component.text(text, color));
-        return true;
+        return ai.resourcepack.ui.chat.Chat.say(sender, text, color);
     }
 
     @Override

@@ -4,6 +4,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import ai.resourcepack.ui.chat.Chat;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.event.ClickEvent;
 import net.kyori.adventure.text.event.HoverEvent;
@@ -75,7 +76,7 @@ final class PageImport {
             say(sender, "That isn't a mcgui.dev code: it's the eight letters after /mcgui import on the Send to server screen.", NamedTextColor.RED);
             return;
         }
-        say(sender, "Fetching " + key + "...", NamedTextColor.GRAY);
+        say(sender, "Fetching " + key + "…", NamedTextColor.GRAY);
         HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(base + key))
                 .timeout(Duration.ofSeconds(20))
                 .header("User-Agent", "MCGUI/" + plugin.getPluginMeta().getVersion());
@@ -140,15 +141,7 @@ final class PageImport {
                     if (page != null && !pages.contains(page)) pages.add(page);
                 }
                 if (!pages.isEmpty()) {
-                    Component line = Component.text("Open: ", NamedTextColor.GRAY);
-                    for (int i = 0; i < pages.size(); i++) {
-                        String page = pages.get(i);
-                        if (i > 0) line = line.append(Component.text(" · ", NamedTextColor.DARK_GRAY));
-                        line = line.append(Component.text(page, i == 0 ? NamedTextColor.AQUA : NamedTextColor.DARK_AQUA)
-                                .clickEvent(ClickEvent.runCommand("/mcgui open " + page))
-                                .hoverEvent(HoverEvent.showText(Component.text("/mcgui open " + page))));
-                    }
-                    sender.sendMessage(line);
+                    sender.sendMessage(Chat.prefix().append(Component.text("Open ", Chat.BODY)).append(UiCommand.pageLinks(pages, null)));
                 }
                 if (!newCursors.isEmpty()) {
                     say(sender, "New cursor" + (newCursors.size() == 1 ? " " : "s ") + String.join(", ", newCursors)
@@ -288,6 +281,6 @@ final class PageImport {
     }
 
     private static void say(CommandSender to, String text, NamedTextColor color) {
-        to.sendMessage(Component.text(text, color));
+        Chat.say(to, text, color);
     }
 }
