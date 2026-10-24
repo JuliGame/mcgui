@@ -186,15 +186,17 @@ public final class MapSender implements AutoCloseable {
 
     /** Whether [player]'s connection has written out every tile of [wall]'s current picture. */
     public boolean delivered(UUID player, MapWall wall) {
-        Assignment a = null;
         for (Assignment x : latest.get()) {
-            if (x.player.getUniqueId().equals(player) && x.wall == wall) {
-                a = x;
-                break;
-            }
+            if (x.player.getUniqueId().equals(player) && x.wall == wall) return delivered(x);
         }
-        Viewer v = viewers.get(player);
-        if (a == null || v == null) return false;
+        return false;
+    }
+
+    /** The same for an assignment handed to {@link #update} (the latest or one before): no looking it up among them all. */
+    public boolean delivered(Assignment a) {
+        Viewer v = viewers.get(a.player.getUniqueId());
+        if (v == null) return false;
+        MapWall wall = a.wall;
         AtomicLong flying = v.wallInFlight.get(wall);
         if (flying != null && flying.get() > 0) return false;
         int[] maps = maps(v, wall);

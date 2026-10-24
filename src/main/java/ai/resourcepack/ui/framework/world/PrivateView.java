@@ -12,6 +12,7 @@ import org.bukkit.util.BoundingBox;
 
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Predicate;
@@ -22,7 +23,8 @@ import java.util.function.Predicate;
  * their client draws it in front of every block (the HI_OWN marker), so the world round the picture
  * stays whole. Without it, [clearBlocks]: they alone are told that the blocks between their eyes and
  * the picture are air, a cone exactly the picture's outline as seen from the camera. Nothing changes
- * on the server.
+ * on the server. Entities in the way are hidden from them, and placed walls in the way take their
+ * frames off their client (see {@link #hides}).
  */
 final class PrivateView {
     private static final BlockData AIR = Material.AIR.createBlockData();
@@ -36,8 +38,10 @@ final class PrivateView {
     private final boolean hideInView;
     /** Everything this player has been told is air, so all of it is put back. */
     private final Set<Position> cleared = new HashSet<>();
-    /** Entities in the way that this player stops seeing meanwhile: another screen's frames, a mob. */
+    /** Entities in the way that this player stops seeing meanwhile: a mob, another player. */
     private final Set<Entity> unseen = new HashSet<>();
+    /** Whether this view hides each placed wall asked about (see {@link #hides}): neither moves, so worked out once. */
+    private final Map<MapWall, Boolean> hidesWall = new IdentityHashMap<>();
     private Plugin plugin;
 
     PrivateView(MapWall wall, Location camera, boolean clearBlocks, boolean hideInView) {
@@ -86,6 +90,37 @@ final class PrivateView {
         if (plugin == null || e == player || !e.isVisibleByDefault() || !player.canSee(e)) return;
         unseen.add(e);
         player.hideEntity(plugin, e);
+    }
+
+    /**
+     * Whether placed wall [other] is in the way, like an entity {@link #refresh} hides: once the view is open, and
+     * not for an overlay. Its frames are on clients only (see MapWall#share), so the wall takes them off this
+     * player's client while this says so.
+     */
+    boolean hides(MapWall other) {
+        if (plugin == null || !hideInView || other.world != wall.world) return false;
+        Boolean known = hidesWall.get(other);
+        if (known != null) return known;
+        Pyramid p = pyramid();
+        boolean hides = false;
+        // Each frame hangs in its block, 1/16 deep against the wall behind it (the side away from [facing]).
+        int fx = other.facing.getModX(), fz = other.facing.getModZ();
+        double deep = 1.0 / 16;
+        for (int[] b : other.blocks()) {
+            if (p == null) break;
+            double x0 = b[0], x1 = b[0] + 1, z0 = b[2], z1 = b[2] + 1;
+            if (fx > 0) x1 = x0 + deep;
+            else if (fx < 0) x0 = x1 - deep;
+            if (fz > 0) z1 = z0 + deep;
+            else if (fz < 0) z0 = z1 - deep;
+            // Level with the picture counts too, as for an entity (see refresh).
+            if (p.reaches(x0, b[1], z0, x1, b[1] + 1.0, z1, 0.5)) {
+                hides = true;
+                break;
+            }
+        }
+        hidesWall.put(other, hides);
+        return hides;
     }
 
     /** Puts back everything this view hid, except what [stillHidden] says must stay hidden for another reason. */

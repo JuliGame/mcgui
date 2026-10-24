@@ -3,20 +3,13 @@ package ai.resourcepack.ui.framework.world;
 import ai.resourcepack.ui.framework.net.Nms;
 import ai.resourcepack.ui.framework.pack.Shaders;
 import org.bukkit.Location;
-import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.block.BlockFace;
-import org.bukkit.entity.Entity;
-import org.bukkit.entity.GlowItemFrame;
 import org.bukkit.entity.Player;
-import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.meta.MapMeta;
-import org.bukkit.plugin.Plugin;
 import org.bukkit.util.Vector;
 
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -27,8 +20,9 @@ import java.util.concurrent.ThreadLocalRandom;
  * A wall of invisible glow item frames, each holding a map id the engine owns. (anchorX, anchorY,
  * anchorZ) is the block holding the TOP-LEFT frame as seen by somebody facing the wall; the pictures
  * face [facing]. Map ids the engine owns have no saved data on the server, so vanilla never sends
- * anything for them: every pixel the client sees comes from the engine's sender. A shared wall's frames
- * are real entities; a view's exist on its viewer's client only (see {@link #spawnFor}).
+ * anything for them: every pixel the client sees comes from the engine's sender. The frames exist on
+ * clients only, never as server entities: a placed wall's on the clients of the players near it (see
+ * {@link #share}), a view's on its one viewer's (see {@link #spawnFor}).
  */
 public final class MapWall {
     public static final Set<BlockFace> HORIZONTAL = Set.of(BlockFace.NORTH, BlockFace.SOUTH, BlockFace.EAST, BlockFace.WEST);
@@ -43,17 +37,21 @@ public final class MapWall {
     /** The centre of the picture, on its surface (see {@link #centre}): asked for by every player's aim, every tick. */
     private final double centreX, centreY, centreZ;
     private final int[] ownMaps;
-    /** A shared wall's frames: real entities, in the world for everybody. */
-    private final List<GlowItemFrame> frames = new ArrayList<>();
-    private final Set<UUID> frameIds = new HashSet<>();
     /**
-     * A view's frames exist on its one viewer's client only (see {@link #spawnFor}): the server never holds an
-     * entity for them. Null for a shared wall.
+     * The frames exist on clients only (see {@link #share} and {@link #spawnFor}): the server never holds an entity
+     * for them. Null until one of those is called.
      */
     private Nms nms;
+    /** A view's one viewer; null for a placed wall. */
     private Player owner;
     private int[] ownerStack;
     private boolean shownToOwner;
+    /**
+     * A placed wall's: the players whose clients have its frames now, as a list (going through it makes nothing) and
+     * a set (every player in range asks, every tick). Server thread.
+     */
+    private final List<Player> shown = new ArrayList<>();
+    private final Set<Player> shownSet = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
     /** The frames' entity ids in tile order, empty while there are none; read by the sender and the netty threads. */
     private volatile int[] entityIds = new int[0];
     /** Tile of each frame's entity id. */
@@ -127,8 +125,6 @@ public final class MapWall {
         return out;
     }
 
-    public boolean isFrame(Entity entity) { return frameIds.contains(entity.getUniqueId()); }
-
     /** The centre of the picture, on its surface. */
     public Location centre() {
         return new Location(world, centreX, centreY, centreZ);
@@ -187,6 +183,10 @@ public final class MapWall {
         this.nms = nms;
         owner = viewer;
         ownerStack = stack;
+        newIds(nms);
+    }
+
+    private void newIds(Nms nms) {
         int[] ids = new int[tiles()];
         Map<Integer, Integer> tiles = new HashMap<>();
         for (int t = 0; t < ids.length; t++) {
@@ -197,37 +197,56 @@ public final class MapWall {
         entityIds = ids;
     }
 
-    /** Shared frames everybody sees, in the world. */
-    public void spawn(Plugin plugin) {
+    /**
+     * A placed wall's frames, for the players near it: entity ids the server never uses for an entity of its own,
+     * brought to a client by {@link #showFrames} once its picture has reached it, and taken off by
+     * {@link #hideFrames}. As server entities they reached clients as far as Paper's tracking range (96 blocks by
+     * default) while pictures only go to players within the screens' view-distance, so the frames further off showed
+     * the filled map item; and the tracker checked each one against each player near it, every tick.
+     */
+    public void share(Nms nms) {
         despawn();
-        for (int r = 0; r < rows; r++) {
-            for (int c = 0; c < cols; c++) {
-                int[] b = tileBlock(c, r);
-                ItemStack item = new ItemStack(Material.FILLED_MAP);
-                MapMeta meta = (MapMeta) item.getItemMeta();
-                meta.setMapId(mapId(r * cols + c));
-                item.setItemMeta(meta);
-                GlowItemFrame frame = world.spawn(new Location(world, b[0], b[1], b[2]), GlowItemFrame.class, f -> {
-                    f.setFacingDirection(facing, true);
-                    f.setItem(item, false);
-                    f.setFixed(true);
-                    f.setVisible(false);
-                    f.setInvulnerable(true);
-                    f.setPersistent(false);
-                    f.setSilent(true);
-                });
-                frames.add(frame);
-                frameIds.add(frame.getUniqueId());
-            }
-        }
-        int[] ids = new int[frames.size()];
-        Map<Integer, Integer> tiles = new HashMap<>();
+        this.nms = nms;
+        newIds(nms);
+    }
+
+    /** Whether [player]'s client has this placed wall's frames. Server thread. */
+    public boolean shownTo(Player player) {
+        return shownSet.contains(player);
+    }
+
+    /** The players whose clients have this placed wall's frames: read it, never keep it. Server thread. */
+    public List<Player> shown() {
+        return shown;
+    }
+
+    /**
+     * Brings this placed wall's frames ({@link #share}) to [player]'s client, each showing its tile's own map (their
+     * connection points it at the map the sender has it show, on the way out: see {@code Pipeline.FrameMaps}). Its
+     * maps must have reached them first, or a frame shows the map item.
+     */
+    public void showFrames(Player player) {
+        if (nms == null || owner != null) throw new IllegalStateException("Only a placed wall shows its frames to the players near it");
+        if (!shownSet.add(player)) return;
+        shown.add(player);
+        int[] ids = entityIds;
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        List<Object> out = new ArrayList<>();
         for (int t = 0; t < ids.length; t++) {
-            ids[t] = frames.get(t).getEntityId();
-            tiles.put(ids[t], t);
+            int[] b = tileBlock(t % cols, t / cols);
+            out.addAll(nms.frameAppears(ids[t], new UUID(random.nextLong(), random.nextLong()), b[0], b[1], b[2], facing, mapId(t)));
         }
-        tileOf = Map.copyOf(tiles);
-        entityIds = ids;
+        for (int i = 0; i < out.size(); i += BUNDLE_MAX) nms.send(player, nms.bundle(out.subList(i, Math.min(out.size(), i + BUNDLE_MAX))));
+    }
+
+    /** Takes this placed wall's frames off [player]'s client, if it has them. */
+    public void hideFrames(Player player) {
+        if (shownSet.remove(player) && shown.remove(player) && player.isOnline()) nms.send(player, nms.removeEntities(entityIds));
+    }
+
+    /** [player]'s client no longer has this placed wall's frames: it left, or changed world or respawned, which drops them. */
+    public void forget(Player player) {
+        if (shownSet.remove(player)) shown.remove(player);
     }
 
     /**
@@ -350,9 +369,12 @@ public final class MapWall {
     }
 
     public void despawn() {
-        for (GlowItemFrame f : frames) f.remove();
-        frames.clear();
-        frameIds.clear();
+        if (!shown.isEmpty()) {
+            Object gone = nms.removeEntities(entityIds);
+            for (Player p : shown) if (p.isOnline()) nms.send(p, gone);
+            shown.clear();
+            shownSet.clear();
+        }
         if (shownToOwner && owner.isOnline()) {
             int[] ids = entityIds;
             if (signatureFrame >= 0) {
@@ -369,13 +391,6 @@ public final class MapWall {
         tileOf = Map.of();
         framed = null;
         signatureFrame = -1;
-    }
-
-    /** A shared wall's frames are all still in the world. */
-    public boolean spawned() {
-        if (frames.isEmpty()) return false;
-        for (GlowItemFrame f : frames) if (!f.isValid()) return false;
-        return true;
     }
 
     /**

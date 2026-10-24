@@ -3,24 +3,24 @@ package ai.resourcepack.ui.framework.world;
 import ai.resourcepack.ui.framework.api.Click;
 import ai.resourcepack.ui.framework.api.WallContent;
 import ai.resourcepack.ui.framework.api.WallScreen;
+import ai.resourcepack.ui.framework.net.Nms;
+import com.destroystokyo.paper.event.player.PlayerUseUnknownEntityEvent;
 import org.bukkit.Bukkit;
 import org.bukkit.FluidCollisionMode;
 import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.block.BlockFace;
-import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
-import org.bukkit.event.entity.EntityDamageEvent;
-import org.bukkit.event.hanging.HangingBreakEvent;
 import org.bukkit.event.player.PlayerAnimationEvent;
 import org.bukkit.event.player.PlayerAnimationType;
-import org.bukkit.event.player.PlayerInteractEntityEvent;
+import org.bukkit.event.player.PlayerChangedWorldEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerItemHeldEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.event.world.WorldUnloadEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.plugin.Plugin;
@@ -35,19 +35,29 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.BiPredicate;
 import java.util.function.Predicate;
 import java.util.logging.Level;
 
 /**
  * Placed walls, and what players do to them: the pixel each player's crosshair is on (so a page can
- * show hover states), clicks, and the scroll wheel. Placed walls keep their chunks loaded, because
- * their frames are not saved with the world.
+ * show hover states), clicks, and the scroll wheel. A wall's frames exist only on the clients of the
+ * players near it, and only once its picture has reached them (see {@link MapWall#share}).
  */
 public final class Walls implements Listener {
+    /**
+     * How much further than the view-distance a player keeps a wall's frames and pictures once they have them, so
+     * walking to and fro across the edge does not take them off and bring them back each time.
+     */
+    static final double KEEP_BEYOND = 8;
+
     private final Plugin plugin;
+    private final Nms nms;
     private final double viewDistance;
     private final double reach;
     private final Predicate<Player> seated;
+    /** Whether a player's open view hides a placed wall (see {@code Views.hides}). */
+    private final BiPredicate<Player, MapWall> hidden;
     private final List<Wall> walls = new CopyOnWriteArrayList<>();
     /** The same, as an array: what every tick goes through for every player, with no iterator made each time. */
     private volatile Wall[] placed = new Wall[0];
@@ -66,13 +76,16 @@ public final class Walls implements Listener {
     private final Map<UUID, Long> lastSwing = new HashMap<>();
     private final Map<UUID, Long> lastUse = new HashMap<>();
 
-    public Walls(Plugin plugin, int firstMapId, double viewDistance, double reach, Predicate<Player> seated) {
+    public Walls(Plugin plugin, Nms nms, int firstMapId, double viewDistance, double reach, Predicate<Player> seated,
+                 BiPredicate<Player, MapWall> hidden) {
         this.plugin = plugin;
+        this.nms = nms;
         this.nextMapId = firstMapId;
         this.pool = new MapPool(firstMapId);
         this.viewDistance = viewDistance;
         this.reach = reach;
         this.seated = seated;
+        this.hidden = hidden;
     }
 
     public final class Wall implements WallScreen {
@@ -107,7 +120,6 @@ public final class Walls implements Listener {
             placed = walls.toArray(new Wall[0]);
             map.despawn();
             pool.remove(map);
-            pin(map, false);
             Set<UUID> watchers = inRange.remove(this);
             if (watchers != null) for (UUID id : watchers) {
                 Player p = Bukkit.getPlayer(id);
@@ -121,8 +133,7 @@ public final class Walls implements Listener {
         MapWall map = new MapWall(topLeft.getWorld(), topLeft.getBlockX(), topLeft.getBlockY(), topLeft.getBlockZ(), facing, cols, rows, nextMapId);
         nextMapId += cols * rows;
         Wall wall = new Wall(map, content);
-        pin(map, true);
-        map.spawn(plugin);
+        map.share(nms);
         pool.add(map);
         walls.add(wall);
         placed = walls.toArray(new Wall[0]);
@@ -133,14 +144,24 @@ public final class Walls implements Listener {
         return walls;
     }
 
-    public Wall byFrame(Entity entity) {
-        for (Wall w : placed) if (w.map.isFrame(entity)) return w;
+    /** The placed wall one of whose frames has entity id [entityId] on players' clients, or null. */
+    private Wall byFrame(int entityId) {
+        for (Wall w : placed) if (w.map.tileOfEntity(entityId) >= 0) return w;
         return null;
+    }
+
+    /**
+     * Whether [wall]'s frames should come to [player], once its picture has reached them: they are in range
+     * ({@link #viewers}), their client does not have them yet, and their open view does not hide it.
+     */
+    public boolean wantsFrames(Wall wall, Player player) {
+        return !wall.map.shownTo(player) && !hidden.test(player, wall.map);
     }
 
     /**
      * Players in range of [wall], seated players included (their own view may be beside it), as of this tick:
      * worked out for every wall at once, the first time any is asked about in a tick (see {@link #collectViewers}).
+     * In range is within the view-distance, or {@link #KEEP_BEYOND} further for a player who has the wall's frames.
      * The list is the wall's own and refilled next tick: read it, never keep it.
      */
     public List<Player> viewers(Wall wall) {
@@ -150,8 +171,7 @@ public final class Walls implements Listener {
         if (wall.viewersTick != tick) {
             wall.viewersTick = tick;
             wall.viewers.clear();
-            double max = viewDistance * viewDistance;
-            for (Player p : Bukkit.getOnlinePlayers()) if (within(p, p.getWorld(), wall.map, max)) wall.viewers.add(p);
+            for (Player p : Bukkit.getOnlinePlayers()) if (inRange(p, p.getWorld(), wall.map)) wall.viewers.add(p);
         }
         return wall.viewers;
     }
@@ -168,11 +188,19 @@ public final class Walls implements Listener {
             wall.viewersTick = tick;
             wall.viewers.clear();
         }
-        double max = viewDistance * viewDistance;
         for (Player p : Bukkit.getOnlinePlayers()) {
             World world = p.getWorld();
-            for (Wall wall : placed) if (within(p, world, wall.map, max)) wall.viewers.add(p);
+            for (Wall wall : placed) if (inRange(p, world, wall.map)) wall.viewers.add(p);
         }
+    }
+
+    /** Whether [p], in [world], is in range of [map] (see {@link #viewers}). */
+    private boolean inRange(Player p, World world, MapWall map) {
+        if (map.world != world) return false;
+        double d = map.distanceSquared(p.getX(), p.getY(), p.getZ());
+        if (d <= viewDistance * viewDistance) return true;
+        double keep = viewDistance + KEEP_BEYOND;
+        return d <= keep * keep && map.shownTo(p);
     }
 
     /** Whether [p], in [world], stands within the square root of [squared] blocks of [map]'s centre. Read straight off the entity: no Location made. */
@@ -197,14 +225,18 @@ public final class Walls implements Listener {
         return true;
     }
 
-    /** Every tick: who is in range of what, and where each player's crosshair is. */
+    /** Every tick: who is in range of what, whose frames go, and where each player's crosshair is. */
     public void tick() {
         collectViewers();
         for (Wall wall : placed) {
-            // A frame can vanish (a /kill, another plugin); put it back.
-            if (!wall.map.spawned() && wall.map.placeable()) wall.map.spawn(plugin);
-            // Usually nobody came or went, and who is in range stands.
             List<Player> viewers = viewers(wall);
+            // Frames go from clients out of range (too far, or in another world) and from players whose view hides them.
+            List<Player> shown = wall.map.shown();
+            for (int i = shown.size() - 1; i >= 0; i--) {
+                Player p = shown.get(i);
+                if (!inRange(p, p.getWorld(), wall.map) || hidden.test(p, wall.map)) wall.map.hideFrames(p);
+            }
+            // Usually nobody came or went, and who is in range stands.
             if (same(viewers, wall.counted)) continue;
             wall.counted.clear();
             wall.counted.addAll(viewers);
@@ -281,9 +313,14 @@ public final class Walls implements Listener {
         if (e.getAnimationType() != PlayerAnimationType.ARM_SWING) return;
         Look look = lookOf(e.getPlayer());
         if (look == null || seated.test(e.getPlayer())) return;
-        // Attacking a frame and the swing arrive together: one click.
         long now = Bukkit.getCurrentTick();
-        Long last = lastSwing.put(e.getPlayer().getUniqueId(), now);
+        UUID id = e.getPlayer().getUniqueId();
+        // A right click that the client takes as done (on a frame, or on the block behind) swings the arm after it:
+        // that swing is not a left click as well.
+        Long used = lastUse.get(id);
+        if (used != null && now - used <= 1) return;
+        // Attacking a frame and the swing arrive together: one click.
+        Long last = lastSwing.put(id, now);
         if (last != null && now - last < 2) return;
         look.wall.content.click(e.getPlayer(), look.x, look.y, Click.LEFT);
     }
@@ -303,12 +340,16 @@ public final class Walls implements Listener {
         }
     }
 
+    /**
+     * A click on one of a wall's frames, which exist on the clients only, so the server knows no such entity. An
+     * attack comes with a swing, which is the click already (see {@link #onSwing}); a right click comes twice
+     * (at a point and not), which {@link #rightClick} takes as one.
+     */
     @EventHandler(priority = EventPriority.LOW)
-    public void onFrameClick(PlayerInteractEntityEvent e) {
-        Wall wall = byFrame(e.getRightClicked());
+    public void onFrameClick(PlayerUseUnknownEntityEvent e) {
+        if (e.isAttack() || e.getHand() != EquipmentSlot.HAND || seated.test(e.getPlayer())) return;
+        Wall wall = byFrame(e.getEntityId());
         if (wall == null) return;
-        e.setCancelled(true); // never rotate or empty a screen's frame
-        if (e.getHand() != EquipmentSlot.HAND || seated.test(e.getPlayer())) return;
         Look look = lookOf(e.getPlayer());
         if (look != null && look.wall == wall) rightClick(e.getPlayer(), look);
     }
@@ -331,26 +372,32 @@ public final class Walls implements Listener {
         if (look.wall.content.scroll(e.getPlayer(), look.x, look.y, delta)) e.setCancelled(true);
     }
 
-    @EventHandler(priority = EventPriority.LOWEST)
-    public void onFrameDamage(EntityDamageEvent e) {
-        if (byFrame(e.getEntity()) != null) e.setCancelled(true);
-    }
-
-    @EventHandler(priority = EventPriority.LOWEST)
-    public void onFrameBreak(HangingBreakEvent e) {
-        if (byFrame(e.getEntity()) != null) e.setCancelled(true);
-    }
-
     @EventHandler
     public void onQuit(PlayerQuitEvent e) {
         UUID id = e.getPlayer().getUniqueId();
         looks.remove(id);
         lastSwing.remove(id);
         lastUse.remove(id);
+        forgetFrames(e.getPlayer());
         // A copy: a content may remove its own wall from left(), which takes it out of inRange.
         for (Map.Entry<Wall, Set<UUID>> entry : new ArrayList<>(inRange.entrySet())) {
             if (entry.getValue().remove(id)) left(entry.getKey(), e.getPlayer());
         }
+    }
+
+    /** A client that changes world or respawns starts a new world of its own, without the frames it had. */
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onWorld(PlayerChangedWorldEvent e) {
+        forgetFrames(e.getPlayer());
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onRespawn(PlayerRespawnEvent e) {
+        forgetFrames(e.getPlayer());
+    }
+
+    private void forgetFrames(Player player) {
+        for (Wall w : placed) w.map.forget(player);
     }
 
     /** A wall in a world that goes away goes with it: it would keep the dead world loaded and never come back. */
@@ -361,15 +408,5 @@ public final class Walls implements Listener {
 
     public void removeAll() {
         for (Wall w : new ArrayList<>(walls)) w.remove();
-    }
-
-    private void pin(MapWall map, boolean pin) {
-        Set<Long> chunks = new HashSet<>();
-        for (int[] b : map.blocks()) chunks.add(((long) (b[0] >> 4) << 32) | ((b[2] >> 4) & 0xFFFFFFFFL));
-        for (long k : chunks) {
-            int cx = (int) (k >> 32), cz = (int) k;
-            if (pin) map.world.addPluginChunkTicket(cx, cz, plugin);
-            else map.world.removePluginChunkTicket(cx, cz, plugin);
-        }
     }
 }

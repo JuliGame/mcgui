@@ -378,6 +378,15 @@ public final class Views implements Listener {
         return views.containsKey(player.getUniqueId());
     }
 
+    /**
+     * Whether [player]'s open view hides placed wall [placed]: it reaches between their camera and the picture, or is
+     * level with it (see PrivateView). Placed walls' frames are on clients only, so no entity hiding reaches them.
+     */
+    public boolean hides(Player player, MapWall placed) {
+        ViewImpl v = views.get(player.getUniqueId());
+        return v != null && v.privateView.hides(placed);
+    }
+
     /** The player's FOV setting, as they told us with /mcgui fov; the server cannot read it. */
     public int fovOf(Player player) {
         Integer fov = player.getPersistentDataContainer().get(fovKey, PersistentDataType.INTEGER);

@@ -89,7 +89,7 @@ public final class Framework implements UIFramework, Listener {
         wire = new ServerWire(nms, pipeline, settings.sharedCompression ? SharedCompression.create(ServerWire.packets(nms), plugin.getLogger()) : null);
         sender = new MapSender(wire, palette, settings.bytesPerSecond, plugin.getLogger());
         views = new Views(plugin, settings, nms, pipeline, id -> pack != null && pack.has(id), sender, palette, settings.mapIdBase);
-        walls = new Walls(plugin, settings.mapIdBase + Views.VIEW_ID_SPAN, settings.viewDistance, settings.reach, views::seated);
+        walls = new Walls(plugin, nms, settings.mapIdBase + Views.VIEW_ID_SPAN, settings.viewDistance, settings.reach, views::seated, views::hides);
         var pm = plugin.getServer().getPluginManager();
         pm.registerEvents(this, plugin);
         pm.registerEvents(walls, plugin);
@@ -171,6 +171,8 @@ public final class Framework implements UIFramework, Listener {
                 }
                 kept++;
                 out.add(a);
+                // The frames come once the picture has: before, they would show the map item.
+                if (walls.wantsFrames(wall, viewer) && sender.delivered(a)) wall.map().showFrames(viewer);
             }
             while (last.size() > kept) last.removeLast();
         }
