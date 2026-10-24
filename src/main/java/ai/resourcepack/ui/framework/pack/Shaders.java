@@ -1069,7 +1069,9 @@ public final class Shaders {
      * </ol>
      *
      * <p>With no signature every pass of ours draws nothing: anybody not at an overlay sees the game's outlines
-     * alone.
+     * alone. Each pass's vertex shader works out what its fragments would do and gives the game's window-sized
+     * triangle only that much ({@link #overlayTakeVsh}): otherwise every pass costs a fragment for every pixel even
+     * when it draws nothing.
      */
     public static String overlayChain() {
         StringBuilder passes = new StringBuilder(OUTLINE_PASSES);
@@ -1080,30 +1082,31 @@ public final class Shaders {
             String inputs = k == 0
                     ? "{\"sampler_name\": \"In\", \"target\": \"minecraft:main\"}, {\"sampler_name\": \"Kept\", \"target\": \"ov_kept\"}"
                     : "{\"sampler_name\": \"In\", \"target\": \"" + from[k] + "\"}, {\"sampler_name\": \"Main\", \"target\": \"minecraft:main\"}";
+            String shader = k == 0 ? "overlay_take" : "overlay_blur";
             passes.append(",\n").append("""
                     {
-                      "vertex_shader": "minecraft:core/screenquad",
+                      "vertex_shader": "uiengine:post/%s",
                       "fragment_shader": "uiengine:post/%s",
                       "inputs": [%s],
                       "output": "%s",
                       "uniforms": {"OverlayConfig": [{"name": "BlurDir", "type": "vec2", "value": [%s]}, {"name": "Last", "type": "float", "value": %s}]}
-                    }""".formatted(k == 0 ? "overlay_take" : "overlay_blur", inputs, to[k], dir, k == 5 ? "1.0" : "0.0"));
+                    }""".formatted(shader, shader, inputs, to[k], dir, k == 5 ? "1.0" : "0.0"));
         }
         passes.append(",\n").append("""
                     {
-                      "vertex_shader": "minecraft:core/screenquad",
+                      "vertex_shader": "uiengine:post/overlay_signed_main",
                       "fragment_shader": "uiengine:post/overlay_mask",
                       "inputs": [{"sampler_name": "Main", "target": "minecraft:main"}, {"sampler_name": "MainDepth", "target": "minecraft:main", "use_depth_buffer": true}],
                       "output": "ov_a"
                     },
                     {
-                      "vertex_shader": "minecraft:core/screenquad",
+                      "vertex_shader": "uiengine:post/overlay_signed_in",
                       "fragment_shader": "uiengine:post/overlay_compose",
                       "inputs": [{"sampler_name": "In", "target": "ov_a"}, {"sampler_name": "Kept", "target": "ov_kept"}],
                       "output": "minecraft:main"
                     },
                     {
-                      "vertex_shader": "minecraft:core/screenquad",
+                      "vertex_shader": "uiengine:post/overlay_signed_in",
                       "fragment_shader": "uiengine:post/overlay_outline",
                       "inputs": [{"sampler_name": "In", "target": "ov_a"}],
                       "output": "minecraft:entity_outline"
@@ -1111,6 +1114,23 @@ public final class Shaders {
         return "{\n  \"targets\": {\"swap\": {}, \"ov_a\": {}, \"ov_b\": {}, \"ov_kept\": {\"persistent\": true}},\n  \"passes\": [\n"
                 + passes + "\n  ]\n}\n";
     }
+
+    /** How {@link #overlayChain}'s shaders read an overlay's signature. */
+    private static final String OVERLAY_SIGNATURE = """
+
+            ivec3 ov_texel(sampler2D s, int x) { return ivec3(round(texelFetch(s, ivec2(x, 0), 0).rgb * 255.0)); }
+
+            // An overlay's signature in [s]'s four bottom-left texels (text.fsh, mcb_signature): its flags plus 8, or 0
+            // without one; [tint], the view's tint.
+            int ov_signature(sampler2D s, out vec4 tint) {
+                tint = vec4(0.0);
+                ivec3 c0 = ov_texel(s, 0), c3 = ov_texel(s, 3);
+                if (c0 != ivec3(@SIG0@) || c3 != ivec3(0, 0, @SIG3@)) return 0;
+                ivec3 c1 = ov_texel(s, 1), c2 = ov_texel(s, 2);
+                tint = vec4(vec3(c1), float(c2.r)) / 255.0;
+                return c2.g | 8;
+            }
+            """;
 
     /** What every fragment shader of {@link #overlayChain} starts with: reading the signature. */
     private static final String OVERLAY_HEAD = """
@@ -1126,19 +1146,33 @@ public final class Shaders {
             layout(location = 0) in vec2 texCoord;
 
             layout(location = 0) out vec4 fragColor;
+            """ + OVERLAY_SIGNATURE;
 
-            ivec3 ov_texel(sampler2D s, int x) { return ivec3(round(texelFetch(s, ivec2(x, 0), 0).rgb * 255.0)); }
+    /**
+     * What every vertex shader of {@link #overlayChain} starts with: the game's screen triangle ({@code ov_uv}, as
+     * {@code core/screenquad} makes it), and the three things to do with it: cover the window, cover only its
+     * bottom-left pixel (the "not taking" mark the take passes leave for the next), or draw nothing.
+     */
+    private static final String OVERLAY_VERTEX_HEAD = """
+            #version 330
+            #extension GL_ARB_separate_shader_objects : require
 
-            // An overlay's signature in [s]'s four bottom-left texels (text.fsh, mcb_signature): its flags plus 8, or 0
-            // without one; [tint], the view's tint.
-            int ov_signature(sampler2D s, out vec4 tint) {
-                tint = vec4(0.0);
-                ivec3 c0 = ov_texel(s, 0), c3 = ov_texel(s, 3);
-                if (c0 != ivec3(@SIG0@) || c3 != ivec3(0, 0, @SIG3@)) return 0;
-                ivec3 c1 = ov_texel(s, 1), c2 = ov_texel(s, 2);
-                tint = vec4(vec3(c1), float(c2.r)) / 255.0;
-                return c2.g | 8;
+            layout(location = 0) out vec2 texCoord;
+            """ + OVERLAY_SIGNATURE + """
+
+            vec2 ov_uv() {
+                vec2 uv = vec2((@VERTEX@ << 1) & 2, @VERTEX@ & 2);
+                texCoord = uv;
+                return uv;
             }
+
+            void ov_window(vec2 uv) { gl_Position = vec4(uv * 2.0 - 1.0, 0.0, 1.0); }
+
+            // Legs two pixels long: the bottom-left pixel's centre is well inside, and nothing else's but along an edge.
+            void ov_corner(vec2 uv, vec2 size) { gl_Position = vec4(uv * 2.0 / size - 1.0, 0.0, 1.0); }
+
+            // Every corner at one point, off the window: no fragment at all.
+            void ov_none() { gl_Position = vec4(-2.0, -2.0, 0.0, 1.0); }
             """;
 
     /** A box blur of [In] along BlurDir at the menu blur radius, or [In] itself; [signature]: the signature's four texels show the row above. */
@@ -1160,11 +1194,20 @@ public final class Shaders {
             """;
 
     private static String overlayShader(Dialect d, String body) {
-        return emit((OVERLAY_HEAD + body).replace("@SIG0@", (SIGNATURE_0 >> 16) + ", " + (SIGNATURE_0 >> 8 & 255) + ", " + (SIGNATURE_0 & 255))
+        return emit(placeholders(OVERLAY_HEAD + body), d);
+    }
+
+    private static String placeholders(String src) {
+        return src.replace("@SIG0@", (SIGNATURE_0 >> 16) + ", " + (SIGNATURE_0 >> 8 & 255) + ", " + (SIGNATURE_0 & 255))
                 .replace("@SIG3@", String.valueOf(SIGNATURE_3))
                 .replace("@BLUR@", String.valueOf(SIGNATURE_BLUR))
                 .replace("@KEPT@", String.valueOf(SIGNATURE_KEPT))
-                .replace("@REVERSED@", String.valueOf(SIGNATURE_REVERSED)), d);
+                .replace("@REVERSED@", String.valueOf(SIGNATURE_REVERSED));
+    }
+
+    /** A vertex shader of {@link #overlayChain}: 26.3 numbers the vertices as Vulkan does, 26.2 as OpenGL. */
+    private static String overlayVertexShader(Dialect d, String body) {
+        return emit(placeholders(OVERLAY_VERTEX_HEAD + body).replace("@VERTEX@", d == Dialect.V26_3 ? "gl_VertexIndex" : "gl_VertexID"), d);
     }
 
     /**
@@ -1280,6 +1323,68 @@ public final class Shaders {
                     fragColor = vec4(0.0);
                 }
                 """);
+    }
+
+    /**
+     * The first take pass's triangle: the window while a picture is taken (see {@link #overlayTakeFsh}), the
+     * bottom-left pixel for the mark that says none is, and nothing without a signature. The game draws every post
+     * pass over the whole window, and a fragment that only finds it has nothing to do still costs: these six passes
+     * were about 0.2 ms of a still overlay's frame at 1080p on Josh's PC (FPSFinish), and with no signature every pass
+     * of the chain ran over the window for anybody with a glowing entity in sight.
+     */
+    public static String overlayTakeVsh(Dialect d) {
+        return overlayVertexShader(d, """
+
+                uniform sampler2D InSampler;
+                uniform sampler2D KeptSampler;
+
+                void main() {
+                    vec2 uv = ov_uv();
+                    vec4 tint;
+                    int flags = ov_signature(InSampler, tint);
+                    if (flags == 0) ov_none();
+                    else if ((flags & @KEPT@) == 0 || texelFetch(KeptSampler, ivec2(0), 0).a < 0.5) ov_window(uv);
+                    else ov_corner(uv, vec2(textureSize(InSampler, 0)));
+                }
+                """);
+    }
+
+    /** The next five take passes' (see {@link #overlayBlurFsh}): the window while taking, else the mark, none for the last. */
+    public static String overlayBlurVsh(Dialect d) {
+        return overlayVertexShader(d, """
+
+                uniform sampler2D InSampler;
+                uniform sampler2D MainSampler;
+
+                layout(std140) uniform OverlayConfig {
+                    vec2 BlurDir;
+                    float Last;
+                };
+
+                void main() {
+                    vec2 uv = ov_uv();
+                    vec4 tint;
+                    if (ov_signature(MainSampler, tint) == 0) ov_none();
+                    else if (texelFetch(InSampler, ivec2(0), 0).a >= 0.5) ov_window(uv);
+                    else if (Last > 0.5) ov_none();
+                    else ov_corner(uv, vec2(textureSize(MainSampler, 0)));
+                }
+                """);
+    }
+
+    /** The mask, compose and outline passes': the window with a signature in [sampler] (InSampler or MainSampler), else nothing. */
+    public static String overlaySignedVsh(Dialect d, String sampler) {
+        return overlayVertexShader(d, """
+
+                uniform sampler2D @S@;
+
+                void main() {
+                    vec2 uv = ov_uv();
+                    vec4 tint;
+                    if (ov_signature(@S@, tint) == 0) ov_none();
+                    else ov_window(uv);
+                }
+                """.replace("@S@", sampler));
     }
 
     /**

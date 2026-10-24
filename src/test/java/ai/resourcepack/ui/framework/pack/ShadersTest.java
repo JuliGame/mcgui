@@ -69,7 +69,8 @@ class ShadersTest {
     /**
      * The overlay chain is JSON the game reads, keeps the game's four outline passes first, only names targets it
      * declares or the game gives it (main and entity_outline: LevelTargetBundle.OUTLINE_TARGETS), keeps its picture
-     * from frame to frame, and its own shaders have every placeholder filled.
+     * from frame to frame, its own passes each have a vertex shader of ours (which keeps them off the pixels they
+     * would not write) reading only samplers the pass is given, and its own shaders have every placeholder filled.
      */
     @Test
     void overlayChainIsWellFormed() {
@@ -82,21 +83,43 @@ class ShadersTest {
         java.util.Set<String> known = new java.util.HashSet<>(targets.keySet());
         known.add("minecraft:main");
         known.add("minecraft:entity_outline");
-        java.util.Set<String> shaders = new java.util.HashSet<>();
+        java.util.Map<String, String> vertex = java.util.Map.of(
+                "uiengine:post/overlay_take", Shaders.overlayTakeVsh(Shaders.Dialect.V26_3),
+                "uiengine:post/overlay_blur", Shaders.overlayBlurVsh(Shaders.Dialect.V26_3),
+                "uiengine:post/overlay_signed_main", Shaders.overlaySignedVsh(Shaders.Dialect.V26_3, "MainSampler"),
+                "uiengine:post/overlay_signed_in", Shaders.overlaySignedVsh(Shaders.Dialect.V26_3, "InSampler"));
+        java.util.Set<String> shaders = new java.util.HashSet<>(), vertexUsed = new java.util.HashSet<>();
         for (var p : passes) {
             com.google.gson.JsonObject pass = p.getAsJsonObject();
             assertTrue(known.contains(pass.get("output").getAsString()), pass.toString());
-            for (var in : pass.getAsJsonArray("inputs")) assertTrue(known.contains(in.getAsJsonObject().get("target").getAsString()), pass.toString());
+            java.util.Set<String> samplers = new java.util.HashSet<>();
+            for (var in : pass.getAsJsonArray("inputs")) {
+                assertTrue(known.contains(in.getAsJsonObject().get("target").getAsString()), pass.toString());
+                samplers.add(in.getAsJsonObject().get("sampler_name").getAsString() + "Sampler");
+            }
             String fsh = pass.get("fragment_shader").getAsString();
-            if (fsh.startsWith("uiengine:")) shaders.add(fsh);
+            if (!fsh.startsWith("uiengine:")) continue;
+            shaders.add(fsh);
+            String vsh = pass.get("vertex_shader").getAsString();
+            assertTrue(vertex.containsKey(vsh), pass.toString());
+            vertexUsed.add(vsh);
+            // 26.3 refuses a shader that declares a sampler its pass does not bind.
+            var declared = java.util.regex.Pattern.compile("uniform sampler2D (\\w+);").matcher(vertex.get(vsh));
+            while (declared.find()) assertTrue(samplers.contains(declared.group(1)), declared.group(1) + " in " + pass);
         }
         assertEquals(java.util.Set.of("uiengine:post/overlay_take", "uiengine:post/overlay_blur", "uiengine:post/overlay_mask",
                 "uiengine:post/overlay_compose", "uiengine:post/overlay_outline"), shaders);
+        assertEquals(vertex.keySet(), vertexUsed);
         for (Shaders.Dialect d : Shaders.Dialect.values()) {
             for (String s : new String[]{Shaders.overlayTakeFsh(d), Shaders.overlayBlurFsh(d), Shaders.overlayMaskFsh(d), Shaders.overlayComposeFsh(d),
                     Shaders.overlayOutlineFsh(d)}) {
                 assertFalse(s.contains("@"), "a placeholder was left in " + s);
                 assertEquals(d == Shaders.Dialect.V26_3, s.contains("layout(location = 0) out vec4 fragColor;"), s);
+            }
+            for (String s : new String[]{Shaders.overlayTakeVsh(d), Shaders.overlayBlurVsh(d), Shaders.overlaySignedVsh(d, "InSampler")}) {
+                assertFalse(s.contains("@"), "a placeholder was left in " + s);
+                assertEquals(d == Shaders.Dialect.V26_3, s.contains("gl_VertexIndex"), s);
+                assertEquals(d == Shaders.Dialect.V26_3, s.contains("layout(location = 0) out vec2 texCoord;"), s);
             }
         }
         assertFalse(Shaders.cloudsVsh().contains("@"));

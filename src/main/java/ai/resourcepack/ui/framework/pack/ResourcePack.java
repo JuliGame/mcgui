@@ -177,6 +177,11 @@ public final class ResourcePack implements AutoCloseable {
                 e.put(post + "overlay_mask.fsh", Shaders.overlayMaskFsh(d));
                 e.put(post + "overlay_compose.fsh", Shaders.overlayComposeFsh(d));
                 e.put(post + "overlay_outline.fsh", Shaders.overlayOutlineFsh(d));
+                // Each pass draws over only as much of the window as it writes (nothing for most frames).
+                e.put(post + "overlay_take.vsh", Shaders.overlayTakeVsh(d));
+                e.put(post + "overlay_blur.vsh", Shaders.overlayBlurVsh(d));
+                e.put(post + "overlay_signed_main.vsh", Shaders.overlaySignedVsh(d, "MainSampler"));
+                e.put(post + "overlay_signed_in.vsh", Shaders.overlaySignedVsh(d, "InSampler"));
                 // The pointer taken out of the menu blur, so the pause menu shows only the system's cursor.
                 e.put(post + "pointer_find.fsh", Shaders.pointerFindFsh(d));
                 e.put(post + "pointer_grow.fsh", Shaders.pointerGrowFsh(d));
