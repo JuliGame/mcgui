@@ -76,6 +76,7 @@ public final class MCGUIPlugin extends JavaPlugin {
         long t0 = System.nanoTime();
         saveDefaultConfig();
         cfg = getConfig();
+        ai.resourcepack.ui.chat.Chat.configure(cfg.getConfigurationSection("chat"));
         framework = new Framework(this);
         if (!framework.enable()) {
             framework = null;
@@ -207,6 +208,7 @@ public final class MCGUIPlugin extends JavaPlugin {
     void reload() {
         reloadConfig();
         cfg = getConfig();
+        ai.resourcepack.ui.chat.Chat.configure(cfg.getConfigurationSection("chat"));
         PageStore old = pages;
         pages = newPageStore();
         old.close();

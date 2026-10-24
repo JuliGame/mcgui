@@ -6,8 +6,6 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import ai.resourcepack.ui.chat.Chat;
 import net.kyori.adventure.text.Component;
-import net.kyori.adventure.text.event.ClickEvent;
-import net.kyori.adventure.text.event.HoverEvent;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
 import org.bukkit.command.CommandSender;
@@ -124,7 +122,14 @@ final class PageImport {
                     return;
                 }
                 plugin.getLogger().info(sender.getName() + " imported " + key + " from mcgui.dev: " + String.join(", ", written));
-                say(sender, "Imported " + written.size() + " file" + (written.size() == 1 ? "" : "s") + " from " + key + ".", NamedTextColor.GREEN);
+                // The first page, then the rest: every page the import wrote.
+                List<String> pages = new ArrayList<>();
+                if (open != null) pages.add(open);
+                for (String f : written) {
+                    String page = f.endsWith(".html") ? f.substring(0, f.length() - 5) : null;
+                    if (page != null && !pages.contains(page)) pages.add(page);
+                }
+                say(sender, pages.isEmpty() ? "Imported " + key + "." : "Imported " + pages.size() + " page" + (pages.size() == 1 ? "" : "s") + " from " + key + ".", NamedTextColor.GREEN);
                 if (!removed.isEmpty()) {
                     plugin.getLogger().info("Removed what the last import of that project left behind: " + String.join(", ", removed));
                     say(sender, "Removed " + String.join(", ", removed) + ": no longer in the project.", NamedTextColor.GRAY);
@@ -133,15 +138,18 @@ final class PageImport {
                     say(sender, "Kept " + String.join(", ", kept) + ": no longer in the project, but changed on the server since the last import. Delete "
                             + (kept.size() == 1 ? "it" : "them") + " by hand if you don't need " + (kept.size() == 1 ? "it." : "them."), NamedTextColor.YELLOW);
                 }
-                // Every page, as something to click: the one being worked on first.
-                List<String> pages = new ArrayList<>();
-                if (open != null) pages.add(open);
-                for (String f : written) {
-                    String page = f.endsWith(".html") ? f.substring(0, f.length() - 5) : null;
-                    if (page != null && !pages.contains(page)) pages.add(page);
-                }
+                // How to open it: the command, and the call a plugin makes. Words to read, not links: a page
+                // opened by clicking in chat has the chat drawn over it.
                 if (!pages.isEmpty()) {
-                    sender.sendMessage(Chat.prefix().append(Component.text("Open ", Chat.BODY)).append(UiCommand.pageLinks(pages, null)));
+                    String first = pages.get(0);
+                    Chat.send(sender, Component.text()
+                            .append(Chat.text("Open it with "))
+                            .append(Chat.command("/mcgui open " + first))
+                            .append(Chat.text(", or from a plugin with "))
+                            .append(Chat.accent("MCGUI.open(player, \"" + first + "\")"))
+                            .append(Chat.text("."))
+                            .build());
+                    if (pages.size() > 1) Chat.send(sender, Component.text().append(Chat.text("Pages: ")).append(UiCommand.pageList(pages)).build());
                 }
                 if (!newCursors.isEmpty()) {
                     say(sender, "New cursor" + (newCursors.size() == 1 ? " " : "s ") + String.join(", ", newCursors)

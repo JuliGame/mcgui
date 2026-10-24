@@ -94,7 +94,7 @@ final class UiCommand implements TabExecutor {
                 if (!permitted(sender, permissionFor("list"))) return true;
                 List<String> names = plugin.pages().names();
                 if (names.isEmpty()) say(sender, "No pages yet: put .html files in " + plugin.pages().root(), NamedTextColor.GRAY);
-                else sender.sendMessage(Chat.prefix().append(Component.text("Pages ", Chat.BODY)).append(pageLinks(names, label)));
+                else Chat.send(sender, Component.text().append(Chat.text("Pages: ")).append(pageList(names)).build());
                 for (Screens.Wall w : plugin.screens().walls()) {
                     Chat.detail(sender, "Screen '" + w.name + "' shows '" + w.page + "', " + w.cols + "x" + w.rows + (w.shared ? " shared" : "") + " in "
                             + w.topLeft.getWorld().getName() + " at " + w.topLeft.getBlockX() + " " + w.topLeft.getBlockY() + " " + w.topLeft.getBlockZ());
@@ -133,35 +133,27 @@ final class UiCommand implements TabExecutor {
             new Help("stats", "What the plugin costs the server", "stats"),
             new Help("clear", "Remove every test wall", "clear"));
 
-    /** The commands the sender may run, one a line, each to click, under the plugin's name and version. */
+    /** The commands the sender may run, one a line under a heading, as the other ResourcePack AI plugins list theirs. */
     private void help(CommandSender sender, String label) {
         String root = "/" + label.toLowerCase(Locale.ROOT).replaceFirst("^mcgui:", "");
-        sender.sendMessage(Chat.prefix()
-                .append(Component.text(plugin.getPluginMeta().getVersion(), Chat.MUTED))
-                .append(Component.text(" · ", Chat.SEPARATOR))
-                .append(Component.text("mcgui.dev", Chat.ACCENT)
-                        .clickEvent(net.kyori.adventure.text.event.ClickEvent.openUrl("https://mcgui.dev/"))
-                        .hoverEvent(net.kyori.adventure.text.event.HoverEvent.showText(Component.text("Make pages in your browser", Chat.MUTED)))));
+        sender.sendMessage(Chat.heading("MC GUI", Component.text()
+                .append(Chat.text(plugin.getPluginMeta().getVersion() + ", pages made on "))
+                .append(Chat.accent("mcgui.dev").clickEvent(net.kyori.adventure.text.event.ClickEvent.openUrl("https://mcgui.dev/")))
+                .build()));
         for (Help h : HELP) {
             if (h.sub() != null && !sender.hasPermission(permissionFor(h.sub()))) continue;
-            sender.sendMessage(Component.text("  ")
-                    .append(Chat.command(root + " " + h.usage()))
-                    .append(Component.text("  " + h.what(), Chat.MUTED)));
+            sender.sendMessage(Chat.row(root + " " + h.usage(), h.what()));
         }
     }
 
-    /** [pages] as names to click, each opening its page for the sender, with dots between. */
-    static Component pageLinks(List<String> pages, String label) {
-        String root = "/" + (label == null ? "mcgui" : label.toLowerCase(Locale.ROOT).replaceFirst("^mcgui:", ""));
-        Component line = Component.empty();
+    /** [pages] by name, in the accent, with commas between: to read, not to click (a page opened from chat has the chat over it). */
+    static Component pageList(List<String> pages) {
+        var line = Component.text();
         for (int i = 0; i < pages.size(); i++) {
-            String page = pages.get(i);
-            if (i > 0) line = line.append(Component.text(" · ", Chat.SEPARATOR));
-            line = line.append(Component.text(page, Chat.ACCENT)
-                    .clickEvent(net.kyori.adventure.text.event.ClickEvent.runCommand(root + " open " + page))
-                    .hoverEvent(net.kyori.adventure.text.event.HoverEvent.showText(Component.text("Open " + page, Chat.MUTED))));
+            if (i > 0) line.append(Chat.text(", "));
+            line.append(Chat.accent(pages.get(i)));
         }
-        return line;
+        return line.build();
     }
 
     private void open(CommandSender sender, String[] args) {

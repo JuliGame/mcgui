@@ -9,6 +9,27 @@ gui-alias: true
 # /ui as well (the command's name before MC GUI). Turn it off when another plugin uses /ui.
 ui-alias: true
 
+# How MC GUI's messages look in chat: [MCGUI] in front, as the other ResourcePack AI
+# plugins do. Colours are #rrggbb, with or without the hash; anything that is not
+# one falls back to its default.
+chat:
+  # The word inside the brackets, in front of everything this plugin says.
+  prefix: "MCGUI"
+  colour:
+    # The word in the brackets, and the brackets around it.
+    prefix: "#3670f8"
+    brackets: "#555555"
+    # Ordinary text: the rest of every line.
+    body: "#aaaaaa"
+    # What a sentence is about: a page, a code. Also the headings in /mcgui's help.
+    accent: "#3670f8"
+    # A command named in a message (click it to put it in the chat box).
+    command: "#ffffff"
+    # Something went wrong, something worked, and something worth a second look.
+    error: "#ff5555"
+    success: "#55ff55"
+    warning: "#ffff55"
+
 # Edit a page (or its CSS or images) and it updates in game within a second.
 live-reload: true
 
