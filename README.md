@@ -162,7 +162,7 @@ game's default (5).
 For everything else players see both cursors until they close the screen:
 chat, the inventory and other containers, and the pause menu with the blur at
 0. Minecraft tells neither the server nor the resource pack when those are
-open, so nothing can hide the pointer for them (NOTES.md has the reasons).
+open, so nothing can hide the pointer for them.
 Mouse clicks go to the screen, not the page, while it is open.
 
 ## Custom cursors
@@ -302,9 +302,9 @@ most `hover-ahead-cpu` of a core (0.5 by default).
 Open screens cost little memory. Players' pictures of one page share every map
 where they look alike, and a screen nobody has drawn on for `park-pictures-after`
 seconds (5) with a still pointer puts its picture away in pieces shared the same
-way; the next hover puts it back first, in a few milliseconds. On the VPS an idle
-fullscreen market costs under 1 MB a player (it was about 19 MB), and 100 players
-hovering it run in a 3 GB heap at 20 TPS (before, the server ran out of memory).
+way; the next hover puts it back first, in a few milliseconds. On a test server an
+idle fullscreen market costs under 1 MB a player, against about 19 MB with every
+picture kept whole, and 100 players hovering it run in a 3 GB heap at 20 TPS.
 
 ## What the renderer supports
 
@@ -334,7 +334,7 @@ Not supported: JavaScript, WOFF fonts, WebP images, video, iframes, floats
 
 ## Fast pages
 
-A hover is quick when the engine can redraw only the part of the page that
+A hover is quick when MC GUI can redraw only the part of the page that
 changed, and quicker still when it drew that hover before the pointer got there
 (`hover-ahead`, the four hovers nearest where the pointer rests). Then a hover
 shows in about 40 ms in game, most of it the client's own 50 ms wait between

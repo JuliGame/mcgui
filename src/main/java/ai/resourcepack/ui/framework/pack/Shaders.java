@@ -1329,7 +1329,7 @@ public final class Shaders {
      * The first take pass's triangle: the window while a picture is taken (see {@link #overlayTakeFsh}), the
      * bottom-left pixel for the mark that says none is, and nothing without a signature. The game draws every post
      * pass over the whole window, and a fragment that only finds it has nothing to do still costs: these six passes
-     * were about 0.2 ms of a still overlay's frame at 1080p on Josh's PC (FPSFinish), and with no signature every pass
+     * were about 0.2 ms of a still overlay's frame at 1080p on a test PC, and with no signature every pass
      * of the chain ran over the window for anybody with a glowing entity in sight.
      */
     public static String overlayTakeVsh(Dialect d) {

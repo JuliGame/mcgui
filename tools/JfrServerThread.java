@@ -3,7 +3,7 @@ import java.nio.file.*;
 import java.time.*;
 import java.util.*;
 
-/** java JfrServerThread.java <file.jfr> <fromSecond> <toSecond> [thread]: what the server thread did, by our frames. */
+/** java JfrServerThread.java <file.jfr> <fromSecond> <toSecond> [thread]: what the server thread did, by MC GUI's frames. */
 public class JfrServerThread {
     public static void main(String[] a) throws Exception {
         String thread = a.length > 3 ? a[3] : "Server thread";

@@ -1,9 +1,8 @@
 <!--
-  A sample claim manager with a parchment chunk survey and ownership-coloured banners.
-  Select a banner or expansion marker; hidden checkboxes preview the four claim flags.
-  Lever widgets combine the catalogue's lever texture with a stone base and two handle angles.
-  Claim, Unclaim and Remove send demo messages only. Connect your claims plugin for persistence,
-  permission checks, real chunk coordinates, terrain, player position and claim allowance.
+  A land claim manager: a chunk map with a banner for each claim. Pick a banner or
+  an expansion marker, and flip the four claim flags with the levers. Claim,
+  Unclaim and Remove only send a chat message; connect them to your claims plugin
+  for real chunks, owners and allowances.
 -->
 <!doctype html>
 <html lang="en">
@@ -243,7 +242,7 @@
     background: #8b8b8b;
     box-shadow: inset 2px 2px 0 #373737, inset -2px -2px 0 #fff;
   }
-  /* The catalogue supplies a model texture, not separate GUI lever states. */
+  /* The game has no GUI lever, only the block's texture: the handle is drawn at two angles over a stone base. */
   .lever::before {
     content: "";
     position: absolute;

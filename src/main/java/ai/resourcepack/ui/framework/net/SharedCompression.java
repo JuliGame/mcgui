@@ -281,7 +281,7 @@ public final class SharedCompression implements AutoCloseable {
             nanos[i] = System.nanoTime() - start;
         };
         // This thread takes patches one after another, and so does each pool thread that is free meanwhile: busy
-        // painting a picture, the pool only means it is all done here, as it was before.
+        // painting a picture, the pool only means it is all done here, as if there were no pool.
         java.util.concurrent.atomic.AtomicInteger next = new java.util.concurrent.atomic.AtomicInteger();
         java.util.concurrent.CountDownLatch left = new java.util.concurrent.CountDownLatch(k);
         Runnable take = () -> {

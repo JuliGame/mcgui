@@ -24,31 +24,12 @@ import java.util.Objects;
 import java.util.Random;
 
 /**
- * PHANTOM FIELD
+ * Phantom Field: Asteroids in glowing vector lines, with phantoms that wind up
+ * and dive at the ship.
  *
- * Review of the supplied sheet and actual harness report:
- * - No exception or performance failure was reported: 2.7 ms average / 6.6 ms
- *   worst is comfortably within budget. The old source's 26.3 / 58.4 ms
- *   commentary was stale and incorrect.
- * - The large opaque attract panel hides the demo ship, phantom and action.
- * - Text is generally readable, but fading instructions leave an opaque black
- *   text shadow. This is visible near the bottom of the five-second frame.
- * - The low-resolution nearest-neighbour world makes fine diagonal vector
- *   outlines rather stair-stepped. Rocks, ghosts and effects have similar
- *   visual weight, so the game's signature enemy does not stand out enough.
- * - A thin dashed warning is easy to miss. It needs direction markers and a
- *   stronger wind-up, rather than just a pale line through nearby rocks.
- * - Impact feedback is short-lived; sampled play looks quiet. Losing a hull
- *   produces a large modal-looking panel that hides the continuing field.
- * - Two lost lives by 11.5 seconds is not itself a bug (this is scripted input),
- *   but clearer protection, recovery and threat cues would improve onboarding.
- * - Wrapping, splitting, waves, lives, scoring and the 10,000-point extra life
- *   were already present; the screenshots do not demonstrate missing features.
- *
- * This revision keeps bounded, low-resolution world rendering, improves
- * vector sampling, reduces attract obstruction, fixes text fading, strengthens
- * phantom telegraphs and hit feedback, and makes hull recovery non-modal.
- * No new performance measurement is claimed.
+ * W thrusts, A and D turn, S brakes; click or hold space to fire. Rocks split
+ * when shot and the field wraps at its edges. Three hulls, and an extra one at
+ * 10,000 points. After the last is lost, click or space to start again.
  */
 public class PhantomField implements Scene {
     private static final double W = 1024, H = 576;

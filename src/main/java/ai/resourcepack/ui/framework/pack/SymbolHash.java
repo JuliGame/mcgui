@@ -10,9 +10,9 @@ import java.util.Random;
  * <p>slot = (k × mul) >>> (32 − BITS), with k = r << 16 | g << 8 | b: no two symbols share a slot. A slot
  * holds its symbol plus one in a byte, 0 for no symbol, four slots to an int ({@link #packed}). Java's int
  * multiplication wraps exactly like GLSL's uint, so {@link #lookup} here and the shader agree bit for bit.
- * The search is seeded, so the same palette always gives the same table, and so the same pack. It used to
- * be hash and displace (two dependent reads, a 64-entry table then a 512-entry one); one read of a bigger
- * table is cheaper on the GPU, where every pixel of a map does this up to 16 times.
+ * The search is seeded, so the same palette always gives the same table, and so the same pack. One read of
+ * a bigger table beats hash and displace (two dependent reads, a 64-entry table then a 512-entry one) on the
+ * GPU, where every pixel of a map does this up to 16 times.
  */
 public final class SymbolHash {
     public static final int BITS = 12;

@@ -19,35 +19,13 @@ import java.util.List;
 import java.util.Random;
 
 /**
- * Ore 2048.
+ * Ore 2048: the sliding-number puzzle with ores, from coal up
+ * to the 2048 tier.
  *
- * Review of the supplied contact sheet and report:
- * - No exceptions were reported. 3.4 ms average / 5.4 ms worst is comfortably
- *   within budget; there is no evidence of a performance problem.
- * - The demo is populated and visibly playing, and the main numbers are readable.
- *   Sparse boards shortly after joining are normal 2048, not missing content.
- * - Floating merge rewards linger over cells that are now empty after another
- *   move. This makes the snapshots look like tiles disappeared.
- * - Most ores reuse almost the same vein silhouette. Coal also blends into
- *   the dark sockets, so recognition depends too much on the numerals.
- * - The reference panel occupies nearly half the screen, but its ore names,
- *   values, and discovery indicators are relatively small and visually flat.
- * - The goal is unclear: the visible collection ends at Nether Star / 1024,
- *   while the actual 2048 victory tier is absent from the collection.
- * - Effects and banners exist, but the player receives little explanation of
- *   the basic merge rule or meaningful feedback for an impossible direction.
- * - The class comment in the supplied file describes older defects and quotes
- *   an incorrect worst-frame time; those claims do not describe these frames.
- *
- * Changes:
- * - Bigger board and numerals, distinct procedural ore silhouettes, brighter
- *   coal, an explicit 2048 goal, and a complete eleven-tier collection.
- * - Short, cell-local merge rewards are cleared when another slide begins.
- * - More legible controls, a merge-rule example, directional edge feedback,
- *   discovery celebrations, and quieter, throttled invalid-move feedback.
- * - Cached art, bounded effects, separate visual/gameplay randomness, safe
- *   input handling, buffered deliberate input, and controlled held-key repeat.
- * - Attract AI, score-table rotation, one-time score submission, and restart.
+ * WASD slides every ore on the board (or click an arrow); two equal ores that
+ * meet merge into the next. The panel beside the board lists every tier and
+ * which have been found. When the board fills, click or space starts a new one.
+ * With nobody seated, a simple AI plays.
  */
 public final class Ore2048 implements Scene {
     private static final int W = 1024, H = 576;

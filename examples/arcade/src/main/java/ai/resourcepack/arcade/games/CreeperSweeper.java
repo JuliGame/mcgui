@@ -19,27 +19,12 @@ import java.util.List;
 import java.util.Random;
 
 /**
- * Creeper Sweeper
+ * Creeper Sweeper: Minesweeper with creepers, for one player.
  *
- * Review of the supplied frames and this harness run:
- * - No exception or performance problem was reported: 0.8 ms average and
- *   2.2 ms worst are comfortably within budget. The old review's 22.4 ms
- *   claim does not describe this run.
- * - The demo is visibly solving, and the player's board makes progress.
- *   Neither an inactive attract mode nor broken digging is evidenced here.
- * - "CREEPERS LEFT" almost touches its counter border. The sidebar repeats
- *   a dense instruction sheet, with relatively small keyboard instructions.
- * - Identical grass textures make the large unopened areas look mechanical.
- *   Most of the moment-to-moment feedback is very brief.
- * - Keyboard auto-repeat and mouse movement both overwrite the same selection,
- *   so a held movement key can unexpectedly take selection back from the mouse.
- * - Flags, detonation and victory are not demonstrated by these screenshots.
- *   Their absence is not evidence that they failed.
- *
- * Improvements: crisp output-resolution text, roomier counter labels,
- * varied procedural tiles, a contextual neighborhood diagram, persistent
- * action feedback, animated banners, visible reveal waves, deliberate mouse/
- * keyboard ownership, and unobstructed explosion and result presentations.
+ * Left click digs a block, or sweeps round a number whose neighbours are all
+ * marked; right click plants or removes a banner on a suspect. WASD moves the
+ * selection, space digs it and F plants a banner. Digging a creeper sets it off. With
+ * nobody seated, the board solves itself.
  */
 public class CreeperSweeper implements Scene {
     private static final int W = 1200, H = 700;

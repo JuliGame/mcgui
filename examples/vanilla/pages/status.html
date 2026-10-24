@@ -1,9 +1,8 @@
 <!--
-  A redstone status board centred at 1024 x 576 and 1024 x 640.
-  Counts and viewer names use live placeholders; telemetry and history are samples.
-  Hover lamps, bars or paper for notes; Refresh reloads and Report sends demo chat.
-  Green-tinted vanilla torches mark clean restarts; red torches mark incidents.
-  For production, connect monitored values, matching meter fills and real history.
+  A server status board in redstone lamps. Player counts and names are live; the
+  rest of the readings and the history are made up. Hover a lamp, bar or note for
+  details; Refresh reloads and Report sends a chat message. Connect it to your
+  own monitoring.
 -->
 <!doctype html>
 <html lang="en">
@@ -182,7 +181,7 @@
     height: 38px;
     margin-bottom: 6px;
   }
-  /* Generic 8-by-8 pixel faces, not claimed to be player skins. */
+  /* Made-up 8-by-8 faces: swap in head:{name} images for real players. */
   .head {
     position: relative;
     display: block;

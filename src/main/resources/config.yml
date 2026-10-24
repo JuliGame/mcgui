@@ -90,7 +90,7 @@ animation-fps: 10
 scroll-step: 80
 
 # Whether a scroll by whole map rows is sent as frames pointed at maps players already have (on), or as
-# every changed map sent again (off, as before). Only for comparing the two.
+# every changed map sent again (off). Only for comparing the two.
 tile-shift: true
 
 # While a player's pointer rests on a page (or heads for something) and the cpu-threads pool has
@@ -168,8 +168,8 @@ walls:
 # The resource pack, the screens and the threads below are read when the server starts: /mcgui reload
 # does not change them.
 resource-pack:
-  # serve: the engine serves its pack itself and sends it to players on join.
-  # external: the engine serves nothing; host plugins/MCGUI/pack.zip yourself (or merge it into
+  # serve: MC GUI serves its pack itself and sends it to players on join.
+  # external: MC GUI serves nothing; host plugins/MCGUI/pack.zip yourself (or merge it into
   #   your own pack) and set public-url, which players are sent on join.
   # off: no pack. Screens fall back to dithered vanilla map colours, and views are cut through the world.
   mode: serve
@@ -206,7 +206,7 @@ screens:
 # number than the cores is a bad idea. Read at start (changing it needs a restart).
 cpu-threads: 0
 
-# Map ids this engine owns. They never get saved-map files, so they cannot collide with real maps as
+# Map ids MC GUI owns. They never get saved-map files, so they cannot collide with real maps as
 # long as the world has fewer maps than this.
 map-id-base: 2000000000
 

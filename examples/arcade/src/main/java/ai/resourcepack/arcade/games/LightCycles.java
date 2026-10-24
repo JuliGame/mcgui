@@ -19,25 +19,11 @@ import java.util.List;
 import java.util.Random;
 
 /*
- * Review of the supplied frames and report:
- *
- * - Performance is already healthy; no exception is reported.
- * - Both humans die early, then spend most of the sample watching bots.
- * - The closing perimeter overwhelms the artwork, produces repeated bass notes,
- *   and ends this round in a draw. It is also unnecessary for the original brief.
- * - Incremental opaque trail strokes overwrite their own highlights, making
- *   continuous light walls look like disconnected, dashed conveyor belts.
- * - Bots mostly draw isolated, parallel paths instead of contesting the arena.
- * - Scores are absent during play, secondary text is small, and player-death
- *   feedback is easy to miss once its short popup disappears.
- * - Joining a running match has confusing bot/player ownership; departing
- *   players also erase their colour's round wins.
- *
- * Improvements:
- * Continuous cell-connected walls, more confrontational space-aware bots,
- * slower opening speed, a larger arena, visible scores, persistent OUT states,
- * brief automatic bot resolution plus an explicit skip, no crushing perimeter,
- * clearer late-join ownership, and once-only score submission per participation.
+ * Light Cycles: up to four riders on one arena, each leaving a wall of light.
+ * Steer into a wall, yours or anybody's, and you are out; the last rider left
+ * takes the round, and the first to three rounds wins. Bots ride the empty
+ * seats; a player who joins mid-match takes over that seat's bot from the
+ * next round.
  *
  * Controls: absolute W/A/S/D. Space or click skips a bot-only showdown and
  * restarts a completed match. Mouse motion deliberately does not steer.

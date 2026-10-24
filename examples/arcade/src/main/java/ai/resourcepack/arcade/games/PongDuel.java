@@ -20,23 +20,12 @@ import java.util.Objects;
 import java.util.Random;
 
 /**
- * Pong Duel
+ * Pong Duel: two players, one each side; the computer takes an empty side.
  *
- * Review of the supplied frames and report:
- * - No reported exceptions or performance problem: 6.4 ms worst case is healthy.
- * - The main brief already works. Short rallies under sweeping scripted input
- *   are not, by themselves, evidence of a physics bug.
- * - The grid and scanlines are too prominent; the speed display is too small.
- * - Enlarging the rasterized text makes it less crisp than native-resolution text.
- * - The attract card obscures part of the actual demonstration.
- * - The ball's dotted trail is visually disconnected, and point feedback is brief.
- * - A late join inherits the CPU's match score. Joining should start a fair duel.
- * - End-screen names and results should remain snapshots if somebody leaves.
- *
- * Improvements:
- * quieter court, native-resolution typography, larger ball and speed display,
- * continuous luminous trail, stronger point celebrations, unobstructed attract
- * play, deliberate AI reaction times, fair roster joins, and frozen final results.
+ * Move the mouse up and down (or hold W and S) to move your paddle. A hit near
+ * a paddle's tip adds spin, the ball speeds up through a rally, and the first to
+ * seven wins. Somebody who joins starts a fresh match rather than taking over
+ * the computer's score. Click or space for a rematch.
  *
  * All simulation is in 1024 x 576 logical units. Effects use a reusable 512 x 288
  * image; text is drawn directly onto the supplied canvas. No external assets.

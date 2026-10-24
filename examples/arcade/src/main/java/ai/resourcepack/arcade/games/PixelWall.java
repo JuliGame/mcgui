@@ -393,7 +393,7 @@ public class PixelWall implements Scene {
             }
         }
 
-        // Horizontal brush passes avoid the old half-finished vertical wall.
+        // Row by row, alternating direction, so the demo always looks like one stroke in progress.
         for (int y = 0; y < GH; y++) {
             for (int i = 0; i < GW; i++) {
                 int x = (y & 1) == 0 ? i : GW - 1 - i;

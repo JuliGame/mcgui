@@ -203,7 +203,7 @@ class Server:
         log(f'starting the server in {self.dir}')
         self.t0 = time.time()
         self.log = open(f'{self.dir}/console.log', 'w')
-        # Heap grown as needed: the VPS's memory is shared, and its limit kills the biggest process (once, this server).
+        # Heap grown as needed: on a machine whose memory is shared, a large fixed heap can get the server killed.
         jfr = [f'-XX:StartFlightRecording=filename={self.a.jfr},settings=profile,dumponexit=true'] if self.a.jfr else []
         self.proc = subprocess.Popen([self.a.java, '-Xms512M', f'-Xmx{self.a.heap}', f'-Dprobe.port={self.probe_port}', *jfr,
                                       '-jar', 'paper.jar', '--nogui'], cwd=self.dir, stdin=subprocess.PIPE,

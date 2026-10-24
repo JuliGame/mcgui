@@ -576,7 +576,7 @@ public final class HoverAhead {
 
     /**
      * CSS pixels the pointer goes from rest in its first report, at most, as far as drawing ahead counts: a glide from a
-     * rest by a card reaches some 50 px into it (the trials in rigs/hl/targets.json, 3 reports over 150 px).
+     * rest by a card reaches some 50 px into it (in trials, only 3 reports went over 150 px).
      */
     static final double REACH = 56;
     /** Seconds between two reports of the pointer. */

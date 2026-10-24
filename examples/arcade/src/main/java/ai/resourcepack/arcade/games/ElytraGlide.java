@@ -19,27 +19,12 @@ import java.util.Objects;
 import java.util.Random;
 
 /**
- * Elytra Glide — a one-button, pixel-art firework flyer.
+ * Elytra Glide: a one-button firework flyer, for one player.
  *
- * Review of the supplied frames and report:
- * - No exceptions or performance-budget failures were reported.
- * - Three separate zero-score runs suggest an unforgiving opening, not necessarily
- *   duplicate score submission. The old -100 boost / 248 gravity tuning climbs
- *   steadily with 2/3-second taps; additional space presses make that worse.
- * - The first point took too long to reach, so players repeatedly crashed before
- *   receiving any positive feedback.
- * - A lethal ceiling immediately below the HUD made overboosting especially harsh.
- * - The mountain layers repeat the same steep tooth shape and compete with the
- *   pillars. The scenery needs larger, quieter, more varied silhouettes.
- * - Attract mode is active and the main text is readable, but its large panels
- *   obscure too much of the demonstration.
- * - Frequent retry input can make the crash/result screen almost disappear.
- *   A visible crash reason and a deliberate retry delay make failures clearer.
- *
- * Changes include cadence-balanced lift, merged near-simultaneous boost inputs,
- * generous introductory gates, an earlier first point, a nonlethal open skyline,
- * clearer obstacle outlines, varied scenery, smaller demo panels, gate progress,
- * stronger pass feedback, and a readable, locked-in result presentation.
+ * Click or space fires a firework that boosts you upward; between boosts you
+ * coast down. Fly through the gaps in the block pillars for a point each. The
+ * first gates are wide and the sky above is open, so an early overboost is not
+ * fatal. After a crash, click or space again to retry.
  */
 public final class ElytraGlide implements Scene {
     private static final int W = 480, H = 270;
