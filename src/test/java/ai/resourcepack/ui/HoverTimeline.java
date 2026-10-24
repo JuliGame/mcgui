@@ -30,28 +30,33 @@ public final class HoverTimeline {
     public static void main(String[] args) throws Exception {
         Path from = Path.of(System.getProperty("dir", "src/main/resources/pages"));
         String[] pages = System.getProperty("pages", "market,quests,crates").split(",");
-        int trials = Integer.getInteger("trials", 16), capacity = Integer.getInteger("layers", 32), threads = Integer.getInteger("threads", 4);
+        int blocks = Integer.getInteger("blocks", 4), per = Integer.getInteger("per", 8), warm = Integer.getInteger("warm", 4);
+        int capacity = Integer.getInteger("layers", 32), threads = Integer.getInteger("threads", 4);
+        String only = System.getProperty("only", "");
         String json = Files.readString(Path.of(System.getProperty("targets", "build/hover-targets.json")));
         Path dir = Files.createTempDirectory("hover-timeline");
         copy(from, dir);
         for (String page : pages) {
             List<int[][]> ts = targets(json, page);
+            if (!only.isEmpty()) ts.removeIf(t -> !java.util.Arrays.toString(t[0]).equals(only));
             List<double[]> off = new ArrayList<>(), on = new ArrayList<>();
             Random rnd = new Random(7);
-            for (int i = 0; i < trials; i++) {
-                int[][] t = ts.get(rnd.nextInt(ts.size()));
-                for (boolean layers : i % 2 == 0 ? new boolean[]{false, true} : new boolean[]{true, false}) {
-                    double[] r = trial(dir, page, t, layers, capacity, threads, rnd.nextLong());
-                    (layers ? on : off).add(r);
-                    System.out.printf("%-7s %-3s box %-20s enter %7.1f ms ahead %s  leave %7.1f ms ahead %s  arm %6.1f ms cpu (%d armed, %d used)%n",
-                            page, layers ? "on" : "off", java.util.Arrays.toString(t[0]), r[0], r[1] > 0 ? "y" : "n", r[2], r[3] > 0 ? "y" : "n",
-                            r[4], (int) r[5], (int) r[6]);
+            for (int b = 0; b < blocks; b++) {
+                for (boolean layers : b % 2 == 0 ? new boolean[]{false, true} : new boolean[]{true, false}) {
+                    long seed = rnd.nextLong();
+                    for (double[] r : block(dir, page, ts, layers, capacity, threads, warm, per, seed)) {
+                        (layers ? on : off).add(r);
+                        System.out.printf("%-7s %-3s box %-20s enter %7.1f ms ahead %s busy %s  leave %7.1f ms ahead %s  arm %6.1f ms cpu (%d armed, %d used)%n",
+                                page, layers ? "on" : "off", java.util.Arrays.toString(ts.get((int) r[7])[0]), r[0], r[1] > 0 ? "y" : "n",
+                                r[8] > 0 ? "y" : "n", r[2], r[3] > 0 ? "y" : "n", r[4], (int) r[5], (int) r[6]);
+                    }
                 }
             }
             for (String tag : new String[]{"off", "on"}) {
                 List<double[]> rs = tag.equals("off") ? off : on;
-                System.out.printf("SUMMARY %-7s %-3s enter p50 %6.1f p90 %6.1f ahead %d/%d   leave p50 %6.1f p90 %6.1f ahead %d/%d   arm cpu mean %.1f ms%n",
+                System.out.printf("SUMMARY %-7s %-3s enter p50 %6.1f p90 %6.1f ahead %d/%d busy %d   leave p50 %6.1f p90 %6.1f ahead %d/%d   arm cpu mean %.1f ms%n",
                         page, tag, q(rs, 0, 0.5), q(rs, 0, 0.9), (int) rs.stream().filter(r -> r[1] > 0).count(), rs.size(),
+                        (int) rs.stream().filter(r -> r[8] > 0).count(),
                         q(rs, 2, 0.5), q(rs, 2, 0.9), (int) rs.stream().filter(r -> r[3] > 0).count(), rs.size(),
                         rs.stream().mapToDouble(r -> r[4]).average().orElse(0));
             }
@@ -64,8 +69,13 @@ public final class HoverTimeline {
         return v.length == 0 ? -1 : v[Math.min(v.length - 1, (int) (p * v.length))];
     }
 
-    /** One fresh session: a settle, a warm-up hover, then the timed trial. {enter ms, ahead, leave ms, ahead, arm ms, armed, used}. */
-    private static double[] trial(Path dir, String page, int[][] t, boolean layersOn, int capacity, int threads, long seed) throws Exception {
+    /**
+     * One session, as the PC rig keeps one page open: [warm] untimed trials, then [per] timed ones, each on a target of
+     * [ts] picked at random. Per trial {enter ms, ahead, leave ms, ahead, arm ms, armed, used, target, busy at entry}.
+     */
+    private static List<double[]> block(Path dir, String page, List<int[][]> ts, boolean layersOn, int capacity, int threads, int warm, int per,
+                                        long seed) throws Exception {
+        List<double[]> out = new ArrayList<>();
         try (SessionRig rig = new SessionRig(dir, threads)) {
             if (rig.pages.load(page).get() == null) throw new IllegalStateException("no page " + page);
             Session s = rig.open(rig.plugin(4), page, COLS, ROWS, 576);
@@ -74,22 +84,28 @@ public final class HoverTimeline {
             HoverLayers layers = layersOn ? layerSet(layerCanvas, capacity) : null;
             if (layersOn) rig.onServer(() -> s.layers(layers));
             Random rnd = new Random(seed);
-            int[] box = t[0], r = t[1], c = t[2];
-            // Somewhere else first, so the rest is a move as on the PC (the last trial's leave).
             rig.onServer(() -> s.pointer(6, 1146));
             rig.quiet();
-            ClientHovers h = layersOn ? get(s, "hovers") : null;
-            long arm0 = h == null ? 0 : h.armNs;
-            rig.onServer(() -> s.pointer(r[0], r[1]));
-            Thread.sleep((long) (700 + 300 * rnd.nextDouble()));
-            double arm = h == null ? 0 : (h.armNs - arm0) / 1e6;
-            int armed = h == null ? 0 : h.count(), used = layers == null ? 0 : layers.used();
-            double[] in = glide(rig, s, r, c, box, true);
-            Thread.sleep(500);
-            double[] out = glide(rig, s, c, r, box, false);
+            for (int i = 0; i < warm + per; i++) {
+                int k = rnd.nextInt(ts.size());
+                int[][] t = ts.get(k);
+                ClientHovers h = layersOn ? get(s, "hovers") : null;
+                long arm0 = h == null ? 0 : h.armNs;
+                int[] box = t[0], r = t[1], c = t[2];
+                rig.onServer(() -> s.pointer(r[0], r[1]));
+                Thread.sleep((long) (700 + 300 * rnd.nextDouble()));
+                double arm = h == null ? 0 : (h.armNs - arm0) / 1e6;
+                int armed = h == null ? 0 : h.count(), used = layers == null ? 0 : layers.used();
+                double[] in = glide(rig, s, r, c, box, true);
+                Thread.sleep(500);
+                double[] o = glide(rig, s, c, r, box, false);
+                // As ih_pc.py: half a second before the next look, so the jump to the next rest is not a report's move.
+                Thread.sleep(500);
+                if (i >= warm) out.add(new double[]{in[0], in[1], o[0], o[1], arm, armed, used, k, in[2]});
+            }
             rig.quiet();
-            return new double[]{in[0], in[1], out[0], out[1], arm, armed, used};
         }
+        return out;
     }
 
     /**
@@ -99,42 +115,79 @@ public final class HoverTimeline {
     private static double[] glide(SessionRig rig, Session s, int[] a, int[] b, int[] box, boolean entering) throws Exception {
         HoverAhead ha = get(s, "hoverAhead");
         long taken0 = ha.taken.get();
-        long t0 = -1;
+        long t0 = -1, shownAt = -1;
+        boolean busy = false;
         List<Element> want = null;
         for (int i = 1; i <= 3; i++) {
             int x = a[0] + (b[0] - a[0]) * i / 3, y = a[1] + (b[1] - a[1]) * i / 3;
             boolean inside = x >= box[0] && y >= box[1] && x < box[0] + box[2] && y < box[1] + box[3];
             if (t0 < 0 && inside == entering) {
                 HtmlRenderer.Frame f = get(s, "frame");
-                double sc = f.scale();
-                Element e = f.elementAt(x / sc, y / sc);
-                List<Element> key = f.page().styles.stateKey(e, false);
-                // What the hover's picture is drawn for: the session's own element (the frame's document is the session's).
+                List<Element> key = keyAt(s, x, y);
                 want = key;
                 ClientHovers h = get(s, "hovers");
                 List<Element> drawn = get(s, "drawnHover");
                 boolean layered = h != null && h.armed(f, key);
+                // A render thread of this session's at work as the pointer gets there (drawing ahead, or arming).
+                busy = get(s, "rendering");
                 t0 = System.nanoTime();
                 rig.onServer(() -> s.pointer(x, y));
-                if (layered || key.equals(drawn)) return new double[]{0, 1};
-                // The next reports come while it is drawn, as they do.
-                long until = t0 + 50_000_000L;
-                while (System.nanoTime() < until && !shows(s, key)) Thread.onSpinWait();
-                continue;
+                if (layered || key.equals(drawn)) return new double[]{0, 1, busy ? 1 : 0};
+            } else {
+                rig.onServer(() -> s.pointer(x, y));
             }
-            rig.onServer(() -> s.pointer(x, y));
-            if (i < 3) Thread.sleep(50);
+            if (i == 3) break;
+            // The next report comes 50 ms later, as the client's do, whether or not the hover is drawn by then.
+            long until = System.nanoTime() + 50_000_000L;
+            while (System.nanoTime() < until) {
+                if (want != null && shownAt < 0 && shows(s, want)) shownAt = System.nanoTime();
+                Thread.onSpinWait();
+            }
         }
-        if (want == null) return new double[]{-1, 0};
+        if (want == null) return new double[]{-1, 0, 0};
         long deadline = t0 + 2_000_000_000L;
-        while (!shows(s, want) && System.nanoTime() < deadline) Thread.sleep(0, 200_000);
-        double ms = (System.nanoTime() - t0) / 1e6;
-        return new double[]{shows(s, want) ? ms : -1, ha.taken.get() > taken0 ? 1 : 0};
+        boolean dumped = false;
+        while (shownAt < 0 && System.nanoTime() < deadline) {
+            if (shows(s, want)) {
+                shownAt = System.nanoTime();
+                break;
+            }
+            if (!dumped && Boolean.getBoolean("stacks") && System.nanoTime() - t0 > 400_000_000L) {
+                dumped = true;
+                System.out.println("STALL rendering=" + get(s, "rendering") + " dirty=" + get(s, "dirty") + " ahead=" + get(s, "ahead")
+                        + " drawnHover=" + get(s, "drawnHover") + " want=" + want);
+                for (var e : Thread.getAllStackTraces().entrySet()) {
+                    StackTraceElement[] st = e.getValue();
+                    if (java.util.Arrays.stream(st).noneMatch(x -> x.getClassName().startsWith("ai.resourcepack"))) continue;
+                    System.out.println("  thread " + e.getKey().getName());
+                    for (int i = 0; i < Math.min(18, st.length); i++) System.out.println("    " + st[i]);
+                }
+            }
+            Thread.sleep(0, 200_000);
+        }
+        return new double[]{shownAt > 0 ? (shownAt - t0) / 1e6 : -1, ha.taken.get() > taken0 ? 1 : 0, busy ? 1 : 0};
     }
 
     private static boolean shows(Session s, List<Element> key) {
         List<Element> drawn = get(s, "drawnHover");
         return drawn.equals(key);
+    }
+
+    /** The hover key the session gives the pointer at (x, y): its element there, in its own document. */
+    @SuppressWarnings("unchecked")
+    private static List<Element> keyAt(Session s, int x, int y) {
+        try {
+            var at = Session.class.getDeclaredMethod("at", int.class, int.class);
+            var counterpart = Session.class.getDeclaredMethod("counterpart", Element.class, org.jsoup.nodes.Document.class);
+            var key = Session.class.getDeclaredMethod("key", Element.class, boolean.class);
+            at.setAccessible(true);
+            counterpart.setAccessible(true);
+            key.setAccessible(true);
+            Element e = (Element) counterpart.invoke(null, at.invoke(s, x, y), get(s, "doc"));
+            return (List<Element>) key.invoke(s, e, false);
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     private static List<int[][]> targets(String json, String page) {
