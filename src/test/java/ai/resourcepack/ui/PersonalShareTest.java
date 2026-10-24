@@ -28,6 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -328,5 +329,45 @@ class PersonalShareTest {
         }
         assertEquals(1, whole, "drawn whole more than once");
         assertEquals(sessions.size() - 1, theirs);
+    }
+
+    /**
+     * Two players at rest on the same page: their pictures are put away (ParkedPicture), sharing every block but where
+     * their names are; the next hover puts a picture back and draws over it, and each player still sees, tile for tile,
+     * what a session that never parks shows, and to the pixel their own fresh picture.
+     */
+    @Test
+    void aPictureParkedAtRestComesBackAsItWas() {
+        UUID al = player(SHORT), max = player(LONG);
+        MCGUIPlugin plugin = rig.plugin(16, 0), alone = rig.plugin(16, 0, false);
+        SessionRig.config(plugin, "park-pictures-after", 1e-6);
+        SessionRig.config(alone, "park-pictures-after", 0);
+        Session a = open(plugin, FIXED, al), b = open(plugin, FIXED, max);
+        Session ownA = open(alone, FIXED, al), ownB = open(alone, FIXED, max);
+        int[][] at = spots(FIXED);
+        int blocks = COLS * ROWS;
+        for (int i = 0; i < at.length; i++) {
+            for (Session s : new Session[]{a, b, ownA, ownB}) point(s, at[i]);
+            // At rest: a tick on the second puts both pictures away, but not those of the sessions that never park.
+            for (Session s : new Session[]{a, b, ownA, ownB}) rig.onServer(() -> s.tick(20));
+            rig.quiet();
+            String step = "parked at " + at[i][0] + "," + at[i][1];
+            for (Session s : new Session[]{a, b}) assertNull(((HtmlRenderer.Frame) get(s, "frame")).image(), step + ": still whole");
+            for (Session s : new Session[]{ownA, ownB}) assertNotNull(((HtmlRenderer.Frame) get(s, "frame")).image(), step + ": parked with parking off");
+            ai.resourcepack.ui.html.ParkedPicture pa = get(a, "parked"), pb = get(b, "parked");
+            int same = pa.sameBlocks(pb);
+            assertTrue(same > 0 && same < blocks, step + ": " + same + " of " + blocks + " blocks shared, though only the names differ");
+            assertSeenAlike(ownA.canvas, a.canvas, step + ", " + SHORT);
+            assertSeenAlike(ownB.canvas, b.canvas, step + ", " + LONG);
+            // The next hover (or the pointer leaving) puts the picture back first.
+            int[] next = at[(i + 1) % at.length];
+            for (Session s : new Session[]{a, b, ownA, ownB}) point(s, next);
+            step = "back, at " + next[0] + "," + next[1];
+            assertSeenAlike(ownA.canvas, a.canvas, step + ", " + SHORT);
+            assertSeenAlike(ownB.canvas, b.canvas, step + ", " + LONG);
+            assertOwnPicture(a, step + ", " + SHORT);
+            assertOwnPicture(b, step + ", " + LONG);
+        }
+        assertTrue(count(a, "parkedPictures") >= at.length, "parked " + count(a, "parkedPictures") + " times");
     }
 }

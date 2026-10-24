@@ -377,13 +377,14 @@ public final class Session {
         render();
     }
 
-    /** Every tick: re-fill placeholders on pages that ask for it, and let go of a tall picture nobody scrolls. */
+    /** Every tick: re-fill placeholders on pages that ask for it, and let go of a tall picture nobody scrolls, and of a picture nobody draws over. */
     void tick(long now) {
         // Something on the page is moving: the next picture of it, so many times a second.
         Page shown = page;
         if (shown != null && shown.moves() && motion.active() && now % plugin.animationTicks() == 0) render();
         ScrollCache c = cache;
         if (c != null && c.idleNanos() > CACHE_IDLE_NANOS) cache = null;
+        if (now % 20 == 0) park();
         if (refreshTicks > 0 && page != null && now >= nextRefresh) {
             nextRefresh = now + refreshTicks;
             Placeholders.Filled fresh = Placeholders.fill(page.document, player());
@@ -472,7 +473,8 @@ public final class Session {
         if (!page.styles.hovers() || page.siblingStates() || !still() || page.moves() && !motion.styled() || !idle()) return;
         HtmlRenderer.Frame f = frame;
         double scale = scale();
-        if (f == null || f.page() != page || f.document() != doc || f.scale() != scale) return;
+        // A picture put away is drawn ahead over once it is back, when it is next drawn over.
+        if (f == null || f.image() == null || f.page() != page || f.document() != doc || f.scale() != scale) return;
         if (Math.abs(f.scrollY() - Math.max(0, Math.min(scrollY, f.maxScroll()))) >= 0.01) return;
         double x = pointerX / scale, y = pointerY / scale;
         if (hoverAhead.done(f, x, y)) return;
@@ -525,8 +527,84 @@ public final class Session {
         return renderers.idle() && HoverAhead.quiet();
     }
 
+    /**
+     * The picture on the screen, put away (ParkedPicture) while nobody draws over it: the frame keeps its hit regions,
+     * styles and document, and no image. Set and cleared by a render thread while this session holds its turn to draw
+     * ([rendering]); {@link #submit} puts it back before anything else.
+     */
+    private volatile ai.resourcepack.ui.html.ParkedPicture parked;
+    /** When this session last finished a turn to draw (nanoTime). */
+    private volatile long drawnAt = System.nanoTime();
+
+    /**
+     * Puts the picture away if nothing has been drawn and the pointer has not moved for {@code park-pictures-after}
+     * (config.yml): its pixels, in blocks shared with every parked picture holding the same ones, instead of a whole
+     * picture per view. Not a picture shared with other sessions (it costs this one nothing), one of a page that moves
+     * or whose pictures can arrive late (what is kept for those is keyed by the picture itself), nor one a tall
+     * picture for scrolling is kept with. Server thread; the parking itself is on a render thread, holding the turn.
+     */
+    private synchronized void park() {
+        long after = plugin.parkAfterNanos();
+        if (after <= 0 || closed || rendering || dirty || parked != null || cache != null || sharedFrame != null) return;
+        Page p = page;
+        HtmlRenderer.Frame f = frame;
+        if (p == null || f == null || p.moves() || p.schemed() || f.image() == null || f.image() == borrowed) return;
+        if (!ai.resourcepack.ui.html.ParkedPicture.parks(f.image())) return;
+        long now = System.nanoTime();
+        if (now - drawnAt < after || now - pointerAt < after) return;
+        rendering = true;
+        try {
+            renderers.execute(Renders.Kind.PARK, () -> {
+                try {
+                    HtmlRenderer.Frame shown = frame;
+                    if (shown == null || shown.image() == null || shown.image() == borrowed || !ai.resourcepack.ui.html.ParkedPicture.parks(shown.image())) return;
+                    ai.resourcepack.ui.html.ParkedPicture pp = ai.resourcepack.ui.html.ParkedPicture.of(shown.image());
+                    HtmlRenderer.Frame bare = new HtmlRenderer.Frame(null, shown.scale(), shown.viewportWidth(), shown.viewportHeight(), shown.pageHeight(),
+                            shown.scrollY(), shown.hits(), shown.styles(), shown.document(), shown.page());
+                    // Nothing keeps the image from now on: drawing ahead forgets the pictures it worked from, and the
+                    // image goes back to the pool.
+                    hoverAhead.letGo();
+                    parked = pp;
+                    frame = bare;
+                    pooled.start(bare);
+                    parkedPictures.incrementAndGet();
+                } catch (RuntimeException | Error e) {
+                    if (plugin.debug()) e.printStackTrace();
+                } finally {
+                    done();
+                }
+            });
+        } catch (RuntimeException e) {
+            // Shutting down: the pool refused the job.
+            rendering = false;
+        }
+    }
+
+    /** Pictures this session put away (tests). */
+    final AtomicLong parkedPictures = new AtomicLong();
+
+    /** Puts the parked picture back as the frame's image, in a pooled picture, exactly as it was. Render thread, holding the turn. */
+    private void unpark() {
+        ai.resourcepack.ui.html.ParkedPicture pp = parked;
+        HtmlRenderer.Frame f = frame;
+        if (pp == null) return;
+        try {
+            if (f != null && f.image() == null) {
+                pooled.start(f);
+                java.awt.image.BufferedImage img = pp.unpark(pooled.take(pp.width(), pp.height()));
+                HtmlRenderer.Frame back = new HtmlRenderer.Frame(img, f.scale(), f.viewportWidth(), f.viewportHeight(), f.pageHeight(), f.scrollY(),
+                        f.hits(), f.styles(), f.document(), f.page());
+                frame = back;
+                pooled.shown(back);
+            }
+        } finally {
+            parked = null;
+        }
+    }
+
     /** This session's turn to draw is over (render thread): another picture if the state moved on meanwhile, else perhaps a drawing ahead. */
     private void done() {
+        drawnAt = System.nanoTime();
         synchronized (this) {
             ahead = null;
             if (closed) cache = null;
@@ -556,6 +634,29 @@ public final class Session {
     }
 
     private void submit() {
+        if (parked != null) {
+            // The picture was put away: back first, on a render thread, then this is asked again, still holding the turn.
+            try {
+                renderers.execute(Renders.Kind.PICTURE, () -> {
+                    try {
+                        unpark();
+                    } catch (RuntimeException | Error e) {
+                        // Not put back: the next picture is drawn whole.
+                        frame = null;
+                        if (plugin.debug()) e.printStackTrace();
+                    }
+                    serverThread.execute(() -> {
+                        synchronized (Session.this) {
+                            if (!closed) submit();
+                            else rendering = false;
+                        }
+                    });
+                });
+            } catch (RuntimeException e) {
+                rendering = false;
+            }
+            return;
+        }
         // The last picture this session shared is settled before anything is drawn or shown over it.
         retireShared();
         Page p = page;

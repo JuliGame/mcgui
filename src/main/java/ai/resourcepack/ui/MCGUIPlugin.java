@@ -308,6 +308,11 @@ public final class MCGUIPlugin extends JavaPlugin {
         return Math.max(0, Math.round(cfg.getDouble("render-timeout", HtmlRenderer.DEFAULT_TIMEOUT_MS / 1000.0) * 1000));
     }
 
+    /** How long a view's picture is kept whole with nothing drawn and the pointer still before it is put away (ns); 0 for never. */
+    long parkAfterNanos() {
+        return Math.max(0, Math.round(cfg.getDouble("park-pictures-after", 5) * 1e9));
+    }
+
     /** The sound of a click that does something: a sound, or none. true (the default) is the game's button click. */
     String clickSound() {
         Object v = cfg.get("click-sound", true);

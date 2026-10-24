@@ -269,6 +269,20 @@ public final class HoverAhead {
         if (of != null && of.image() != null) shared.forget(of.image());
     }
 
+    /**
+     * As {@link #drop}, and lets go of every picture it still refers to (whose targets it worked out, which it last drew
+     * ahead over): its session put its picture away (ParkedPicture), and no picture of it is to be kept alive here.
+     */
+    public void letGo() {
+        drop();
+        synchronized (this) {
+            targetsOf = null;
+            targets = List.of();
+            pickedOf = null;
+            picked = List.of();
+        }
+    }
+
     /** The hover keys this session drew ahead from the picture it last finished drawing ahead over (tests). */
     synchronized List<List<Element>> keys() {
         return new ArrayList<>(mine);

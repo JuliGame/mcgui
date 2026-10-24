@@ -43,6 +43,12 @@ allow-private-hosts: false
 # good. 0 for no limit.
 render-timeout: 2
 
+# Seconds a screen's picture is kept whole once nothing is drawn on it and its pointer is still. Then it is put
+# away in pieces shared with every other screen showing the same pixels there (other players on the same page),
+# so idle views hold well under a megabyte each instead of about 9 MB. The next hover or scroll puts it back first
+# (a few milliseconds). 0 keeps every picture whole.
+park-pictures-after: 5
+
 # The sound of a click on a link or button that does something: true for the game's own button click,
 # false for none, or any sound as "<sound> [volume] [pitch]" (e.g. "block.note_block.hat 0.5 1.6", or one
 # of your own, "uiengine:<file>" for plugins/MCGUI/sounds/<file>.ogg). A page can set its own with <meta name="ui:click-sound">.

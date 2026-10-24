@@ -34,7 +34,9 @@ class Renders implements Executor {
         /** An animation's next moment, which the clock asked for: late, it is only a dropped frame. */
         MOTION,
         /** A hover drawn ahead, in case the pointer reaches it. */
-        AHEAD
+        AHEAD,
+        /** The picture of a view nobody has drawn over for a while, put away (ParkedPicture): only ever memory saved. */
+        PARK
     }
 
     /** Jobs kept per kind for {@link #times}. */

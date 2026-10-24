@@ -192,6 +192,17 @@ final class SessionRig implements AutoCloseable {
         return plugin.firstPictures();
     }
 
+    /** Sets [key] in [plugin]'s config.yml, as the server's file would. */
+    static void config(MCGUIPlugin plugin, String key, Object value) {
+        try {
+            Field f = MCGUIPlugin.class.getDeclaredField("cfg");
+            f.setAccessible(true);
+            ((YamlConfiguration) f.get(plugin)).set(key, value);
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
     /** A new session on a [cols] x [rows] canvas showing [page], made and opened on the server thread, as a wall makes one. */
     Session open(MCGUIPlugin plugin, String page, int cols, int rows, double designHeight) {
         return open(plugin, page, cols, rows, designHeight, UUID.randomUUID());
