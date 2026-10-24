@@ -502,7 +502,7 @@ public final class LoadBench {
             this.mode = mode;
             this.rnd = new Random(1000 + id);
             // -Daheadevery=<n>: only every n-th session draws ahead; the others are the control group.
-            this.ahead = new HoverAhead(id % Integer.getInteger("aheadevery", 1) == 0 ? ahead : 0, 4L * W * H);
+            this.ahead = new HoverAhead(id % Integer.getInteger("aheadevery", 1) == 0 ? ahead : 0, new SharedRepaints(4L * W * H));
             for (int t = 0; t < TILES; t++) lastTiles[t] = canvas.tile(t, Canvas.Encoding.HI);
         }
 

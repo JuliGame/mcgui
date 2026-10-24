@@ -6,11 +6,14 @@ import ai.resourcepack.ui.html.HoverAhead;
 import ai.resourcepack.ui.html.HtmlRenderer;
 import ai.resourcepack.ui.html.Repaint;
 import ai.resourcepack.ui.html.Page;
+import ai.resourcepack.ui.html.Personal;
 import ai.resourcepack.ui.html.PooledPicture;
 import ai.resourcepack.ui.html.RenderAbandoned;
 import ai.resourcepack.ui.html.ScrollCache;
+import ai.resourcepack.ui.html.SharedRepaints;
 import ai.resourcepack.ui.event.PageClickEvent;
 import ai.resourcepack.ui.event.PageOpenEvent;
+import ai.resourcepack.ui.html.css.Selector;
 import ai.resourcepack.ui.html.style.Motion;
 import ai.resourcepack.ui.html.style.Style;
 import net.kyori.adventure.text.Component;
@@ -124,6 +127,11 @@ public final class Session {
     private FirstPictures.Picture offered;
     /** A picture of a page that moves that another session drew for this one's state, handed over when it was published (server thread). */
     private AnimFrames.Shared offeredFrame;
+    /** A hover repaint another session drew for this one's state (or failed to: null), handed over when it landed (server thread). */
+    private RepaintLanded offeredRepaint;
+
+    /** The hover repaint [key] another session was drawing, as it landed: [prepared], or null if it is not partial or was not drawn. */
+    private record RepaintLanded(Object key, Repaint.Prepared prepared) {}
     /**
      * The last picture of a page that moves this session drew and shared (AnimFrames), until it next draws or shows
      * another, when it settles whether anyone took it ({@link #retireShared}). Set by the render thread, read by the
@@ -144,6 +152,8 @@ public final class Session {
      * took from another session (AnimFrames): for tests and benchmarks.
      */
     final AtomicLong drewWhole = new AtomicLong(), drewPart = new AtomicLong(), tookFrames = new AtomicLong();
+    /** First pictures drawn over another player's copy of a personal page, their values repainted (tests). */
+    final AtomicLong fromTheirs = new AtomicLong();
     private HoverAhead.Job ahead;
     /** Looks ahead again, on the server thread: when another session's drawing ahead is over. */
     private final Runnable lookAgain;
@@ -167,7 +177,7 @@ public final class Session {
         this.viewer = viewer;
         this.designHeight = designHeight;
         this.born = Bukkit.getCurrentTick();
-        this.hoverAhead = new HoverAhead(plugin.hoverAhead(), 4L * canvas.width() * canvas.height());
+        this.hoverAhead = new HoverAhead(plugin.hoverAhead(), plugin.repaints());
         this.lookAgain = () -> serverThread.execute(this::lookAhead);
     }
 
@@ -450,6 +460,7 @@ public final class Session {
         List<Element> hoverKey = key(hover, false), pressKey = key(pressed, true);
         if (!hoverKey.equals(drawnHover) || !pressKey.equals(drawnPress)) return;
         if (!HoverAhead.claim(lookAgain)) return;
+        hoverAhead.personal(personalCopy());
         // From here every way out releases the turn: one kept by mistake would stop drawing ahead for every session.
         try {
             boolean resting = System.nanoTime() - pointerAt > 150_000_000L;
@@ -553,12 +564,15 @@ public final class Session {
             } else {
                 first = null;
             }
-            if (take != null) {
+            if (take != null && !take.key.personal()) {
                 adopt(take, name);
                 rendering = false;
                 return;
             }
         }
+        // Another player's first picture of this personal page: their values in it are repainted with this player's
+        // own before anything is shown (Personal), on the render thread.
+        FirstPictures.Picture theirs = take;
         FirstPictures.Key publish = first;
         FirstPictures pictures = plugin.firstPictures();
         // A page that moves is drawn at the moment each picture is of. While something on it moves, a picture differs
@@ -591,6 +605,29 @@ public final class Session {
             }
         }
         AnimFrames.Shared sharing = share;
+        // The hover repaint this picture is, if any session in this state may have drawn it (SharedRepaints): taken if
+        // it is kept; waited for, without holding a render thread, if another session is drawing it; else claimed, so
+        // whoever wants it meanwhile waits for this one. Claimed before drawings ahead give way, so a drawing ahead of
+        // it that this session waits for is finished, not stopped.
+        Object shareKey = shareable(p, held, s, fragment, scale, hoverKey, pressKey);
+        // This player's own copy of a personal page whose repaints are shared with other players' copies, or null.
+        Personal.Copy shareCopy = shareKey instanceof Personal.Key ? personalCopy() : null;
+        RepaintLanded landedRepaint = offeredRepaint;
+        offeredRepaint = null;
+        SharedRepaints.Claim claim = null;
+        if (shareKey != null) {
+            if (landedRepaint != null && landedRepaint.key().equals(shareKey) && landedRepaint.prepared() != null) {
+                claim = SharedRepaints.Claim.kept(landedRepaint.prepared());
+            } else {
+                claim = hoverAhead.claim(shareKey, frame, hoverKey, landedRepaint == null);
+                if (claim.pending() != null) {
+                    Object k = shareKey;
+                    claim.pending().whenComplete((r, e) -> serverThread.execute(() -> repaintLanded(new RepaintLanded(k, r))));
+                    return; // still drawing, as far as render() goes
+                }
+            }
+        }
+        SharedRepaints.Claim claimed = claim;
         // Real work first: drawings ahead, of every session, give way.
         HoverAhead.makeRoom();
         // The picture's urgency, for the queue it waits in: a page not yet shown first, then what a player's own action
@@ -598,7 +635,7 @@ public final class Session {
         Renders.Kind kind = frame == null || frame.page() != p ? Renders.Kind.SHOW
                 : animating && sameView(p, held, s, fragment, scale, hoverKey, pressKey) ? Renders.Kind.MOTION : Renders.Kind.PICTURE;
         renderers.execute(kind, () -> {
-            boolean published = false, drawnAhead = false;
+            boolean published = false, drawnAhead = false, shareSettled = false, tookTheirs = false;
             Motion m = moving;
             if (m != null) {
                 m.moment(moment[0], moment[1]);
@@ -609,6 +646,8 @@ public final class Session {
             try {
                 if (d == null) {
                     d = fill.copy();
+                    // Worked out here, off the server thread, while nothing else reads the copy.
+                    if (personalShared(fill, p)) copyOf(d, fill, p);
                     // The session's from now on, unless another page or fill was shown meanwhile.
                     synchronized (Session.this) {
                         if (doc == null && filled == fill) doc = d;
@@ -664,21 +703,74 @@ public final class Session {
                         changed = new Rectangle2D.Double(g.getX(), g.getY() + strip.scrollY() - at, g.getWidth(), g.getHeight());
                     }
                 }
-                if (c != null) {
+                Repaint.Result over = theirs == null ? null : overTheirs(theirs, p, d, fill, scale, state, timeout);
+                if (over != null) {
+                    // Their picture, the canvas showing it with this player's own values already in: only where those
+                    // are was drawn, and the rest is shown as it is (its tiles shared).
+                    f = over.frame();
+                    changed = over.changed();
+                    partial = true;
+                    tookTheirs = true;
+                } else if (c != null) {
                     f = c.frame(at);
                     partial = still;
                 } else if (still && !redraw) {
                     // Only the hover or press state moved, or what moves on the page: repaint just what it touches, unless
-                    // that was drawn ahead (HoverAhead: the same pixels, worked out over a copy of this picture, with the
-                    // motion it was styled with, taken on here). A picture shared with other sessions (FirstPictures) is
+                    // that was drawn already. On a page that does not move, by any session in this state, ahead or when
+                    // its own hover came (SharedRepaints: the same pixels, worked out over a picture equal to this one);
+                    // on one that moves, ahead by this session (HoverAhead, with the motion it was styled with, taken on
+                    // here), and never while something moves. A picture shared with other sessions (FirstPictures) is
                     // copied first, as the repaint (or the pixels drawn ahead) go into it.
-                    HtmlRenderer.Frame base = before.image() == borrowed ? FirstPictures.own(before, pooled.take(canvas.width(), canvas.height())) : before;
-                    Repaint.Prepared ready = animating ? null : hoverAhead.take(before, drawnHover, drawnPress, hoverKey, pressKey);
+                    Repaint.Prepared ready = null;
+                    boolean whole = false;
+                    if (claimed != null) {
+                        ready = claimed.prepared();
+                        // Known not to be partial: drawn whole below.
+                        whole = ready == null && claimed.kept() && !claimed.own();
+                        if (ready != null && shareCopy != null) {
+                            // Another player's copy drew it (or this one, ahead): this player's only if nothing of their
+                            // own is near what it painted, with this copy's own frame.
+                            Personal.Copy from = Personal.copy(ready.frame().document());
+                            ready = from == null || !Personal.clear(shareCopy, before, ready) ? null : Personal.translate(ready, from, shareCopy, before);
+                        }
+                        // One this copy drew ahead for itself alone, as it paints the player's own values.
+                        if (ready == null && !whole && shareCopy != null) ready = hoverAhead.take(before, drawnHover, drawnPress, hoverKey, pressKey);
+                    } else if (!animating) {
+                        ready = hoverAhead.take(before, drawnHover, drawnPress, hoverKey, pressKey);
+                    }
                     drawnAhead = ready != null;
                     if (drawnAhead && ready.motion() != null) m = took(moving, ready.motion(), moment[0]);
-                    Repaint.Result r = drawnAhead ? ready.apply(base)
-                            : Repaint.partial(p, d, canvas.width(), canvas.height(), scale, before.scrollY(), state, base, moved, margin, timeout);
-                    if (r.frame() != null) {
+                    Repaint.Result r = null;
+                    if (!whole) {
+                        HtmlRenderer.Frame base = before.image() == borrowed ? FirstPictures.own(before, pooled.take(canvas.width(), canvas.height())) : before;
+                        if (drawnAhead) {
+                            r = ready.apply(base);
+                        } else {
+                            long c0 = CPU.getCurrentThreadCpuTime();
+                            Repaint.Prepared mineToShare = null;
+                            if (claimed != null && claimed.mine() && shareCopy != null) {
+                                // Worked out apart and then applied, as a drawing ahead is: what it keeps is then only
+                                // the pixels it changes, which other players' copies are compared round (Personal).
+                                mineToShare = Repaint.prepare(p, d, canvas.width(), canvas.height(), scale, before.scrollY(), state, base, moved,
+                                        ai.resourcepack.ui.html.RenderBudget.of(timeout));
+                                // Not partial: drawn whole below, as partial() would have said.
+                                r = mineToShare == null ? new Repaint.Result(null, null, Repaint.Why.NO_REGION, null) : mineToShare.apply(base);
+                            } else {
+                                r = Repaint.partial(p, d, canvas.width(), canvas.height(), scale, before.scrollY(), state, base, moved, margin, timeout);
+                            }
+                            if (claimed != null && claimed.mine()) {
+                                long cpu = CPU.getCurrentThreadCpuTime() - c0;
+                                SharedRepaints shared = hoverAhead.shared();
+                                if (r.frame() == null) shared.put(shareKey, null, cpu, false);
+                                else if (shareCopy == null) shared.put(shareKey, Repaint.Prepared.of(r), cpu, false);
+                                // It paints this player's own values: every other copy draws its own.
+                                else if (mineToShare == null || !Personal.clear(shareCopy, before, mineToShare)) shared.putOwn(shareKey, false);
+                                else shared.put(shareKey, Personal.share(mineToShare, before), cpu, false);
+                                shareSettled = true;
+                            }
+                        }
+                    }
+                    if (r != null && r.frame() != null) {
                         f = r.frame();
                         changed = r.changed();
                         partial = true;
@@ -722,7 +814,10 @@ public final class Session {
                     int x0 = Math.max(0, (int) Math.floor(changed.getX() * scale)), y0 = Math.max(0, (int) Math.floor(changed.getY() * scale));
                     int x1 = Math.min(canvas.width(), (int) Math.ceil(changed.getMaxX() * scale));
                     int y1 = Math.min(canvas.height(), (int) Math.ceil(changed.getMaxY() * scale));
-                    if (x1 > x0 && y1 > y0) canvas.draw(f.image().getSubimage(x0, y0, x1 - x0, y1 - y0), x0, y0);
+                    // Over another player's picture: shown with this player's values drawn in, as one change, so their
+                    // values are never on this canvas, not even for a moment.
+                    if (tookTheirs) canvas.show(theirs.canvas, x1 > x0 && y1 > y0 ? f.image().getSubimage(x0, y0, x1 - x0, y1 - y0) : null, x0, y0);
+                    else if (x1 > x0 && y1 > y0) canvas.draw(f.image().getSubimage(x0, y0, x1 - x0, y1 - y0), x0, y0);
                 } else {
                     // Moved by whole map rows on the same page: the canvas moves too, so its viewers' frames are pointed
                     // at the maps their clients already have and only the rows that came in are sent.
@@ -776,7 +871,7 @@ public final class Session {
                             drawnAhead ? " (drawn ahead)" : ""));
                 }
                 // A new page under a still pointer: what it is over has changed.
-                if (!partial) serverThread.execute(this::repoint);
+                if (!partial || tookTheirs) serverThread.execute(this::repoint);
             } catch (RuntimeException | Error e) {
                 // Once per page revision: a page too heavy to draw fails on every hover and scroll, for every viewer.
                 int failures = FAILURES.computeIfAbsent(p, k -> new AtomicInteger()).incrementAndGet();
@@ -794,9 +889,82 @@ public final class Session {
                 if (publish != null && !published) pictures.abandon(publish);
                 // Not drawn: whoever waits for it draws their own (nothing if it was published).
                 if (sharing != null) plugin.animFrames().abandon(sharing);
+                // Claimed but not drawn (it failed, or was not the picture drawn after all): whoever waits draws it.
+                if (claimed != null && claimed.mine() && !shareSettled) hoverAhead.shared().abandon(shareKey);
                 done();
             }
         });
+    }
+
+    private static final com.sun.management.ThreadMXBean CPU = (com.sun.management.ThreadMXBean) java.lang.management.ManagementFactory.getThreadMXBean();
+
+    /**
+     * What the picture about to be drawn is kept under as a hover repaint ({@link SharedRepaints}), if it is one: the
+     * picture on the screen is of the same document [d], page [p] and [scale], at the scroll [s] is to be drawn at, and
+     * only the hover or press state moves, to [hoverKey] and [pressKey]. Else null. Of this player's own copy of a
+     * personal page, a key other players' copies find too ({@link Personal#key}). Server thread, before submitting:
+     * the picture and its drawn state are settled while this session is not drawing.
+     */
+    private Object shareable(Page p, Document d, double s, String fragment, double scale, List<Element> hoverKey, List<Element> pressKey) {
+        HtmlRenderer.Frame f = frame;
+        if (d == null || f == null || fragment != null || cache != null || p.moves()) return null;
+        if (f.document() != d || f.page() != p || f.scale() != scale || Math.abs(f.scrollY() - Math.max(0, Math.min(s, f.maxScroll()))) >= 0.01) return null;
+        if (changedState(hoverKey, pressKey).isEmpty()) return null;
+        Personal.Copy c = personalCopy();
+        hoverAhead.personal(c);
+        return HoverAhead.shareKey(c, f, drawnHover, drawnPress, hoverKey, pressKey);
+    }
+
+    /** Whether pictures of [p] filled as [f] are shared with other players' copies though some values are the player's own (Personal). */
+    private boolean personalShared(Placeholders.Filled f, Page p) {
+        return f != null && f.personal() && plugin.sharePersonal() && f.source() == p.document && !p.moves() && !p.schemed();
+    }
+
+    /**
+     * This session's document as a {@link Personal.Copy}, if it is a personal page's copy whose pictures are shared
+     * with other players' copies, as it was filled (nothing clicked changed it). Else null. Server thread.
+     */
+    private Personal.Copy personalCopy() {
+        Document d = doc;
+        Placeholders.Filled f = filled;
+        Page p = page;
+        if (d == null || p == null || !pristine || !personalShared(f, p)) return null;
+        return copyOf(d, f, p);
+    }
+
+    /** [d], a copy of [p] made from [f] and not changed since, as a {@link Personal.Copy}: worked out the first time. */
+    private static Personal.Copy copyOf(Document d, Placeholders.Filled f, Page p) {
+        Personal.Copy c = Personal.copy(d);
+        if (c != null) return c;
+        Placeholders.Parts parts = f.parts(d);
+        return Personal.of(d, p, f.template(), parts.text(), parts.attrs());
+    }
+
+    /**
+     * This player's first picture of [p], drawn over [theirs], another player's first picture of the same personal page
+     * at this size: their picture retargeted to this player's copy [d] (made from [fill]), and only the elements
+     * holding this player's own values repainted ({@link Personal}). Null if that cannot be done (the copies differ, or
+     * the repaint would move something else): then the picture is drawn whole. Render thread.
+     */
+    private Repaint.Result overTheirs(FirstPictures.Picture theirs, Page p, Document d, Placeholders.Filled fill, double scale,
+                                      Selector.State state, long timeout) {
+        Personal.Copy from = Personal.copy(theirs.document());
+        if (from == null || !personalShared(fill, p) || theirs.frame.page() != p) return null;
+        Personal.Copy mine = copyOf(d, fill, p);
+        if (!mine.template.equals(from.template)) return null;
+        HtmlRenderer.Frame base = Personal.retarget(theirs.frame, from, mine);
+        if (base == null || base.scale() != scale || base.scrollY() != 0) return null;
+        base = FirstPictures.own(base, pooled.take(canvas.width(), canvas.height()));
+        if (mine.personal().isEmpty()) {
+            // The player's own values are only where nothing is drawn from them (a command a click runs): the picture is theirs as it is.
+            fromTheirs.incrementAndGet();
+            return new Repaint.Result(base, new Rectangle2D.Double(), Repaint.Why.PARTIAL, new Rectangle2D.Double());
+        }
+        Repaint.Result r = Repaint.retext(p, d, canvas.width(), canvas.height(), scale, 0, state, base, mine.personal(), timeout);
+        // Not partial: drawn whole, into the same pooled picture.
+        if (r.frame() == null) return null;
+        fromTheirs.incrementAndGet();
+        return r;
     }
 
     /** Pages (one revision each: a reload makes a new Page) that failed to draw, and how many times since they last drew. */
@@ -895,6 +1063,20 @@ public final class Session {
         }
     }
 
+    /** The hover repaint this session waited for was drawn by another session, or could not be ([l]). */
+    private void repaintLanded(RepaintLanded l) {
+        synchronized (this) {
+            dirty = false;
+            if (closed) {
+                rendering = false;
+                return;
+            }
+            // Taken if the state is still the one it is of; else what is wanted now is drawn (or claimed) here.
+            offeredRepaint = l;
+            submit();
+        }
+    }
+
     /**
      * Settles the last picture this session shared ({@link #sharedFrame}), before it draws or shows another: nobody takes it
      * from now on, and if anybody did, it is shared for good, so it is copied before it is painted over and never handed
@@ -920,10 +1102,13 @@ public final class Session {
     private FirstPictures.Key firstKey(Page p, Document d, double s, String fragment, double scale) {
         HtmlRenderer.Frame f = frame;
         if (!plugin.firstPictures().enabled() || fragment != null || s != 0 || hover != null || pressed != null) return null;
-        if (!pristine || filled == null || filled.source() != p.document || filled.personal() || d != null && f != null && f.document() == d) return null;
+        if (!pristine || filled == null || filled.source() != p.document || d != null && f != null && f.document() == d) return null;
         // A face that has not arrived yet would be kept as its stand-in. A page that moves is kept with the motion it was
         // drawn with (its transitions' starting points, when its animations that end began), which the taker takes on.
         if (p.schemed()) return null;
+        // A copy filled with the player's own values: kept by its template, and taken only with the taker's own values
+        // drawn in over it (Personal), never shown as it is.
+        if (filled.personal()) return personalShared(filled, p) ? new FirstPictures.Key(pageName, p, canvas.cols(), canvas.rows(), scale, FirstPictures.Key.PERSONAL + filled.template()) : null;
         return new FirstPictures.Key(pageName, p, canvas.cols(), canvas.rows(), scale, filled.key());
     }
 

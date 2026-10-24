@@ -444,7 +444,10 @@ public final class Screens implements Listener {
 
     /** Every session on a page, for a reload. */
     void reloaded(String page) {
-        plugin.firstPictures().invalidate(page, plugin.pages().loaded(page));
+        Page current = plugin.pages().loaded(page);
+        plugin.firstPictures().invalidate(page, current);
+        // Hover repaints of the file's older revisions are no use to anybody now.
+        if (current != null) plugin.repaints().invalidate(p -> p != current && p.file.equals(current.file));
         for (Wall w : walls.values()) for (Session s : w.all()) s.reloaded(page);
         for (Seated s : views.values()) s.session.reloaded(page);
     }

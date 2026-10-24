@@ -33,6 +33,10 @@ import java.util.logging.Logger;
 final class SessionRig implements AutoCloseable {
     static final AtomicInteger TICK = new AtomicInteger(), ONLINE = new AtomicInteger(3);
     static final Palette PALETTE = new Palette(c -> 0xFF000000 | (c * 0x9E3779B1));
+    /** Viewers who are online, by id, with their names: their pages are filled for them ({@link #player}). Everybody else is offline. */
+    static final java.util.Map<UUID, String> PLAYERS = new java.util.concurrent.ConcurrentHashMap<>();
+    /** Every command run as the console, in order. */
+    static final java.util.List<String> COMMANDS = new java.util.concurrent.CopyOnWriteArrayList<>();
 
     static {
         // Set straight into Bukkit: setServer would look for the build information of a real server.
@@ -53,8 +57,10 @@ final class SessionRig implements AutoCloseable {
             case "getCurrentTick" -> TICK.get();
             case "getOnlinePlayers" -> Collections.nCopies(ONLINE.get(), null);
             case "getMaxPlayers" -> 20;
-            // Every viewer is offline: a page is filled for nobody in particular, as for anyone on a public page.
-            case "getPlayer", "getPlayerExact" -> null;
+            // Every viewer is offline, unless the test named them: a page is filled for nobody in particular, as for anyone on a public page.
+            case "getPlayer" -> args[0] instanceof UUID id && PLAYERS.containsKey(id) ? player(id, PLAYERS.get(id)) : null;
+            case "getPlayerExact" -> null;
+            case "dispatchCommand" -> COMMANDS.add((String) args[1]);
             case "getLogger" -> Logger.getLogger("SessionRig");
             case "hashCode" -> System.identityHashCode(self);
             case "equals" -> self == args[0];
@@ -69,6 +75,23 @@ final class SessionRig implements AutoCloseable {
                 if (r.isInterface()) yield stub(r);
                 yield null;
             }
+        });
+    }
+
+    /** An online player as Placeholders and Session read one: a name, an id, and the rest the defaults of somebody who just joined. */
+    static org.bukkit.entity.Player player(UUID id, String name) {
+        return (org.bukkit.entity.Player) Proxy.newProxyInstance(SessionRig.class.getClassLoader(), new Class<?>[]{org.bukkit.entity.Player.class}, (self, m, args) -> switch (m.getName()) {
+            case "getName" -> name;
+            case "getUniqueId" -> id;
+            case "displayName" -> net.kyori.adventure.text.Component.text(name);
+            case "getLocation" -> new org.bukkit.Location(null, 0, 64, 0);
+            case "getHealth" -> 20.0;
+            case "getGameMode" -> org.bukkit.GameMode.SURVIVAL;
+            case "isOnline" -> true;
+            case "hashCode" -> id.hashCode();
+            case "equals" -> self == args[0];
+            case "toString" -> "player " + name;
+            default -> m.invoke(stub(org.bukkit.entity.Player.class), args);
         });
     }
 
@@ -122,6 +145,16 @@ final class SessionRig implements AutoCloseable {
 
     /** A plugin as a session sees it, keeping up to [entries] first pictures (0: none, so every session draws its own). */
     UIEnginePlugin plugin(int entries) {
+        return plugin(entries, -1);
+    }
+
+    /** As {@link #plugin(int)}, drawing [ahead] hover targets ahead (-1: the config's default). */
+    UIEnginePlugin plugin(int entries, int ahead) {
+        return plugin(entries, ahead, true);
+    }
+
+    /** As {@link #plugin(int, int)}, sharing personal pages' pictures between players where their own values are not if [personal]. */
+    UIEnginePlugin plugin(int entries, int ahead, boolean personal) {
         try {
             Field f = sun.misc.Unsafe.class.getDeclaredField("theUnsafe");
             f.setAccessible(true);
@@ -130,11 +163,14 @@ final class SessionRig implements AutoCloseable {
             // No time limit: the machine is shared, and a slow render here is not a page that cannot be drawn.
             cfg.set("render-timeout", 0);
             cfg.set("first-pictures.entries", entries);
+            if (ahead >= 0) cfg.set("hover-ahead", ahead);
+            cfg.set("sharing.personal-pages", personal);
             set(p, UIEnginePlugin.class, "cfg", cfg);
             set(p, UIEnginePlugin.class, "pages", pages);
             set(p, UIEnginePlugin.class, "serverThread", serverThread);
             set(p, UIEnginePlugin.class, "pictures", new FirstPictures(entries, 512L << 20));
             set(p, UIEnginePlugin.class, "frames", new AnimFrames());
+            set(p, UIEnginePlugin.class, "repaints", new ai.resourcepack.ui.html.SharedRepaints(256L << 20));
             set(p, JavaPlugin.class, "logger", Logger.getLogger("SessionRig"));
             return p;
         } catch (ReflectiveOperationException e) {
@@ -154,7 +190,11 @@ final class SessionRig implements AutoCloseable {
 
     /** A new session on a [cols] x [rows] canvas showing [page], made and opened on the server thread, as a wall makes one. */
     Session open(UIEnginePlugin plugin, String page, int cols, int rows, double designHeight) {
-        UUID id = UUID.randomUUID();
+        return open(plugin, page, cols, rows, designHeight, UUID.randomUUID());
+    }
+
+    /** As {@link #open(UIEnginePlugin, String, int, int, double)}, for viewer [id] (online if in {@link #PLAYERS}). */
+    Session open(UIEnginePlugin plugin, String page, int cols, int rows, double designHeight, UUID id) {
         return onServer(() -> {
             long cpu = THREADS.getCurrentThreadCpuTime(), bytes = THREADS.getCurrentThreadAllocatedBytes();
             Session s = new Session(plugin, renderers, new Canvas(PALETTE, cols, rows), id, designHeight);

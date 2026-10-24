@@ -11,8 +11,12 @@ import org.jsoup.nodes.TextNode;
 
 import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.BitSet;
+import java.util.IdentityHashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.function.UnaryOperator;
 import java.util.logging.Logger;
 import java.util.regex.Matcher;
@@ -53,17 +57,55 @@ public final class Placeholders {
      * read) without copying the document. [values] are every value put in, in document order, and [key] all of
      * them in one string: two copies of the same page with the same key are the same document. [personal]: some
      * value was the player's own (their name, where they are, anything PlaceholderAPI filled), so the copy is theirs
-     * alone. {@link #copy()} makes the filled copy, on any thread.
+     * alone; [personalAt] says which, by place in [values], and [template] is [key] with each of those left out (null
+     * if none is): two personal copies with the same template differ only in their own values. {@link #copy()} makes
+     * the filled copy, on any thread.
      */
-    public record Filled(Document source, List<String> values, String key, boolean personal) {
+    public record Filled(Document source, List<String> values, String key, boolean personal, BitSet personalAt, String template) {
         /** A copy of [source] with [values] put in: what the player sees. Any thread; [source] is only read. */
         public Document copy() {
             Document copy = source.clone();
             Iterator<String> next = values.iterator();
-            walk(copy, text -> next.next(), true);
+            walk(copy, (owner, attr, text) -> next.next(), true);
             return copy;
         }
+
+        /**
+         * Where [copy] (made by {@link #copy()}, and not changed since: the same nodes as [source]) holds this fill's personal values: the elements
+         * whose own text holds one, and the elements with an attribute that holds one, with those attributes' names.
+         */
+        public Parts parts(Document copy) {
+            Set<Element> text = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+            Map<Element, List<String>> attrs = new IdentityHashMap<>();
+            // The copy's values are filled in, so where they are is read off [source], node by node alongside it.
+            if (personal) parts(source, copy, new int[]{0}, text, attrs);
+            return new Parts(text, attrs);
+        }
+
+        private void parts(Node src, Node copy, int[] at, Set<Element> text, Map<Element, List<String>> attrs) {
+            if (src instanceof TextNode t) {
+                String v = t.getWholeText();
+                if ((v.indexOf('{') >= 0 || v.indexOf('%') >= 0) && personalAt.get(at[0]++) && copy.parent() instanceof Element p) text.add(p);
+                return;
+            }
+            if (src instanceof Element e) {
+                String tag = e.normalName();
+                if (tag.equals("style") || tag.equals("script")) return;
+                if (e.attributesSize() > 0) {
+                    for (Attribute a : e.attributes()) {
+                        String v = a.getValue();
+                        if ((v.indexOf('{') >= 0 || v.indexOf('%') >= 0) && !a.getKey().equals("style") && personalAt.get(at[0]++)) {
+                            attrs.computeIfAbsent((Element) copy, k -> new ArrayList<>()).add(a.getKey());
+                        }
+                    }
+                }
+            }
+            for (int i = 0, n = src.childNodeSize(); i < n; i++) parts(src.childNode(i), copy.childNode(i), at, text, attrs);
+        }
     }
+
+    /** Where a copy holds its personal values: in the own text of [text], and in the attributes [attrs] names. */
+    public record Parts(Set<Element> text, Map<Element, List<String>> attrs) {}
 
     /** [doc] with its placeholders filled for [player] (null: the server's own values only). */
     public static Filled fill(Document doc, Player player) {
@@ -77,17 +119,29 @@ public final class Placeholders {
      */
     static Filled fill(Document doc, UnaryOperator<String> fill, UnaryOperator<String> anyone) {
         List<String> values = new ArrayList<>();
-        StringBuilder key = new StringBuilder();
-        boolean[] personal = {false};
-        walk(doc, text -> {
+        StringBuilder key = new StringBuilder(), template = new StringBuilder();
+        BitSet personal = new BitSet();
+        walk(doc, (owner, attr, text) -> {
             String out = fill.apply(text);
-            values.add(out);
             // Separated by a character no value has, so "ab" + "c" never reads as "a" + "bc".
             key.append(out).append('\0');
-            if (!personal[0] && anyone != null && !out.equals(anyone.apply(text))) personal[0] = true;
+            if (anyone != null && !out.equals(anyone.apply(text))) {
+                personal.set(values.size());
+                // The template has a mark where a player's own value goes: no value has that character either.
+                template.append('\u0001').append('\0');
+            } else {
+                template.append(out).append('\0');
+            }
+            values.add(out);
             return out;
         }, false);
-        return new Filled(doc, values, key.toString(), personal[0]);
+        boolean any = !personal.isEmpty();
+        return new Filled(doc, values, key.toString(), any, personal, any ? template.toString() : null);
+    }
+
+    /** Told each text (with its element, [attr] null) and attribute value that may hold a placeholder; answers its value. */
+    private interface Visitor {
+        String visit(Element owner, String attr, String text);
     }
 
     /**
@@ -95,11 +149,11 @@ public final class Placeholders {
      * as it answers if [write]. Read only otherwise: not even an empty attribute list is made (jsoup makes one on
      * {@code attributes()}).
      */
-    private static void walk(Node node, UnaryOperator<String> value, boolean write) {
+    private static void walk(Node node, Visitor value, boolean write) {
         if (node instanceof TextNode t) {
             String text = t.getWholeText();
             if (text.indexOf('{') >= 0 || text.indexOf('%') >= 0) {
-                String out = value.apply(text);
+                String out = value.visit(t.parent() instanceof Element p ? p : null, null, text);
                 if (write) t.text(out);
             }
             return;
@@ -113,7 +167,7 @@ public final class Placeholders {
                     String v = a.getValue();
                     if (v.indexOf('{') >= 0 || v.indexOf('%') >= 0) {
                         if (a.getKey().equals("style")) continue;
-                        String out = value.apply(v);
+                        String out = value.visit(e, a.getKey(), v);
                         if (write) a.setValue(out);
                     }
                 }

@@ -16,28 +16,27 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * One session's hover repaints drawn before they are asked for. While the pointer rests (or heads somewhere) and
  * the render threads have nothing else to do, the repaints for the few hover targets nearest the pointer are worked
  * out ({@link Repaint#prepare}) over a copy of the picture on the screen, made for the drawing ahead in a
- * {@link PixelPool} picture of the render thread's and handed back when it ends, and kept; when the pointer then lands
- * on one of them, the session takes it ({@link #take}) instead of painting, and applies it to what it would have
- * painted into ({@link Repaint.Prepared#apply}), which then holds exactly what {@link Repaint#partial} would have
- * drawn. A drawing ahead never paints into a picture a frame shows, a session holds, or FirstPictures shares, not
- * even for a moment. A prepared repaint is of one picture (by identity), one drawn hover and press state, and one
- * wanted one: any other picture finds nothing. All of them go when the picture changes.
+ * {@link PixelPool} picture of the render thread's and handed back when it ends, and kept in the {@link SharedRepaints}
+ * every session takes from: so a hover one session drew ahead (or drew when it came) is drawn for every session in the
+ * same state, and nothing is drawn ahead that is kept there already or being drawn. When the pointer then lands on
+ * one of them, the session takes it instead of painting, and applies it to what it would have painted into
+ * ({@link Repaint.Prepared#apply}), which then holds exactly what {@link Repaint#partial} would have drawn. A drawing
+ * ahead never paints into a picture a frame shows, a session holds, or FirstPictures shares, not even for a moment.
  *
  * <p>Drawing ahead never holds up real work: a session draws ahead only in place of a render of its own (one at a
- * time per session, as ever), only when the render threads are idle, and every drawing ahead stops at its next
- * budget check as soon as any session asks for a real picture ({@link #makeRoom}), unless it is drawing the very
- * state its own session has just asked for.
+ * time per session, as ever), only when the render threads are idle, one session at a time ({@link #AT_ONCE}), within a
+ * CPU budget for all of them ({@link #budget}), and every drawing ahead stops at its next budget check as soon as any
+ * session asks for a real picture ({@link #makeRoom}), unless it is drawing the very state its own session has just
+ * asked for, or one another session waits for.
  */
 public final class HoverAhead {
-    /** Speeds in CSS pixels a second: below SLOW the pointer counts as resting; above FAST only what lies ahead is drawn. */
-    static final double SLOW = 150, FAST = 400;
-
     /** The drawings ahead under way, of every session: stopped when real work comes. */
     private static final Set<Job> RUNNING = ConcurrentHashMap.newKeySet();
     /**
@@ -46,16 +45,60 @@ public final class HoverAhead {
      * once doubled the garbage and the GC time for the same hits).
      */
     static final int AT_ONCE = 1;
-    private static final java.util.concurrent.atomic.AtomicInteger STARTED = new java.util.concurrent.atomic.AtomicInteger();
+    private static final AtomicInteger STARTED = new AtomicInteger();
 
-    /** Sessions that wanted a turn while another had it: one is offered the next turn (each runs its own check again). */
+    /** Sessions that wanted a turn while another had it, or the budget was spent: one is offered the next turn. */
     private static final Set<Runnable> WAITING = ConcurrentHashMap.newKeySet();
 
     /**
-     * A turn to draw ahead, if no other session has it; {@link #release} it when done (or if it never ran). Without one,
-     * [retry] (the same object each time for one session) is run when a turn comes free.
+     * The CPU all drawing ahead may use, every session's together: [share] of one core on average, in bursts of up to
+     * {@link #BURST_NS} (four targets of the heaviest shipped page). Drawing ahead is a guess, and the cores it would
+     * burn are the ones chunk loading and other plugins use while the server thread waits for nothing.
+     */
+    private static double share = 1;
+    static final long BURST_NS = 500_000_000L;
+    private static double credit = BURST_NS;
+    private static long creditAt = System.nanoTime();
+
+    /**
+     * Sets the CPU budget for drawing ahead: [cores] of one core on average (0: none; at most 1, as {@link #AT_ONCE} is),
+     * starting with a full burst.
+     */
+    public static synchronized void budget(double cores) {
+        share = Math.max(0, Math.min(1, cores));
+        credit = BURST_NS;
+        creditAt = System.nanoTime();
+    }
+
+    /** Whether the budget has CPU left to draw ahead with. */
+    static synchronized boolean affordable() {
+        long now = System.nanoTime();
+        credit = Math.min(BURST_NS, credit + (now - creditAt) * share);
+        creditAt = now;
+        return share > 0 && credit > 0;
+    }
+
+    private static synchronized void spend(long ns) {
+        credit -= ns;
+        spent += ns;
+    }
+
+    /** CPU (ns) every drawing ahead has used since the plugin started. */
+    private static long spent;
+
+    public static synchronized long spentNs() {
+        return spent;
+    }
+
+    /**
+     * A turn to draw ahead, if no other session has it and the budget allows; {@link #release} it when done (or if it
+     * never ran). Without one, [retry] (the same object each time for one session) is run when a turn comes free.
      */
     public static boolean claim(Runnable retry) {
+        if (!affordable()) {
+            WAITING.add(retry);
+            return false;
+        }
         for (int n; (n = STARTED.get()) < AT_ONCE; ) if (STARTED.compareAndSet(n, n + 1)) return true;
         WAITING.add(retry);
         return false;
@@ -63,6 +106,15 @@ public final class HoverAhead {
 
     public static void release() {
         STARTED.decrementAndGet();
+        offer();
+    }
+
+    /** Every tick: a session waiting for the budget to fill again is offered a turn once it has. */
+    public static void wake() {
+        if (!WAITING.isEmpty() && STARTED.get() < AT_ONCE && affordable()) offer();
+    }
+
+    private static void offer() {
         for (Runnable r : WAITING) {
             if (WAITING.remove(r)) {
                 r.run();
@@ -73,18 +125,20 @@ public final class HoverAhead {
 
     /** Hover targets drawn ahead at most; 0 for none. */
     public final int most;
-    /** Bytes of prepared pixels kept at most. */
-    private final long maxBytes;
+    /** Where repaints are kept, for every session (and taken from). */
+    private final SharedRepaints shared;
+    /** Told on the render thread after each repaint drawn ahead is kept. */
+    private volatile Runnable onReady = () -> {};
+    /** See {@link #personal}. */
+    private volatile Personal.Copy copy;
 
-    // Guarded by this. Everything here is of the picture [of].
-    private HtmlRenderer.Frame of;
-    private final List<Entry> entries = new ArrayList<>();
-    private long bytes;
-    /** Where the last drawing ahead that finished was done from: nothing more to draw from there. */
+    // Guarded by this: where the last drawing ahead that finished was done from; nothing more to draw from there.
     private HtmlRenderer.Frame doneOf;
     private double doneX, doneY;
+    /** The hover keys this session drew ahead over [doneOf]'s state, in the order drawn (tests). */
+    private final List<List<Element>> mine = new ArrayList<>();
 
-    // Render thread only (a session draws one thing at a time): the hover targets of the picture [targetsOf].
+    // Guarded by this: the hover targets of the picture [targetsOf].
     private HtmlRenderer.Frame targetsOf;
     private List<Target> targets = List.of();
 
@@ -101,25 +155,37 @@ public final class HoverAhead {
     private List<List<Element>> picked = List.of();
     private static final com.sun.management.ThreadMXBean THREADS = (com.sun.management.ThreadMXBean) java.lang.management.ManagementFactory.getThreadMXBean();
 
-    /** A repaint worked out ahead: from the [drawnHover]/[drawnPress] state of the picture to [hoverKey]/[pressKey]. Null [prepared]: not partial. */
-    private record Entry(List<Element> drawnHover, List<Element> drawnPress, List<Element> hoverKey, List<Element> pressKey, Repaint.Prepared prepared,
-                         long cpuNs) {
-        boolean is(List<Element> dh, List<Element> dp, List<Element> hk, List<Element> pk) {
-            return drawnHover.equals(dh) && drawnPress.equals(dp) && hoverKey.equals(hk) && pressKey.equals(pk);
-        }
-    }
-
     /** Elements of one hover key: one of them (to hover) and where they are, in CSS pixels of the view. */
     private record Target(List<Element> key, Element element, List<Rectangle2D> boxes) {}
 
-    /** [most] hover targets at a time, keeping at most [maxBytes] of their pixels. */
-    public HoverAhead(int most, long maxBytes) {
-        this.most = Math.max(0, most);
-        this.maxBytes = maxBytes;
+    /** A repaint drawn ahead (or drawn by any session) from a picture's state to [hoverKey], whose [boxes] (CSS pixels of the view) lead there. */
+    public record Ready(List<Element> hoverKey, List<Rectangle2D> boxes, Repaint.Prepared prepared) {}
+
+    /** [most] hover targets at a time, kept in [shared]. */
+    public HoverAhead(int most, SharedRepaints shared) {
+        this(most, shared, false);
     }
+
+    /** As above; [everyTarget]: those the pointer cannot reach next too, after those it can, nearest first (tests). */
+    HoverAhead(int most, SharedRepaints shared, boolean everyTarget) {
+        this.most = Math.max(0, most);
+        this.shared = shared;
+        this.everyTarget = everyTarget;
+    }
+
+    private final boolean everyTarget;
 
     public boolean on() {
         return most > 0;
+    }
+
+    public SharedRepaints shared() {
+        return shared;
+    }
+
+    /** [r] runs on the render thread each time a repaint drawn ahead by this session is kept. */
+    public void onReady(Runnable r) {
+        onReady = r == null ? () -> {} : r;
     }
 
     /** Whether nothing else is drawing a whole picture: a drawing ahead would take a core from its bands. */
@@ -127,9 +193,30 @@ public final class HoverAhead {
         return HtmlRenderer.painting() == 0;
     }
 
-    /** Real work is coming: every drawing ahead stops, but for one drawing what its own session has just asked for. */
+    /**
+     * Real work is coming: every drawing ahead stops, but for one drawing what its own session has just asked for, or
+     * what another session waits for ({@link SharedRepaints#claim}: claim before calling this).
+     */
     public static void makeRoom() {
-        for (Job j : RUNNING) j.budget.cancel();
+        for (Job j : RUNNING) {
+            Object k = j.drawingKey;
+            if (k != null && j.ahead.shared.awaited(k)) j.last = true;
+            else j.budget.cancel();
+        }
+    }
+
+    /**
+     * What a repaint from [before] (a picture of its page and document, drawn with [drawnHover] and [drawnPress]) to
+     * [hoverKey] and [pressKey] is kept under. A page whose pictures can change without its state changing (images
+     * that arrive late), or one that moves (a repaint carries the motion of the session it was drawn for), is keyed by
+     * the picture itself too, so only this picture finds it: such repaints are never shared.
+     */
+    public static SharedRepaints.Key key(HtmlRenderer.Frame before, List<Element> drawnHover, List<Element> drawnPress,
+                                         List<Element> hoverKey, List<Element> pressKey) {
+        BufferedImage img = before.image();
+        Page page = before.page();
+        return new SharedRepaints.Key(before.document(), page, img.getWidth(), img.getHeight(), before.scale(), before.scrollY(),
+                page.schemed() || page.moves() ? img : null, drawnHover, drawnPress, hoverKey, pressKey);
     }
 
     /** Whether a drawing ahead from (x, y) over [f] would draw nothing new: one finished there, and nothing has changed. */
@@ -138,57 +225,77 @@ public final class HoverAhead {
     }
 
     /**
-     * The repaint of [before] from its drawn state ([drawnHover], [drawnPress]) to [hoverKey] and [pressKey], if it was
-     * drawn ahead, ready to {@link Repaint.Prepared#apply}; else null. Everything else kept goes: the picture is about
-     * to change either way.
+     * The repaint from [before]'s drawn state ([drawnHover], [drawnPress]) to [hoverKey] and [pressKey], if it is kept
+     * (drawn ahead, or drawn by any session), ready to {@link Repaint.Prepared#apply}; else null.
      */
-    public synchronized Repaint.Prepared take(HtmlRenderer.Frame before, List<Element> drawnHover, List<Element> drawnPress,
-                                              List<Element> hoverKey, List<Element> pressKey) {
-        Entry found = null;
-        if (before == of) for (Entry e : entries) {
-            if (e.prepared != null && e.is(drawnHover, drawnPress, hoverKey, pressKey)) found = e;
+    public Repaint.Prepared take(HtmlRenderer.Frame before, List<Element> drawnHover, List<Element> drawnPress,
+                                 List<Element> hoverKey, List<Element> pressKey) {
+        Repaint.Prepared p = shared.take(key(before, drawnHover, drawnPress, hoverKey, pressKey));
+        counted(before, hoverKey, p);
+        return p;
+    }
+
+    /**
+     * Claims the repaint [key] (see {@link SharedRepaints#claim}), for a session about to draw it, and counts what it
+     * found as {@link #take} does if [count] (not when asking again after waiting for it).
+     */
+    public SharedRepaints.Claim claim(Object key, HtmlRenderer.Frame before, List<Element> hoverKey, boolean count) {
+        SharedRepaints.Claim c = shared.claim(key, count);
+        if (count) counted(before, hoverKey, c.kept() ? c.prepared() : null);
+        return c;
+    }
+
+    private void counted(HtmlRenderer.Frame before, List<Element> hoverKey, Repaint.Prepared p) {
+        if (p != null) {
+            taken.incrementAndGet();
+            return;
         }
-        drop();
-        if (found == null) {
+        synchronized (this) {
             (pickedOf != before ? missNoJob : picked.contains(hoverKey) ? missUnfinished : missNotPicked).incrementAndGet();
-            return null;
         }
-        taken.incrementAndGet();
-        usedNs.addAndGet(found.cpuNs);
-        return found.prepared;
     }
 
-    /** Lets go of everything kept: the picture changed, or the session closed. */
-    public synchronized void drop() {
-        of = null;
-        entries.clear();
-        bytes = 0;
-        doneOf = null;
+    /**
+     * Forgets where it last drew ahead from: the picture changed, or the session closed. What it drew stays shared,
+     * but for repaints only that picture could take (keyed by it, see {@link #key}), which go with it.
+     */
+    public void drop() {
+        HtmlRenderer.Frame of;
+        synchronized (this) {
+            of = doneOf != null ? doneOf : pickedOf;
+            doneOf = null;
+            mine.clear();
+        }
+        if (of != null && of.image() != null) shared.forget(of.image());
     }
 
-    /** The hover keys drawn ahead and kept (tests). */
+    /** The hover keys this session drew ahead from the picture it last finished drawing ahead over (tests). */
     synchronized List<List<Element>> keys() {
-        List<List<Element>> out = new ArrayList<>();
-        for (Entry e : entries) if (e.prepared != null) out.add(e.hoverKey);
-        return out;
+        return new ArrayList<>(mine);
     }
 
-    private synchronized boolean has(HtmlRenderer.Frame before, List<Element> dh, List<Element> dp, List<Element> hk, List<Element> pk) {
-        if (before != of) return false;
-        for (Entry e : entries) if (e.is(dh, dp, hk, pk)) return true;
-        return false;
-    }
-
-    /** Keeps [e], of [before], if there is room. */
-    private synchronized void keep(HtmlRenderer.Frame before, Entry e) {
-        if (before != of) {
-            drop();
-            of = before;
+    /**
+     * Every repaint kept from [before]'s state ([drawnHover], [drawnPress], [pressKey]) to one of its hover targets,
+     * with where that target is: what is ready for whatever the pointer reaches next. Takes nothing.
+     */
+    public List<Ready> ready(HtmlRenderer.Frame before, List<Element> drawnHover, List<Element> drawnPress, List<Element> pressKey) {
+        List<Ready> out = new ArrayList<>();
+        Personal.Copy c = copyOf(before.document());
+        for (Target t : targets(before)) {
+            SharedRepaints.Entry e = shared.peek(key(before, drawnHover, drawnPress, t.key, pressKey));
+            if (e == null && c != null) {
+                // Another copy's, whose pixels are this one's as long as the pictures are alike round them and nothing
+                // of this player's own is near them; with this copy's own frame.
+                e = shared.peek(shareKey(c, before, drawnHover, drawnPress, t.key, pressKey));
+                Repaint.Prepared p = e == null ? null : e.prepared();
+                Personal.Copy from = p == null ? null : Personal.copy(p.frame().document());
+                p = from == null || !Personal.clear(c, before, p) ? null : Personal.translate(p, from, c, before);
+                if (p != null) out.add(new Ready(t.key, t.boxes, p));
+                continue;
+            }
+            if (e != null && e.prepared() != null) out.add(new Ready(t.key, t.boxes, e.prepared()));
         }
-        long b = e.prepared == null ? 0 : e.prepared.bytes();
-        if (bytes + b > maxBytes) return;
-        bytes += b;
-        entries.add(e);
+        return out;
     }
 
     /**
@@ -214,11 +321,42 @@ public final class HoverAhead {
     public Job job(Page page, Document doc, int width, int height, double scale, HtmlRenderer.Frame before,
                    List<Element> drawnHover, List<Element> drawnPress, List<Element> hoverKey, Element pressed, List<Element> pressKey,
                    double x, double y, double vx, double vy, long timeoutMs) {
-        return new Job(page, doc, width, height, scale, before, drawnHover, drawnPress, hoverKey, pressed, pressKey, x, y, vx, vy,
-                RenderBudget.cancellable(timeoutMs));
+        return job(page, doc, width, height, scale, before, drawnHover, drawnPress, hoverKey, pressed, pressKey, x, y, vx, vy, timeoutMs, copy);
+    }
+
+    private Job job(Page page, Document doc, int width, int height, double scale, HtmlRenderer.Frame before,
+                    List<Element> drawnHover, List<Element> drawnPress, List<Element> hoverKey, Element pressed, List<Element> pressKey,
+                    double x, double y, double vx, double vy, long timeoutMs, Personal.Copy copy) {
+        return new Job(this, page, doc, width, height, scale, before, drawnHover, drawnPress, hoverKey, pressed, pressKey, x, y, vx, vy,
+                RenderBudget.cancellable(timeoutMs), copy != null && copy.doc == doc ? copy : null);
+    }
+
+    /**
+     * The session's document is [c], a player's own copy of a personal page, whose repaints other players' copies may
+     * take and which may take theirs (see {@link Personal}); null when it is not one (or sharing them is off).
+     */
+    public void personal(Personal.Copy c) {
+        copy = c;
+    }
+
+    /** The copy of {@link #personal}, if it is [doc]. */
+    private Personal.Copy copyOf(Document doc) {
+        Personal.Copy c = copy;
+        return c != null && c.doc == doc ? c : null;
+    }
+
+    /**
+     * What the repaint from [before]'s drawn state to [hoverKey] and [pressKey] is kept under for every session that
+     * may take it: of [copy] (a personal page's copy: {@link Personal#key}), or else of [before]'s document ({@link #key}).
+     */
+    public static Object shareKey(Personal.Copy copy, HtmlRenderer.Frame before, List<Element> drawnHover, List<Element> drawnPress,
+                                  List<Element> hoverKey, List<Element> pressKey) {
+        Personal.Key k = copy == null ? null : Personal.key(copy, before, drawnHover, drawnPress, hoverKey, pressKey);
+        return k != null ? k : key(before, drawnHover, drawnPress, hoverKey, pressKey);
     }
 
     public static final class Job {
+        final HoverAhead ahead;
         final Page page;
         final Document doc;
         final int width, height;
@@ -227,14 +365,18 @@ public final class HoverAhead {
         final List<Element> drawnHover, drawnPress, hoverKey, pressKey;
         final Element pressed;
         final RenderBudget budget;
-        /** The hover key being drawn now, or null. */
+        /** The player's own copy of a personal page it draws over, or null. */
+        final Personal.Copy copy;
+        /** The hover key being drawn now and the key it is kept under, or null. */
         private volatile List<Element> drawing;
-        /** Stop after the one being drawn: its session wants it. */
+        private volatile Object drawingKey;
+        /** Stop after the one being drawn: a session wants it. */
         private volatile boolean last;
 
-        private Job(Page page, Document doc, int width, int height, double scale, HtmlRenderer.Frame before,
+        private Job(HoverAhead ahead, Page page, Document doc, int width, int height, double scale, HtmlRenderer.Frame before,
                     List<Element> drawnHover, List<Element> drawnPress, List<Element> hoverKey, Element pressed, List<Element> pressKey,
-                    double x, double y, double vx, double vy, RenderBudget budget) {
+                    double x, double y, double vx, double vy, RenderBudget budget, Personal.Copy copy) {
+            this.ahead = ahead;
             this.page = page;
             this.doc = doc;
             this.width = width;
@@ -251,6 +393,7 @@ public final class HoverAhead {
             this.vx = vx;
             this.vy = vy;
             this.budget = budget;
+            this.copy = copy;
         }
 
         /** Whether it draws over the picture [p]'s document [d] would show at [scroll]. */
@@ -273,12 +416,13 @@ public final class HoverAhead {
         }
     }
 
-    /** Draws ahead for [job], nearest target first, until done, stopped, or out of room. On a render thread. */
+    /** Draws ahead for [job], nearest target first, until done, stopped, out of budget, or every one is known. On a render thread. */
     public void run(Job job) {
         RUNNING.add(job);
         boolean finished = false;
         long cpu0 = THREADS.getCurrentThreadCpuTime(), alloc0 = THREADS.getCurrentThreadAllocatedBytes();
         HtmlRenderer.Frame base = null;
+        List<List<Element>> drew = new ArrayList<>();
         try {
             List<Target> ranked = rank(job, targets(job.before));
             synchronized (this) {
@@ -286,26 +430,63 @@ public final class HoverAhead {
                 pickedOf = job.before;
                 for (Target t : ranked) if (!picked.contains(t.key)) picked.add(t.key);
             }
+            // Up to [most] that a hover would show something by (a repaint that changes nothing, a card that is only
+            // raised, takes no turn), trying at most twice as many.
+            int useful = 0, tried = 0;
             for (Target t : ranked) {
-                if (job.budget.cancelled() || job.last || !quiet()) return;
-                if (has(job.before, job.drawnHover, job.drawnPress, t.key, job.pressKey)) continue;
+                if (useful >= most || tried >= 2 * most) break;
+                if (job.budget.cancelled() || job.last || !quiet() || !affordable()) return;
                 Set<Element> moved = changed(job.drawnHover, job.drawnPress, t.key, job.pressKey);
                 if (moved.isEmpty()) continue;
-                if (base == null) base = scratch(job.before);
-                job.drawing = t.key;
+                Object key = shareKey(job.copy, job.before, job.drawnHover, job.drawnPress, t.key, job.pressKey);
+                // For this copy alone, where one that paints the player's own values is kept.
+                SharedRepaints.Key own = key instanceof Personal.Key ? key(job.before, job.drawnHover, job.drawnPress, t.key, job.pressKey) : null;
+                // Kept already, or another session is drawing it: one drawing serves both. Unless what is kept is one
+                // that paints a player's own values: then each copy draws its own, kept for itself alone.
+                if (own != null && shared.known(own)) {
+                    useful++;
+                    continue;
+                }
+                SharedRepaints.Entry kept = shared.peek(key);
+                boolean forOwn = kept != null && kept.own() && own != null;
+                if (kept != null && !forOwn || kept == null && !shared.claim(key, false).mine()) {
+                    // Ready, or being drawn by another session.
+                    if (kept == null || kept.prepared() != null && !empty(kept.prepared())) useful++;
+                    continue;
+                }
+                tried++;
+                boolean settled = forOwn;
                 long c0 = THREADS.getCurrentThreadCpuTime();
-                Repaint.Prepared p;
                 try {
-                    p = Repaint.prepare(job.page, job.doc, job.width, job.height, job.scale, job.before.scrollY(),
+                    if (base == null) base = scratch(job.before);
+                    job.drawingKey = key;
+                    job.drawing = t.key;
+                    Repaint.Prepared p = Repaint.prepare(job.page, job.doc, job.width, job.height, job.scale, job.before.scrollY(),
                             HtmlRenderer.state(t.element, job.pressed), base, moved, job.budget);
+                    long cpu = THREADS.getCurrentThreadCpuTime() - c0;
+                    prepared.incrementAndGet();
+                    if (forOwn) {
+                        shared.put(own, p, cpu, true);
+                    } else if (own != null && p != null && !Personal.clear(job.copy, job.before, p)) {
+                        // It paints the player's own values: every other copy draws its own, and this one keeps it.
+                        shared.putOwn(key, true);
+                        shared.put(own, p, cpu, true);
+                    } else {
+                        shared.put(key, own != null && p != null ? Personal.share(p, job.before) : p, cpu, true);
+                    }
+                    settled = true;
+                    drew.add(t.key);
+                    if (p != null && !empty(p)) useful++;
+                    if (p != null) onReady.run();
                 } catch (RenderAbandoned e) {
                     abandoned.incrementAndGet();
                     return;
                 } finally {
                     job.drawing = null;
+                    job.drawingKey = null;
+                    if (!settled) shared.abandon(key);
+                    spend(THREADS.getCurrentThreadCpuTime() - c0);
                 }
-                prepared.incrementAndGet();
-                keep(job.before, new Entry(job.drawnHover, job.drawnPress, t.key, job.pressKey, p, THREADS.getCurrentThreadCpuTime() - c0));
             }
             finished = true;
         } finally {
@@ -314,16 +495,21 @@ public final class HoverAhead {
             if (base != null && base.image().getType() == BufferedImage.TYPE_INT_ARGB_PRE) PixelPool.givePicture(base.image());
             cpuNs.addAndGet(THREADS.getCurrentThreadCpuTime() - cpu0);
             allocBytes.addAndGet(THREADS.getCurrentThreadAllocatedBytes() - alloc0);
-            if (finished) {
-                synchronized (this) {
-                    if (of == job.before || of == null) {
-                        doneOf = job.before;
-                        doneX = job.x;
-                        doneY = job.y;
-                    }
+            synchronized (this) {
+                if (doneOf != job.before) mine.clear();
+                mine.addAll(drew);
+                if (finished) {
+                    doneOf = job.before;
+                    doneX = job.x;
+                    doneY = job.y;
                 }
             }
         }
+    }
+
+    /** Whether [p] changes no pixel (a hover that only raises a box over what it does not overlap). */
+    private static boolean empty(Repaint.Prepared p) {
+        return p.pixels().length == 0;
     }
 
     /** The elements whose state differs between the drawn state and the wanted one (as Session works it out). */
@@ -337,7 +523,7 @@ public final class HoverAhead {
     }
 
     /** [f]'s hover targets: every hover key its pointer regions have, with where they are in the view. */
-    private List<Target> targets(HtmlRenderer.Frame f) {
+    private synchronized List<Target> targets(HtmlRenderer.Frame f) {
         if (targetsOf == f) return targets;
         Map<Element, List<Element>> keyOf = new IdentityHashMap<>();
         Map<List<Element>, Target> byKey = new LinkedHashMap<>();
@@ -363,71 +549,68 @@ public final class HoverAhead {
     }
 
     /**
-     * CSS pixels between two boxes across which the pointer can go from one straight into the other. The client reports
-     * the pointer 20 times a second, so a moving pointer jumps a gap as wide as it goes in a report or so; one at rest
-     * jumps a gutter on its first move often enough (LoadBench, hand mode) that half a map row is allowed for.
+     * CSS pixels the pointer goes from rest in its first report, at most, as far as drawing ahead counts: a glide from a
+     * rest by a card reaches some 50 px into it (the trials in rigs/hl/targets.json, 3 reports over 150 px).
      */
-    static final double GAP = 32;
-    /** Seconds between two reports of the pointer, with some to spare. */
-    static final double REPORT = 0.075;
+    static final double REACH = 56;
+    /** Seconds between two reports of the pointer. */
+    static final double REPORT = 0.05;
+    /** CSS pixels between the points where the next report is looked for. */
+    static final double STEP = 6;
 
     /**
-     * The targets worth drawing for [job], best first, at most {@link #most}. The next state is whatever the pointer
-     * is reported over next. On a target that is what lies under it (the page round a card), or a target close enough
-     * to jump to between two reports ({@link #GAP}); a target further off is reached only through what lies under, which
-     * is a new picture, and drawn ahead from that one. Off any target (or on one that has no box of its own) it meets the nearest. Those it is heading for count as
-     * nearer and those behind it as further; when it moves fast, only those ahead (and what lies under) are drawn.
+     * The targets worth drawing for [job], likeliest first: by the chance that the next report of the pointer lands on
+     * each. Where it lands is taken as anywhere in a disc round the pointer, {@link #REACH} wide at rest, and round where
+     * it is heading (half a report on) and as wide as three quarters of a report's travel when it moves. The chance of a
+     * target is the share of that disc it is what the pointer is over, topmost first as a hover finds it (a card's row
+     * over the card: the row's state, not the card's). The state the pointer is in now is left out.
      */
     private List<Target> rank(Job job, List<Target> all) {
+        HtmlRenderer.Frame f = job.before;
         double speed = Math.hypot(job.vx, job.vy);
-        // The boxes of the hovered target the pointer is in, and how far it is from leaving them.
-        List<Rectangle2D> on = new ArrayList<>();
-        double exit = 0;
-        for (Target t : all) {
-            if (!t.key.equals(job.hoverKey)) continue;
-            for (Rectangle2D b : t.boxes) {
-                if (!b.contains(job.x, job.y)) continue;
-                on.add(b);
-                exit = Math.max(exit, Math.min(Math.min(job.x - b.getMinX(), b.getMaxX() - job.x), Math.min(job.y - b.getMinY(), b.getMaxY() - job.y)));
+        double reach = Math.max(REACH, 0.75 * speed * REPORT);
+        double cx = job.x + 0.5 * job.vx * REPORT, cy = job.y + 0.5 * job.vy * REPORT;
+        Map<List<Element>, Target> byKey = new java.util.HashMap<>();
+        for (Target t : all) byKey.put(t.key, t);
+        Map<Element, List<Element>> keyOf = new IdentityHashMap<>();
+        Map<List<Element>, double[]> score = new LinkedHashMap<>();
+        // Rings of points, as many to a ring as its length holds: each point stands for the same area.
+        for (double r = STEP / 2; r <= reach; r += STEP) {
+            int n = Math.max(6, (int) Math.round(2 * Math.PI * r / STEP));
+            for (int a = 0; a < n; a++) {
+                double ang = 2 * Math.PI * (a + 0.5 * ((int) (r / STEP) & 1)) / n;
+                double x = cx + r * Math.cos(ang), y = cy + r * Math.sin(ang);
+                if (x < 0 || y < 0 || x >= f.viewportWidth() || y >= f.viewportHeight()) continue;
+                Element e = f.elementAt(x, y);
+                List<Element> key = e == null ? List.of() : keyOf.computeIfAbsent(e, k -> f.page().styles.stateKey(k, false));
+                if (key.equals(job.hoverKey) || !byKey.containsKey(key)) continue;
+                double d = Math.hypot(x - job.x, y - job.y);
+                double[] s = score.computeIfAbsent(key, k -> new double[]{0, Double.MAX_VALUE});
+                s[0]++;
+                s[1] = Math.min(s[1], d);
             }
         }
-        List<double[]> scored = new ArrayList<>();
-        for (int i = 0; i < all.size(); i++) {
-            Target t = all.get(i);
-            if (t.key.equals(job.hoverKey)) continue;
-            double best = Double.MAX_VALUE, cos = 0;
-            // Nothing hovered is always under: leaving the target reaches it, wherever the page has no box of its own.
-            boolean under = t.key.isEmpty(), touching = on.isEmpty();
-            if (under) best = exit;
-            for (Rectangle2D b : t.boxes) {
-                double nx = Math.max(b.getMinX(), Math.min(job.x, b.getMaxX())), ny = Math.max(b.getMinY(), Math.min(job.y, b.getMaxY()));
-                double dx = nx - job.x, dy = ny - job.y, d = Math.hypot(dx, dy);
-                double c = d == 0 || speed == 0 ? 0 : (dx * job.vx + dy * job.vy) / (d * speed);
-                if (d == 0) {
-                    under = true;
-                    d = exit;
-                }
-                if (!touching) for (Rectangle2D o : on) touching |= gap(b, o) <= Math.max(GAP, speed * REPORT);
-                if (d < best) {
-                    best = d;
-                    cos = c;
-                }
-            }
-            if (!under && !touching) continue;
-            if (!under && speed > FAST && cos < 0.5) continue;
-            double score = speed > SLOW ? best * (1 - 0.6 * cos) : best;
-            scored.add(new double[]{score, i});
+        List<Map.Entry<List<Element>, double[]>> ranked = new ArrayList<>(score.entrySet());
+        // Likeliest first; of two as likely, the nearer.
+        ranked.sort((p, q) -> p.getValue()[0] != q.getValue()[0] ? Double.compare(q.getValue()[0], p.getValue()[0]) : Double.compare(p.getValue()[1], q.getValue()[1]));
+        List<Target> out = new ArrayList<>(ranked.size());
+        for (Map.Entry<List<Element>, double[]> e : ranked) out.add(byKey.get(e.getKey()));
+        if (everyTarget) {
+            List<Target> rest = new ArrayList<>();
+            for (Target t : all) if (!t.key.equals(job.hoverKey) && !score.containsKey(t.key)) rest.add(t);
+            rest.sort(java.util.Comparator.comparingDouble(t -> distance(t, job.x, job.y)));
+            out.addAll(rest);
         }
-        scored.sort((a, b) -> Double.compare(a[0], b[0]));
-        List<Target> out = new ArrayList<>(Math.min(most, scored.size()));
-        for (int i = 0; i < scored.size() && out.size() < most; i++) out.add(all.get((int) scored.get(i)[1]));
         return out;
     }
 
-    /** The distance between two boxes; 0 if they meet. */
-    private static double gap(Rectangle2D a, Rectangle2D b) {
-        double dx = Math.max(0, Math.max(a.getMinX() - b.getMaxX(), b.getMinX() - a.getMaxX()));
-        double dy = Math.max(0, Math.max(a.getMinY() - b.getMaxY(), b.getMinY() - a.getMaxY()));
-        return Math.hypot(dx, dy);
+    /** How far (CSS px) the nearest of [t]'s boxes is from (x, y); 0 inside one, and for what lies under everything. */
+    private static double distance(Target t, double x, double y) {
+        double best = t.boxes.isEmpty() ? 0 : Double.MAX_VALUE;
+        for (Rectangle2D b : t.boxes) {
+            double nx = Math.max(b.getMinX(), Math.min(x, b.getMaxX())), ny = Math.max(b.getMinY(), Math.min(y, b.getMaxY()));
+            best = Math.min(best, Math.hypot(nx - x, ny - y));
+        }
+        return best;
     }
 }

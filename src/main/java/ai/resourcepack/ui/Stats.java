@@ -2,6 +2,7 @@ package ai.resourcepack.ui;
 
 import ai.resourcepack.ui.framework.TickMeter;
 import ai.resourcepack.ui.framework.api.Cpu;
+import ai.resourcepack.ui.html.HoverAhead;
 import ai.resourcepack.ui.html.RenderBudget;
 import org.bukkit.Bukkit;
 
@@ -32,6 +33,7 @@ final class Stats {
                 t.ticks(), t.meanMicros(), t.p99Micros(), t.maxMicros(), t.meanBytes()));
         for (Renders.Kind k : Renders.Kind.values()) out.add("Jobs " + k.name().toLowerCase(Locale.ROOT) + ": " + r.times(k) + " (ms: median, 99th, most)");
         out.add("Pictures given up for taking too long: " + RenderBudget.timedOut() + ". Kept first pictures: " + plugin.firstPictures().stats() + ".");
+        out.add(String.format(Locale.ROOT, "Hovers: %s; drawing ahead used %.1f s of CPU.", plugin.repaints().stats(), HoverAhead.spentNs() / 1e9));
         out.add(String.format(Locale.ROOT, "Threads: %s; cpu-threads %d (%d running, %d queued).", threads(), pool.getParallelism(),
                 pool.getRunningThreadCount(), pool.getQueuedSubmissionCount() + pool.getQueuedTaskCount()));
         out.add(String.format(Locale.ROOT, "Started in %.0f ms on the server thread; warmed up %.0f ms after.", plugin.enableMillis(), plugin.warmMillis()));
@@ -51,9 +53,9 @@ final class Stats {
             threads.append(threads.isEmpty() ? "" : ",").append('"').append(e.getKey()).append("\":").append(e.getValue());
         }
         return String.format(Locale.ROOT, "{\"walls\":%d,\"wall_sessions\":%d,\"views\":%d,\"sent_mb\":%.3f,\"tick\":%s,\"jobs\":{%s},"
-                        + "\"timed_out\":%d,\"threads\":{%s},\"enable_ms\":%.1f,\"warm_ms\":%.1f}",
-                c[0], c[1], c[2], plugin.framework().bytesSent() / 1e6, t.json(), jobs, RenderBudget.timedOut(), threads,
-                plugin.enableMillis(), plugin.warmMillis());
+                        + "\"timed_out\":%d,\"hovers\":%s,\"ahead_cpu_s\":%.3f,\"threads\":{%s},\"enable_ms\":%.1f,\"warm_ms\":%.1f}",
+                c[0], c[1], c[2], plugin.framework().bytesSent() / 1e6, t.json(), jobs, RenderBudget.timedOut(), plugin.repaints().json(),
+                HoverAhead.spentNs() / 1e9, threads, plugin.enableMillis(), plugin.warmMillis());
     }
 
     /** The plugin's live threads by name, numbers left out: name -> how many. */

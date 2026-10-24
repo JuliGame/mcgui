@@ -53,8 +53,10 @@ public final class Repaint {
     /**
      * [frame] is the new picture, drawn over the last one's pixels, and [changed] the CSS-pixel rectangle of it
      * that differs (all of the canvas that has to be redrawn). [frame] is null, and [changed] null, unless [why] is PARTIAL.
+     * [paint] is what was painted to get [changed] right (CSS pixels of the picture): its pixels there depend on nothing
+     * painted further off than a pixel or two from it.
      */
-    public record Result(HtmlRenderer.Frame frame, Rectangle2D changed, Why why) {}
+    public record Result(HtmlRenderer.Frame frame, Rectangle2D changed, Why why, Rectangle2D paint) {}
 
     /** Room round a changed element for what it may draw outside itself on hover beyond its shadows and blur: a lift, a glow. */
     public static final double DIRTY_MARGIN = 48;
@@ -78,12 +80,27 @@ public final class Repaint {
     /** As above, with [margin] (CSS px) round what [moved] paints: {@link #MOTION_MARGIN} for an animation frame. */
     public static Result partial(Page page, Document doc, int width, int height, double scale, double scroll, Selector.State state,
                                  HtmlRenderer.Frame before, Set<Element> moved, double margin, long timeoutMs) {
-        return partial(page, doc, width, height, scale, scroll, state, before, moved, margin, () -> RenderBudget.of(timeoutMs), null);
+        return partial(page, doc, width, height, scale, scroll, state, before, moved, margin, () -> RenderBudget.of(timeoutMs), null, false);
     }
 
-    /** As above, each render within a budget from [budgets]; [undo], if not null, is told what each render may paint over first. */
+    /**
+     * As {@link #partial(Page, Document, int, int, double, double, Selector.State, HtmlRenderer.Frame, Set, long)}, for
+     * [moved] whose text or attributes changed rather than their state (another player's copy of the page under
+     * [before], see Personal): whatever else the new layout moves (a flexible box beside a longer name) is repainted
+     * too, as long as the whole of it stays small.
+     */
+    public static Result retext(Page page, Document doc, int width, int height, double scale, double scroll, Selector.State state,
+                                HtmlRenderer.Frame before, Set<Element> moved, long timeoutMs) {
+        return partial(page, doc, width, height, scale, scroll, state, before, moved, DIRTY_MARGIN, () -> RenderBudget.of(timeoutMs), null, true);
+    }
+
+    /**
+     * As above, each render within a budget from [budgets]; [undo], if not null, is told what each render may paint over
+     * first; [follow]: what the new layout moves joins [moved] (see {@link #retext}).
+     */
     private static Result partial(Page page, Document doc, int width, int height, double scale, double scroll, Selector.State state,
-                                  HtmlRenderer.Frame before, Set<Element> moved, double margin, Supplier<RenderBudget> budgets, Undo undo) {
+                                  HtmlRenderer.Frame before, Set<Element> moved, double margin, Supplier<RenderBudget> budgets, Undo undo,
+                                  boolean follow) {
         // A page where hovering one element restyles its siblings ('+', '~') is drawn whole.
         if (page.siblingStates()) return fail(Why.SIBLING_STATES);
         Set<Element> order = orderOnly(page, moved);
@@ -95,6 +112,19 @@ public final class Repaint {
         RenderBudget budget = budgets.get();
         HtmlRenderer.Over over = HtmlRenderer.layOver(page, doc, width, height, scale, scroll, state, before.image(), budget);
         HtmlRenderer.Frame laid = over.frame();
+        if (follow) {
+            Set<Element> shifted = shifted(before, laid);
+            if (!moved.containsAll(shifted)) {
+                Set<Element> all = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+                all.addAll(moved);
+                all.addAll(shifted);
+                moved = all;
+                order = orderOnly(page, moved);
+                region = region(before, moved, order, List.of(), margin);
+                if (region.commit == null) return fail(region.why);
+                if (!small(region.paint, before)) return fail(Why.GREW_TOO_BIG);
+            }
+        }
         if (!order.isEmpty() && !orderKept(before, laid, order)) {
             order = Set.of();
             region = region(before, moved, order, List.of(), margin);
@@ -116,7 +146,7 @@ public final class Repaint {
             f = HtmlRenderer.render(page, doc, width, height, scale, scroll, state, before.image(), region.paint, region.commit, budgets.get());
         }
         if (!sameLayout(before, f, region.commit)) return fail(Why.LAYOUT_MOVED);
-        return new Result(f, region.commit, Why.PARTIAL);
+        return new Result(f, region.commit, Why.PARTIAL, region.paint);
     }
 
     /**
@@ -201,17 +231,51 @@ public final class Repaint {
      */
     public static final class Prepared {
         private final HtmlRenderer.Frame frame;
-        private final Rectangle2D changed;
+        private final Rectangle2D changed, paint;
         private final java.awt.Rectangle at;
         private final int[] pixels;
         private final Motion motion;
 
-        private Prepared(HtmlRenderer.Frame frame, Rectangle2D changed, java.awt.Rectangle at, int[] pixels, Motion motion) {
+        private Prepared(HtmlRenderer.Frame frame, Rectangle2D changed, Rectangle2D paint, java.awt.Rectangle at, int[] pixels, Motion motion) {
             this.frame = frame;
             this.changed = changed;
+            this.paint = paint;
             this.at = at;
             this.pixels = pixels;
             this.motion = motion;
+        }
+
+        /** The same pixels with another frame: the one the same repaint makes of another copy of the page (see Personal). */
+        Prepared with(HtmlRenderer.Frame other) {
+            return new Prepared(other, changed, paint, at, pixels, motion);
+        }
+
+        /**
+         * The picture it was worked out over, without its image (its hit regions and styles): what another copy of the
+         * page is compared with before it takes the repaint (see Personal). Null unless set by {@link #over}.
+         */
+        HtmlRenderer.Frame origin() {
+            return origin;
+        }
+
+        private HtmlRenderer.Frame origin;
+
+        /** The same, worked out over [before] (see {@link #origin}). */
+        Prepared over(HtmlRenderer.Frame before) {
+            Prepared p = new Prepared(frame, changed, paint, at, pixels, motion);
+            p.origin = new HtmlRenderer.Frame(null, before.scale(), before.viewportWidth(), before.viewportHeight(), before.pageHeight(),
+                    before.scrollY(), before.hits(), before.styles(), before.document(), before.page());
+            return p;
+        }
+
+        /** The rectangle of the picture it repaints (see {@link Result#changed}), CSS pixels of the picture. */
+        Rectangle2D changed() {
+            return changed;
+        }
+
+        /** What was painted to work it out (see {@link Result#paint}), CSS pixels of the picture. */
+        public Rectangle2D paint() {
+            return paint;
         }
 
         /** What it holds on to, roughly: its pixels (the frame's styles and regions are shared in part with the picture's). */
@@ -227,15 +291,46 @@ public final class Repaint {
             return motion;
         }
 
+        /** The frame it makes, with no picture: its hit regions, styles and document. */
+        public HtmlRenderer.Frame frame() {
+            return frame;
+        }
+
+        /** Where its pixels go, in device pixels of the picture. */
+        public java.awt.Rectangle at() {
+            return new java.awt.Rectangle(at);
+        }
+
+        /** Its pixels, row by row, {@link #at()} wide and high: shared, never to be written to. */
+        public int[] pixels() {
+            return pixels;
+        }
+
+        /**
+         * The repaint [r] ({@link #partial}'s, PARTIAL) has just drawn on a page that does not move, as one to
+         * {@link #apply} to any picture that held what the one it was drawn over held: the pixels of its rectangle (with
+         * the pixel all round a clip edge may be rounded out by) copied out of [r]'s picture. Its picture is only read.
+         */
+        public static Prepared of(Result r) {
+            HtmlRenderer.Frame f = r.frame();
+            BufferedImage img = f.image();
+            java.awt.Rectangle at = new Undo(img, f.scale()).device(r.changed());
+            int[] px = Repaint.pixels(img), out = new int[at.width * at.height];
+            for (int y = 0; y < at.height; y++) System.arraycopy(px, (at.y + y) * img.getWidth() + at.x, out, y * at.width, at.width);
+            HtmlRenderer.Frame pictureless = new HtmlRenderer.Frame(null, f.scale(), f.viewportWidth(), f.viewportHeight(), f.pageHeight(), f.scrollY(),
+                    f.hits(), f.styles(), f.document(), f.page());
+            return new Prepared(pictureless, r.changed(), r.paint(), at, out, null);
+        }
+
         /** Paints the repaint into [onto]'s picture (the picture it was worked out over, or a copy of it) and gives the frame it makes. */
         public Result apply(HtmlRenderer.Frame onto) {
             BufferedImage img = onto.image();
-            int[] px = pixels(img);
+            int[] px = Repaint.pixels(img);
             int stride = img.getWidth();
             for (int y = 0; y < at.height; y++) System.arraycopy(pixels, y * at.width, px, (at.y + y) * stride + at.x, at.width);
             HtmlRenderer.Frame f = new HtmlRenderer.Frame(img, frame.scale(), frame.viewportWidth(), frame.viewportHeight(), frame.pageHeight(),
                     frame.scrollY(), frame.hits(), frame.styles(), frame.document(), frame.page());
-            return new Result(f, changed, Why.PARTIAL);
+            return new Result(f, changed, Why.PARTIAL, paint);
         }
     }
 
@@ -252,7 +347,7 @@ public final class Repaint {
         Motion current = Motion.current(), own = current == null ? null : current.copy();
         if (own != null) Motion.set(own);
         try {
-            Result r = partial(page, doc, width, height, scale, scroll, state, before, moved, DIRTY_MARGIN, () -> budget, undo);
+            Result r = partial(page, doc, width, height, scale, scroll, state, before, moved, DIRTY_MARGIN, () -> budget, undo, false);
             if (r.frame() == null) return null;
             // Only the rectangle kept changes (the rest of what was painted is put back by the render itself), give or
             // take the pixel Java2D may round a clip edge out by; and of that, often only the middle (a card, not the
@@ -261,7 +356,7 @@ public final class Repaint {
             HtmlRenderer.Frame f = r.frame();
             HtmlRenderer.Frame pictureless = new HtmlRenderer.Frame(null, f.scale(), f.viewportWidth(), f.viewportHeight(), f.pageHeight(), f.scrollY(),
                     f.hits(), f.styles(), f.document(), f.page());
-            return new Prepared(pictureless, r.changed(), tight, undo.copy(tight, new int[tight.width * tight.height]), own);
+            return new Prepared(pictureless, r.changed(), r.paint(), tight, undo.copy(tight, new int[tight.width * tight.height]), own);
         } finally {
             if (own != null) Motion.set(current);
             undo.restore();
@@ -370,7 +465,7 @@ public final class Repaint {
     }
 
     private static Result fail(Why why) {
-        return new Result(null, null, why);
+        return new Result(null, null, why, null);
     }
 
     /** What to paint and what to keep, in CSS pixels of the viewport; [commit] is null (with [why]) if it cannot be told. */
@@ -591,7 +686,7 @@ public final class Repaint {
     }
 
     /** How far past its box (CSS pixels) an element styled [s] can paint at [scale]: its outer shadows, its text's shadows, its blur. */
-    private static double paintsOutside(Style s, double scale) {
+    static double paintsOutside(Style s, double scale) {
         if (s == null) return 0;
         return Math.max(Math.max(shadowReach(s.boxShadow, s), shadowReach(s.textShadow, s)), blurReach(s, scale));
     }
@@ -637,7 +732,7 @@ public final class Repaint {
     }
 
     /** How far (CSS px) [s]'s filter blur reaches past what it draws, and reads past what it makes, at [scale]. */
-    private static double blurReach(Style s, double scale) {
+    static double blurReach(Style s, double scale) {
         String filter = s.filter;
         if (filter == null || filter.equals("none")) return 0;
         double reach = 0;
@@ -683,9 +778,38 @@ public final class Repaint {
         return true;
     }
 
-    /** Whether [box] (page CSS pixels of [f]) is inside [region] (of [f]'s picture). */
+    /** The elements with a box in [a] or [b] that is not the same in the other (matched by element, as {@link #sameLayout}). */
+    private static Set<Element> shifted(HtmlRenderer.Frame a, HtmlRenderer.Frame b) {
+        Map<Element, List<Rectangle2D>> in = new IdentityHashMap<>();
+        for (Painter.Hit h : a.hits()) in.computeIfAbsent(h.element(), k -> new ArrayList<>()).add(h.shape().getBounds2D());
+        Map<Element, List<Rectangle2D>> out = new IdentityHashMap<>();
+        for (Painter.Hit h : b.hits()) out.computeIfAbsent(h.element(), k -> new ArrayList<>()).add(h.shape().getBounds2D());
+        Set<Element> moved = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+        for (Map.Entry<Element, List<Rectangle2D>> e : in.entrySet()) {
+            List<Rectangle2D> x = e.getValue(), y = out.get(e.getKey());
+            if (y == null || x.size() != y.size()) {
+                moved.add(e.getKey());
+                continue;
+            }
+            for (int i = 0; i < x.size(); i++) {
+                Rectangle2D p = x.get(i), q = y.get(i);
+                if (Math.abs(p.getX() - q.getX()) < 0.5 && Math.abs(p.getY() - q.getY()) < 0.5 && Math.abs(p.getWidth() - q.getWidth()) < 0.5
+                        && Math.abs(p.getHeight() - q.getHeight()) < 0.5) continue;
+                moved.add(e.getKey());
+                break;
+            }
+        }
+        for (Element e : out.keySet()) if (!in.containsKey(e)) moved.add(e);
+        return moved;
+    }
+
+    /**
+     * Whether [box] (page CSS pixels of [f]) is inside [region] (of [f]'s picture). By its edges, so a box of no width or
+     * height (a flexible spacer) is inside too: {@link Rectangle2D#contains} holds no empty rectangle.
+     */
     private static boolean inside(Rectangle2D region, Rectangle2D box, HtmlRenderer.Frame f) {
-        return region.contains(new Rectangle2D.Double(box.getX(), box.getY() - f.scrollY(), box.getWidth(), box.getHeight()));
+        double y = box.getY() - f.scrollY();
+        return box.getX() >= region.getMinX() && box.getMaxX() <= region.getMaxX() && y >= region.getMinY() && y + box.getHeight() <= region.getMaxY();
     }
 
     private static int[] pixels(BufferedImage img) {

@@ -46,20 +46,37 @@ scroll-step: 80
 tile-shift: true
 
 # While a player's pointer rests on a page (or heads for something) and the cpu-threads pool has
-# nothing else to do, the hover pictures of this many targets nearest the pointer are drawn in advance, so a hover that
-# lands on one shows without waiting for it to be drawn. Real pictures always come first: drawing ahead stops
-# the moment any player needs one. 0 turns it off. Applies to screens opened after a reload. Four, not two: in a
-# card with buttons in it, the card and the button nearest are two targets, and the card next to it two more.
+# nothing else to do, the hover pictures of up to this many targets are drawn in advance, the likeliest first (where
+# the pointer's next move most probably lands), so a hover that lands on one shows without waiting for it to be
+# drawn. Real pictures always come first: drawing ahead stops the moment any player needs one. A hover that changes
+# no pixel takes no turn. 0 turns it off. Applies to screens opened after a reload.
 hover-ahead: 4
+
+# The most CPU that drawing ahead may use, every player's together, in cores on average (it may spend up to half
+# a second at once). Drawing ahead is a guess, and the cores it burns are the ones chunk loading and other
+# plugins use. 0 turns drawing ahead off for everyone; 1 is the most it can use (one drawing at a time).
+hover-ahead-cpu: 0.5
+
+# Hover pictures are kept and shared by every player in the same state on the same page, so a hover one player
+# drew (or that was drawn ahead for them) is not drawn again for the next. This much memory at most.
+hover-repaints:
+  megabytes: 64
 
 # The first picture of each page at each screen size, kept so that the next player to open that page there
 # is sent the picture at once instead of waiting for it to be drawn (and a private wall sends each map
-# once, not blank first). Drawn for every placed screen when the plugin starts. A page filled in with a
-# player's own values ({player}, {x}, PlaceholderAPI) is never kept. Least recently used go first; 0 megabytes
-# keeps none.
+# once, not blank first). Drawn for every placed screen when the plugin starts. Least recently used go first;
+# 0 megabytes keeps none.
 first-pictures:
   entries: 64
   megabytes: 128
+
+sharing:
+  # A page filled in with a player's own values ({player}, {x}, PlaceholderAPI) is still drawn once for
+  # everybody where it does not show their values: a player's first picture is another's with only their own
+  # values drawn in, and a hover is shared between players whose pictures are laid out alike where neither
+  # shows their values near it. Every player sees, to the pixel, what their own page draws, and their clicks
+  # run their own commands. Off: each player's page is drawn for them alone.
+  personal-pages: true
 
 views:
   # Size of a fullscreen page, in maps (128 pixels each). A page can set its own with

@@ -3,7 +3,9 @@ package ai.resourcepack.ui;
 import ai.resourcepack.ui.framework.Framework;
 import ai.resourcepack.ui.framework.FrameworkCommand;
 import ai.resourcepack.ui.framework.api.UIFramework;
+import ai.resourcepack.ui.html.HoverAhead;
 import ai.resourcepack.ui.html.HtmlRenderer;
+import ai.resourcepack.ui.html.SharedRepaints;
 import ai.resourcepack.ui.html.Page;
 import org.bukkit.Bukkit;
 import org.bukkit.configuration.file.FileConfiguration;
@@ -50,6 +52,8 @@ public final class UIEnginePlugin extends JavaPlugin {
     private volatile double enableMillis = -1, warmMillis = -1;
     /** The pictures of pages that move, shared by the viewers in the same state (see {@link AnimFrames}). */
     private final AnimFrames frames = new AnimFrames();
+    /** Hover repaints every session takes from (see {@link SharedRepaints}); one for the plugin's life, sized by the config. */
+    private final SharedRepaints repaints = new SharedRepaints(0);
 
     @Override
     public void onEnable() {
@@ -69,6 +73,7 @@ public final class UIEnginePlugin extends JavaPlugin {
         renderers = new Renders();
         pages = newPageStore();
         pictures = newFirstPictures();
+        configureHovers();
         screens = new Screens(this, renderers);
         Heads heads = new Heads(this, screens::redrawSchemed);
         Page.SCHEMES.put("head", heads::image);
@@ -91,6 +96,7 @@ public final class UIEnginePlugin extends JavaPlugin {
             int tick = Bukkit.getCurrentTick();
             try {
                 screens.tick(tick);
+                HoverAhead.wake();
             } finally {
                 meter.end(tick);
             }
@@ -159,6 +165,8 @@ public final class UIEnginePlugin extends JavaPlugin {
         old.close();
         // Every page is read again, as a new revision: no picture of the old ones is any use, and the bounds may have changed.
         pictures = newFirstPictures();
+        repaints.invalidate(p -> true);
+        configureHovers();
         Placeholders.reset();
         watch();
         for (String name : pages.names()) screens.reloaded(name);
@@ -189,6 +197,17 @@ public final class UIEnginePlugin extends JavaPlugin {
 
     private FirstPictures newFirstPictures() {
         return new FirstPictures(cfg.getInt("first-pictures.entries", 64), Math.round(cfg.getDouble("first-pictures.megabytes", 128) * 1048576));
+    }
+
+    /** Hover repaints shared between sessions (see {@link SharedRepaints}). */
+    SharedRepaints repaints() {
+        return repaints;
+    }
+
+    /** The shared hover repaints' size and the CPU budget for drawing ahead, as the config says. */
+    private void configureHovers() {
+        repaints.limit(Math.round(Math.max(0, cfg.getDouble("hover-repaints.megabytes", 64)) * 1048576));
+        HoverAhead.budget(cfg.getDouble("hover-ahead-cpu", 0.5));
     }
 
     /**
@@ -253,6 +272,11 @@ public final class UIEnginePlugin extends JavaPlugin {
     }
 
     /** Hover targets near a resting pointer whose repaint is drawn in advance, while the cpu-threads pool is idle; 0 for none. */
+    /** Whether personal pages' pictures are shared between players where their own values are not (see {@link ai.resourcepack.ui.html.Personal}). */
+    boolean sharePersonal() {
+        return cfg.getBoolean("sharing.personal-pages", true);
+    }
+
     int hoverAhead() {
         return Math.max(0, Math.min(8, cfg.getInt("hover-ahead", 4)));
     }

@@ -32,15 +32,28 @@ import java.util.function.Consumer;
  * <p>Keyed by all a first picture depends on ({@link Key}): the page, one revision of it (a reload makes a new
  * {@link Page}), the canvas's size in maps, the scale, and every placeholder value filled into the document.
  * Only a session's first picture of a document is kept or taken: at the top of the page, nothing hovered or
- * pressed, nothing clicked, no #fragment. A document filled with a player's own values is never kept
- * ({@link Placeholders.Filled#personal}). A picture that failed or was given up is never kept.
+ * pressed, nothing clicked, no #fragment. A document filled with a player's own values is kept by its template, and
+ * only ever taken with the taker's own values drawn in over it ({@link Key#personal}, Personal). A picture that failed
+ * or was given up is never kept.
  *
  * <p>One session draws a missing picture; others wanting it meanwhile wait for it ({@link #claim}). Kept by
  * least recent use, within a count and a number of bytes. Safe from any thread.
  */
 final class FirstPictures {
-    /** Everything a first picture depends on. [page] is one revision; [name] is only for {@link #invalidate}. */
-    record Key(String name, Page page, int cols, int rows, double scale, String fill) {}
+    /**
+     * Everything a first picture depends on. [page] is one revision; [name] is only for {@link #invalidate}. [fill] is
+     * every value filled in; or, for a copy filled with a player's own values, {@link #PERSONAL} and the template it was
+     * filled from (Placeholders.Filled#template): such a picture is never shown as it is, only with the taker's own
+     * values drawn in over it (Personal).
+     */
+    record Key(String name, Page page, int cols, int rows, double scale, String fill) {
+        /** Starts the [fill] of a personal copy's picture: no filled key starts with it. */
+        static final String PERSONAL = "\u0002";
+
+        boolean personal() {
+            return fill.startsWith(PERSONAL);
+        }
+    }
 
     /** What {@link #claim} found: the picture, or none, and then whether the caller is to draw it (else it waits). */
     record Claim(Picture picture, boolean mine) {}

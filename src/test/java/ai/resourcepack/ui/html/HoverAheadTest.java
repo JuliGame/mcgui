@@ -97,7 +97,7 @@ class HoverAheadTest {
                     py = on.getCenterY();
                 }
                 steps++;
-                HoverAhead ahead = new HoverAhead(64, Long.MAX_VALUE);
+                HoverAhead ahead = new HoverAhead(64, new SharedRepaints(Long.MAX_VALUE), true);
                 int[] shown = pixels(cur.image()).clone();
                 ahead.run(ahead.job(page, doc, W, H, SCALE, cur, drawn, List.of(), drawn, null, List.of(), px, py, 0, 0, 0));
                 assertArrayEquals(shown, pixels(cur.image()), name + ": drawing ahead changed the picture on the screen");
@@ -186,7 +186,7 @@ class HoverAheadTest {
             }
         });
         reader.start();
-        HoverAhead ahead = new HoverAhead(64, Long.MAX_VALUE);
+        HoverAhead ahead = new HoverAhead(64, new SharedRepaints(Long.MAX_VALUE), true);
         try {
             ahead.run(ahead.job(page, doc, W, H, SCALE, cur, List.of(), List.of(), List.of(), null, List.of(), 1, 1, 0, 0, 0));
         } finally {
@@ -211,6 +211,52 @@ class HoverAheadTest {
         assertArrayEquals(shown, pixels(cur.image()), "the shared picture was painted");
     }
 
+    /**
+     * Two crates side by side, each raised on hover ({@code z-index}, which paints nothing new) with rows of its own. The
+     * pointer rests in the gutter, just off the left crate, and glides right: the first report inside the right crate
+     * lands on one of its rows. That row is drawn ahead, though the left crate's rows are nearer; and the crates alone,
+     * whose repaints change no pixel, take none of the four turns.
+     */
+    @Test
+    void theRowThePointerGlidesOntoIsDrawnAhead() {
+        StringBuilder html = new StringBuilder("""
+                <html><head><style>
+                body { margin: 0; padding: 20px; display: flex; gap: 16px; background: #222; font: 14px sans-serif; }
+                .crate { position: relative; width: 240px; padding: 12px; background: #334; }
+                .crate:hover { z-index: 2; }
+                .row { height: 30px; margin: 6px 0; background: #556; }
+                .row:hover { background: #88a; }
+                </style></head><body>
+                """);
+        for (int c = 0; c < 3; c++) {
+            html.append("<div class=crate>");
+            for (int r = 0; r < 6; r++) html.append("<div class=row></div>");
+            html.append("</div>");
+        }
+        Page page = Page.of(html.append("</body></html>").toString(), Path.of("crates.html").toAbsolutePath(), OFFLINE);
+        Document doc = page.document.clone();
+        HtmlRenderer.Frame cur = HtmlRenderer.render(page, doc, W, H, SCALE, 0, Selector.State.NONE);
+        List<Element> crates = doc.select(".crate");
+        Rectangle2D left = where(cur, crates.get(0));
+        Element row = crates.get(1).select(".row").get(3);
+        Rectangle2D target = where(cur, row);
+        // At rest in the gutter, a pixel off the left crate, level with the row.
+        double x = left.getMaxX() + 1, y = target.getCenterY();
+        assertTrue(cur.elementAt(x, y) == doc.body() || cur.elementAt(x, y) == null, "not in the gutter");
+        HoverAhead ahead = new HoverAhead(4, new SharedRepaints(Long.MAX_VALUE));
+        HoverAhead.budget(1);
+        ahead.run(ahead.job(page, doc, W, H, SCALE, cur, List.of(), List.of(), List.of(), null, List.of(), x, y, 0, 0, 0));
+        List<Element> need = page.styles.stateKey(row, false);
+        assertTrue(ahead.keys().contains(need), "the right crate's row was not drawn ahead: " + ahead.keys().size() + " drawn");
+        // Only the crates' rows were worth a turn: those drawn that change pixels are at most four.
+        int changing = 0;
+        for (List<Element> k : ahead.keys()) {
+            Repaint.Prepared p = ahead.take(cur, List.of(), List.of(), k, List.of());
+            if (p != null && p.pixels().length > 0) changing++;
+        }
+        assertTrue(changing <= 4 && changing >= 3, changing + " repaints that change pixels drawn ahead");
+    }
+
     /** Stopped part way through (real work came), the picture on the screen is as it was, and nothing half drawn is kept. */
     @Test
     void stoppedPartWayLeavesThePictureAsItWas() throws Exception {
@@ -221,7 +267,7 @@ class HoverAheadTest {
         int stopped = 0;
         for (int d = 1; d <= 40; d += 3) {
             int delayMs = d;
-            HoverAhead ahead = new HoverAhead(64, Long.MAX_VALUE);
+            HoverAhead ahead = new HoverAhead(64, new SharedRepaints(Long.MAX_VALUE), true);
             HoverAhead.Job job = ahead.job(page, doc, W, H, SCALE, cur, List.of(), List.of(), List.of(), null, List.of(), 1, 1, 0, 0, 0);
             Thread realWork = new Thread(() -> {
                 try {

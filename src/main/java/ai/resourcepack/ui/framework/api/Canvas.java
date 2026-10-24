@@ -171,6 +171,32 @@ public final class Canvas {
     }
 
     /**
+     * Show [from]'s picture with [patch] drawn over it at (x, y), as one published change: what {@link #show(Canvas)}
+     * and then {@link #draw} would show, without [from]'s pixels under [patch] ever being published here (another
+     * player's own values, say). Null [patch]: [from] as it is.
+     */
+    public void show(Canvas from, BufferedImage patch, int x, int y) {
+        if (from.cols != cols || from.rows != rows) throw new IllegalArgumentException("Not the same size: " + from.cols + "x" + from.rows);
+        if (patch == null) {
+            show(from);
+            return;
+        }
+        from.owned = false;
+        changing++;
+        try {
+            owned = false;
+            ycc = from.ycc;
+        } finally {
+            changing++;
+        }
+        transparent = from.transparent;
+        int was = nextTint;
+        tint = from.tint;
+        nextTint = was;
+        draw(patch, x, y, from.tiles);
+    }
+
+    /**
      * Whether later drawings may be transparent. With it on, a pixel of an image with alpha that is less than
      * half opaque is transparent, and one at least half opaque is drawn as its colour, as without (so a
      * premultiplied image's edges are flattened onto black). Through a transparent pixel the world behind
@@ -226,7 +252,7 @@ public final class Canvas {
      * one, is read in place.
      */
     public void draw(BufferedImage image, int x, int y) {
-        paint(0, image, x, y, null);
+        paint(0, image, x, y, null, tiles);
     }
 
     /**
@@ -236,7 +262,7 @@ public final class Canvas {
      * far less handed over this way. Nothing of [image] outside [areas] is read; an empty list changes nothing.
      */
     public void draw(BufferedImage image, int x, int y, List<Rectangle> areas) {
-        paint(0, image, x, y, areas);
+        paint(0, image, x, y, areas, tiles);
     }
 
     /**
@@ -246,11 +272,16 @@ public final class Canvas {
      * out until [image] covers them (draw the whole new view, or at least the rows that came in).
      */
     public void scroll(int rows, BufferedImage image, int x, int y) {
-        paint(rows, image, x, y, null);
+        paint(rows, image, x, y, null, tiles);
     }
 
-    /** {@link #scroll}, drawing only [areas] (canvas pixels) of [image], or all of it for null. */
-    private void paint(int rows, BufferedImage image, int x, int y, List<Rectangle> areas) {
+    /** [image] drawn at (x, y) over the tiles [start] (another canvas's, see {@link #show(Canvas, BufferedImage, int, int)}), published once. */
+    private void draw(BufferedImage image, int x, int y, Tile[] start) {
+        paint(0, image, x, y, null, start);
+    }
+
+    /** {@link #scroll}, drawing only [areas] (canvas pixels) of [image], or all of it for null, over the tiles [start]. */
+    private void paint(int rows, BufferedImage image, int x, int y, List<Rectangle> areas, Tile[] start) {
         int w = image.getWidth(), h = image.getHeight();
         int type = image.getType();
         boolean alpha = transparent && image.getColorModel().hasAlpha();
@@ -260,15 +291,15 @@ public final class Canvas {
             // A sub-image shares its parent's array: start where it does, and step by the parent's row length.
             int stride = sm.getScanlineStride();
             int offset = db.getOffset() - r.getSampleModelTranslateY() * stride - r.getSampleModelTranslateX();
-            apply(rows, db.getData(), offset, stride, w, h, x, y, alpha, areas);
+            apply(start, rows, db.getData(), offset, stride, w, h, x, y, alpha, areas);
         } else {
-            apply(rows, image.getRGB(0, 0, w, h, null, 0, w), 0, w, w, h, x, y, alpha, areas);
+            apply(start, rows, image.getRGB(0, 0, w, h, null, 0, w), 0, w, w, h, x, y, alpha, areas);
         }
     }
 
     /** Draw a [w] × [h] block of RGB pixels (row-major; the top byte is ignored) with its top-left at (x, y). */
     public void draw(int[] rgb, int w, int h, int x, int y) {
-        apply(0, rgb, 0, w, w, h, x, y, false, null);
+        apply(tiles, 0, rgb, 0, w, w, h, x, y, false, null);
     }
 
     /** Rows per piece of work when converting a big drawing on several cores. */
@@ -279,7 +310,7 @@ public final class Canvas {
      * and it covers the [w] × [h] canvas pixels from (x, y). Only [areas] of it (canvas pixels) are drawn, or all of
      * it for null. [alpha]: its top byte is alpha, and a pixel under half is transparent.
      */
-    private void apply(int shift, int[] rgb, int offset, int stride, int w, int h, int x, int y, boolean alpha, List<Rectangle> areas) {
+    private void apply(Tile[] start, int shift, int[] rgb, int offset, int stride, int w, int h, int x, int y, boolean alpha, List<Rectangle> areas) {
         int x0 = Math.max(0, x), y0 = Math.max(0, y);
         int x1 = Math.min(width, x + w), y1 = Math.min(height, y + h);
         // What to convert, in canvas pixels, in bands of rows a core each: {left, top, right, bottom}.
@@ -294,10 +325,12 @@ public final class Canvas {
         }
         boolean moves = shift != 0 && Math.abs(shift) < rows;
         boolean draws = !bands.isEmpty();
-        if (!moves && !draws) return;
+        // Over another canvas's tiles: shown even if nothing is drawn.
+        boolean shows = start != tiles;
+        if (!moves && !draws && !shows) return;
         // Colours shared with another canvas (or none yet, all black) are copied before they are drawn into: here, on the drawing thread.
         detach();
-        Tile[] next = tiles.clone();
+        Tile[] next = start.clone();
         changing++;
         try {
             if (moves) rotate(shift, next);
@@ -312,7 +345,7 @@ public final class Canvas {
                 }
                 for (int t = 0; t < dirty.length; t++) if (dirty[t]) changed.add(t);
             }
-            if (!moves && changed.isEmpty() && tint == nextTint) return;
+            if (!moves && !shows && changed.isEmpty() && tint == nextTint) return;
             encode(changed, next);
         } finally {
             changing++;

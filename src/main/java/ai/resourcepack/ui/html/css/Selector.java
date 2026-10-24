@@ -84,6 +84,14 @@ public final class Selector {
         return java.util.Arrays.copyOf(out, n);
     }
 
+    /** Adds to [out] the name of every attribute it tests, in any compound or inside :is(), :not(), :has() and the like. */
+    public void attributes(java.util.Set<String> out) {
+        for (Compound c : compounds) {
+            for (String[] a : c.attrs) out.add(a[0].startsWith("abs:") ? a[0].substring(4) : a[0]);
+            for (Pseudo p : c.pseudos) if (p.args != null) for (Selector s : p.args) s.attributes(out);
+        }
+    }
+
     Compound subject() {
         return compounds.get(compounds.size() - 1);
     }
