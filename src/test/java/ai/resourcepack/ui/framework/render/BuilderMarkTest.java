@@ -34,21 +34,27 @@ class BuilderMarkTest {
     void raisesLitBlocksOneLevel() {
         Palette palette = new Palette(c -> 0xFF000000 | (c * 0x9E3779B1));
         int w = 256, h = 256;
-        byte[] ycc = new byte[w * h * 3];
-        for (int i = 0; i < w * h; i++) Palette.rgbToYcc(0x2b3a55, ycc, i * 3);
-        byte[] before = ycc.clone();
+        // Four maps, two a row.
+        byte[][] maps = new byte[4][128 * 128 * 3];
+        for (byte[] m : maps) for (int i = 0; i < 128 * 128; i++) Palette.rgbToYcc(0x2b3a55, m, i * 3);
+        byte[][] before = new byte[4][];
+        for (int t = 0; t < 4; t++) before[t] = maps[t].clone();
         boolean[] dirty = new boolean[4];
-        BuilderMark.apply(palette, ycc, w, h, 2, 0, 0, w, h, dirty);
+        BuilderMark.apply(palette, new BuilderMark.Tiles() {
+            @Override public byte[] read(int t) { return maps[t]; }
+            @Override public byte[] write(int t) { return maps[t]; }
+        }, w, h, 2, 0, 0, w, h, dirty);
         int raised = 0;
         for (int by = 0; by < h / 2; by++) {
             for (int bx = 0; bx < w / 2; bx++) {
                 int sumBefore = 0, sumAfter = 0;
                 for (int i = 0; i < 4; i++) {
-                    int p = ((2 * by + (i >> 1)) * w + 2 * bx + (i & 1)) * 3;
-                    assertEquals(before[p], ycc[p]);
-                    assertEquals(before[p + 2], ycc[p + 2]);
-                    sumBefore += before[p + 1] & 255;
-                    sumAfter += ycc[p + 1] & 255;
+                    int px = 2 * bx + (i & 1), py = 2 * by + (i >> 1);
+                    int t = (py / 128) * 2 + px / 128, p = ((py % 128) * 128 + px % 128) * 3;
+                    assertEquals(before[t][p], maps[t][p]);
+                    assertEquals(before[t][p + 2], maps[t][p + 2]);
+                    sumBefore += before[t][p + 1] & 255;
+                    sumAfter += maps[t][p + 1] & 255;
                 }
                 int step = palette.chromaLevelOf(sumAfter) - palette.chromaLevelOf(sumBefore);
                 boolean edge = bx == 0 || by == 0 || bx >= w / 2 - 1 || by >= h / 2 - 1 || (bx & 63) == 0 && (by & 63) == 0;

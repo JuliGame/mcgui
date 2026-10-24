@@ -8,6 +8,7 @@ import java.util.Map;
 import java.util.Random;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
@@ -81,6 +82,12 @@ class SharedTilesTest {
             assertSame(a.canvas.tile(t, Canvas.Encoding.HI), c.canvas.tile(t, Canvas.Encoding.HI), "show shares tile " + t);
         }
         check("shared", a, b, c);
+        // A view's tiles carry their place, made once for every canvas showing the same tile there.
+        for (int t = 0; t < COLS * ROWS; t++) {
+            assertSame(a.canvas.tile(t, Canvas.Encoding.HI_TILED), b.canvas.tile(t, Canvas.Encoding.HI_TILED), "copy shares HI_TILED " + t);
+            assertSame(a.canvas.tile(t, Canvas.Encoding.HI_TILED), c.canvas.tile(t, Canvas.Encoding.HI_TILED), "show shares HI_TILED " + t);
+        }
+        assertEquals(0, a.canvas.ownMaps() + b.canvas.ownMaps() + c.canvas.ownMaps(), "nothing drawn since sharing: every map shared");
 
         // b draws into tile 0 only: it detaches, tile 0 is a new array, the others are still a's.
         byte[] a0 = a.canvas.tile(0, Canvas.Encoding.HI), a1 = a.canvas.tile(1, Canvas.Encoding.HI);
@@ -89,11 +96,14 @@ class SharedTilesTest {
         assertSame(a1, b.canvas.tile(1, Canvas.Encoding.HI), "b's unchanged tile is still a's");
         assertSame(a0, a.canvas.tile(0, Canvas.Encoding.HI), "a keeps its tile");
         check("b drew", a, b, c);
+        assertEquals(1, b.canvas.ownMaps(), "b copied only the map it drew into");
+        assertEquals(0, a.canvas.ownMaps() + c.canvas.ownMaps(), "a and c still share every map");
 
         // The canvas b shared from draws too, over a tile b and c still show from it.
         paint(a, noise(r, 100, 100), 100, 100, 200, 140);
         assertSame(a1, c.canvas.tile(1, Canvas.Encoding.HI), "c still shows a's old tile");
         check("a drew", a, b, c);
+        assertEquals(2, a.canvas.ownMaps(), "a copied the two maps it drew into");
 
         // c scrolls by a map row and draws the row that came in: moved tiles keep their arrays, new ones are new.
         int[] row = noise(r, W, 128);

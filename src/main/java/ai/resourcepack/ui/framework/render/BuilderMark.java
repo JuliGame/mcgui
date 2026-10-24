@@ -37,12 +37,21 @@ public final class BuilderMark {
         return (TAG_BITS[(h >>> 1) % 32] ^ (h & 1)) == 1;
     }
 
+    /** A canvas's colours a map at a time: 128 × 128 pixels, 3 bytes a pixel, row by row. */
+    public interface Tiles {
+        /** Map [t]'s colours, to read. */
+        byte[] read(int t);
+
+        /** Map [t]'s colours, to change: what {@link #read} gives from then on. */
+        byte[] write(int t);
+    }
+
     /**
-     * Marks the lit blocks wholly inside [x0, x1) × [y0, y1) of [ycc] (a [width] × [height] canvas, 3 bytes a pixel)
-     * whose 3×3 blocks round them are one flat colour, raising their Cb one level, and flags each tile it changes in
-     * [dirty] ([cols] tiles a row). The blocks round them may already carry a nudge of their own.
+     * Marks the lit blocks wholly inside [x0, x1) × [y0, y1) of [ycc] (a [width] × [height] canvas of [cols] maps a
+     * row) whose 3×3 blocks round them are one flat colour, raising their Cb one level, and flags each tile it changes
+     * in [dirty]. The blocks round them may already carry a nudge of their own.
      */
-    public static void apply(Palette palette, byte[] ycc, int width, int height, int cols, int x0, int y0, int x1, int y1, boolean[] dirty) {
+    public static void apply(Palette palette, Tiles ycc, int width, int height, int cols, int x0, int y0, int x1, int y1, boolean[] dirty) {
         int bw = width / 2, bh = height / 2;
         int bx0 = Math.max(1, (x0 + 1) / 2), by0 = Math.max(1, (y0 + 1) / 2);
         int bx1 = Math.min(bw - 2, x1 / 2 - 1), by1 = Math.min(bh - 2, y1 / 2 - 1);
@@ -51,31 +60,44 @@ public final class BuilderMark {
                 // The top-left block of every map is its marker.
                 if ((bx & 63) == 0 && (by & 63) == 0) continue;
                 if (!lit(bx, by)) continue;
-                int c = (2 * by * width + 2 * bx) * 3;
-                int y = ycc[c] & 255, cb = ycc[c + 1] & 255, cr = ycc[c + 2] & 255;
+                // A 2×2 block is always inside one map.
+                int t = tile(cols, 2 * bx, 2 * by), c = at(2 * bx, 2 * by);
+                byte[] m = ycc.read(t);
+                int y = m[c] & 255, cb = m[c + 1] & 255, cr = m[c + 2] & 255;
                 if (cb == 0 && cr == 0) continue; // transparent
                 int level = palette.chromaLevelOf(cb * 4);
-                if (level >= 63 || !flat(palette, ycc, width, bx, by, y, cb, cr, level)) continue;
+                if (level >= 63 || !flat(palette, ycc, cols, bx, by, y, cb, cr, level)) continue;
                 int k = 1;
                 while (k <= 16 && palette.chromaLevelOf(cb * 4 + k) == level) k++;
                 if (k > 16 || palette.chromaLevelOf(cb * 4 + k) != level + 1 || cb + (k + 3) / 4 > 255) continue;
+                byte[] w = ycc.write(t);
                 for (int i = 0; i < 4; i++) {
-                    int p = c + ((i >> 1) * width + (i & 1)) * 3;
-                    ycc[p + 1] = (byte) (cb + k / 4 + (i < k % 4 ? 1 : 0));
+                    int p = c + ((i >> 1) * 128 + (i & 1)) * 3;
+                    w[p + 1] = (byte) (cb + k / 4 + (i < k % 4 ? 1 : 0));
                 }
-                dirty[(2 * by / 128) * cols + 2 * bx / 128] = true;
+                dirty[t] = true;
             }
         }
     }
 
+    /** The map pixel (px, py) of the canvas is in. */
+    private static int tile(int cols, int px, int py) {
+        return (py >> 7) * cols + (px >> 7);
+    }
+
+    /** Where pixel (px, py) of the canvas is in its map's colours. */
+    private static int at(int px, int py) {
+        return (((py & 127) << 7) + (px & 127)) * 3;
+    }
+
     /** Whether the 3×3 blocks round (bx, by) are all luma [y] and Cr [cr], the middle one Cb [cb], the rest Cb [level] or one above. */
-    private static boolean flat(Palette palette, byte[] ycc, int width, int bx, int by, int y, int cb, int cr, int level) {
+    private static boolean flat(Palette palette, Tiles ycc, int cols, int bx, int by, int y, int cb, int cr, int level) {
         for (int py = 2 * by - 2; py < 2 * by + 4; py++) {
-            int row = py * width * 3;
             for (int px = 2 * bx - 2; px < 2 * bx + 4; px++) {
-                int i = row + px * 3;
-                if ((ycc[i] & 255) != y || (ycc[i + 2] & 255) != cr) return false;
-                int b = ycc[i + 1] & 255;
+                byte[] m = ycc.read(tile(cols, px, py));
+                int i = at(px, py);
+                if ((m[i] & 255) != y || (m[i + 2] & 255) != cr) return false;
+                int b = m[i + 1] & 255;
                 if (b == cb) continue;
                 boolean middle = px >= 2 * bx && px < 2 * bx + 2 && py >= 2 * by && py < 2 * by + 2;
                 if (middle) return false;
