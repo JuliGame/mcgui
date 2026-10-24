@@ -38,7 +38,7 @@ import java.util.UUID;
 import java.util.logging.Level;
 
 /**
- * Neon Breakout: an example of a plugin built on UI Engine's framework. {@code /arcade play} sits you at a game of
+ * Neon Breakout: an example of a plugin built on MC GUI's framework. {@code /arcade play} sits you at a game of
  * your own; {@code /arcade cabinet} puts one up on a wall for anybody to walk up to.
  */
 public final class ArcadePlugin extends JavaPlugin {

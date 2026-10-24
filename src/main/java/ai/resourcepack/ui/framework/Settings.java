@@ -23,7 +23,7 @@ public final class Settings {
     /**
      * How far a view's pointer moves per mouse count, as a multiple of a desktop pointer at Windows' default
      * speed on a 1920-pixel-wide screen (one pixel per count); the view fills the window, so 1 crosses it in
-     * 1920 counts. Each player's /ui pointer multiplies it.
+     * 1920 counts. Each player's /mcgui pointer multiplies it.
      */
     public final double pointerSpeed;
     /** With the pack: the client draws the pointer itself every frame from where the player looks. */

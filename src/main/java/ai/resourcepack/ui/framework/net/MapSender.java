@@ -122,7 +122,7 @@ public final class MapSender implements AutoCloseable {
     private final AtomicReference<List<Assignment>> latest = new AtomicReference<>(List.of());
     private final AtomicLong bytesSent = new AtomicLong();
     private final Logger log;
-    private final Thread loop = new Thread(this::run, "UIEngine-send");
+    private final Thread loop = new Thread(this::run, "MCGUI-send");
     private volatile boolean closed;
     /** Whether the last pass left tiles to send (out of budget, or the connection full): then the loop looks again soon. */
     private volatile boolean unsent;

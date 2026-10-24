@@ -48,7 +48,7 @@ import java.util.function.Consumer;
  * Pages load off the server thread too, and show once loaded. Everything else runs on the server thread.
  */
 public final class Session {
-    private final UIEnginePlugin plugin;
+    private final MCGUIPlugin plugin;
     private final Renders renderers;
     /**
      * Back to the server thread as soon as it is free, which between ticks is at once: the Bukkit
@@ -169,7 +169,7 @@ public final class Session {
     static final int BLANK_AFTER_TICKS = 10;
 
     /** [designHeight]: how many CSS pixels tall the canvas is, unless the first page shown sets its own ui:height. */
-    Session(UIEnginePlugin plugin, Renders renderers, Canvas canvas, UUID viewer, double designHeight) {
+    Session(MCGUIPlugin plugin, Renders renderers, Canvas canvas, UUID viewer, double designHeight) {
         this.plugin = plugin;
         this.renderers = renderers;
         this.serverThread = plugin.serverThread();

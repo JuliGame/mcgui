@@ -51,7 +51,7 @@ import java.util.logging.Level;
 
 /**
  * Atlas: the game's own map, but live, as big as your screen, and something you can use. An example of a
- * plugin built on UI Engine's framework. {@code /atlas} opens it fullscreen; {@code /atlas wall} puts one on a wall.
+ * plugin built on MC GUI's framework. {@code /atlas} opens it fullscreen; {@code /atlas wall} puts one on a wall.
  */
 public final class AtlasPlugin extends JavaPlugin implements Listener {
     private static final TextColor GOLD = TextColor.color(0xFFAA00), GREY = TextColor.color(0xAAAAAA);

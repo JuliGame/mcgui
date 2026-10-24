@@ -4,7 +4,7 @@ import java.awt.Graphics2D;
 
 /**
  * Something for the arcade to run: a game, a toy, a thing that moves. It knows nothing of Minecraft or of
- * UI Engine: it draws frames with Java2D and is told what its players do, and the arcade puts the frames
+ * MC GUI: it draws frames with Java2D and is told what its players do, and the arcade puts the frames
  * on a cabinet's wall and in each seated player's fullscreen view.
  *
  * <p>Every method is called on one thread, the arcade's loop, so a scene needs no locking. Each frame the

@@ -440,7 +440,7 @@ public final class Shaders {
         SymbolHash hash = new SymbolHash(palette.symbolRgb);
         return """
 
-                // ---- UI Engine hi-colour map decoder ----
+                // ---- MC GUI hi-colour map decoder ----
                 // Colour -> symbol in one table read: a perfect hash into @SLOTS@ byte slots, four to a uint, each
                 // holding its symbol plus one (SymbolHash builds the table).
                 const uint MCB_T[@WORDS@] = @TABLE@;

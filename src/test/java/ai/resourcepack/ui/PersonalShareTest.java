@@ -103,7 +103,7 @@ class PersonalShareTest {
         return id;
     }
 
-    private Session open(UIEnginePlugin plugin, String page, UUID viewer) {
+    private Session open(MCGUIPlugin plugin, String page, UUID viewer) {
         Session s = rig.open(plugin, page, COLS, ROWS, H, viewer);
         rig.quiet();
         return s;
@@ -197,7 +197,7 @@ class PersonalShareTest {
     @Test
     void whatIsNotThePlayersOwnIsShared() {
         UUID al = player(SHORT), max = player(LONG);
-        UIEnginePlugin plugin = rig.plugin(16, 0), alone = rig.plugin(16, 0, false);
+        MCGUIPlugin plugin = rig.plugin(16, 0), alone = rig.plugin(16, 0, false);
         Session a = open(plugin, FIXED, al), b = open(plugin, FIXED, max);
         Session ownA = open(alone, FIXED, al), ownB = open(alone, FIXED, max);
         assertNotSame((Object) get(a, "doc"), get(b, "doc"));
@@ -226,7 +226,7 @@ class PersonalShareTest {
     @Test
     void aNameThatMovesTheRestSharesNothing() {
         UUID al = player(SHORT), max = player(LONG);
-        UIEnginePlugin plugin = rig.plugin(16, 0), alone = rig.plugin(16, 0, false);
+        MCGUIPlugin plugin = rig.plugin(16, 0), alone = rig.plugin(16, 0, false);
         Session a = open(plugin, FLOW, al), b = open(plugin, FLOW, max);
         Session ownB = open(alone, FLOW, max);
         HtmlRenderer.Frame fa = get(a, "frame"), fb = get(b, "frame");
@@ -257,7 +257,7 @@ class PersonalShareTest {
     @Test
     void aClickRunsThePlayersOwnCommand() {
         UUID al = player(SHORT), max = player(LONG);
-        UIEnginePlugin plugin = rig.plugin(16, 0);
+        MCGUIPlugin plugin = rig.plugin(16, 0);
         Session a = open(plugin, COMMAND, al), b = open(plugin, COMMAND, max);
         assertEquals(1, count(b, "fromTheirs"), "the second player's first picture was not the first's");
         assertSeenAlike(a.canvas, b.canvas, "opened: nothing drawn is either player's own");
@@ -290,7 +290,7 @@ class PersonalShareTest {
             }
         }
         assertNotNull(rig.pages.load("market").get(60, TimeUnit.SECONDS));
-        UIEnginePlugin plugin = rig.plugin(16, 0), alone = rig.plugin(16, 0, false);
+        MCGUIPlugin plugin = rig.plugin(16, 0), alone = rig.plugin(16, 0, false);
         UUID one = player("Fake1"), two = player("Fake_With_A_Long");
         Session a = rig.open(plugin, "market", 16, 9, 576, one);
         rig.quiet();
@@ -316,7 +316,7 @@ class PersonalShareTest {
     /** Players opening the page at the same moment: one draws it whole, the others wait for it and draw in only their own names. */
     @Test
     void openedAtOnceItIsDrawnOnce() {
-        UIEnginePlugin plugin = rig.plugin(16, 0);
+        MCGUIPlugin plugin = rig.plugin(16, 0);
         List<Session> sessions = new ArrayList<>();
         for (String name : List.of("Al", "Bo", "Cy", "Di", "Ed", "Flo")) sessions.add(rig.open(plugin, FIXED, COLS, ROWS, H, player(name)));
         rig.quiet();

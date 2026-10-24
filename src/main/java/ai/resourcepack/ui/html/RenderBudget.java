@@ -24,7 +24,7 @@ public final class RenderBudget {
     public static final RenderBudget NONE = new RenderBudget(0);
     /** How many times its limit a render may run on the clock, however little CPU it got. */
     static final int WALL_TIMES = 5;
-    /** Renders given up for taking longer than their limit, since the server started: {@code /ui stats} shows it. */
+    /** Renders given up for taking longer than their limit, since the server started: {@code /mcgui stats} shows it. */
     private static final AtomicLong TIMED_OUT = new AtomicLong();
     private static final ThreadMXBean THREADS = ManagementFactory.getThreadMXBean();
     private static final boolean CPU = THREADS.isThreadCpuTimeSupported() && THREADS.isThreadCpuTimeEnabled();

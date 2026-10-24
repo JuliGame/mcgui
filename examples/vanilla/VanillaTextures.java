@@ -14,9 +14,9 @@ import java.util.zip.ZipFile;
  * Copies the game's own textures that the vanilla example pages use out of a Minecraft client jar
  * (which is Mojang's, so this repository cannot ship them) into [pages]/vanilla/.
  *
- * <pre>java VanillaTextures.java path/to/versions/26.3/26.3.jar plugins/UIEngine/pages</pre>
+ * <pre>java VanillaTextures.java path/to/versions/26.3/26.3.jar plugins/MCGUI/pages</pre>
  *
- * Small textures are copied as they are: UI Engine draws pixel art 64 pixels or smaller scaled up without
+ * Small textures are copied as they are: MC GUI draws pixel art 64 pixels or smaller scaled up without
  * smoothing. The few bigger ones (the book page, the experience bar) are scaled up here, pixel for pixel,
  * to the size the pages draw them at, so they stay just as sharp.
  */
@@ -43,7 +43,7 @@ public class VanillaTextures {
 
     public static void main(String[] args) throws IOException {
         if (args.length != 2) {
-            System.err.println("java VanillaTextures.java <minecraft client jar> <UI Engine pages folder>");
+            System.err.println("java VanillaTextures.java <minecraft client jar> <MC GUI pages folder>");
             System.exit(2);
         }
         Path out = Path.of(args[1], "vanilla");
@@ -155,7 +155,7 @@ public class VanillaTextures {
     }
 
     /**
-     * The game's own font as TrueType files UI Engine can load (vanilla/minecraft.ttf and
+     * The game's own font as TrueType files MC GUI can load (vanilla/minecraft.ttf and
      * vanilla/minecraft_bold.ttf), built from the bitmap glyph sheets and the font definitions in the jar:
      * every glyph pixel for pixel, each one's width worked out as the game works it out (its rightmost
      * drawn column, plus one pixel of spacing), and bold done the game's way, the glyph drawn again one
@@ -197,7 +197,7 @@ public class VanillaTextures {
                     case "space" -> ((java.util.Map<String, Object>) p.get("advances")).forEach((ch, adv) ->
                             glyphs.putIfAbsent(ch.codePointAt(0), new Glyph((int) Math.round(((Number) adv).doubleValue() * UNIT), List.of())));
                     case "bitmap" -> bitmap(jar, p, glyphs);
-                    default -> {} // unihex (the fallback for every other script) is left to UI Engine's own fallbacks
+                    default -> {} // unihex (the fallback for every other script) is left to MC GUI's own fallbacks
                 }
             }
         }

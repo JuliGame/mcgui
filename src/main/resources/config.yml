@@ -1,19 +1,22 @@
-# UI Engine: HTML pages in game, on walls of maps and in fullscreen views. Pages live in
-# plugins/UIEngine/<pages-folder>/.
+# MC GUI: HTML pages in game, on walls of maps and in fullscreen views. Pages live in
+# plugins/MCGUI/<pages-folder>/.
 
 pages-folder: pages
+
+# /gui as well as /mcgui. Turn it off when another plugin uses /gui (read when the server starts).
+gui-alias: true
 
 # Edit a page (or its CSS or images) and it updates in game within a second.
 live-reload: true
 
-# Where /ui import <code> fetches pages shared from mcgui.dev (the browser builder for these pages),
-# with the code put on the end. Blank turns /ui import off.
+# Where /mcgui import <code> fetches pages shared from mcgui.dev (the browser builder for these pages),
+# with the code put on the end. Blank turns /mcgui import off.
 import-url: https://mcgui.dev/api/builder/ui/page/
 
-# Usage count: every 30 seconds UI Engine sends a random id, how many players are online and the names
-# of plugins that depend on it. And when somebody runs /ui import, the request to mcgui.dev also says
+# Usage count: every 30 seconds MC GUI sends a random id, how many players are online and the names
+# of plugins that depend on it. And when somebody runs /mcgui import, the request to mcgui.dev also says
 # this server's port, its server-ip (if set), its MOTD, how many players are on and who ran the command,
-# so we can see where pages made there are used. Off, neither is sent and /ui import still works.
+# so we can see where pages made there are used. Off, neither is sent and /mcgui import still works.
 telemetry: true
 
 # Pages made on mcgui.dev say so (a generator meta tag), and are drawn with a faint mark that mcgui.dev can
@@ -22,7 +25,7 @@ telemetry: true
 builder-mark: true
 
 # Let pages load stylesheets, fonts and images from the web (Google Fonts, image hosts). They are
-# fetched once and kept in plugins/UIEngine/cache/. Each fetch may take 15 seconds and 16 MB at most.
+# fetched once and kept in plugins/MCGUI/cache/. Each fetch may take 15 seconds and 16 MB at most.
 allow-web: true
 
 # Let pages load from this machine and private networks too (localhost, 10.x, 192.168.x, a cloud's
@@ -42,7 +45,7 @@ render-timeout: 2
 
 # The sound of a click on a link or button that does something: true for the game's own button click,
 # false for none, or any sound as "<sound> [volume] [pitch]" (e.g. "block.note_block.hat 0.5 1.6", or one
-# of your own, "uiengine:<file>" for plugins/UIEngine/sounds/<file>.ogg). A page can set its own with <meta name="ui:click-sound">.
+# of your own, "uiengine:<file>" for plugins/MCGUI/sounds/<file>.ogg). A page can set its own with <meta name="ui:click-sound">.
 click-sound: true
 
 # Pictures a second of a page while something on it animates (CSS animation or transition), 1 to 20. Each
@@ -101,13 +104,13 @@ views:
   # 1024 x 576 page drawn at twice the sharpness). A page can set its own with <meta name="ui:height">.
   height: 576
   # A view is fitted to the player's field of view. Minecraft does not tell the server what a player's
-  # FOV setting is, so this is assumed until they set theirs with /ui fov.
+  # FOV setting is, so this is assumed until they set theirs with /mcgui fov.
   default-fov: 70
   # How far the pointer moves for each step the mouse reports (a "count"), whatever the player's mouse
-  # sensitivity, which UI Engine reads from how their head turns. 1.0 is a desktop pointer at Windows'
+  # sensitivity, which MC GUI reads from how their head turns. 1.0 is a desktop pointer at Windows'
   # default speed on a 1920-pixel-wide screen: the view, which fills the window, is 1920 counts across
   # (6 cm with an 800 DPI mouse), so the pointer moves as the player's own desktop pointer does. 1.5 is
-  # 1280 counts (4 cm at 800 DPI). Players scale it for themselves with /ui pointer.
+  # 1280 counts (4 cm at 800 DPI). Players scale it for themselves with /mcgui pointer.
   pointer-speed: 1.0
   # With the pack, the player's own client draws the pointer every frame from where they look, so it has
   # no network or tick lag. Off: the server moves the pointer as their rotation arrives (20 times a second).
@@ -126,11 +129,11 @@ walls:
   # right click clicks the page like a left click does.
   right-click-fullscreen: true
 
-# The resource pack, the screens and the threads below are read when the server starts: /ui reload
+# The resource pack, the screens and the threads below are read when the server starts: /mcgui reload
 # does not change them.
 resource-pack:
   # serve: the engine serves its pack itself and sends it to players on join.
-  # external: the engine serves nothing; host plugins/UIEngine/pack.zip yourself (or merge it into
+  # external: the engine serves nothing; host plugins/MCGUI/pack.zip yourself (or merge it into
   #   your own pack) and set public-url, which players are sent on join.
   # off: no pack. Screens fall back to dithered vanilla map colours, and views are cut through the world.
   mode: serve

@@ -35,8 +35,8 @@ import java.util.Locale;
  * <p>The test picture is drawn with plain Java2D: a gradient, some text and one button that lights up
  * under the pointer and counts clicks. It is how to see the engine working without any other plugin.
  *
- * <p>Each subcommand checks its own node, {@code uiengine.<subcommand>}, and one pointed at another
- * player also needs {@code uiengine.<subcommand>.others}. {@code uiengine.admin} is only a parent in
+ * <p>Each subcommand checks its own node, {@code mcgui.<subcommand>}, and one pointed at another
+ * player also needs {@code mcgui.<subcommand>.others}. {@code mcgui.admin} is only a parent in
  * {@code plugin.yml} that grants them all; nothing here checks it.
  */
 public final class FrameworkCommand implements TabExecutor {
@@ -50,12 +50,12 @@ public final class FrameworkCommand implements TabExecutor {
         this.plugin = plugin;
     }
 
-    /** The node a subcommand needs: {@code uiengine.<subcommand>}. */
+    /** The node a subcommand needs: {@code mcgui.<subcommand>}. */
     static String permissionFor(String sub) {
-        return "uiengine." + sub;
+        return "mcgui." + sub;
     }
 
-    /** What pointing a subcommand at somebody else needs on top: {@code uiengine.<subcommand>.others}. */
+    /** What pointing a subcommand at somebody else needs on top: {@code mcgui.<subcommand>.others}. */
     static String othersPermissionFor(String sub) {
         return permissionFor(sub) + ".others";
     }
@@ -75,7 +75,7 @@ public final class FrameworkCommand implements TabExecutor {
             case "test" -> test(sender, args);
             case "fov" -> {
                 if (!(sender instanceof Player p)) return say(sender, "Only players have a field of view.", NamedTextColor.RED);
-                if (args.length < 2) return say(sender, "Your FOV here is " + plugin.views().fovOf(p) + ". Set it with /ui fov <degrees> to match your video settings.", NamedTextColor.GRAY);
+                if (args.length < 2) return say(sender, "Your FOV here is " + plugin.views().fovOf(p) + ". Set it with /mcgui fov <degrees> to match your video settings.", NamedTextColor.GRAY);
                 try {
                     int fov = Integer.parseInt(args[1]);
                     if (fov < 30 || fov > 110) throw new NumberFormatException();
@@ -95,12 +95,12 @@ public final class FrameworkCommand implements TabExecutor {
                 say(sender, "Removed " + testWalls.size() + " test wall(s).", NamedTextColor.GREEN);
                 testWalls.clear();
             }
-            default -> say(sender, "/ui test wall|view [cols] [rows] · fov <degrees> · pointer [speed] · pack · stats · clear", NamedTextColor.GRAY);
+            default -> say(sender, "/mcgui test wall|view [cols] [rows] · fov <degrees> · pointer [speed] · pack · stats · clear", NamedTextColor.GRAY);
         }
         return true;
     }
 
-    /** /ui pointer [speed]: how fast the pointer moves in your views, as a multiple of the server's speed. */
+    /** /mcgui pointer [speed]: how fast the pointer moves in your views, as a multiple of the server's speed. */
     private void pointer(CommandSender sender, String[] args) {
         if (!(sender instanceof Player p)) {
             say(sender, "Only players have a mouse.", NamedTextColor.RED);
@@ -110,7 +110,7 @@ public final class FrameworkCommand implements TabExecutor {
             double sensitivity = plugin.views().sensitivityOf(p);
             String read = Double.isNaN(sensitivity) ? "Your mouse sensitivity is not known yet: look up and down a little."
                     : "Your mouse sensitivity reads as " + Math.round(sensitivity * 200) + "%, so a view moves the pointer as far per bit of mouse travel whatever it is.";
-            say(sender, String.format(Locale.ROOT, "Your pointer speed is %.2f. %s Set it with /ui pointer <0.25 to 4> (1 is the server's).",
+            say(sender, String.format(Locale.ROOT, "Your pointer speed is %.2f. %s Set it with /mcgui pointer <0.25 to 4> (1 is the server's).",
                     plugin.views().pointerSpeedOf(p), read), NamedTextColor.GRAY);
             return;
         }
@@ -128,7 +128,7 @@ public final class FrameworkCommand implements TabExecutor {
         // A fifth argument names the player, so the console (and a test harness) can run it.
         Player p = args.length > 4 ? org.bukkit.Bukkit.getPlayerExact(args[4]) : sender instanceof Player self ? self : null;
         if (p == null) {
-            say(sender, "Run this as a player, or name one: /ui test wall|view <cols> <rows> <player>.", NamedTextColor.RED);
+            say(sender, "Run this as a player, or name one: /mcgui test wall|view <cols> <rows> <player>.", NamedTextColor.RED);
             return;
         }
         if (p != sender && !permitted(sender, othersPermissionFor("test"))) return;
@@ -154,14 +154,14 @@ public final class FrameworkCommand implements TabExecutor {
     }
 
     /**
-     * /ui debug &lt;player&gt; point &lt;x&gt; &lt;y&gt; | click [right] | scroll &lt;notches&gt; | speed | close: drive a
+     * /mcgui debug &lt;player&gt; point &lt;x&gt; &lt;y&gt; | click [right] | scroll &lt;notches&gt; | speed | close: drive a
      * player's view from the console, for testing without anybody at the mouse.
      */
     private void debug(CommandSender sender, String[] args) {
         Player p = args.length > 1 ? org.bukkit.Bukkit.getPlayerExact(args[1]) : null;
         View view = p == null ? null : plugin.viewOf(p);
         if (view == null || args.length < 3) {
-            say(sender, "/ui debug <player> point <x> <y> | click [right] | scroll <n> | speed | close (the player needs an open view)", NamedTextColor.RED);
+            say(sender, "/mcgui debug <player> point <x> <y> | click [right] | scroll <n> | speed | close (the player needs an open view)", NamedTextColor.RED);
             return;
         }
         if (p != sender && !permitted(sender, othersPermissionFor("debug"))) return;
@@ -240,7 +240,7 @@ public final class FrameworkCommand implements TabExecutor {
             }
             g.setColor(Color.WHITE);
             g.setFont(new Font(Font.SANS_SERIF, Font.BOLD, h / 9));
-            centre(g, "UI Engine", w / 2, h / 4);
+            centre(g, "MC GUI", w / 2, h / 4);
             g.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, h / 22));
             centre(g, canvas.cols() + " x " + canvas.rows() + " maps, " + w + " x " + h + " pixels", w / 2, h / 2);
             g.setColor(hover ? new Color(0x22C55E) : new Color(0x16A34A));

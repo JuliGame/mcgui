@@ -13,7 +13,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/** A second /ui import of a project removes what it no longer has, and nothing anybody changed or owns. */
+/** A second /mcgui import of a project removes what it no longer has, and nothing anybody changed or owns. */
 class PageImportTidyTest {
     @TempDir
     Path dir;
@@ -24,7 +24,7 @@ class PageImportTidyTest {
         return out;
     }
 
-    /** What /ui import does: write the files, then tidy. */
+    /** What /mcgui import does: write the files, then tidy. */
     private List<String>[] importProject(String project, Map<String, byte[]> files) throws Exception {
         Path pages = dir.resolve("pages");
         Files.createDirectories(pages);

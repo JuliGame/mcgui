@@ -61,7 +61,7 @@ public final class SessionBench {
     private static void open(Path dir, String page, Size size, int warm, int opens, boolean take) throws Exception {
         try (SessionRig rig = new SessionRig(dir, 2)) {
             rig.pages.load(page).get(30, TimeUnit.SECONDS);
-            UIEnginePlugin plugin = rig.plugin(take ? 64 : 0);
+            MCGUIPlugin plugin = rig.plugin(take ? 64 : 0);
             List<Session> live = new ArrayList<>();
             // The first viewer draws (and, with take, keeps) the picture; [warm] more warm the code up.
             for (int i = 0; i <= warm; i++) {
@@ -97,7 +97,7 @@ public final class SessionBench {
     private static void heap(Path dir, String page, Size size, int n) throws Exception {
         try (SessionRig rig = new SessionRig(dir, 2)) {
             rig.pages.load(page).get(30, TimeUnit.SECONDS);
-            UIEnginePlugin plugin = rig.plugin(64);
+            MCGUIPlugin plugin = rig.plugin(64);
             List<Session> live = new ArrayList<>();
             live.add(rig.open(plugin, page, size.cols, size.rows, size.height));
             rig.quiet();

@@ -1,6 +1,6 @@
 # Arcade
 
-An example plugin built on UI Engine's framework API: arcade games in vanilla Minecraft,
+An example plugin built on MC GUI's framework API: arcade games in vanilla Minecraft,
 drawn into a `Canvas` up to 30 times a second and played with the real mouse and
 keyboard.
 
@@ -40,9 +40,9 @@ keyboard.
   top-left block, and the way the screen faces), and
   `/arcade remove <x> <y> <z> [world]` (any block the cabinet covers).
 
-Build with `../../gradlew build` from this directory; it builds UI Engine from
+Build with `../../gradlew build` from this directory; it builds MC GUI from
 the checkout two directories up. Install `build/libs/Arcade-*.jar` beside
-UI Engine's jar.
+MC GUI's jar.
 
 ## Writing a game
 

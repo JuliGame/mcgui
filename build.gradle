@@ -5,7 +5,7 @@ plugins {
 }
 
 group = 'ai.resourcepack'
-version = '0.1.1'
+version = '0.2.0'
 
 java {
     toolchain {
@@ -59,10 +59,10 @@ shadowJar {
     relocate 'ai.resourcepack.common', 'ai.resourcepack.ui.libs.common'
 }
 
-base { archivesName = 'UIEngine' }
+base { archivesName = 'MCGUI' }
 
 // The classes alone, without the libraries: what the examples here (and anything else built in the same
-// Gradle run) compile against. The plugin is the shadow jar, UIEngine-<version>.jar.
+// Gradle run) compile against. The plugin is the shadow jar, MCGUI-<version>.jar.
 jar {
     archiveClassifier.set('dev')
 }
@@ -71,7 +71,7 @@ build {
     dependsOn shadowJar
 }
 
-// For plugins that build against UI Engine: the plugin jar itself, with its sources. JitPack builds it
+// For plugins that build against MC GUI: the plugin jar itself, with its sources. JitPack builds it
 // from a tag of this repository (see the README).
 publishing {
     publications {

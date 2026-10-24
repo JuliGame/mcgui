@@ -14,7 +14,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * caret, nothing, or a cursor of the server's own. Each is one glyph of the pack's pointer font, drawn so its
  * hot pixel ({@link #hotX}, {@link #hotY}) is where the pointer points.
  *
- * <p>The server's own cursors are the PNGs in {@code plugins/UIEngine/cursors/}, put in the pack when UI
+ * <p>The server's own cursors are the PNGs in {@code plugins/MCGUI/cursors/}, put in the pack when UI
  * Engine starts and named by their file name ({@code sword.png} is {@link #custom custom("sword")}). A page
  * asks for one with CSS: {@code cursor: url(sword.png) 4 0, pointer}, the hot pixel in the picture's own
  * pixels, and the keyword after it for a server without that cursor. A picture 16 pixels tall is the arrow's
@@ -126,7 +126,7 @@ public final class Pointer {
     }
 
     /**
-     * Adds a cursor called [name] drawn as [image]. UI Engine calls this for each picture in its cursors folder
+     * Adds a cursor called [name] drawn as [image]. MC GUI calls this for each picture in its cursors folder
      * as it builds its resource pack; one added later is not in the pack. Returns it, or null when the pack has
      * no room for another or the picture is too short for a glyph.
      */

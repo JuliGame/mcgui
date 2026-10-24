@@ -1,90 +1,93 @@
-name: UIEngine
+name: MCGUI
 version: ${version}
-main: ai.resourcepack.ui.UIEnginePlugin
+main: ai.resourcepack.ui.MCGUIPlugin
 api-version: '1.21'
 softdepend: [PlaceholderAPI]
+# Its name until 0.1.1: a plugin that depends on UIEngine still loads after this one.
+provides: [UIEngine]
 description: "Custom HTML/CSS screens in Minecraft with no limits. Not chest GUIs or Dialogs!"
 website: https://mcgui.dev/
 commands:
-  ui:
+  # /gui as well, unless gui-alias in config.yml is off (registered at start-up, see MCGUIPlugin).
+  mcgui:
     description: Open, place and reload HTML pages; test screens, set your field of view and pointer speed, re-send the pack.
-    usage: /ui open <page> [player] | close | place <page> [cols] [rows] [name] [shared] | remove [name] | list | reload | test wall|view [cols] [rows] | fov <degrees> | pointer [speed] | pack | stats | clear
+    usage: /mcgui open <page> [player] | close | place <page> [cols] [rows] [name] [shared] | remove [name] | list | reload | test wall|view [cols] [rows] | fov <degrees> | pointer [speed] | pack | stats | clear
 permissions:
-  # One node per subcommand, checked as uiengine.<subcommand>, and a separate
-  # .others node for pointing one at somebody else. uiengine.admin is only a
+  # One node per subcommand, checked as mcgui.<subcommand>, and a separate
+  # .others node for pointing one at somebody else. mcgui.admin is only a
   # parent: nothing checks it, it grants all of them in one line. Closing your
   # OWN page needs nothing, as sneaking out of it needs nothing.
-  uiengine.admin:
+  mcgui.admin:
     description: Everything below. A convenience parent, not a node anything checks.
     default: op
     children:
-      uiengine.open: true
-      uiengine.open.others: true
-      uiengine.close.others: true
-      uiengine.place: true
-      uiengine.remove: true
-      uiengine.list: true
-      uiengine.reload: true
-      uiengine.import: true
-      uiengine.test: true
-      uiengine.test.others: true
-      uiengine.stats: true
-      uiengine.clear: true
-      uiengine.debug: true
-      uiengine.debug.others: true
-      uiengine.fov: true
-      uiengine.pointer: true
-      uiengine.pack: true
-  uiengine.open:
-    description: Open a page fullscreen for yourself with /ui open.
+      mcgui.open: true
+      mcgui.open.others: true
+      mcgui.close.others: true
+      mcgui.place: true
+      mcgui.remove: true
+      mcgui.list: true
+      mcgui.reload: true
+      mcgui.import: true
+      mcgui.test: true
+      mcgui.test.others: true
+      mcgui.stats: true
+      mcgui.clear: true
+      mcgui.debug: true
+      mcgui.debug.others: true
+      mcgui.fov: true
+      mcgui.pointer: true
+      mcgui.pack: true
+  mcgui.open:
+    description: Open a page fullscreen for yourself with /mcgui open.
     default: op
-  uiengine.open.others:
-    description: Open a page for another player with /ui open <page> <player>, and close it again.
+  mcgui.open.others:
+    description: Open a page for another player with /mcgui open <page> <player>, and close it again.
     default: op
     children:
-      uiengine.close.others: true
-  uiengine.close.others:
-    description: Close another player's page with /ui close <player>.
+      mcgui.close.others: true
+  mcgui.close.others:
+    description: Close another player's page with /mcgui close <player>.
     default: op
-  uiengine.place:
-    description: Put a page on a wall with /ui place.
+  mcgui.place:
+    description: Put a page on a wall with /mcgui place.
     default: op
-  uiengine.remove:
-    description: Take a wall screen down with /ui remove.
+  mcgui.remove:
+    description: Take a wall screen down with /mcgui remove.
     default: op
-  uiengine.list:
-    description: List the pages and every placed screen, with where it is, with /ui list.
+  mcgui.list:
+    description: List the pages and every placed screen, with where it is, with /mcgui list.
     default: op
-  uiengine.reload:
-    description: Read the config and every page again with /ui reload.
+  mcgui.reload:
+    description: Read the config and every page again with /mcgui reload.
     default: op
-  uiengine.import:
-    description: Write pages shared from mcgui.dev into the pages folder with /ui import <code>.
+  mcgui.import:
+    description: Write pages shared from mcgui.dev into the pages folder with /mcgui import <code>.
     default: op
-  uiengine.test:
-    description: Put a test picture on a wall or open one as a view, with /ui test.
+  mcgui.test:
+    description: Put a test picture on a wall or open one as a view, with /mcgui test.
     default: op
-  uiengine.test.others:
-    description: Open a test view or place a test wall for another player, with /ui test ... <player>.
+  mcgui.test.others:
+    description: Open a test view or place a test wall for another player, with /mcgui test ... <player>.
     default: op
-  uiengine.stats:
-    description: See what the plugin costs the server (server thread, pictures, threads, start-up) with /ui stats.
+  mcgui.stats:
+    description: See what the plugin costs the server (server thread, pictures, threads, start-up) with /mcgui stats.
     default: op
-  uiengine.clear:
-    description: Remove every test wall, whoever placed it, with /ui clear.
+  mcgui.clear:
+    description: Remove every test wall, whoever placed it, with /mcgui clear.
     default: op
-  uiengine.debug:
-    description: Drive your own open view with /ui debug (point, click, scroll, speed, close), for testing.
+  mcgui.debug:
+    description: Drive your own open view with /mcgui debug (point, click, scroll, speed, close), for testing.
     default: op
-  uiengine.debug.others:
-    description: Drive another player's open view with /ui debug <player>.
+  mcgui.debug.others:
+    description: Drive another player's open view with /mcgui debug <player>.
     default: op
-  uiengine.fov:
-    description: Fit views to your field of view with /ui fov.
+  mcgui.fov:
+    description: Fit views to your field of view with /mcgui fov.
     default: true
-  uiengine.pointer:
-    description: Set how fast the pointer moves in your views with /ui pointer.
+  mcgui.pointer:
+    description: Set how fast the pointer moves in your views with /mcgui pointer.
     default: true
-  uiengine.pack:
-    description: Have the resource pack sent to you again with /ui pack.
+  mcgui.pack:
+    description: Have the resource pack sent to you again with /mcgui pack.
     default: true

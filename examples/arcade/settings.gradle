@@ -1,4 +1,4 @@
 rootProject.name = 'arcade'
 
-// UI Engine, built from this checkout (the directory two up).
+// MC GUI, built from this checkout (the directory two up).
 includeBuild('../..')

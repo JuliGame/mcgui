@@ -368,7 +368,7 @@ public final class Views implements Listener {
         return views.containsKey(player.getUniqueId());
     }
 
-    /** The player's FOV setting, as they told us with /ui fov; the server cannot read it. */
+    /** The player's FOV setting, as they told us with /mcgui fov; the server cannot read it. */
     public int fovOf(Player player) {
         Integer fov = player.getPersistentDataContainer().get(fovKey, PersistentDataType.INTEGER);
         return fov == null ? settings.defaultFov : fov;
@@ -661,7 +661,7 @@ public final class Views implements Listener {
 
     /**
      * Canvas pixels per degree of turn for [player]'s view of [canvas]: views.pointer-speed, times their own
-     * (/ui pointer), per mouse count, over the degrees a count turns them by (their {@link MouseSteps}, or
+     * (/mcgui pointer), per mouse count, over the degrees a count turns them by (their {@link MouseSteps}, or
      * the game's default sensitivity's until those are known). A desktop pointer at Windows' default speed
      * moves one screen pixel a count, so 1920 counts across a 1920-pixel-wide screen; the view fills the
      * window, so a speed of 1 crosses it in as many.
@@ -699,7 +699,7 @@ public final class Views implements Listener {
         return Double.isNaN(step) ? Double.NaN : MouseSteps.sensitivity(step);
     }
 
-    /** [player]'s own pointer speed, a multiple of views.pointer-speed set with /ui pointer. */
+    /** [player]'s own pointer speed, a multiple of views.pointer-speed set with /mcgui pointer. */
     public double pointerSpeedOf(Player player) {
         Double speed = player.getPersistentDataContainer().get(pointerKey, PersistentDataType.DOUBLE);
         return speed == null ? 1.0 : speed;
@@ -711,7 +711,7 @@ public final class Views implements Listener {
         else player.getPersistentDataContainer().set(pointerKey, PersistentDataType.DOUBLE, speed);
     }
 
-    /** For /ui debug: the pointer's speed in [player]'s open view, and what it came from. */
+    /** For /mcgui debug: the pointer's speed in [player]'s open view, and what it came from. */
     public String pointerSpeedReport(Player player) {
         ViewImpl v = views.get(player.getUniqueId());
         double sensitivity = sensitivityOf(player);
@@ -1593,7 +1593,7 @@ public final class Views implements Listener {
     }
 
     /**
-     * For /ui debug: put a view's pointer at (x, y) as if the mouse had moved there. A client-placed
+     * For /mcgui debug: put a view's pointer at (x, y) as if the mouse had moved there. A client-placed
      * pointer is where the player looks, so they are turned to look there too.
      */
     public void debugPoint(Player player, int x, int y) {

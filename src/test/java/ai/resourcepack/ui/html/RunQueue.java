@@ -15,7 +15,7 @@ import java.util.concurrent.locks.LockSupport;
  * the machine is running.
  */
 final class RunQueue extends Thread {
-    private static final String[] POOLS = {"ForkJoinPool", "UIEngine-cpu", "LoadBench-rend"};
+    private static final String[] POOLS = {"ForkJoinPool", "MCGUI-cpu", "LoadBench-rend"};
     private volatile boolean stop;
     private int[] counts = new int[1 << 16];
     private long[] at = new long[1 << 16];

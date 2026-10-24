@@ -66,7 +66,7 @@ class MapSenderSleepTest {
         Canvas canvas = new Canvas(PALETTE, COLS, ROWS, sender::wake);
         sender.update(List.of(new MapSender.Assignment(player(), wall, canvas, Canvas.Encoding.HI, null)));
         sender.start();
-        Thread loop = thread("UIEngine-send");
+        Thread loop = thread("MCGUI-send");
         canvas.draw(noise(2), W, H, 0, 0);
         awaitShown(canvas);
         awaitState(loop, Thread.State.WAITING);

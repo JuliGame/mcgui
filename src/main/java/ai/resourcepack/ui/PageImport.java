@@ -28,7 +28,7 @@ import java.util.Map;
 import java.util.regex.Pattern;
 
 /**
- * {@code /ui import <code>}: the pages somebody shared from <a href="https://mcgui.dev">mcgui.dev</a>,
+ * {@code /mcgui import <code>}: the pages somebody shared from <a href="https://mcgui.dev">mcgui.dev</a>,
  * written into the pages folder. The code names a frozen copy there; this fetches its files (pages,
  * stylesheets, pictures) as JSON from {@code import-url} + code, checks every name itself (a server
  * trusts no website to keep names inside its folder), and writes them, replacing files of the same
@@ -52,14 +52,14 @@ final class PageImport {
     private static final int MAX_BYTES = 4 * 1024 * 1024;
     private static final int MAX_FILES = 40;
 
-    private final UIEnginePlugin plugin;
+    private final MCGUIPlugin plugin;
     private final HttpClient http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
             .followRedirects(HttpClient.Redirect.NORMAL)
             .version(HttpClient.Version.HTTP_1_1)
             .build();
 
-    PageImport(UIEnginePlugin plugin) {
+    PageImport(MCGUIPlugin plugin) {
         this.plugin = plugin;
     }
 
@@ -72,13 +72,13 @@ final class PageImport {
         }
         String key = code.toLowerCase(java.util.Locale.ROOT);
         if (!CODE.matcher(key).matches()) {
-            say(sender, "That isn't a mcgui.dev code: it's the eight letters after /ui import on the Send to server screen.", NamedTextColor.RED);
+            say(sender, "That isn't a mcgui.dev code: it's the eight letters after /mcgui import on the Send to server screen.", NamedTextColor.RED);
             return;
         }
         say(sender, "Fetching " + key + "...", NamedTextColor.GRAY);
         HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(base + key))
                 .timeout(Duration.ofSeconds(20))
-                .header("User-Agent", "UIEngine/" + plugin.getPluginMeta().getVersion());
+                .header("User-Agent", "MCGUI/" + plugin.getPluginMeta().getVersion());
         if (plugin.telemetry()) about(builder, sender);
         HttpRequest request = builder.GET().build();
         http.sendAsync(request, HttpResponse.BodyHandlers.ofByteArray()).whenComplete((res, error) -> {
@@ -145,8 +145,8 @@ final class PageImport {
                         String page = pages.get(i);
                         if (i > 0) line = line.append(Component.text(" · ", NamedTextColor.DARK_GRAY));
                         line = line.append(Component.text(page, i == 0 ? NamedTextColor.AQUA : NamedTextColor.DARK_AQUA)
-                                .clickEvent(ClickEvent.runCommand("/ui open " + page))
-                                .hoverEvent(HoverEvent.showText(Component.text("/ui open " + page))));
+                                .clickEvent(ClickEvent.runCommand("/mcgui open " + page))
+                                .hoverEvent(HoverEvent.showText(Component.text("/mcgui open " + page))));
                     }
                     sender.sendMessage(line);
                 }

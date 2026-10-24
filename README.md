@@ -1,11 +1,11 @@
-# UI Engine
+# MC GUI
 
-Put an HTML page in `plugins/UIEngine/pages/` and it is in the game: on a wall,
+Put an HTML page in `plugins/MCGUI/pages/` and it is in the game: on a wall,
 or fullscreen in front of the player, who points with their mouse and clicks.
 Vanilla clients, no mods: a Paper plugin and a small resource pack it builds and
 serves itself. Edit the file and it updates in game within a second.
 
-No browser runs. UI Engine has its own HTML and CSS renderer, so what works is
+No browser runs. MC GUI has its own HTML and CSS renderer, so what works is
 **static** HTML and CSS: no JavaScript. Links, commands, hover states, scrolling,
 sounds and a few form bits are made to work in game instead (below).
 
@@ -16,7 +16,7 @@ it. See [For plugin developers](#for-plugin-developers).
 
 **Needs** Paper 26.2 or 26.3 (Java 25). PlaceholderAPI is optional. Build with
 `./gradlew build` (JDK 17 or 21 to run Gradle); the plugin is
-`build/libs/UIEngine-<version>.jar`. `./gradlew renderSamples` renders
+`build/libs/MCGUI-<version>.jar`. `./gradlew renderSamples` renders
 `samples/*.html` to `build/samples/` to check the renderer by eye.
 
 ## How it works
@@ -33,7 +33,7 @@ it. See [For plugin developers](#for-plugin-developers).
 - **Colour.** With the pack, maps carry YCbCr 4:2:0 in 240 map colours and the
   pack's text shader decodes them, smoothly scaled, unlit and unfogged. Without
   it, players get dithered vanilla map colours.
-- **Sounds.** Every `.ogg` in `plugins/UIEngine/sounds/` goes into the pack
+- **Sounds.** Every `.ogg` in `plugins/MCGUI/sounds/` goes into the pack
   as a sound named after its path: `sounds/menu/open.ogg` plays as
   `uiengine:menu/open`, from a page, `/playsound` or any plugin. Names are lower
   case. Restart after adding one, so the pack is built again.
@@ -42,24 +42,29 @@ A new `pages/` folder starts with examples: `menu`, `rules`, `shop`, and
 `market`, a night-market trader's stall that shows off hover tooltips, a
 click-to-showcase item stand (radio inputs, no JavaScript), pixel-art item
 sprites and pre-rendered 3D models, and a Trade button that runs a console
-`give` with item components. Try `/ui open market`. `market-overlay` and
+`give` with item components. Try `/mcgui open market`. `market-overlay` and
 `market-blur` are the same stall as an overlay, with the world round it.
 
 ## Commands
 
+`/gui` works as well as `/mcgui` unless `gui-alias: false` in `config.yml` (for a
+server where another plugin has `/gui`). MC GUI was called UI Engine until 0.1.1:
+its folder moves from `plugins/UIEngine` on first start, and a plugin that
+depends on `UIEngine` still loads.
+
 | Command | Does |
 |---|---|
-| `/ui open <page> [player]` | Opens a page fullscreen. Sneak to leave |
-| `/ui close [player]` | Closes it |
-| `/ui place <page> [cols] [rows] [name] [shared]` | Puts a page on the wall you look at (the block becomes the top-left corner) |
-| `/ui remove [name]` | Takes a wall screen down (or the one you look at) |
-| `/ui list` · `/ui reload` | Pages and screens · read the config and every page again |
-| `/ui import <code>` | Writes pages made on [mcgui.dev](https://mcgui.dev) into the pages folder (the code is on its Send to server screen). Importing the same project again removes the files it no longer has, unless they were changed on the server |
-| `/ui test wall\|view [cols] [rows] [player]` | Puts a test picture on the wall you look at, or opens one fullscreen: the framework working with no page at all |
-| `/ui fov <degrees>` | Fits views to your FOV setting, for players without the pack (the server cannot read it) |
-| `/ui pointer [speed]` | Your pointer speed in views, 0.25 to 4 times the server's (`views.pointer-speed`); without a number, shows it and the mouse sensitivity read from your turning |
-| `/ui pack` · `stats` · `clear` | Re-send the pack · what the plugin costs the server now (see below) · remove test walls |
-| `/ui debug <player> point <x> <y>` · `click` · `scroll <n>` · `speed` · `close` | Drive a player's view from the console; `speed` shows its pointer speed and where it came from |
+| `/mcgui open <page> [player]` | Opens a page fullscreen. Sneak to leave |
+| `/mcgui close [player]` | Closes it |
+| `/mcgui place <page> [cols] [rows] [name] [shared]` | Puts a page on the wall you look at (the block becomes the top-left corner) |
+| `/mcgui remove [name]` | Takes a wall screen down (or the one you look at) |
+| `/mcgui list` · `/mcgui reload` | Pages and screens · read the config and every page again |
+| `/mcgui import <code>` | Writes pages made on [mcgui.dev](https://mcgui.dev) into the pages folder (the code is on its Send to server screen). Importing the same project again removes the files it no longer has, unless they were changed on the server |
+| `/mcgui test wall\|view [cols] [rows] [player]` | Puts a test picture on the wall you look at, or opens one fullscreen: the framework working with no page at all |
+| `/mcgui fov <degrees>` | Fits views to your FOV setting, for players without the pack (the server cannot read it) |
+| `/mcgui pointer [speed]` | Your pointer speed in views, 0.25 to 4 times the server's (`views.pointer-speed`); without a number, shows it and the mouse sensitivity read from your turning |
+| `/mcgui pack` · `stats` · `clear` | Re-send the pack · what the plugin costs the server now (see below) · remove test walls |
+| `/mcgui debug <player> point <x> <y>` · `click` · `scroll <n>` · `speed` · `close` | Drive a player's view from the console; `speed` shows its pointer speed and where it came from |
 
 ### Permissions
 
@@ -69,38 +74,38 @@ node as well.
 
 | Node | Allows | Default |
 |---|---|---|
-| `uiengine.open` | `/ui open <page>` for yourself | op |
-| `uiengine.open.others` | `/ui open <page> <player>`; also grants `uiengine.close.others` | op |
-| `uiengine.close.others` | `/ui close <player>` | op |
-| `uiengine.place` | `/ui place` | op |
-| `uiengine.remove` | `/ui remove` | op |
-| `uiengine.list` | `/ui list` (pages, and where every screen is) | op |
-| `uiengine.reload` | `/ui reload` | op |
-| `uiengine.import` | `/ui import` (writes files into the pages folder, replacing any of the same name) | op |
-| `uiengine.test` | `/ui test` for yourself | op |
-| `uiengine.test.others` | `/ui test ... <player>` for somebody else | op |
-| `uiengine.stats` | `/ui stats` | op |
-| `uiengine.clear` | `/ui clear` (removes every test wall, whoever placed it) | op |
-| `uiengine.debug` | `/ui debug` on your own view | op |
-| `uiengine.debug.others` | `/ui debug` on another player's view | op |
-| `uiengine.fov` | `/ui fov` | everyone |
-| `uiengine.pointer` | `/ui pointer` | everyone |
-| `uiengine.pack` | `/ui pack` | everyone |
-| `uiengine.admin` | all of the above, in one line | op |
+| `mcgui.open` | `/mcgui open <page>` for yourself | op |
+| `mcgui.open.others` | `/mcgui open <page> <player>`; also grants `mcgui.close.others` | op |
+| `mcgui.close.others` | `/mcgui close <player>` | op |
+| `mcgui.place` | `/mcgui place` | op |
+| `mcgui.remove` | `/mcgui remove` | op |
+| `mcgui.list` | `/mcgui list` (pages, and where every screen is) | op |
+| `mcgui.reload` | `/mcgui reload` | op |
+| `mcgui.import` | `/mcgui import` (writes files into the pages folder, replacing any of the same name) | op |
+| `mcgui.test` | `/mcgui test` for yourself | op |
+| `mcgui.test.others` | `/mcgui test ... <player>` for somebody else | op |
+| `mcgui.stats` | `/mcgui stats` | op |
+| `mcgui.clear` | `/mcgui clear` (removes every test wall, whoever placed it) | op |
+| `mcgui.debug` | `/mcgui debug` on your own view | op |
+| `mcgui.debug.others` | `/mcgui debug` on another player's view | op |
+| `mcgui.fov` | `/mcgui fov` | everyone |
+| `mcgui.pointer` | `/mcgui pointer` | everyone |
+| `mcgui.pack` | `/mcgui pack` | everyone |
+| `mcgui.admin` | all of the above, in one line | op |
 
 Closing your own page needs no permission, just as sneaking out of it needs
-none. `uiengine.admin` is only a parent: the plugin checks the nodes it grants,
-never `uiengine.admin` itself. Tab completion offers only what you may run.
+none. `mcgui.admin` is only a parent: the plugin checks the nodes it grants,
+never `mcgui.admin` itself. Tab completion offers only what you may run.
 
-**Telemetry.** Every 30 seconds UI Engine sends an anonymous usage count to
+**Telemetry.** Every 30 seconds MC GUI sends an anonymous usage count to
 resourcepack.ai: a random id, how many players are online and the names of
-plugins that depend on it. And `/ui import` tells mcgui.dev which server is
+plugins that depend on it. And `/mcgui import` tells mcgui.dev which server is
 importing: its port, its `server-ip` if set, its MOTD, the players online and
 who ran the command, beside the address the request comes from anyway.
 `telemetry: false` in `config.yml` turns both off; importing still works.
 
 **The mcgui.dev mark.** A page made on mcgui.dev carries
-`<meta name="generator" content="mcgui.dev">`, and UI Engine draws it with a
+`<meta name="generator" content="mcgui.dev">`, and MC GUI draws it with a
 faint mark: some blocks of plain colour are one chroma level bluer, in a
 pattern mcgui.dev can read back from a PNG screenshot to tell the page came
 from it. It holds a fixed tag and nothing about the player or the server.
@@ -128,14 +133,14 @@ Minecraft mouse sensitivity. `views.pointer-speed` in `config.yml` sets it:
 | 1.5 | 1280 | 4.1 cm | 2.0 cm |
 | 2.0 | 960 | 3.0 cm | 1.5 cm |
 
-Each player can scale it for themselves with `/ui pointer <0.25 to 4>`.
+Each player can scale it for themselves with `/mcgui pointer <0.25 to 4>`.
 
 Minecraft never tells the server a player's sensitivity, and no mouse ever
 tells anybody its DPI, so neither can be asked for. But the client turns the
 head by a whole number of counts times a step that depends only on the
 sensitivity: `1.2 × (0.6 s + 0.2)³` degrees, for the option's `s` from 0 to 1
 (shown in the game as 0 to 200%). Every change of pitch the client sends is a
-whole multiple of that step, so UI Engine reads the step off the pitch of
+whole multiple of that step, so MC GUI reads the step off the pitch of
 every online player as they play, in a fraction of a second of looking around,
 and remembers it on the player. Turns the server makes (teleports, respawns,
 a view turning the player back inside the picture) are left out. Until it
@@ -170,7 +175,7 @@ Mouse clicks go to the screen, not the page, while it is open.
 
 The pointer is an arrow, a hand over anything clickable, a text caret or
 nothing, as the page's CSS `cursor` says (`default`, `pointer`, `text`,
-`none`). For a cursor of your own, put a PNG in `plugins/UIEngine/cursors/`
+`none`). For a cursor of your own, put a PNG in `plugins/MCGUI/cursors/`
 and restart the server: it goes into the resource pack, named by its file
 name. A page asks for it the way a browser page does:
 
@@ -195,7 +200,7 @@ drawn bigger, and a taller one is scaled to 32 (128 a side at most, 64 cursors
 at most). Players without the resource pack see it drawn into the map, in the
 nearest map colours.
 
-`/ui import` copies any picture an imported page uses as a cursor into the
+`/mcgui import` copies any picture an imported page uses as a cursor into the
 cursors folder for you, and says when the server needs a restart to show it.
 Plugins can use them too: `Pointer.custom("sword")`, and `.at(x, y)` for
 another hot pixel.
@@ -235,7 +240,7 @@ Page settings, all optional:
 ```
 
 A sound is any the game has, by its id (`entity.experience_orb.pickup`), or
-your own: put an `.ogg` in `plugins/UIEngine/sounds/` and restart, and
+your own: put an `.ogg` in `plugins/MCGUI/sounds/` and restart, and
 `sounds/door.ogg` is `uiengine:door`. Only the player who clicked hears it.
 
 An overlay page (`ui:overlay`) is drawn on nothing instead of white: leave
@@ -270,11 +275,11 @@ thread for good. It counts CPU time, not the clock, so a picture that is only sl
 the server is busy is not given up; one that has run five times the limit on the clock is,
 however little CPU it got. Raise it (or set 0) for very large pages.
 
-`/ui stats` shows what the plugin costs the server right now: its share of the
+`/mcgui stats` shows what the plugin costs the server right now: its share of the
 server thread each tick (time and bytes allocated, over the last 10 seconds),
 how long the last pictures waited for a thread and took to draw, how many were
 given up for `render-timeout`, its threads, and how long it took to start and
-warm up. `/ui stats json` prints the same as one line of JSON.
+warm up. `/mcgui stats json` prints the same as one line of JSON.
 
 The first picture of each page at each screen size is kept (`first-pictures` in
 config.yml), so the next player to open that page there is sent the picture at
@@ -415,7 +420,7 @@ RTX 5060 (1280×720 window, no frame cap):
 
 ## For plugin developers
 
-Add `depend: [UIEngine]` to your `plugin.yml` and compile against the plugin
+Add `depend: [MCGUI]` to your `plugin.yml` and compile against the plugin
 (`compileOnly`, never shaded: it is one plugin on the server, which owns the
 pack, the map ids and the seats). From a tag of this repository with
 [JitPack](https://jitpack.io):
@@ -425,13 +430,13 @@ repositories { maven { url 'https://jitpack.io' } }
 dependencies { compileOnly 'com.github.resourcepack-ai:ui-engine:<tag>' }
 ```
 
-Pages, from `plugins/UIEngine/pages/`:
+Pages, from `plugins/MCGUI/pages/`:
 
 ```java
-UIEngine.open(player, "menu");   // menu.html, fullscreen
-UIEngine.close(player);
-UIEngine.page(player);           // the page they have open, or null
-UIEngine.exists("menu");
+MCGUI.open(player, "menu");   // menu.html, fullscreen
+MCGUI.close(player);
+MCGUI.page(player);           // the page they have open, or null
+MCGUI.exists("menu");
 ```
 
 What players do on pages comes as Bukkit events: `PageClickEvent` (cancellable,

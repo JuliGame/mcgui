@@ -42,7 +42,7 @@ public final class Cpu {
             AtomicInteger n = new AtomicInteger();
             pool = new ForkJoinPool(threads(), p -> {
                 ForkJoinWorkerThread t = ForkJoinPool.defaultForkJoinWorkerThreadFactory.newThread(p);
-                t.setName("UIEngine-cpu-" + n.incrementAndGet());
+                t.setName("MCGUI-cpu-" + n.incrementAndGet());
                 t.setDaemon(true);
                 // Does nothing on Linux, where the scheduler ignores Java priorities; elsewhere it yields to the game.
                 t.setPriority(Thread.NORM_PRIORITY - 1);

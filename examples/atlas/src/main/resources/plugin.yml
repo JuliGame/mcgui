@@ -2,8 +2,8 @@ name: Atlas
 version: ${version}
 main: ai.resourcepack.atlas.AtlasPlugin
 api-version: '1.21'
-depend: [UIEngine]
-description: A live world map in the game's own map style, built on UI Engine. Fullscreen or on a wall; pan, zoom, pin and travel.
+depend: [MCGUI]
+description: A live world map in the game's own map style, built on MC GUI. Fullscreen or on a wall; pan, zoom, pin and travel.
 commands:
   atlas:
     description: Open the world map, or put one up on a wall.

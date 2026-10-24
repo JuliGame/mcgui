@@ -60,7 +60,7 @@ public final class PageStore {
         AtomicInteger n = new AtomicInteger();
         // Two at most; gone after a minute with nothing to load, so a server at rest keeps none.
         ThreadPoolExecutor pool = new ThreadPoolExecutor(2, 2, 60, TimeUnit.SECONDS, new LinkedBlockingQueue<>(), r -> {
-            Thread t = new Thread(r, "UIEngine-load-" + n.incrementAndGet());
+            Thread t = new Thread(r, "MCGUI-load-" + n.incrementAndGet());
             t.setDaemon(true);
             return t;
         });
@@ -191,7 +191,7 @@ public final class PageStore {
                 String n = e.getKey();
                 Loaded fresh = read(n);
                 if (fresh != null) {
-                    // Only if nothing (a /ui reload) replaced the entry meanwhile.
+                    // Only if nothing (a /mcgui reload) replaced the entry meanwhile.
                     if (pages.replace(n, f, CompletableFuture.completedFuture(fresh))) {
                         logger.info("Reloaded page '" + n + "'");
                         onReload.accept(n);

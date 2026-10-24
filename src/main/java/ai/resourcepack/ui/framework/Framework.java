@@ -38,7 +38,7 @@ import java.util.Map;
 import java.util.logging.Level;
 
 /**
- * The framework under UI Engine's pages: full-colour pictures on walls of maps and in fullscreen views,
+ * The framework under MC GUI's pages: full-colour pictures on walls of maps and in fullscreen views,
  * for vanilla clients. It owns the resource pack, the map ids and the seats, and is what
  * {@link UIFramework#get()} hands other plugins. Started and stopped by the plugin, before its pages
  * and after them.
@@ -78,7 +78,7 @@ public final class Framework implements UIFramework, Listener {
         try {
             nms = new Nms(plugin.getServer());
         } catch (ReflectiveOperationException | LinkageError e) {
-            plugin.getLogger().log(Level.SEVERE, "This server is not one UI Engine can drive (Paper 26.2 or newer is needed): " + e, e);
+            plugin.getLogger().log(Level.SEVERE, "This server is not one MC GUI can drive (Paper 26.2 or newer is needed): " + e, e);
             return false;
         }
         palette = new Palette(nms::mapColor);
@@ -222,7 +222,7 @@ public final class Framework implements UIFramework, Listener {
         return nms.serverThread();
     }
 
-    /** What the plugin's tick tasks cost the server thread (UI Engine's own tick adds to it too). */
+    /** What the plugin's tick tasks cost the server thread (MC GUI's own tick adds to it too). */
     public TickMeter meter() {
         return meter;
     }

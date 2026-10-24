@@ -11,7 +11,7 @@ import java.util.logging.Logger;
 
 /**
  * Runs every game 30 times a second on a thread of its own. Not on the server's tick: a canvas may be drawn
- * from any one thread, and UI Engine sends a drawing the moment it is published, so a game can run
+ * from any one thread, and MC GUI sends a drawing the moment it is published, so a game can run
  * faster than the server ticks and never costs the server thread a frame. With no games it does not run at all.
  */
 final class Loop {

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""UI Engine's bench: the headline numbers of every part of the engine in one run, to check a change against.
+"""MC GUI's bench: the headline numbers of every part of the engine in one run, to check a change against.
 
     python3 bench/bench.py                      # everything (about 15 minutes)
     python3 bench/bench.py --quick              # shorter windows, fewer cells (about 6 minutes)
@@ -10,10 +10,10 @@ It builds the plugin (and the arcade example), then, holding the machine's timin
 
 * runs the headless benches on the test classpath (HoverCost, RenderBench): the CPU of a hover repaint and a whole
   picture, per page, on one thread;
-* starts a private copy of a Paper server with UI Engine, the arcade example and the Probe plugin (whose fake players
+* starts a private copy of a Paper server with MC GUI, the arcade example and the Probe plugin (whose fake players
   are real connections made inside the server; it is not in this repository) and runs each cell with fakes,
   reading the server's ticks and threads from Probe (`ticks`, `fake status`, `health`) and the plugin's own cost
-  from `/ui stats json`;
+  from `/mcgui stats json`;
 * prints one table and writes every number to build/bench/<time>.json (raw replies included).
 
 Needs: a Paper 26.2+ server folder that has run once (--server), the Probe plugin jar (--probe), Java 25 for the
@@ -100,7 +100,7 @@ def build(a):
         cp = [l for l in out.splitlines() if l.strip()][-1].strip()
         log('building the arcade example')
         sh(['sh', '../../gradlew', '-q', 'build', '--offline'], cwd=os.path.join(REPO, 'examples/arcade'), env=env)
-    jar = os.path.join(REPO, 'build/libs/UIEngine-0.1.0.jar')
+    jar = os.path.join(REPO, 'build/libs/MCGUI-0.1.0.jar')
     arcade = os.path.join(REPO, 'examples/arcade/build/libs/Arcade-0.1.0.jar')
     return jar, arcade, cp
 
@@ -152,17 +152,17 @@ class Server:
         if os.path.exists(self.dir):
             shutil.rmtree(self.dir)
         sh(['rsync', '-a', '--exclude', 'logs', '--exclude', 'world/playerdata', '--exclude', 'plugins/', f'{a.server}/', f'{self.dir}/'])
-        os.makedirs(f'{self.dir}/plugins/UIEngine/pages', exist_ok=True)
+        os.makedirs(f'{self.dir}/plugins/MCGUI/pages', exist_ok=True)
         props = f'{self.dir}/server.properties'
         kv = {'server-port': self.port, 'query.port': self.port, 'max-players': 200, 'enable-rcon': 'false',
               'spawn-protection': 0, 'view-distance': 6, 'simulation-distance': 4}
         lines = [l for l in open(props).read().splitlines() if l.split('=', 1)[0] not in kv]
         open(props, 'w').write('\n'.join(lines + [f'{k}={v}' for k, v in kv.items()]) + '\n')
-        shutil.copy(self.jar, f'{self.dir}/plugins/UIEngine.jar')
+        shutil.copy(self.jar, f'{self.dir}/plugins/MCGUI.jar')
         shutil.copy(self.arcade, f'{self.dir}/plugins/Arcade.jar')
         shutil.copy(a.probe, f'{self.dir}/plugins/Probe.jar')
-        open(f'{self.dir}/plugins/UIEngine/config.yml', 'w').write(f'resource-pack:\n  port: {self.pack_port}\n')
-        pages = f'{self.dir}/plugins/UIEngine/pages'
+        open(f'{self.dir}/plugins/MCGUI/config.yml', 'w').write(f'resource-pack:\n  port: {self.pack_port}\n')
+        pages = f'{self.dir}/plugins/MCGUI/pages'
         shutil.copytree(f'{REPO}/src/main/resources/pages', pages, dirs_exist_ok=True)
         shutil.copytree(f'{REPO}/bench/pages', pages, dirs_exist_ok=True)
         if a.vanilla and os.path.isdir(a.vanilla):
@@ -222,7 +222,7 @@ class Server:
         return self.P('cmd ' + c)
 
     def stats(self):
-        """/ui stats json, read back from the console log; None from a build without it."""
+        """/mcgui stats json, read back from the console log; None from a build without it."""
         path = f'{self.dir}/logs/latest.log'
         # Whatever the log holds from here on: a command's reply is not always in the log after a `say` sent first.
         at = os.path.getsize(path)
@@ -272,7 +272,7 @@ def window(b, seconds, tag=None):
         'tick_ms_p50': t['p50'], 'tick_ms_p99': t['p99'], 'tick_ms_mean': t['mean'], 'tps': t['tps'],
         'cores': (t.get('cpu') or {}).get('cores_used', 0),
         'server_thread_alloc_mb_s': server[2] / secs,
-        'cpu_pool_ms_s': cpu_of(t, 'UIEngine-cpu') / secs, 'send_ms_s': cpu_of(t, 'UIEngine-send') / secs,
+        'cpu_pool_ms_s': cpu_of(t, 'MCGUI-cpu') / secs, 'send_ms_s': cpu_of(t, 'MCGUI-send') / secs,
         'netty_ms_s': cpu_of(t, 'Netty') / secs, 'arcade_ms_s': cpu_of(t, 'Arcade') / secs,
         'fake_client_ms_s': cpu_of(t, 'probe-fake') / secs,
         'rx_mb_s': fs.get('rx_mb_s', 0),
@@ -292,7 +292,7 @@ def window(b, seconds, tag=None):
 
 
 def pick(w, *keys, suffix=''):
-    """The keys of window [w] it has (a build without /ui stats has fewer), each with [suffix]."""
+    """The keys of window [w] it has (a build without /mcgui stats has fewer), each with [suffix]."""
     return {k + suffix: w[k] for k in keys if k in w}
 
 
@@ -429,7 +429,7 @@ def hover_ms(s, x, y, wait=0.5):
 
 
 def latency(b):
-    """One player at the market: a hover by the pointer (`/ui debug point`) until its map patches reach them, on the
+    """One player at the market: a hover by the pointer (`/mcgui debug point`) until its map patches reach them, on the
     server's clock. Cold: from the bottom-left corner, nothing near drawn ahead. Resting: from the target before it,
     after resting there a second, which is when drawing ahead has had its chance."""
     s = b.srv
@@ -621,7 +621,7 @@ def main():
     p.add_argument('--only', default='', help='cells to run, comma separated: ' + ','.join(CELLS))
     p.add_argument('--quick', action='store_true')
     p.add_argument('--no-build', action='store_true', help='use the jars and classpath already built')
-    p.add_argument('--jar', help='a UI Engine jar to bench instead of this checkout\'s (headless cells still use the checkout)')
+    p.add_argument('--jar', help='a MC GUI jar to bench instead of this checkout\'s (headless cells still use the checkout)')
     p.add_argument('--arcade', help='an arcade example jar to bench instead of this checkout\'s')
     p.add_argument('--heap', default='3G')
     p.add_argument('--ports', default='25790', help='first of three ports: server, probe, pack')
@@ -645,7 +645,7 @@ def main():
     b.a, b.raw = a, {}
     if a.no_build:
         b.cp = open(os.path.join(a.work, 'classpath.txt')).read().strip()
-        jar, arc = os.path.join(REPO, 'build/libs/UIEngine-0.1.0.jar'), os.path.join(REPO, 'examples/arcade/build/libs/Arcade-0.1.0.jar')
+        jar, arc = os.path.join(REPO, 'build/libs/MCGUI-0.1.0.jar'), os.path.join(REPO, 'examples/arcade/build/libs/Arcade-0.1.0.jar')
     else:
         jar, arc, b.cp = build(a)
         open(os.path.join(a.work, 'classpath.txt'), 'w').write(b.cp)

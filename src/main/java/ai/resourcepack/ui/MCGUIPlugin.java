@@ -23,13 +23,13 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 
 /**
- * UI Engine: HTML pages from {@code plugins/UIEngine/pages/}, shown in game on wall screens and in
+ * MC GUI: HTML pages from {@code plugins/MCGUI/pages/}, shown in game on wall screens and in
  * fullscreen views. No browser: the pages are laid out and painted by the plugin's own renderer, so
  * what works is static HTML and CSS (no JavaScript), with links, commands and hover states made to
  * work in game. Underneath is the {@link Framework}, which puts pictures on walls and in views and is
  * there for other plugins to draw with too ({@link UIFramework#get()}).
  */
-public final class UIEnginePlugin extends JavaPlugin {
+public final class MCGUIPlugin extends JavaPlugin {
     /** The example pages copied into a new pages folder. */
     private static final String[] EXAMPLES = {"menu.html", "rules.html", "shop.html", "style.css", "market.html",
             "market-overlay.html", "market-blur.html",
@@ -55,6 +55,21 @@ public final class UIEnginePlugin extends JavaPlugin {
     /** Hover repaints every session takes from (see {@link SharedRepaints}); one for the plugin's life, sized by the config. */
     private final SharedRepaints repaints = new SharedRepaints(0);
     private ai.resourcepack.common.telemetry.Heartbeat heartbeat;
+
+    @Override
+    public void onLoad() {
+        // The plugin was UIEngine until 0.1.1: its folder (pages, config, placed screens) moves over once.
+        Path now = getDataFolder().toPath();
+        Path old = now.resolveSibling("UIEngine");
+        if (Files.isDirectory(old) && !Files.exists(now)) {
+            try {
+                Files.move(old, now);
+                getLogger().info("Moved plugins/UIEngine to plugins/MCGUI (the plugin's new name)");
+            } catch (IOException e) {
+                getLogger().warning("Could not move plugins/UIEngine to plugins/MCGUI, move it by hand: " + e);
+            }
+        }
+    }
 
     @Override
     public void onEnable() {
@@ -89,8 +104,10 @@ public final class UIEnginePlugin extends JavaPlugin {
         });
         screens.load();
         UiCommand command = new UiCommand(this, new FrameworkCommand(framework));
-        getCommand("ui").setExecutor(command);
-        getCommand("ui").setTabCompleter(command);
+        org.bukkit.command.PluginCommand mcgui = getCommand("mcgui");
+        mcgui.setExecutor(command);
+        mcgui.setTabCompleter(command);
+        if (cfg.getBoolean("gui-alias", true)) registerGuiAlias(mcgui);
         var meter = framework.meter();
         tasks.add(Bukkit.getScheduler().runTaskTimer(this, () -> {
             meter.begin();
@@ -107,13 +124,34 @@ public final class UIEnginePlugin extends JavaPlugin {
         heartbeat = ai.resourcepack.common.telemetry.Heartbeat.of(this, "ui-engine")
                 .enabledWhen(this::telemetry)
                 .start();
-        UIEngine.instance = this;
+        MCGUI.instance = this;
         enableMillis = (System.nanoTime() - t0) / 1e6;
+    }
+
+    /**
+     * /gui, the same command as /mcgui. Not an alias in plugin.yml, because config.yml can turn it off
+     * ({@code gui-alias}) for a server where another plugin owns /gui; read at start-up.
+     */
+    private void registerGuiAlias(org.bukkit.command.PluginCommand mcgui) {
+        org.bukkit.command.Command gui = new org.bukkit.command.Command("gui", mcgui.getDescription(), mcgui.getUsage().replace("/mcgui", "/gui"), List.of()) {
+            @Override
+            public boolean execute(org.bukkit.command.CommandSender sender, String label, String[] args) {
+                return mcgui.execute(sender, label, args);
+            }
+
+            @Override
+            public List<String> tabComplete(org.bukkit.command.CommandSender sender, String alias, String[] args) {
+                return mcgui.tabComplete(sender, alias, args);
+            }
+        };
+        if (!getServer().getCommandMap().register("mcgui", gui)) {
+            getLogger().info("Another plugin has /gui, so /gui is that plugin's here; /mcgui and /mcgui:gui still work");
+        }
     }
 
     @Override
     public void onDisable() {
-        UIEngine.instance = null;
+        MCGUI.instance = null;
         if (heartbeat != null) heartbeat.stop();
         Page.SCHEMES.remove("head");
         tasks.forEach(BukkitTask::cancel);
@@ -260,7 +298,7 @@ public final class UIEnginePlugin extends JavaPlugin {
         return cfg.getBoolean("telemetry", true);
     }
 
-    /** Where {@code /ui import <code>} fetches shared pages from, the code appended; blank turns importing off. */
+    /** Where {@code /mcgui import <code>} fetches shared pages from, the code appended; blank turns importing off. */
     String importUrl() {
         return cfg.getString("import-url", "https://mcgui.dev/api/builder/ui/page/").trim();
     }

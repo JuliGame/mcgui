@@ -68,7 +68,7 @@ class SharedPictureTest {
         rig.close();
     }
 
-    private Session open(UIEnginePlugin plugin) {
+    private Session open(MCGUIPlugin plugin) {
         Session s = rig.open(plugin, NAME, COLS, ROWS, H);
         rig.quiet();
         return s;
@@ -121,7 +121,7 @@ class SharedPictureTest {
     }
 
     /** The kept picture of the page as it is now, filled for nobody in particular. */
-    private FirstPictures.Picture kept(UIEnginePlugin plugin) {
+    private FirstPictures.Picture kept(MCGUIPlugin plugin) {
         Page page = rig.pages.loaded(NAME);
         String key = rig.onServer(() -> Placeholders.fill(page.document, null).key());
         return SessionRig.pictures(plugin).get(new FirstPictures.Key(NAME, page, COLS, ROWS, 1, key));
@@ -137,7 +137,7 @@ class SharedPictureTest {
 
     @Test
     void aSessionSharingAPictureCarriesOnLikeOneThatDrewItsOwn() throws IOException, Exception {
-        UIEnginePlugin sharing = rig.plugin(16), alone = rig.plugin(0);
+        MCGUIPlugin sharing = rig.plugin(16), alone = rig.plugin(0);
         Session drew = open(sharing);
         FirstPictures.Picture first = kept(sharing);
         assertNotNull(first, "the first session's picture is kept");
@@ -220,7 +220,7 @@ class SharedPictureTest {
 
     @Test
     void sessionsSharingAPictureDrawAtOnceWithoutTouchingEachOther() {
-        UIEnginePlugin sharing = rig.plugin(16), alone = rig.plugin(0);
+        MCGUIPlugin sharing = rig.plugin(16), alone = rig.plugin(0);
         int n = 8;
         Session first = open(sharing);
         Seen picture = seen(first.canvas);

@@ -95,7 +95,7 @@ public final class AnimBench {
         boolean hover = parts.length > 1 && parts[1].equals("hover");
         String selector = parts.length > 2 ? parts[2] : null;
         try (SessionRig rig = new SessionRig(dir, threads)) {
-            UIEnginePlugin plugin = rig.plugin(64);
+            MCGUIPlugin plugin = rig.plugin(64);
             YamlConfiguration cfg = get(plugin, "cfg");
             cfg.set("animation-fps", fps);
             Page p = rig.pages.load(page).get(60, TimeUnit.SECONDS);

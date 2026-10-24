@@ -1,4 +1,4 @@
-# UI Engine: notes for whoever works on it
+# MC GUI: notes for whoever works on it
 
 HTML pages in game (2026-10-09), drawn through the framework in `framework/`:
 pictures on walls of maps and in seated fullscreen views. It was
@@ -251,7 +251,7 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
   coverage: `AheadCheck` (test sources) on the hover-latency trials in `rigs/hl/targets.json`: crates
   went from 16 to 23 of 23 trials drawn ahead at rest (4 to 23 after a jump), market, quests and auction stayed at
   all of them while drawing 25/28/43 repaints instead of 56/44/68. `HoverAheadTest.theRowThePointerGlidesOntoIsDrawnAhead`.
-  `/ui stats` prints how many drawn ahead were used and the CPU drawing ahead took.
+  `/mcgui stats` prints how many drawn ahead were used and the CPU drawing ahead took.
 - **A partial repaint takes in every blurred layer its region meets** that
   something which changed is inside or round (`Repaint.region`): a `filter:
   blur()` layer that the clip cuts would blur with a cut edge. A blurred layer
@@ -310,7 +310,7 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
   pixels under each window pixel.
 - **Google Fonts send TrueType to a user agent they do not recognise**, which is
   why `Page` asks for their CSS as plain "Mozilla/5.0": Java cannot read WOFF.
-  Web fetches are cached in `plugins/UIEngine/cache/` and switched off with
+  Web fetches are cached in `plugins/MCGUI/cache/` and switched off with
   `allow-web: false`. `Page.Loader` follows redirects itself so it can refuse
   loopback and private addresses at every hop (`allow-private-hosts`), and
   reads `file:` URLs only inside the pages folder.
@@ -320,11 +320,11 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
   value has whitespace or `;` in it: `{player}` and `{uuid}` never do, but
   `{display_name}` (nickname plugins), `{world}` (a folder name) and
   PlaceholderAPI values can, and would add arguments to a console command.
-- **Permissions are one node per subcommand** (`uiengine.<sub>`, plus
+- **Permissions are one node per subcommand** (`mcgui.<sub>`, plus
   `.others` when the command names another player), checked in `UiCommand`
-  through `permissionFor`. `uiengine.admin` is a parent in `plugin.yml` that
-  grants them all and is never checked itself; `uiengine.open.others` is also
-  a parent of `uiengine.close.others`, so whoever may open a page for somebody
+  through `permissionFor`. `mcgui.admin` is a parent in `plugin.yml` that
+  grants them all and is never checked itself; `mcgui.open.others` is also
+  a parent of `mcgui.close.others`, so whoever may open a page for somebody
   may close it again. A new subcommand needs its node in `plugin.yml`, under
   the parent too.
 
@@ -332,13 +332,13 @@ the example pages the plugin ships; `-Ponly=<name>` one page.
 
 Mineflayer cannot speak 26.3 and ViaBackwards kicks it for movement, so the
 bot is no use here. Use a real client and drive the view from the console:
-`/ui debug <player> point <x> <y>` then `click`, in canvas pixels (2048
-wide for a default view). `/ui place <page> <cols> <rows> <name> <x> <y> <z>
+`/mcgui debug <player> point <x> <y>` then `click`, in canvas pixels (2048
+wide for a default view). `/mcgui place <page> <cols> <rows> <name> <x> <y> <z>
 <facing> [world]` places a wall without anybody aiming.
 
-## Measuring: `/ui stats` and the bench
+## Measuring: `/mcgui stats` and the bench
 
-- **`/ui stats` is what the plugin costs a live server** (`Stats`; `/ui stats json` for scripts).
+- **`/mcgui stats` is what the plugin costs a live server** (`Stats`; `/mcgui stats json` for scripts).
   `framework/TickMeter` times the plugin's two tick tasks (the framework's and the screens') and reads the server
   thread's allocation counter round them, per tick, over the last 200 ticks: two clock reads and two counter reads
   a task, nothing allocated. `Renders` keeps, per kind of job (a first picture, a picture somebody waits for, the
@@ -360,10 +360,10 @@ wide for a default view). `/ui place <page> <cols> <rows> <name> <x> <y> <z>
 - **`python3 bench/bench.py` gives every part's headline numbers in one run** (`--quick` for a shorter one,
   `--only <cells>`, `--compare <earlier json>`; `--help` for the rest). It builds the plugin and the arcade
   example, waits for the machine to be quiet (`gate.sh`), and holds the timing lock throughout. Then it runs the
-  headless benches on the test classpath and a private copy of a Paper server with UI Engine, the arcade and the
+  headless benches on the test classpath and a private copy of a Paper server with MC GUI, the arcade and the
   Probe plugin (kept outside this repository), whose fake players are real connections made inside the server
   that answer what a client must and turn their heads like one. The server's ticks and threads come from Probe
-  (`ticks`, `fake status`, `health`), the plugin's own cost from `/ui stats json`. It prints one line per number
+  (`ticks`, `fake status`, `health`), the plugin's own cost from `/mcgui stats json`. It prints one line per number
   and writes them all, with the raw replies, to `build/bench/<time>.json`. The server's heap is 3 GB (`--heap`):
   the `deadline` cell holds 60 open views at about 23 MB each, and at 2 GB it spent its time in full collections
   (a 37 s tick) whichever build ran. The cells:
@@ -377,7 +377,7 @@ wide for a default view). `/ui place <page> <cols> <rows> <name> <x> <y> <z>
   | `walls` | 8 shared 4x3 market walls in view of 100 players, nobody aiming | the same, and the sender's CPU |
   | `views` | 50 players at the market fullscreen, still | the same, the sender's and pool's CPU, heap per view |
   | `hover` | 10 and 50 players sweeping round the market | cores used, pool CPU, tick p50/p99, MB/s sent, pictures and drawings ahead |
-  | `latency` | one player at the market, the pointer moved by `/ui debug point` | ms until the hover's map patches reach them: cold, and after resting next to it |
+  | `latency` | one player at the market, the pointer moved by `/mcgui debug point` | ms until the hover's map patches reach them: cold, and after resting next to it |
   | `anim` | 1, 10 and 50 players at `bench/pages/bench-anim.html` (a spinner, cards that fade) | cores, pool CPU, pictures a second, MB/s |
   | `deadline` | 40 hovering the market, 10 at the spinner, a busy loop on every core but one, while 10 more open a market with their name in it (a whole first picture each) and the traced player opens it six times | renders given up, ms until the traced player's whole picture arrives (median, most), each kind of job's wait and run p50/p99/max |
   | `arcade` | four cabinets with nobody in range; then each game on a 16x9 cabinet playing itself, one player watching | CPU (game loop, pool, sender) at rest and per game, and MB/s per game |
@@ -536,7 +536,7 @@ wide for a default view). `/ui place <page> <cols> <rows> <name> <x> <y> <z>
   (20 a second, whatever the server's tick rate): raising the server's TPS
   would not make it send more often.
 - **Pictures skip the tick too.** `MapSender` runs on its own thread
-  (`UIEngine-send`). It wakes when a canvas publishes a drawing, when who sees
+  (`MCGUI-send`). It wakes when a canvas publishes a drawing, when who sees
   what changes, or when a write lands; every 8 ms only while a picture is
   still part sent (out of budget, or the connection full), and otherwise it
   sleeps. It writes each player's patches straight to their channel with one
@@ -559,7 +559,7 @@ wide for a default view). `/ui place <page> <cols> <rows> <name> <x> <y> <z>
   to 50 ms late.
 - **One pool for all CPU-heavy work: `api/Cpu`.** `cpu-threads` (default: the cores
   minus one) is the most threads that convert, encode or draw at once, for this
-  plugin and any plugin on top of it (UI Engine's render jobs and painter bands run
+  plugin and any plugin on top of it (MC GUI's render jobs and painter bands run
   on it too). Never make another pool for work like that: pools add up, the sum
   passes the core count and the server thread waits for a core (Java priorities do
   nothing on Linux). Work on the pool may wait for work it forks (a pool thread
@@ -608,11 +608,11 @@ wide for a default view). `/ui place <page> <cols> <rows> <name> <x> <y> <z>
   tick in `Views.learnMice`) and finds the step every one of them is a whole
   multiple of: the client turns by whole counts times a step that depends only
   on the sensitivity. A view's pixels per degree are `views.pointer-speed` (and
-  `/ui pointer`) per count over that step, and reach a client-placed pointer's
+  `/mcgui pointer`) per count over that step, and reach a client-placed pointer's
   shader as the pointer text display's distance from the eye
   (`Shaders.clientPointerDistance`). A turn the server makes is not whole
   counts: teleports and respawns, and every rotation a view sends (the seat,
-  the turn back from an edge, a level head, `/ui debug point`), bump
+  the turn back from an edge, a level head, `/mcgui debug point`), bump
   `ViewImpl.serverTurns` or call `MouseSteps.hold`, which leaves the next few
   samples out. Anything new that rotates a player must do the same. Keyboard
   input never rotates anybody.
@@ -631,16 +631,16 @@ wide for a default view). `/ui place <page> <cols> <rows> <name> <x> <y> <z>
   every right-click while seated, and scrolling then pops its name over the
   view. `Pipeline.conceal` rewrites inventory packets to empty for a seated
   player; the server keeps the real items.
-- **Permissions are one node per subcommand** (`uiengine.<sub>`, plus
+- **Permissions are one node per subcommand** (`mcgui.<sub>`, plus
   `.others` when the command names another player), checked in
-  `FrameworkCommand` through `permissionFor`. `uiengine.admin` is a parent
+  `FrameworkCommand` through `permissionFor`. `mcgui.admin` is a parent
   in `plugin.yml` that grants them all and is never checked itself. A new
   subcommand needs its node in `plugin.yml`, under the parent too, and in
   `SUBCOMMANDS` so the check and tab completion see it.
 
 ## The framework: testing
 
-`/ui test wall` and `/ui test view` need nothing else installed.
-`/ui debug <player> point|click|scroll|speed|close` drives a view from the
+`/mcgui test wall` and `/mcgui test view` need nothing else installed.
+`/mcgui debug <player> point|click|scroll|speed|close` drives a view from the
 console, which is how a harness tests one without anybody at the mouse. The
 shaders can only be judged in the real client.

@@ -5,23 +5,23 @@ import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.entity.Player;
 
 /**
- * UI Engine for other plugins: open a page from the pages folder for a player. What players do on pages
+ * MC GUI for other plugins: open a page from the pages folder for a player. What players do on pages
  * comes as events: {@link ai.resourcepack.ui.event.PageClickEvent}, {@link ai.resourcepack.ui.event.PageOpenEvent}
  * and {@link ai.resourcepack.ui.event.PageCloseEvent}. To draw pictures of your own, see
  * {@link ai.resourcepack.ui.framework.api.UIFramework}.
  *
  * <pre>{@code
- * UIEngine.open(player, "menu");          // plugins/UIEngine/pages/menu.html, fullscreen
+ * MCGUI.open(player, "menu");          // plugins/MCGUI/pages/menu.html, fullscreen
  * }</pre>
  */
-public final class UIEngine {
-    static volatile UIEnginePlugin instance;
+public final class MCGUI {
+    static volatile MCGUIPlugin instance;
 
-    private UIEngine() {}
+    private MCGUI() {}
 
-    private static UIEnginePlugin plugin() {
-        UIEnginePlugin p = instance;
-        if (p == null) throw new IllegalStateException("UI Engine is not enabled");
+    private static MCGUIPlugin plugin() {
+        MCGUIPlugin p = instance;
+        if (p == null) throw new IllegalStateException("MC GUI is not enabled");
         return p;
     }
 

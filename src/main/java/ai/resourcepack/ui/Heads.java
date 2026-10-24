@@ -40,14 +40,14 @@ final class Heads {
 
     private record Face(Picture picture, long until) {}
 
-    private final UIEnginePlugin plugin;
+    private final MCGUIPlugin plugin;
     private final Runnable arrived;
     private final Map<String, Face> faces = new ConcurrentHashMap<>();
     private final Map<String, Boolean> asked = new ConcurrentHashMap<>();
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
 
     /** [arrived] runs on the server thread whenever a face comes in, so pages showing it are drawn again. */
-    Heads(UIEnginePlugin plugin, Runnable arrived) {
+    Heads(MCGUIPlugin plugin, Runnable arrived) {
         this.plugin = plugin;
         this.arrived = arrived;
     }

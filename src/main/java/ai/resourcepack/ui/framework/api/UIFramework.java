@@ -5,7 +5,7 @@ import org.bukkit.block.BlockFace;
 import org.bukkit.entity.Player;
 
 /**
- * UI Engine's framework: pictures in vanilla Minecraft, drawn on walls of maps and in fullscreen views that a
+ * MC GUI's framework: pictures in vanilla Minecraft, drawn on walls of maps and in fullscreen views that a
  * player sits at and drives with their mouse. A plugin draws into a {@link Canvas}; the engine gets it
  * to the players looking at it, changed tiles only, in full colour for players with its resource pack.
  *
@@ -17,10 +17,10 @@ import org.bukkit.entity.Player;
  * }</pre>
  */
 public interface UIFramework {
-    /** The running engine. Depend on the {@code UIEngine} plugin to have it enabled first. */
+    /** The running engine. Depend on the {@code MCGUI} plugin to have it enabled first. */
     static UIFramework get() {
         UIFramework engine = Holder.engine;
-        if (engine == null) throw new IllegalStateException("UI Engine is not enabled");
+        if (engine == null) throw new IllegalStateException("MC GUI is not enabled");
         return engine;
     }
 

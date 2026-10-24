@@ -1,7 +1,7 @@
 # Vanilla pages
 
-UI Engine pages in the game's own look, as tools and guides it does not have. Open one with
-`/ui open <name>`.
+MC GUI pages in the game's own look, as tools and guides it does not have. Open one with
+`/mcgui open <name>`.
 
 - **`quests`**: a quest log in the game's book. Pick a quest on the left page to read it on
   the right, turn the page with the arrows, hover a reward for its tooltip, claim what is
@@ -47,5 +47,5 @@ java VanillaTextures.java ~/.minecraft/versions/26.3/26.3.jar pages
 That writes `pages/vanilla/`: the textures, the title screen's panorama (which the launcher
 keeps beside the jar), and the game's font as `minecraft.ttf` and `minecraft_bold.ttf`, built
 from its glyph sheets pixel for pixel. Without them the pages fall back to Mac's Minecraft, which
-UI Engine bundles: an open recreation of the game's font. Then copy `pages/` into
-`plugins/UIEngine/pages/`.
+MC GUI bundles: an open recreation of the game's font. Then copy `pages/` into
+`plugins/MCGUI/pages/`.

@@ -148,7 +148,7 @@ public final class Page implements Resources {
                 String scheme = at.getScheme() == null ? "" : at.getScheme().toLowerCase(Locale.ROOT);
                 if (!scheme.equals("http") && !scheme.equals("https")) return null;
                 if (!privateHosts && !publicHost(at.getHost(), deadline)) return null;
-                HttpRequest req = HttpRequest.newBuilder(at).header("User-Agent", userAgent == null ? "Mozilla/5.0 (UI Engine)" : userAgent).build();
+                HttpRequest req = HttpRequest.newBuilder(at).header("User-Agent", userAgent == null ? "Mozilla/5.0 (MC GUI)" : userAgent).build();
                 CompletableFuture<HttpResponse<byte[]>> pending = http.sendAsync(req,
                         info -> info.statusCode() == 200 ? new Capped(MAX_BYTES) : HttpResponse.BodySubscribers.replacing(null));
                 HttpResponse<byte[]> res;
@@ -177,7 +177,7 @@ public final class Page implements Resources {
 
         /** Name lookups, so a slow DNS server counts against a fetch's deadline. Threads go when idle. */
         private static final ExecutorService LOOKUPS = Executors.newCachedThreadPool(r -> {
-            Thread t = new Thread(r, "UIEngine-lookup");
+            Thread t = new Thread(r, "MCGUI-lookup");
             t.setDaemon(true);
             return t;
         });

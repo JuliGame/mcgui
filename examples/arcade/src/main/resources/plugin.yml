@@ -2,8 +2,8 @@ name: Arcade
 version: ${version}
 main: ai.resourcepack.arcade.ArcadePlugin
 api-version: '1.21'
-depend: [UIEngine]
-description: Arcade games, an example built on UI Engine. Play one fullscreen with your mouse, or put up a cabinet everyone can watch.
+depend: [MCGUI]
+description: Arcade games, an example built on MC GUI. Play one fullscreen with your mouse, or put up a cabinet everyone can watch.
 commands:
   arcade:
     description: Play an arcade game, or put up a cabinet.

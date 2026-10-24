@@ -82,7 +82,7 @@ class SharedHoverTest {
         }
     }
 
-    private Session open(UIEnginePlugin plugin, String page, UUID viewer) {
+    private Session open(MCGUIPlugin plugin, String page, UUID viewer) {
         Session s = rig.open(plugin, page, COLS, ROWS, H, viewer);
         rig.quiet();
         return s;
@@ -120,7 +120,7 @@ class SharedHoverTest {
 
     @Test
     void playersInOneStateShareEveryHover() {
-        UIEnginePlugin plugin = rig.plugin(16, 0), alone = rig.plugin(0, 0);
+        MCGUIPlugin plugin = rig.plugin(16, 0), alone = rig.plugin(0, 0);
         Session a = open(plugin, PUBLIC, UUID.randomUUID()), b = open(plugin, PUBLIC, UUID.randomUUID());
         Session own = open(alone, PUBLIC, UUID.randomUUID());
         assertSame((Object) get(a, "doc"), get(b, "doc"), "the two sessions took one first picture, and with it one document");
@@ -152,7 +152,7 @@ class SharedHoverTest {
         UUID alex = UUID.randomUUID(), sam = UUID.randomUUID();
         SessionRig.PLAYERS.put(alex, "Alex");
         SessionRig.PLAYERS.put(sam, "Sam");
-        UIEnginePlugin plugin = rig.plugin(16, 0, false), alone = rig.plugin(16, 0, false);
+        MCGUIPlugin plugin = rig.plugin(16, 0, false), alone = rig.plugin(16, 0, false);
         Session a = open(plugin, PERSONAL, alex), b = open(plugin, PERSONAL, sam);
         Session ownA = open(alone, PERSONAL, alex), ownB = open(alone, PERSONAL, sam);
         assertNotSame((Object) get(a, "doc"), get(b, "doc"));
@@ -172,7 +172,7 @@ class SharedHoverTest {
     /** One player's pointer rests by a card: what is drawn ahead for them is not drawn again for another resting there too. */
     @Test
     void oneDrawingAheadServesEveryone() {
-        UIEnginePlugin plugin = rig.plugin(16, 4);
+        MCGUIPlugin plugin = rig.plugin(16, 4);
         Session a = open(plugin, PUBLIC, UUID.randomUUID()), b = open(plugin, PUBLIC, UUID.randomUUID());
         int[] card = spots()[2], beside = {card[0], card[1] - 12};
         point(a, beside);

@@ -66,7 +66,7 @@ class AnimationTest {
     @TempDir
     Path dir;
     private SessionRig rig;
-    private UIEnginePlugin plugin;
+    private MCGUIPlugin plugin;
 
     @BeforeEach
     void setUp() throws Exception {

@@ -96,7 +96,7 @@ public final class SharedRepaints {
     }
 
     /**
-     * Counters, for /ui stats and benchmarks: repaints taken from here, drawn by a session for itself (of those, found
+     * Counters, for /mcgui stats and benchmarks: repaints taken from here, drawn by a session for itself (of those, found
      * not to be partial), waited for while another drew them; drawn ahead and kept, and of those, taken at least once;
      * CPU (ns) of the repaints taken, which is what sharing saved.
      */
@@ -321,7 +321,7 @@ public final class SharedRepaints {
                 wholes, ahead, aheadUsed, ahead == 0 ? 0.0 : 100.0 * aheadUsed / ahead);
     }
 
-    /** The same as {@link #stats}, as one JSON object (for /ui stats json and the bench). */
+    /** The same as {@link #stats}, as one JSON object (for /mcgui stats json and the bench). */
     public synchronized String json() {
         return String.format(java.util.Locale.ROOT,
                 "{\"kept\":%d,\"kept_mb\":%.1f,\"taken\":%d,\"drawn\":%d,\"waited\":%d,\"saved_s\":%.2f,\"whole\":%d,\"ahead\":%d,\"ahead_used\":%d}",

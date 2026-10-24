@@ -41,7 +41,7 @@ import java.util.function.Consumer;
  * unless the screen is shared) and fullscreen views a player sits at.
  */
 public final class Screens implements Listener {
-    private final UIEnginePlugin plugin;
+    private final MCGUIPlugin plugin;
     private final Renders renderers;
     private final File file;
     private final Map<String, Wall> walls = new ConcurrentHashMap<>();
@@ -54,7 +54,7 @@ public final class Screens implements Listener {
     /** Each player's latest fullscreen open still waiting for its page to load: an older one that loads later is dropped. */
     private final Map<UUID, Object> opening = new ConcurrentHashMap<>();
 
-    Screens(UIEnginePlugin plugin, Renders renderers) {
+    Screens(MCGUIPlugin plugin, Renders renderers) {
         this.plugin = plugin;
         this.renderers = renderers;
         this.file = new File(plugin.getDataFolder(), "screens.yml");

@@ -6,7 +6,7 @@ import java.util.Locale;
 
 /**
  * What the plugin's own work costs the server thread each tick: the time its tick tasks take and the bytes they
- * allocate, over the last {@link #WINDOW} ticks. {@code /ui stats} shows it, and the bench reads it. Measuring is two
+ * allocate, over the last {@link #WINDOW} ticks. {@code /mcgui stats} shows it, and the bench reads it. Measuring is two
  * clock reads and two reads of the thread's allocation counter a task, and allocates nothing. Server thread only.
  */
 public final class TickMeter {

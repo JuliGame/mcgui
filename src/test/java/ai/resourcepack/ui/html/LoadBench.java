@@ -350,7 +350,7 @@ public final class LoadBench {
             long c = mx.getThreadCpuTime(t.getId());
             if (c < 0) continue;
             String n = t.getName();
-            int g = n.startsWith("UIEngine-cpu-") ? 0
+            int g = n.startsWith("MCGUI-cpu-") ? 0
                     : n.equals("LoadBench-send") ? 3 : n.equals("LoadBench-server") ? 4 : -1;
             if (g < 0) continue;
             out[g] += c;

@@ -28,7 +28,7 @@ final class Cabinet implements WallContent {
     /** Who is sitting at it, or null. Server thread only. */
     UUID player;
     /**
-     * The loop runs this rather than the game: the game's tick while anybody can see the cabinet. UI Engine asks
+     * The loop runs this rather than the game: the game's tick while anybody can see the cabinet. MC GUI asks
      * for the canvas every tick for every player in range ({@link #canvas}), which is how it knows.
      */
     final Loop.Ticker ticker = this::tick;

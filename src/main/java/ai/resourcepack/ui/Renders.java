@@ -20,7 +20,7 @@ import java.util.concurrent.TimeUnit;
  *
  * <p>This also counts the plugin's own jobs so that {@link #close} can stop taking new ones and wait for the ones
  * running (the pool is not the plugin's to shut down), and keeps how long the last jobs of each kind waited for a
- * thread and ran, for {@code /ui stats}. Not final: tests count the jobs they hand it.
+ * thread and ran, for {@code /mcgui stats}. Not final: tests count the jobs they hand it.
  */
 class Renders implements Executor {
     /** What a job draws, most urgent first. */

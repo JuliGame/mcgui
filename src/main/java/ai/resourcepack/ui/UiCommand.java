@@ -17,32 +17,32 @@ import java.util.Locale;
 import java.util.Set;
 
 /**
- * /ui open &lt;page&gt; [player] · close [player] · place &lt;page&gt; [cols] [rows] [name] [shared] ·
+ * /mcgui open &lt;page&gt; [player] · close [player] · place &lt;page&gt; [cols] [rows] [name] [shared] ·
  * remove [name] · list · reload · import &lt;code&gt;, and the framework's own, which {@link FrameworkCommand} answers.
  *
- * <p>Each subcommand checks its own node, {@code uiengine.<subcommand>}, and one pointed at another
- * player also needs {@code uiengine.<subcommand>.others}. {@code uiengine.admin} is only a parent in
+ * <p>Each subcommand checks its own node, {@code mcgui.<subcommand>}, and one pointed at another
+ * player also needs {@code mcgui.<subcommand>.others}. {@code mcgui.admin} is only a parent in
  * {@code plugin.yml} that grants them all; nothing here checks it. Closing your own page needs nothing.
  */
 final class UiCommand implements TabExecutor {
     private static final Set<BlockFace> WALL = Set.of(BlockFace.NORTH, BlockFace.SOUTH, BlockFace.EAST, BlockFace.WEST);
-    private final UIEnginePlugin plugin;
+    private final MCGUIPlugin plugin;
     /** The framework's own subcommands (test, fov, pointer, pack, stats, clear, debug), handed on as they are. */
     private final FrameworkCommand framework;
     private final PageImport importer;
 
-    UiCommand(UIEnginePlugin plugin, FrameworkCommand framework) {
+    UiCommand(MCGUIPlugin plugin, FrameworkCommand framework) {
         this.plugin = plugin;
         this.framework = framework;
         this.importer = new PageImport(plugin);
     }
 
-    /** The node a subcommand needs: {@code uiengine.<subcommand>}. */
+    /** The node a subcommand needs: {@code mcgui.<subcommand>}. */
     static String permissionFor(String sub) {
-        return "uiengine." + sub;
+        return "mcgui." + sub;
     }
 
-    /** What pointing a subcommand at somebody else needs on top: {@code uiengine.<subcommand>.others}. */
+    /** What pointing a subcommand at somebody else needs on top: {@code mcgui.<subcommand>.others}. */
     static String othersPermissionFor(String sub) {
         return permissionFor(sub) + ".others";
     }
@@ -95,7 +95,7 @@ final class UiCommand implements TabExecutor {
             }
             case "import" -> {
                 if (!permitted(sender, permissionFor("import"))) return true;
-                if (args.length < 2) return say(sender, "/ui import <code>: the code from Send to server on mcgui.dev", NamedTextColor.RED);
+                if (args.length < 2) return say(sender, "/mcgui import <code>: the code from Send to server on mcgui.dev", NamedTextColor.RED);
                 importer.run(sender, args[1]);
             }
             case "reload" -> {
@@ -103,7 +103,7 @@ final class UiCommand implements TabExecutor {
                 plugin.reload();
                 say(sender, "Reloaded the config and every page.", NamedTextColor.GREEN);
             }
-            default -> say(sender, "/ui open <page> [player] · close [player] · place <page> [cols] [rows] [name] [shared] · remove [name] · list · reload · import <code>"
+            default -> say(sender, "/mcgui open <page> [player] · close [player] · place <page> [cols] [rows] [name] [shared] · remove [name] · list · reload · import <code>"
                     + " · test wall|view [cols] [rows] · fov <degrees> · pointer [speed] · pack · stats · clear", NamedTextColor.GRAY);
         }
         return true;
@@ -112,7 +112,7 @@ final class UiCommand implements TabExecutor {
     private void open(CommandSender sender, String[] args) {
         if (!permitted(sender, permissionFor("open"))) return;
         if (args.length < 2) {
-            say(sender, "/ui open <page> [player]", NamedTextColor.RED);
+            say(sender, "/mcgui open <page> [player]", NamedTextColor.RED);
             return;
         }
         Player target = args.length > 2 ? Bukkit.getPlayerExact(args[2]) : sender instanceof Player p ? p : null;
@@ -138,14 +138,14 @@ final class UiCommand implements TabExecutor {
 
     private void place(CommandSender sender, String[] args) {
         if (!permitted(sender, permissionFor("place"))) return;
-        // From the console (or a script): /ui place <page> <cols> <rows> <name> <x> <y> <z> <facing> [world] [shared]
+        // From the console (or a script): /mcgui place <page> <cols> <rows> <name> <x> <y> <z> <facing> [world] [shared]
         if (args.length >= 9) {
             placeAt(sender, args);
             return;
         }
         if (!(sender instanceof Player p) || args.length < 2) {
-            say(sender, "As a player, looking at a wall: /ui place <page> [cols] [rows] [name] [shared]"
-                    + " (or anywhere: /ui place <page> <cols> <rows> <name> <x> <y> <z> <facing> [world] [shared])", NamedTextColor.RED);
+            say(sender, "As a player, looking at a wall: /mcgui place <page> [cols] [rows] [name] [shared]"
+                    + " (or anywhere: /mcgui place <page> <cols> <rows> <name> <x> <y> <z> <facing> [world] [shared])", NamedTextColor.RED);
             return;
         }
         String page = args[1];
@@ -205,7 +205,7 @@ final class UiCommand implements TabExecutor {
             }
         }
         if (name == null) {
-            say(sender, "Name the screen, or look at it: /ui remove [name]", NamedTextColor.RED);
+            say(sender, "Name the screen, or look at it: /mcgui remove [name]", NamedTextColor.RED);
             return;
         }
         say(sender, plugin.screens().remove(name) ? "Removed '" + name + "'." : "No screen called '" + name + "'.", NamedTextColor.GRAY);

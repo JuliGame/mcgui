@@ -144,33 +144,33 @@ final class SessionRig implements AutoCloseable {
     }
 
     /** A plugin as a session sees it, keeping up to [entries] first pictures (0: none, so every session draws its own). */
-    UIEnginePlugin plugin(int entries) {
+    MCGUIPlugin plugin(int entries) {
         return plugin(entries, -1);
     }
 
     /** As {@link #plugin(int)}, drawing [ahead] hover targets ahead (-1: the config's default). */
-    UIEnginePlugin plugin(int entries, int ahead) {
+    MCGUIPlugin plugin(int entries, int ahead) {
         return plugin(entries, ahead, true);
     }
 
     /** As {@link #plugin(int, int)}, sharing personal pages' pictures between players where their own values are not if [personal]. */
-    UIEnginePlugin plugin(int entries, int ahead, boolean personal) {
+    MCGUIPlugin plugin(int entries, int ahead, boolean personal) {
         try {
             Field f = sun.misc.Unsafe.class.getDeclaredField("theUnsafe");
             f.setAccessible(true);
-            UIEnginePlugin p = (UIEnginePlugin) ((sun.misc.Unsafe) f.get(null)).allocateInstance(UIEnginePlugin.class);
+            MCGUIPlugin p = (MCGUIPlugin) ((sun.misc.Unsafe) f.get(null)).allocateInstance(MCGUIPlugin.class);
             YamlConfiguration cfg = new YamlConfiguration();
             // No time limit: the machine is shared, and a slow render here is not a page that cannot be drawn.
             cfg.set("render-timeout", 0);
             cfg.set("first-pictures.entries", entries);
             if (ahead >= 0) cfg.set("hover-ahead", ahead);
             cfg.set("sharing.personal-pages", personal);
-            set(p, UIEnginePlugin.class, "cfg", cfg);
-            set(p, UIEnginePlugin.class, "pages", pages);
-            set(p, UIEnginePlugin.class, "serverThread", serverThread);
-            set(p, UIEnginePlugin.class, "pictures", new FirstPictures(entries, 512L << 20));
-            set(p, UIEnginePlugin.class, "frames", new AnimFrames());
-            set(p, UIEnginePlugin.class, "repaints", new ai.resourcepack.ui.html.SharedRepaints(256L << 20));
+            set(p, MCGUIPlugin.class, "cfg", cfg);
+            set(p, MCGUIPlugin.class, "pages", pages);
+            set(p, MCGUIPlugin.class, "serverThread", serverThread);
+            set(p, MCGUIPlugin.class, "pictures", new FirstPictures(entries, 512L << 20));
+            set(p, MCGUIPlugin.class, "frames", new AnimFrames());
+            set(p, MCGUIPlugin.class, "repaints", new ai.resourcepack.ui.html.SharedRepaints(256L << 20));
             set(p, JavaPlugin.class, "logger", Logger.getLogger("SessionRig"));
             return p;
         } catch (ReflectiveOperationException e) {
@@ -184,17 +184,17 @@ final class SessionRig implements AutoCloseable {
         f.set(o, value);
     }
 
-    static FirstPictures pictures(UIEnginePlugin plugin) {
+    static FirstPictures pictures(MCGUIPlugin plugin) {
         return plugin.firstPictures();
     }
 
     /** A new session on a [cols] x [rows] canvas showing [page], made and opened on the server thread, as a wall makes one. */
-    Session open(UIEnginePlugin plugin, String page, int cols, int rows, double designHeight) {
+    Session open(MCGUIPlugin plugin, String page, int cols, int rows, double designHeight) {
         return open(plugin, page, cols, rows, designHeight, UUID.randomUUID());
     }
 
-    /** As {@link #open(UIEnginePlugin, String, int, int, double)}, for viewer [id] (online if in {@link #PLAYERS}). */
-    Session open(UIEnginePlugin plugin, String page, int cols, int rows, double designHeight, UUID id) {
+    /** As {@link #open(MCGUIPlugin, String, int, int, double)}, for viewer [id] (online if in {@link #PLAYERS}). */
+    Session open(MCGUIPlugin plugin, String page, int cols, int rows, double designHeight, UUID id) {
         return onServer(() -> {
             long cpu = THREADS.getCurrentThreadCpuTime(), bytes = THREADS.getCurrentThreadAllocatedBytes();
             Session s = new Session(plugin, renderers, new Canvas(PALETTE, cols, rows), id, designHeight);

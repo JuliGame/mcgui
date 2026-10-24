@@ -100,7 +100,7 @@ public final class ResourcePack implements AutoCloseable {
         // part-way must not take every one: up to 8 at once, each ending after 30 s idle. A pool only
         // grows past its core size once its queue is full, so the core size is the cap.
         ThreadPoolExecutor pool = new ThreadPoolExecutor(8, 8, 30, TimeUnit.SECONDS, new LinkedBlockingQueue<>(), r -> {
-            Thread t = new Thread(r, "UIEngine-pack");
+            Thread t = new Thread(r, "MCGUI-pack");
             t.setDaemon(true);
             return t;
         });
@@ -158,7 +158,7 @@ public final class ResourcePack implements AutoCloseable {
             Entries e = new Entries(zip);
             e.put("pack.mcmeta", """
                     {
-                      "pack": {"description": "UI Engine", "min_format": %d, "max_format": %d},
+                      "pack": {"description": "MC GUI", "min_format": %d, "max_format": %d},
                       "overlays": {"entries": [{"directory": "%s", "min_format": %d, "max_format": %d}]}
                     }
                     """.formatted(FORMAT_26_2, FORMAT_26_3, OVERLAY_26_2, FORMAT_26_2, FORMAT_26_3 - 1));

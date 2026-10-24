@@ -14,14 +14,14 @@ import java.util.TreeMap;
 import java.util.concurrent.ForkJoinPool;
 
 /**
- * {@code /ui stats}: what the plugin costs the server right now. The server thread's share each tick, the pictures
+ * {@code /mcgui stats}: what the plugin costs the server right now. The server thread's share each tick, the pictures
  * drawn (how long each waited for a thread and took), what is on screen, the plugin's threads and how long it took to
- * start. {@code /ui stats json} gives the same as one line of JSON, which the bench reads.
+ * start. {@code /mcgui stats json} gives the same as one line of JSON, which the bench reads.
  */
 final class Stats {
     private Stats() {}
 
-    static List<String> lines(UIEnginePlugin plugin) {
+    static List<String> lines(MCGUIPlugin plugin) {
         TickMeter.Summary t = plugin.framework().meter().summary(Bukkit.getCurrentTick());
         int[] c = plugin.screens().counts();
         Renders r = plugin.renderers();
@@ -40,7 +40,7 @@ final class Stats {
         return out;
     }
 
-    static String json(UIEnginePlugin plugin) {
+    static String json(MCGUIPlugin plugin) {
         TickMeter.Summary t = plugin.framework().meter().summary(Bukkit.getCurrentTick());
         int[] c = plugin.screens().counts();
         Renders r = plugin.renderers();
@@ -63,7 +63,7 @@ final class Stats {
         Map<String, Integer> out = new TreeMap<>();
         for (Thread th : Thread.getAllStackTraces().keySet()) {
             String name = th.getName();
-            if (name.startsWith("UIEngine")) out.merge(name.replaceAll("-?\\d+$", ""), 1, Integer::sum);
+            if (name.startsWith("MCGUI")) out.merge(name.replaceAll("-?\\d+$", ""), 1, Integer::sum);
         }
         return out;
     }

@@ -1,6 +1,6 @@
 # Atlas
 
-An example plugin built on UI Engine's framework API: the game's own map, but live, as big as
+An example plugin built on MC GUI's framework API: the game's own map, but live, as big as
 your screen, and something you can use.
 
 - `/atlas` opens it fullscreen, centred on you and following you. WASD moves it, the
