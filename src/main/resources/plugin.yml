@@ -3,7 +3,7 @@ version: ${version}
 main: ai.resourcepack.ui.UIEnginePlugin
 api-version: '1.21'
 softdepend: [PlaceholderAPI]
-description: HTML pages in game, on walls of maps and fullscreen, for vanilla clients; and a framework for other plugins to draw on them.
+description: "Custom HTML/CSS screens in Minecraft with no limits. Not chest GUIs or Dialogs!"
 website: https://mcgui.dev/
 commands:
   ui:
