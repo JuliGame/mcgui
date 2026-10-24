@@ -99,10 +99,18 @@ def build(a):
         out = sh(['sh', 'gradlew', '-q', 'shadowJar', 'benchClasspath', '--offline'], cwd=REPO, env=env)
         cp = [l for l in out.splitlines() if l.strip()][-1].strip()
         log('building the arcade example')
-        sh(['sh', '../../gradlew', '-q', 'build', '--offline'], cwd=os.path.join(REPO, 'examples/arcade'), env=env)
-    jar = os.path.join(REPO, 'build/libs/MCGUI-0.1.0.jar')
-    arcade = os.path.join(REPO, 'examples/arcade/build/libs/Arcade-0.1.0.jar')
-    return jar, arcade, cp
+        sh(['sh', '../../gradlew', '-q', 'jar', '--offline'], cwd=os.path.join(REPO, 'examples/arcade'), env=env)
+    return built_jars() + (cp,)
+
+
+def built_jars():
+    """The plugin and arcade jars this checkout built, whatever their versions (not the -dev jar the tests use)."""
+    def newest(folder, name):
+        jars = [os.path.join(folder, f) for f in os.listdir(folder) if re.fullmatch(name + r'-[\d.]+\.jar', f)]
+        if not jars:
+            raise RuntimeError(f'no {name}-<version>.jar in {folder}: build first')
+        return max(jars, key=os.path.getmtime)
+    return newest(os.path.join(REPO, 'build/libs'), 'MCGUI'), newest(os.path.join(REPO, 'examples/arcade/build/libs'), 'Arcade')
 
 
 # ----------------------------------------------------------------------------------------------------- headless
@@ -226,7 +234,7 @@ class Server:
         path = f'{self.dir}/logs/latest.log'
         # Whatever the log holds from here on: a command's reply is not always in the log after a `say` sent first.
         at = os.path.getsize(path)
-        self.cmd('ui stats json')
+        self.cmd('mcgui stats json')
         # Up to 30 s: a loaded server (the deadline cell) can take seconds to get to a console command.
         for _ in range(300):
             time.sleep(0.1)
@@ -314,6 +322,19 @@ def W(b):
     return 6 if b.a.quick else 12
 
 
+def received(b):
+    """MB the fakes have been sent so far, all together."""
+    return b.srv.P('fake status').get('rx_mb', 0)
+
+
+def expect_pictures(b, since, what):
+    """Fails the cell if the fakes got nothing since [since] MB: a page that never opened (a renamed command, say)
+    would otherwise measure an idle server as if it were the cell."""
+    got = received(b) - since
+    if got <= 0:
+        raise RuntimeError(f'{what}: the fakes were sent no pictures ({got:.1f} MB), so the page never showed; nothing measured')
+
+
 # ----------------------------------------------------------------------------------------------------- cells
 
 TICK = ('uie_tick_us', 'uie_tick_us_p50', 'uie_tick_us_p99', 'uie_tick_bytes', 'tick_ms_p50', 'tick_ms_p99')
@@ -367,19 +388,21 @@ def place_walls(b, n, page='market', shared=True):
     s = b.srv
     s.cmd(f'fill -50 -61 {WALL_Z - 1} 50 -40 {WALL_Z - 1} minecraft:barrier')
     for i in range(n):
-        s.cmd(f'ui place {page} 4 3 bw{i} {-40 + i * 5} -56 {WALL_Z} south world{" shared" if shared else ""}')
+        s.cmd(f'mcgui place {page} 4 3 bw{i} {-40 + i * 5} -56 {WALL_Z} south world{" shared" if shared else ""}')
 
 
 def remove_walls(b, n):
     for i in range(n):
-        b.srv.cmd(f'ui remove bw{i}')
+        b.srv.cmd(f'mcgui remove bw{i}')
 
 
 def walls(b):
     """Eight shared market walls in view of 100 players, nobody aiming at one: a quiet lobby."""
     fakes(b, 100)
+    rx = received(b)
     place_walls(b, 8)
     settle(b, 15)
+    expect_pictures(b, rx, 'walls')
     w = window(b, W(b), 'walls')
     remove_walls(b, 8)
     return pick(w, *TICK, 'send_ms_s', 'rx_mb_s')
@@ -390,11 +413,13 @@ def views(b):
     s = b.srv
     fakes(b, 50)
     h0 = s.P('health')['heap']
-    s.P('fakedo open market 5')
+    rx = received(b)
+    s.P('fakedo cmd 5 mcgui open market {name}')
     settle(b, 20)
+    expect_pictures(b, rx, 'views')
     w = window(b, W(b), 'views')
     h1 = s.P('health')['heap']
-    s.P('fakedo close 10')
+    s.P('fakedo cmd 10 mcgui close {name}')
     time.sleep(3)
     return {**pick(w, *TICK, 'send_ms_s', 'cpu_pool_ms_s', 'rx_mb_s'), 'heap_mb_per_view': (h1 - h0) / 50 / 1e6}
 
@@ -405,13 +430,15 @@ def hover(b):
     res = {}
     for n in (10, 50):
         fakes(b, n)
-        s.P('fakedo open market 5')
+        rx = received(b)
+        s.P('fakedo cmd 5 mcgui open market {name}')
         settle(b, 15)
+        expect_pictures(b, rx, f'hover {n}')
         s.P('fakedo sweep 20 10 3')
         settle(b, 5)
         w = window(b, W(b), f'hover{n}')
         s.P('fakedo still')
-        s.P('fakedo close 10')
+        s.P('fakedo cmd 10 mcgui close {name}')
         time.sleep(3)
         res.update(pick(w, 'cores', 'cpu_pool_ms_s', 'tick_ms_p50', 'tick_ms_p99', 'rx_mb_s', 'pictures', 'ahead', 'picture_run_ms',
                         'timed_out', 'uie_tick_us', suffix=f'.{n}'))
@@ -422,7 +449,7 @@ def hover_ms(s, x, y, wait=0.5):
     """Points Fake1's view at (x, y): ms until the first map patch (a frame over 512 bytes) reached it, or None."""
     s.P('fakedo lat clear')
     t0 = s.P('now')['nano']
-    s.cmd(f'ui debug Fake1 point {x} {y}')
+    s.cmd(f'mcgui debug Fake1 point {x} {y}')
     time.sleep(wait)
     arrived = [f[0] for f in s.P('fakedo lat')['frames'] if f[0] > t0 and f[1] > 512]
     return (min(arrived) - t0) / 1e6 if arrived else None
@@ -434,8 +461,10 @@ def latency(b):
     after resting there a second, which is when drawing ahead has had its chance."""
     s = b.srv
     fakes(b, 1)
-    s.P('fakedo open market 1')
+    rx = received(b)
+    s.P('fakedo cmd 1 mcgui open market {name}')
     settle(b, 15)
+    expect_pictures(b, rx, 'latency')
     targets = b.targets.get('market', [])[:12]
     cold, rest = [], []
     for x, y in targets:
@@ -448,7 +477,7 @@ def latency(b):
         v = hover_ms(s, x, y)
         if v is not None:
             rest.append(v)
-    s.P('fakedo close 1')
+    s.P('fakedo cmd 1 mcgui close {name}')
 
     def q(v, p):
         return sorted(v)[int(p * (len(v) - 1))] if v else None
@@ -463,10 +492,12 @@ def anim(b):
     res = {}
     for n in (1, 10, 50):
         fakes(b, n)
-        s.P('fakedo open bench-anim 5')
+        rx = received(b)
+        s.P('fakedo cmd 5 mcgui open bench-anim {name}')
         settle(b, 10)
+        expect_pictures(b, rx, f'anim {n}')
         w = window(b, W(b), f'anim{n}')
-        s.P('fakedo close 10')
+        s.P('fakedo cmd 10 mcgui close {name}')
         time.sleep(2)
         res.update(pick(w, 'cores', 'cpu_pool_ms_s', 'rx_mb_s', suffix=f'.{n}'))
         if 'pictures' in w:
@@ -480,7 +511,7 @@ def open_ms(s, page, player='Fake1', within=20.0, whole=100_000):
     command that count."""
     s.P('fakedo lat clear')
     t0 = s.P('now')['nano']
-    s.cmd(f'ui open {page} {player}')
+    s.cmd(f'mcgui open {page} {player}')
     end = time.time() + within
     while time.time() < end:
         time.sleep(0.2)
@@ -499,10 +530,12 @@ def deadline(b):
     not wait behind drawing ahead or animation, and none may be given up."""
     s = b.srv
     fakes(b, 60)
-    s.P('fakedo open market 10')
+    rx = received(b)
+    s.P('fakedo cmd 10 mcgui open market {name}')
     settle(b, 15)
+    expect_pictures(b, rx, 'deadline')
     for k in range(41, 51):
-        s.cmd(f'ui open bench-anim Fake{k}')
+        s.cmd(f'mcgui open bench-anim Fake{k}')
     s.P('fakedo sweep 20 10 3')
     settle(b, 5)
     # Before the busy loops: a server they starve can take longer than the wait to answer a console command.
@@ -512,10 +545,10 @@ def deadline(b):
     try:
         s.P('ticks start')
         for k in range(51, 61):
-            s.cmd(f'ui open market-own Fake{k}')
+            s.cmd(f'mcgui open market-own Fake{k}')
             if k < 57:
                 shown.append(open_ms(s, 'market-own'))
-                s.cmd('ui open market Fake1')
+                s.cmd('mcgui open market Fake1')
             time.sleep(1.5)
         time.sleep(5)
         t = s.P('ticks stop')
@@ -531,7 +564,7 @@ def deadline(b):
             p.kill()
     b.raw['deadline'] = {'ticks': t, 'stats': st, 'before': st0, 'open_ms': shown}
     s.P('fakedo still')
-    s.P('fakedo close 10')
+    s.P('fakedo cmd 10 mcgui close {name}')
     time.sleep(3)
     got = sorted(v for v in shown if v is not None)
     out = {'tick_ms_p99': t['p99'], 'cores': (t.get('cpu') or {}).get('cores_used', 0),
@@ -645,7 +678,7 @@ def main():
     b.a, b.raw = a, {}
     if a.no_build:
         b.cp = open(os.path.join(a.work, 'classpath.txt')).read().strip()
-        jar, arc = os.path.join(REPO, 'build/libs/MCGUI-0.1.0.jar'), os.path.join(REPO, 'examples/arcade/build/libs/Arcade-0.1.0.jar')
+        jar, arc = built_jars()
     else:
         jar, arc, b.cp = build(a)
         open(os.path.join(a.work, 'classpath.txt'), 'w').write(b.cp)
