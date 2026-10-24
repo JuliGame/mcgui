@@ -129,7 +129,18 @@ final class PageImport {
                     String page = f.endsWith(".html") ? f.substring(0, f.length() - 5) : null;
                     if (page != null && !pages.contains(page)) pages.add(page);
                 }
-                say(sender, pages.isEmpty() ? "Imported " + key + "." : "Imported " + pages.size() + " page" + (pages.size() == 1 ? "" : "s") + " from " + key + ".", NamedTextColor.GREEN);
+                // What came in and how to open it, on one line: the command, and the call a plugin makes. Words to read,
+                // not links: a page opened by clicking in chat has the chat drawn over it.
+                var done = Component.text().append(Chat.success(pages.isEmpty() ? "Imported " + key + "." : "Imported " + pages.size() + " page" + (pages.size() == 1 ? "" : "s") + " from " + key + "."));
+                if (!pages.isEmpty()) {
+                    String first = pages.get(0);
+                    done.append(Chat.text(" Open it with "))
+                            .append(Chat.command("/mcgui open " + first))
+                            .append(Chat.text(", or from a plugin with "))
+                            .append(Chat.code("MCGUI.open(player, \"" + first + "\")"))
+                            .append(Chat.text("."));
+                }
+                Chat.send(sender, done.build());
                 if (!removed.isEmpty()) {
                     plugin.getLogger().info("Removed what the last import of that project left behind: " + String.join(", ", removed));
                     say(sender, "Removed " + String.join(", ", removed) + ": no longer in the project.", NamedTextColor.GRAY);
@@ -138,19 +149,7 @@ final class PageImport {
                     say(sender, "Kept " + String.join(", ", kept) + ": no longer in the project, but changed on the server since the last import. Delete "
                             + (kept.size() == 1 ? "it" : "them") + " by hand if you don't need " + (kept.size() == 1 ? "it." : "them."), NamedTextColor.YELLOW);
                 }
-                // How to open it: the command, and the call a plugin makes. Words to read, not links: a page
-                // opened by clicking in chat has the chat drawn over it.
-                if (!pages.isEmpty()) {
-                    String first = pages.get(0);
-                    Chat.send(sender, Component.text()
-                            .append(Chat.text("Open it with "))
-                            .append(Chat.command("/mcgui open " + first))
-                            .append(Chat.text(", or from a plugin with "))
-                            .append(Chat.accent("MCGUI.open(player, \"" + first + "\")"))
-                            .append(Chat.text("."))
-                            .build());
-                    if (pages.size() > 1) Chat.send(sender, Component.text().append(Chat.text("Pages: ")).append(UiCommand.pageList(pages)).build());
-                }
+                if (pages.size() > 1) Chat.send(sender, Component.text().append(Chat.text("Pages: ")).append(UiCommand.pageList(pages)).build());
                 if (!newCursors.isEmpty()) {
                     say(sender, "New cursor" + (newCursors.size() == 1 ? " " : "s ") + String.join(", ", newCursors)
                             + ": restart the server to put " + (newCursors.size() == 1 ? "it" : "them") + " in the resource pack. Until then the page uses its fallback.", NamedTextColor.YELLOW);

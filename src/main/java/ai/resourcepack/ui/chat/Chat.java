@@ -124,6 +124,16 @@ public final class Chat {
         return Component.text(text, style.accent);
     }
 
+    /** Text in the success green. */
+    public static Component success(String text) {
+        return Component.text(text, style.success);
+    }
+
+    /** Code to type somewhere other than chat (a plugin's call), in the command colour, not clickable. */
+    public static Component code(String text) {
+        return Component.text(text, style.command);
+    }
+
     /** Text in the ordinary grey. */
     public static Component text(String text) {
         return Component.text(text, style.body);
