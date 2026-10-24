@@ -39,6 +39,7 @@ permissions:
       mcgui.fov: true
       mcgui.pointer: true
       mcgui.pack: true
+      mcgui.update: true
   mcgui.open:
     description: Open a page fullscreen for yourself with /mcgui open.
     default: op
@@ -92,3 +93,6 @@ permissions:
   mcgui.pack:
     description: Have the resource pack sent to you again with /mcgui pack.
     default: true
+  mcgui.update:
+    description: Be told on joining when a newer MC GUI is on SpigotMC.
+    default: op

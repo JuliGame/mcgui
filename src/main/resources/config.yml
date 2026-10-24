@@ -43,6 +43,10 @@ import-url: https://mcgui.dev/api/builder/ui/page/
 # so we can see where pages made there are used. Off, neither is sent and /mcgui import still works.
 telemetry: true
 
+# Tells the console on start, and ops (mcgui.update) as they join, when a newer MC GUI is on SpigotMC.
+# It asks api.spigotmc.org for the current version number and sends nothing else.
+update-check: true
+
 # Pages made on mcgui.dev say so (a generator meta tag), and are drawn with a faint mark that mcgui.dev can
 # read back from a screenshot to tell that a page came from it: some blocks of plain colour are a shade
 # bluer than they would be. Nothing about the player or the server is in it. Off, pages are drawn exactly.

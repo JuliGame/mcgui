@@ -1,5 +1,6 @@
 package ai.resourcepack.ui;
 
+import ai.resourcepack.ui.chat.Chat;
 import ai.resourcepack.ui.framework.Framework;
 import ai.resourcepack.ui.framework.FrameworkCommand;
 import ai.resourcepack.ui.framework.api.UIFramework;
@@ -7,6 +8,9 @@ import ai.resourcepack.ui.html.HoverAhead;
 import ai.resourcepack.ui.html.HtmlRenderer;
 import ai.resourcepack.ui.html.SharedRepaints;
 import ai.resourcepack.ui.html.Page;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.event.ClickEvent;
+import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Bukkit;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.event.HandlerList;
@@ -55,6 +59,9 @@ public final class MCGUIPlugin extends JavaPlugin {
     /** Hover repaints every session takes from (see {@link SharedRepaints}); one for the plugin's life, sized by the config. */
     private final SharedRepaints repaints = new SharedRepaints(0);
     private ai.resourcepack.common.telemetry.Heartbeat heartbeat;
+    /** This plugin's SpigotMC resource id: the number in its page's URL. */
+    private static final int SPIGOT_RESOURCE = 139931;
+    private ai.resourcepack.common.update.UpdateCheck updates;
 
     @Override
     public void onLoad() {
@@ -76,7 +83,7 @@ public final class MCGUIPlugin extends JavaPlugin {
         long t0 = System.nanoTime();
         saveDefaultConfig();
         cfg = getConfig();
-        ai.resourcepack.ui.chat.Chat.configure(cfg.getConfigurationSection("chat"));
+        Chat.configure(cfg.getConfigurationSection("chat"));
         framework = new Framework(this);
         if (!framework.enable()) {
             framework = null;
@@ -126,6 +133,20 @@ public final class MCGUIPlugin extends JavaPlugin {
         heartbeat = ai.resourcepack.common.telemetry.Heartbeat.of(this, "ui-engine")
                 .enabledWhen(this::telemetry)
                 .start();
+        updates = ai.resourcepack.common.update.UpdateCheck.spigot(this, SPIGOT_RESOURCE)
+                .name("MC GUI")
+                .permission("mcgui.update")
+                .enabledWhen(() -> cfg.getBoolean("update-check", true))
+                .player((player, update) -> Chat.send(player, Component.text()
+                        .append(Component.text("MC GUI ", Chat.body()))
+                        .append(Chat.accent(update.latest()))
+                        .append(Component.text(" is out (you have " + update.running() + "). ", Chat.body()))
+                        .append(Chat.accent("Get it on SpigotMC")
+                                .decorate(TextDecoration.UNDERLINED)
+                                .clickEvent(ClickEvent.openUrl(update.url()))
+                                .hoverEvent(Component.text(update.url())))
+                        .build()))
+                .start();
         MCGUI.instance = this;
         enableMillis = (System.nanoTime() - t0) / 1e6;
     }
@@ -157,6 +178,7 @@ public final class MCGUIPlugin extends JavaPlugin {
     public void onDisable() {
         MCGUI.instance = null;
         if (heartbeat != null) heartbeat.stop();
+        if (updates != null) updates.stop();
         Page.SCHEMES.remove("head");
         tasks.forEach(BukkitTask::cancel);
         tasks.clear();
@@ -208,7 +230,7 @@ public final class MCGUIPlugin extends JavaPlugin {
     void reload() {
         reloadConfig();
         cfg = getConfig();
-        ai.resourcepack.ui.chat.Chat.configure(cfg.getConfigurationSection("chat"));
+        Chat.configure(cfg.getConfigurationSection("chat"));
         PageStore old = pages;
         pages = newPageStore();
         old.close();
