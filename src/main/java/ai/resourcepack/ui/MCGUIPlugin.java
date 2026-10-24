@@ -107,7 +107,8 @@ public final class MCGUIPlugin extends JavaPlugin {
         org.bukkit.command.PluginCommand mcgui = getCommand("mcgui");
         mcgui.setExecutor(command);
         mcgui.setTabCompleter(command);
-        if (cfg.getBoolean("gui-alias", true)) registerGuiAlias(mcgui);
+        if (cfg.getBoolean("gui-alias", true)) registerAlias(mcgui, "gui", "gui-alias");
+        if (cfg.getBoolean("ui-alias", true)) registerAlias(mcgui, "ui", "ui-alias");
         var meter = framework.meter();
         tasks.add(Bukkit.getScheduler().runTaskTimer(this, () -> {
             meter.begin();
@@ -129,11 +130,12 @@ public final class MCGUIPlugin extends JavaPlugin {
     }
 
     /**
-     * /gui, the same command as /mcgui. Not an alias in plugin.yml, because config.yml can turn it off
-     * ({@code gui-alias}) for a server where another plugin owns /gui; read at start-up.
+     * /gui or /ui (UI Engine's command until 0.1.1), the same command as /mcgui. Not aliases in plugin.yml,
+     * because config.yml can turn each off ({@code gui-alias}, {@code ui-alias}) for a server where another
+     * plugin owns the name; read at start-up.
      */
-    private void registerGuiAlias(org.bukkit.command.PluginCommand mcgui) {
-        org.bukkit.command.Command gui = new org.bukkit.command.Command("gui", mcgui.getDescription(), mcgui.getUsage().replace("/mcgui", "/gui"), List.of()) {
+    private void registerAlias(org.bukkit.command.PluginCommand mcgui, String name, String key) {
+        org.bukkit.command.Command alias = new org.bukkit.command.Command(name, mcgui.getDescription(), mcgui.getUsage().replace("/mcgui", "/" + name), List.of()) {
             @Override
             public boolean execute(org.bukkit.command.CommandSender sender, String label, String[] args) {
                 return mcgui.execute(sender, label, args);
@@ -144,8 +146,9 @@ public final class MCGUIPlugin extends JavaPlugin {
                 return mcgui.tabComplete(sender, alias, args);
             }
         };
-        if (!getServer().getCommandMap().register("mcgui", gui)) {
-            getLogger().info("Another plugin has /gui, so /gui is that plugin's here; /mcgui and /mcgui:gui still work");
+        if (!getServer().getCommandMap().register("mcgui", alias)) {
+            getLogger().info("Another plugin has /" + name + ", so /" + name + " is that plugin's here; /mcgui and /mcgui:" + name
+                    + " still work (" + key + ": false in config.yml stops trying)");
         }
     }
 

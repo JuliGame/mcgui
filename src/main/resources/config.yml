@@ -6,6 +6,9 @@ pages-folder: pages
 # /gui as well as /mcgui. Turn it off when another plugin uses /gui (read when the server starts).
 gui-alias: true
 
+# /ui as well (the command's name before MC GUI). Turn it off when another plugin uses /ui.
+ui-alias: true
+
 # Edit a page (or its CSS or images) and it updates in game within a second.
 live-reload: true
 

@@ -47,8 +47,9 @@ sprites and pre-rendered 3D models, and a Trade button that runs a console
 
 ## Commands
 
-`/gui` works as well as `/mcgui` unless `gui-alias: false` in `config.yml` (for a
-server where another plugin has `/gui`). MC GUI was called UI Engine until 0.1.1:
+`/gui` and `/ui` work as well as `/mcgui`, unless `gui-alias: false` or
+`ui-alias: false` in `config.yml` (for a server where another plugin has that
+command). MC GUI was called UI Engine until 0.1.1:
 its folder moves from `plugins/UIEngine` on first start, and a plugin that
 depends on `UIEngine` still loads.
 

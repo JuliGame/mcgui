@@ -9,7 +9,7 @@ provides: [UIEngine]
 description: "Custom HTML/CSS screens in Minecraft with no limits. Not chest GUIs or Dialogs!"
 website: https://mcgui.dev/
 commands:
-  # /gui as well, unless gui-alias in config.yml is off (registered at start-up, see MCGUIPlugin).
+  # /gui and /ui as well, unless gui-alias / ui-alias in config.yml is off (registered at start-up, see MCGUIPlugin).
   mcgui:
     description: Open, place and reload HTML pages; test screens, set your field of view and pointer speed, re-send the pack.
     usage: /mcgui open <page> [player] | close | place <page> [cols] [rows] [name] [shared] | remove [name] | list | reload | test wall|view [cols] [rows] | fov <degrees> | pointer [speed] | pack | stats | clear
