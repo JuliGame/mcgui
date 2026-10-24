@@ -314,6 +314,9 @@ def window(b, seconds, tag=None):
             'picture_run_ms': st['jobs']['picture']['run_ms'], 'picture_wait_ms': st['jobs']['picture']['wait_ms'],
             'timed_out': st['timed_out'] - st0['timed_out'],
         })
+        # Hover layers (views.hover-layers): armed, worked out, found worked out by another session, shown by the client.
+        if 'layers' in st and 'layers' in st0:
+            out.update({f'layers_{k}': st['layers'][k] - st0['layers'][k] for k in ('armed', 'worked_out', 'reused', 'shown')})
     if tag:
         b.raw[tag] = {'ticks': t, 'fakes': fs, 'stats': st}
     return out
@@ -445,23 +448,26 @@ def views(b):
 
 
 def hover(b):
-    """Players hovering round the market fullscreen: the server's CPU, ticks and bytes, at 1, 10 and 50."""
+    """Players hovering round a page fullscreen (--hover-pages, the market unless told): the server's CPU, ticks and bytes,
+    at 1, 10 and 50. Keys of a page other than the market carry its name (hover.cores.quests.50)."""
     s = b.srv
     res = {}
-    for n in (1, 10, 50):
-        fakes(b, n)
-        rx = received(b)
-        s.P('fakedo cmd 5 mcgui open market {name}')
-        settle(b, 15)
-        expect_pictures(b, rx, f'hover {n}')
-        s.P('fakedo sweep 20 10 3')
-        settle(b, 5)
-        w = window(b, W(b), f'hover{n}')
-        s.P('fakedo still')
-        s.P('fakedo cmd 10 mcgui close {name}')
-        time.sleep(3)
-        res.update(pick(w, 'cores', 'cpu_pool_ms_s', 'send_ms_s', 'netty_ms_s', 'tick_ms_p50', 'tick_ms_p99', 'rx_mb_s', 'pictures', 'ahead',
-                        'picture_run_ms', 'timed_out', 'uie_tick_us', suffix=f'.{n}'))
+    for page in b.a.hover_pages.split(','):
+        for n in (1, 10, 50):
+            fakes(b, n)
+            rx = received(b)
+            s.P(f'fakedo cmd 5 mcgui open {page} {{name}}')
+            settle(b, 15)
+            expect_pictures(b, rx, f'hover {page} {n}')
+            s.P('fakedo sweep 20 10 3')
+            settle(b, 5)
+            w = window(b, W(b), f'hover{n}' if page == 'market' else f'hover-{page}-{n}')
+            s.P('fakedo still')
+            s.P('fakedo cmd 10 mcgui close {name}')
+            time.sleep(3)
+            res.update(pick(w, 'cores', 'cpu_pool_ms_s', 'send_ms_s', 'netty_ms_s', 'tick_ms_p50', 'tick_ms_p99', 'rx_mb_s', 'pictures', 'ahead',
+                            'picture_run_ms', 'timed_out', 'uie_tick_us', 'layers_armed', 'layers_worked_out', 'layers_reused', 'layers_shown',
+                            suffix=f'.{n}' if page == 'market' else f'.{page}.{n}'))
     return res
 
 
@@ -686,6 +692,8 @@ def main():
     p.add_argument('--tag', default='')
     p.add_argument('--set', action='append', default=[], metavar='KEY=VALUE',
                    help='a config.yml setting for the server, dotted (views.hover-layers=32); repeatable')
+    p.add_argument('--hover-pages', default='market',
+                   help='pages the hover cell runs on, comma separated (vanilla ones need --vanilla)')
     a = p.parse_args()
     cells = [c for c in (a.only.split(',') if a.only else (QUICK if a.quick else CELLS)) if c]
     for c in cells:
