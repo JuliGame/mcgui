@@ -430,7 +430,7 @@ with it. The rig and every result of the 26.3 port are in
 | `render/Palette` | The map colour table, and the HI (YCbCr in 240 colours) and PLAIN encodings |
 | `pack/` | `Shaders` (both GLSL dialects), `SymbolHash` (the shader's colour lookup), `ResourcePack` (build, serve, who has it) |
 | `net/` | `Nms` (every server internal, by reflection), `MapSender` (diffed map patches, per-player budget, frame re-pointing), `Wire`/`ServerWire` (what the sender writes through), `Pipeline` (ping answers, the hidden inventory, each connection's frame pointing) |
-| `world/` | `MapWall` (the frames), `Walls` (placed walls and crosshair input), `Views` (seating, camera, pointer, input), `PrivateView` (fake air for players without the pack) |
+| `world/` | `MapWall` (the frames), `MapPool` (placed walls whose frames share maps), `Walls` (placed walls and crosshair input), `Views` (seating, camera, pointer, input), `PrivateView` (fake air for players without the pack) |
 
 ## The framework: things that are not obvious
 
@@ -694,6 +694,24 @@ with it. The rig and every result of the 26.3 port are in
   that connection. The sender's own bundles never carry a new entity, which is
   how the handler tells them apart. Pointing lives as long as the connection
   (the client keeps its maps as long), so `MapSender.reset` keeps it.
+- **Placed walls share maps: one per distinct tile a player has in them**
+  (`MapPool`, `MapSender.pooled`). The client draws every distinct map with a
+  draw call of its own each frame (`RenderTypeFeatureRenderer.Group` merges
+  only frames that show the same map texture), about 15–20 µs a map at 1080p
+  on Josh's PC however small it is on screen, so frames that show the same map
+  cost one draw. Canvases share tiles of the same colours (`shareAlike`), so the
+  same tile is the same array on any wall; a frame of any placed wall may be
+  pointed at any of their maps that holds its tile. Rules: a map more than one
+  frame shows is never sent anything (whoever changes moves to a map no frame
+  shows, the tile's own first so every player's frames come back to the same
+  ids and patches stay compressed once for all of them); a map still waiting in
+  a queue is never counted on for what it holds now; a tile on its way to
+  another map is waited for (`WAIT`), not sent twice, so walls of one page that
+  come into view together cost one wall's bytes. Frames are counted from the
+  pointing of every placed wall, in range or not, since a wall's frames stay
+  on clients up to Paper's tracking range. Views keep their own maps. Measured
+  (Josh's PC, 1080p, 48 walls of 4×3 in view): one page on every wall 75 → 184
+  FPS, 48 different pictures 76 → 88 (their plain areas repeat).
 - **Content is not trusted.** Every call into a `WallContent` or
   `ViewContent` from the tick, the sender or `Views.close` is guarded and
   logged, `LinkageError` included: a content whose plugin was disabled first
