@@ -526,8 +526,8 @@ MC GUI runs on Spigot and Paper from the same jar (since 0.3.0; SpigotMC lists o
   with nothing defined; the GUI path writes depth and zero fog distances for that
   reason. 1.21.11 has no `sample_lightmap.glsl`. Every shader of every overlay was
   compiled with glslang against that version's own includes from its client jar,
-  and a 1.21.11 client loaded the pack without a shader error; overlays, blur and
-  the client-placed pointer on 1.21.11 and 26.1 are unseen in a client.
+  and a 1.21.11 client loaded the pack without a shader error and drew walls and
+  fullscreen pages as 26.x does (seen by the owner). 26.1 is unseen in a client.
 - **The pack replaces `text.fsh`/`text.vsh` and `position_tex_color`**,
   `post_effect/entity_outline.json` and `post_effect/blur.json`, and in its
   26.2 overlay `rendertype_clouds.vsh` (overlays and menus, below). So do other plugins
