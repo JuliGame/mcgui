@@ -70,7 +70,8 @@ public final class ResourcePack implements AutoCloseable {
         this.sha1 = sha1(bytes);
         Files.createDirectories(dataFolder);
         Files.write(dataFolder.resolve("pack.zip"), bytes);
-        logger.info("Resource pack built: " + bytes.length + " bytes, sha1 " + sha1 + " (also written to pack.zip)");
+        ai.resourcepack.ui.StartupNotes.say(logger, "Pack", "Built, " + Math.max(1, bytes.length / 1024) + " KB (pack.zip)",
+                "Resource pack built: " + bytes.length + " bytes, sha1 " + sha1 + " (also written to pack.zip)");
     }
 
     public void start() throws IOException {
@@ -104,7 +105,8 @@ public final class ResourcePack implements AutoCloseable {
         server.setExecutor(pool);
         server.start();
         http = server;
-        logger.info("Serving the resource pack on " + settings.packBind + ":" + settings.packPort);
+        ai.resourcepack.ui.StartupNotes.say(logger, "Serving", "The resource pack on " + settings.packBind + ":" + settings.packPort,
+                "Serving the resource pack on " + settings.packBind + ":" + settings.packPort);
     }
 
     private String url() {

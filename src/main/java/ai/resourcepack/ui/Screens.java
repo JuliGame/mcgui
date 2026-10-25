@@ -243,7 +243,8 @@ public final class Screens implements Listener {
             }
             putBack(s, world);
         }
-        plugin.getLogger().info("Placed " + walls.size() + " screen(s)");
+        StartupNotes.say(plugin.getLogger(), "Screens", walls.size() + " placed",
+                "Placed " + walls.size() + (walls.size() == 1 ? " screen" : " screens"));
     }
 
     /** Places the screen saved as [s] in [world]; one that cannot be is kept as it was in screens.yml. */

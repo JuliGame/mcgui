@@ -194,7 +194,8 @@ public final class SharedCompression implements AutoCloseable {
     public static SharedCompression create(Packets packets, Logger log) {
         try {
             SharedCompression s = new SharedCompression(packets, log, paperLevel());
-            log.info("Map pictures are compressed once for everyone watching them (" + s.compressorName + ").");
+            ai.resourcepack.ui.StartupNotes.say(log, "Maps", "Compressed once for every viewer (" + s.compressorName + ")",
+                    "Map pictures are compressed once for everyone watching them (" + s.compressorName + ").");
             return s;
         } catch (ReflectiveOperationException | LinkageError | RuntimeException e) {
             log.info("Map pictures are compressed by each player's connection: this server's network classes are not "

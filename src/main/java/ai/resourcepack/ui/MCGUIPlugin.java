@@ -79,6 +79,8 @@ public final class MCGUIPlugin extends JavaPlugin {
                 getLogger().warning("Could not move plugins/UIEngine to plugins/MCGUI, move it by hand: " + e);
             }
         }
+        // Asked before the worlds load, so the answer is back for the startup banner.
+        ai.resourcepack.common.update.UpdateCheck.early(this, SPIGOT_RESOURCE);
     }
 
     @Override
@@ -86,9 +88,30 @@ public final class MCGUIPlugin extends JavaPlugin {
         long t0 = System.nanoTime();
         saveDefaultConfig();
         cfg = getConfig();
+        if (updates != null) updates.stop();
+        updates = ai.resourcepack.common.update.UpdateCheck.spigot(this, SPIGOT_RESOURCE)
+                .name("MC GUI")
+                .permission("mcgui.update")
+                .enabledWhen(() -> cfg.getBoolean("update-check", true))
+                .player((player, update) -> Chat.send(player, Component.text()
+                        .append(Component.text("MC GUI ", Chat.body()))
+                        .append(Chat.accent(update.latest()))
+                        .append(Component.text(" is out (you have " + update.running() + "). ", Chat.body()))
+                        .append(Chat.accent("Get it on SpigotMC")
+                                .decorate(TextDecoration.UNDERLINED)
+                                .clickEvent(ClickEvent.openUrl(update.url()))
+                                .hoverEvent(Component.text(update.url())))
+                        .build()));
+        ai.resourcepack.common.banner.StartupBanner banner = ai.resourcepack.common.banner.StartupBanner.begin(this)
+                .name("MC GUI")
+                .tagline("HTML and CSS pages on maps, for vanilla clients.")
+                .link("Editor", "https://mcgui.dev")
+                .updates(updates);
+        StartupNotes.collect(banner);
         Chat.configure(cfg.getConfigurationSection("chat"));
         framework = new Framework(this);
         if (!framework.enable()) {
+            StartupNotes.collect(null);
             framework = null;
             getServer().getPluginManager().disablePlugin(this);
             return;
@@ -152,21 +175,11 @@ public final class MCGUIPlugin extends JavaPlugin {
         heartbeat = ai.resourcepack.common.telemetry.Heartbeat.of(this, "ui-engine")
                 .enabledWhen(this::telemetry)
                 .start();
-        updates = ai.resourcepack.common.update.UpdateCheck.spigot(this, SPIGOT_RESOURCE)
-                .name("MC GUI")
-                .permission("mcgui.update")
-                .enabledWhen(() -> cfg.getBoolean("update-check", true))
-                .player((player, update) -> Chat.send(player, Component.text()
-                        .append(Component.text("MC GUI ", Chat.body()))
-                        .append(Chat.accent(update.latest()))
-                        .append(Component.text(" is out (you have " + update.running() + "). ", Chat.body()))
-                        .append(Chat.accent("Get it on SpigotMC")
-                                .decorate(TextDecoration.UNDERLINED)
-                                .clickEvent(ClickEvent.openUrl(update.url()))
-                                .hoverEvent(Component.text(update.url())))
-                        .build()))
-                .start();
+        updates.start();
         MCGUI.instance = this;
+        if (Threads.folia()) banner.ok("Server", "Folia, each region on its own thread");
+        StartupNotes.collect(null);
+        banner.print();
         enableMillis = (System.nanoTime() - t0) / 1e6;
     }
 
