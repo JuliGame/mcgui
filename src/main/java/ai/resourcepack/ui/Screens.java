@@ -1,6 +1,7 @@
 package ai.resourcepack.ui;
 
 import ai.resourcepack.ui.framework.platform.Platform;
+import ai.resourcepack.ui.framework.platform.Threads;
 import ai.resourcepack.ui.framework.api.Canvas;
 import ai.resourcepack.ui.framework.api.Click;
 import ai.resourcepack.ui.framework.api.CloseReason;
@@ -377,6 +378,17 @@ public final class Screens implements Listener {
     public boolean open(Player player, String page, Consumer<String> problem) {
         String n = plugin.pages().normalise(page);
         if (n == null || !plugin.pages().exists(n)) return false;
+        if (!Threads.owns(player) && Threads.folia()) {
+            // Folia: seated from their own thread, as soon as it runs.
+            Threads.on(plugin, player, () -> {
+                try {
+                    if (!open(player, page, problem)) problem.accept("No page called '" + page + "'.");
+                } catch (IllegalStateException e) {
+                    problem.accept(e.getMessage());
+                }
+            });
+            return true;
+        }
         UUID id = player.getUniqueId();
         Page p = plugin.pages().loaded(n);
         if (p != null) {
@@ -394,7 +406,7 @@ public final class Screens implements Listener {
             } catch (IllegalStateException e) {
                 problem.accept(e.getMessage());
             }
-        }, plugin.serverThread());
+        }, Threads.player(plugin, player, plugin.serverThread()));
         return true;
     }
 
@@ -466,10 +478,20 @@ public final class Screens implements Listener {
             for (Session s : w.sessions.values()) s.tick(now);
             if (w.sharedSession != null) w.sharedSession.tick(now);
         }
+        // Folia: each seated page on its player's thread instead (tick(Player, long)).
+        if (Threads.folia()) return;
         for (Seated s : views.values()) {
             s.session.tick(now);
             s.restHotbar();
         }
+    }
+
+    /** Folia: [player]'s seated page's tick, on their thread. */
+    void tick(Player player, long now) {
+        Seated s = views.get(player.getUniqueId());
+        if (s == null) return;
+        s.session.tick(now);
+        s.restHotbar();
     }
 
     /** How many walls are placed and how many sessions they have, and how many players are seated at a page. */

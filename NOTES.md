@@ -470,6 +470,36 @@ MC GUI runs on Spigot and Paper from the same jar (since 0.3.0; SpigotMC lists o
   an invalid move). On 26.2 with ViaVersion and ViaBackwards it joins as 26.1, so 26.2 is where a bot can drive
   both servers; 26.3 needs a real client.
 
+## Folia
+
+The same jar runs on Folia (since 0.5.0; `folia-supported: true` in `plugin.yml`). Folia has no main thread: each
+region of the world ticks on its own, its `BukkitScheduler` refuses every task, and an entity may only be changed
+(anything that reaches CraftBukkit's `getHandle()`) or plainly `teleport`ed on the thread of the region it is in.
+Reading a position, a world or a UUID is fine from anywhere. How MC GUI copes, all in `framework/platform/Threads`:
+
+- **Every task goes through `Threads`** (on plugin-common's `scheduler/Tasks`, which reaches Folia's schedulers by
+  reflection, since we compile against spigot-api). Off Folia each call is exactly the Bukkit scheduler call it
+  replaced, so Spigot and Paper behave as before. A new `Bukkit.getScheduler()` call is a Folia bug.
+- **One lock.** All of MC GUI was written for one thread, so on Folia every way in (a task, an event through
+  `Threads.register`, a command) holds one `ReentrantLock`, and MC GUI still sees one thread at a time. Netty threads
+  never take it; they hand work back as before. Its own work per tick is small, so regions seldom wait on it.
+- **The tick is split.** What concerns nobody in particular (sending maps, walls' viewers, walls' sessions) runs on
+  the global region; what concerns one player runs on their thread every tick (`Threads.PlayerTicks`): their view
+  (`Views.tick(Player)`), what they aim at on a wall (`Walls.tick(Player)`) and their seated page
+  (`Screens.tick(Player, long)`). Off Folia the old loops do all of it, in the old order. Folia has no server-wide
+  tick count, so the global tick counts (`Threads.countTick`) and `Platform.tick` reads that.
+- **Work about a player goes to their thread**: a view's and a player session's `serverThread` is the player's
+  (`Threads.player`), `Views.close` and `Screens.open` hop there when called from elsewhere (the console's
+  `/mcgui open <page> <player>`), a page's `data-command` runs there and a console command on the global region.
+  `UIFramework.openView` throws on Folia from any other thread; `MCGUI.open` does the hop itself.
+- **Teleports are `Platform.teleport`**: `teleportAsync` on Folia, so a server-placed pointer's mount waits for it.
+- **Shutting down**, the thread disabling plugins has no world to work in: an open view is only let go of, and the
+  player is put back on their next join from the PDC, as after a crash (`Views.onJoin`).
+- **Testing**: Folia 1.21.11 from `fill.papermc.io` (project `folia`) swapped in for a test server's `paper.jar`.
+  Checked with bots: start, commands, a page opened by a player and by the console, clicks, chat, getting up, walls
+  (frames, aim, clicks), a seated player hidden from another, quitting while seated, reload, import, a shutdown with
+  somebody seated, a placed wall coming back. Not yet in a real client (the client-placed pointer and overlays).
+
 ## The framework: things that are not obvious
 
 - **The server internals are reached by reflection**, so the plugin compiles against the plain 1.21.8 API and needs

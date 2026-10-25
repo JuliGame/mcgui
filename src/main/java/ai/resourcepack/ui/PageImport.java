@@ -1,6 +1,7 @@
 package ai.resourcepack.ui;
 
 import ai.resourcepack.ui.framework.platform.Platform;
+import ai.resourcepack.ui.framework.platform.Threads;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -116,7 +117,8 @@ final class PageImport {
             String failed = problem;
             String open = entry != null && NAME.matcher(entry).matches() && entry.endsWith(".html") ? entry.substring(0, entry.length() - 5) : null;
             if (!plugin.isEnabled()) return;
-            Bukkit.getScheduler().runTask(plugin, () -> {
+            // Back on the server, and on Folia on the thread of whoever ran it (a player is told on their own).
+            Runnable told = () -> {
                 if (failed != null) {
                     plugin.getLogger().warning(sender.getName() + " could not import " + key + ": " + failed);
                     say(sender, "Could not import " + key + ": " + failed, NamedTextColor.RED);
@@ -155,7 +157,9 @@ final class PageImport {
                     say(sender, "New cursor" + (newCursors.size() == 1 ? " " : "s ") + String.join(", ", newCursors)
                             + ": restart the server to put " + (newCursors.size() == 1 ? "it" : "them") + " in the resource pack. Until then the page uses its fallback.", NamedTextColor.YELLOW);
                 }
-            });
+            };
+            if (sender instanceof org.bukkit.entity.Player p) Threads.on(plugin, p, told);
+            else Threads.global(plugin, told);
         });
     }
 

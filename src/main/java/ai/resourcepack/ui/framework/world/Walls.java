@@ -1,6 +1,7 @@
 package ai.resourcepack.ui.framework.world;
 
 import ai.resourcepack.ui.framework.platform.Platform;
+import ai.resourcepack.ui.framework.platform.Threads;
 import ai.resourcepack.ui.framework.api.Click;
 import ai.resourcepack.ui.framework.api.WallContent;
 import ai.resourcepack.ui.framework.api.WallScreen;
@@ -260,22 +261,32 @@ public final class Walls implements Listener {
         }
         // No walls and nobody looking at one: nothing to aim at, and nothing to look away from.
         if (placed.length == 0 && looks.isEmpty()) return;
-        for (Player p : Bukkit.getOnlinePlayers()) {
-            Look now = seated.test(p) || !nearAny(p) ? null : aim(p);
-            Look before = now == null ? looks.remove(p.getUniqueId()) : looks.put(p.getUniqueId(), now);
-            // Each guarded: a content that throws must not cost every later wall and player their turn.
-            try {
-                if (before != null && (now == null || before.wall != now.wall)) before.wall.content.lookAway(p);
-            } catch (RuntimeException | LinkageError e) {
-                failed("on a look away", e);
+        // Folia: each player aims on their own thread instead (tick(Player)), as aiming reads the world round them.
+        if (Threads.folia()) return;
+        for (Player p : Bukkit.getOnlinePlayers()) look(p);
+    }
+
+    /** Folia: what [player] aims at, on their thread. */
+    public void tick(Player player) {
+        if (placed.length == 0 && looks.isEmpty()) return;
+        look(player);
+    }
+
+    private void look(Player p) {
+        Look now = seated.test(p) || !nearAny(p) ? null : aim(p);
+        Look before = now == null ? looks.remove(p.getUniqueId()) : looks.put(p.getUniqueId(), now);
+        // Each guarded: a content that throws must not cost every later wall and player their turn.
+        try {
+            if (before != null && (now == null || before.wall != now.wall)) before.wall.content.lookAway(p);
+        } catch (RuntimeException | LinkageError e) {
+            failed("on a look away", e);
+        }
+        try {
+            if (now != null && (before == null || before.wall != now.wall || before.x != now.x || before.y != now.y)) {
+                now.wall.content.look(p, now.x, now.y);
             }
-            try {
-                if (now != null && (before == null || before.wall != now.wall || before.x != now.x || before.y != now.y)) {
-                    now.wall.content.look(p, now.x, now.y);
-                }
-            } catch (RuntimeException | LinkageError e) {
-                failed("on a look", e);
-            }
+        } catch (RuntimeException | LinkageError e) {
+            failed("on a look", e);
         }
     }
 

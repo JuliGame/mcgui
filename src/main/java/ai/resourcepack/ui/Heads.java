@@ -3,6 +3,7 @@ package ai.resourcepack.ui;
 import ai.resourcepack.ui.html.res.Picture;
 import ai.resourcepack.ui.html.res.Pictures;
 import ai.resourcepack.ui.framework.platform.Platform;
+import ai.resourcepack.ui.framework.platform.Threads;
 import org.bukkit.profile.PlayerProfile;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
@@ -66,30 +67,35 @@ final class Heads {
     /** Looks [who] up and fetches their skin, once at a time. */
     private void fetch(String who) {
         if (asked.putIfAbsent(who, true) != null || !plugin.isEnabled()) return;
-        // The player and their profile are read on the server thread; the lookup and the download are not.
-        Bukkit.getScheduler().runTask(plugin, () -> {
+        // The player and their profile are read on the server thread (on Folia, theirs); the lookup and the download are not.
+        Threads.global(plugin, () -> {
             Player online = ID.matcher(who).matches() ? Bukkit.getPlayer(uuid(who)) : Bukkit.getPlayerExact(who);
-            PlayerProfile known = online == null ? null : Platform.profile(online);
-            String name = online != null ? online.getName() : NAME.matcher(who).matches() ? who : null;
-            UUID id = online == null && name == null ? uuid(who) : null;
-            Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
-                Picture picture = null;
-                try {
-                    URL skin = known == null ? null : known.getTextures().getSkin();
-                    if (skin == null) {
-                        // Looked up by name (or UUID) at Mojang, whether or not this server checks accounts.
-                        PlayerProfile looked = Bukkit.createPlayerProfile(id, name).update().get(15, TimeUnit.SECONDS);
-                        if (looked != null) skin = looked.getTextures().getSkin();
-                    }
-                    if (skin != null) picture = face(skin);
-                } catch (Exception e) {
-                    if (plugin.isEnabled() && plugin.debug()) plugin.getLogger().info("No face for " + who + ": " + e);
+            if (online == null || Threads.owns(online)) lookUp(who, online);
+            else Threads.on(plugin, online, () -> lookUp(who, online));
+        });
+    }
+
+    private void lookUp(String who, Player online) {
+        PlayerProfile known = online == null ? null : Platform.profile(online);
+        String name = online != null ? online.getName() : NAME.matcher(who).matches() ? who : null;
+        UUID id = online == null && name == null ? uuid(who) : null;
+        Threads.async(plugin, () -> {
+            Picture picture = null;
+            try {
+                URL skin = known == null ? null : known.getTextures().getSkin();
+                if (skin == null) {
+                    // Looked up by name (or UUID) at Mojang, whether or not this server checks accounts.
+                    PlayerProfile looked = Bukkit.createPlayerProfile(id, name).update().get(15, TimeUnit.SECONDS);
+                    if (looked != null) skin = looked.getTextures().getSkin();
                 }
-                long now = System.currentTimeMillis();
-                faces.put(who, picture != null ? new Face(picture, now + KEEP_MILLIS) : new Face(STAND_IN, now + RETRY_MILLIS));
-                asked.remove(who);
-                if (picture != null && plugin.isEnabled()) Bukkit.getScheduler().runTask(plugin, arrived);
-            });
+                if (skin != null) picture = face(skin);
+            } catch (Exception e) {
+                if (plugin.isEnabled() && plugin.debug()) plugin.getLogger().info("No face for " + who + ": " + e);
+            }
+            long now = System.currentTimeMillis();
+            faces.put(who, picture != null ? new Face(picture, now + KEEP_MILLIS) : new Face(STAND_IN, now + RETRY_MILLIS));
+            asked.remove(who);
+            if (picture != null && plugin.isEnabled()) Threads.global(plugin, arrived);
         });
     }
 

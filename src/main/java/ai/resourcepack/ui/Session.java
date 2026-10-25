@@ -1,6 +1,7 @@
 package ai.resourcepack.ui;
 
 import ai.resourcepack.ui.framework.platform.Platform;
+import ai.resourcepack.ui.framework.platform.Threads;
 import ai.resourcepack.ui.framework.api.Canvas;
 import ai.resourcepack.ui.framework.api.Pointer;
 import ai.resourcepack.ui.html.HoverAhead;
@@ -179,7 +180,11 @@ public final class Session {
     Session(MCGUIPlugin plugin, Renders renderers, Canvas canvas, UUID viewer, double designHeight) {
         this.plugin = plugin;
         this.renderers = renderers;
-        this.serverThread = plugin.serverThread();
+        // On Folia, a player's session goes back to their own thread, and a shared one to the global region's.
+        this.serverThread = Threads.folia() && viewer != null ? task -> {
+            Player p = Bukkit.getPlayer(viewer);
+            (p != null ? Threads.player(plugin, p, plugin.serverThread()) : plugin.serverThread()).execute(task);
+        } : plugin.serverThread();
         this.canvas = canvas;
         // Players' pictures of one page are alike but where their own values are, and where they hover: one tile for each
         // place they are alike in, whoever drew it.
@@ -1600,7 +1605,7 @@ public final class Session {
             int press = ++presses;
             pressed = target;
             render();
-            Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            Threads.globalLater(plugin, () -> {
                 // By identity it could miss: a refresh in between moves pressed to a new copy of the document.
                 if (presses == press && pressed != null) {
                     pressed = null;
@@ -1776,7 +1781,10 @@ public final class Session {
     /** Runs [template] as the console, its placeholders filled for [p]; not if a value would change the command's shape. */
     private void console(String template, Player p) {
         String command = Placeholders.command(strip(template), p, plugin.getLogger());
-        if (command != null) Bukkit.dispatchCommand(Bukkit.getConsoleSender(), command);
+        if (command == null) return;
+        // On Folia, the console's commands run on the global region.
+        if (Threads.folia()) Threads.globalNow(plugin, () -> Bukkit.dispatchCommand(Bukkit.getConsoleSender(), command));
+        else Bukkit.dispatchCommand(Bukkit.getConsoleSender(), command);
     }
 
     /**
@@ -1882,7 +1890,10 @@ public final class Session {
         return c.startsWith("/") ? c.substring(1) : c;
     }
 
-    private static void runAs(Player p, String command) {
-        p.performCommand(strip(command));
+    private void runAs(Player p, String command) {
+        String c = strip(command);
+        // On Folia, from [p]'s own thread, which a wall's click may not be on.
+        if (Threads.folia()) Threads.now(plugin, p, () -> p.performCommand(c));
+        else p.performCommand(c);
     }
 }

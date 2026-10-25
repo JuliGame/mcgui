@@ -46,7 +46,7 @@ dependencies {
     implementation 'org.jsoup:jsoup:1.23.2'
     implementation 'com.github.weisj:jsvg:2.2.0'
     // The anonymous usage count. Shaded and relocated below, so it never meets another plugin's copy.
-    implementation 'ai.resourcepack:common:0.4.0'
+    implementation 'ai.resourcepack:common:0.5.0'
     // Adventure, for building chat. Spigot has none and Paper's must never meet ours, so it is shaded and
     // relocated below; messages leave as BungeeCord chat, which both servers ship (platform/Platform). Gson
     // is the server's on both.

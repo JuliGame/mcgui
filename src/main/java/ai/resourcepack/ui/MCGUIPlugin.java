@@ -1,6 +1,8 @@
 package ai.resourcepack.ui;
 
+import ai.resourcepack.common.scheduler.Tasks;
 import ai.resourcepack.ui.framework.platform.Platform;
+import ai.resourcepack.ui.framework.platform.Threads;
 import ai.resourcepack.ui.chat.Chat;
 import ai.resourcepack.ui.framework.Framework;
 import ai.resourcepack.ui.framework.FrameworkCommand;
@@ -16,7 +18,6 @@ import org.bukkit.Bukkit;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.event.HandlerList;
 import org.bukkit.plugin.java.JavaPlugin;
-import org.bukkit.scheduler.BukkitTask;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -49,8 +50,9 @@ public final class MCGUIPlugin extends JavaPlugin {
     private Screens screens;
     private Renders renderers;
     private Executor serverThread;
-    private final List<BukkitTask> tasks = new ArrayList<>();
-    private BukkitTask watcher;
+    private final List<Tasks.Handle> tasks = new ArrayList<>();
+    private Threads.PlayerTicks playerTicks;
+    private Tasks.Handle watcher;
     private FileConfiguration cfg;
     private volatile FirstPictures pictures;
     /** How long enabling took on the server thread, and until the warm-up (and its kept first pictures) was done, in ms; -1 until known. */
@@ -102,7 +104,7 @@ public final class MCGUIPlugin extends JavaPlugin {
         screens = new Screens(this, renderers);
         Heads heads = new Heads(this, screens::redrawSchemed);
         Page.SCHEMES.put("head", heads::image);
-        getServer().getPluginManager().registerEvents(screens, this);
+        Threads.register(screens, this);
         // Warm the renderer so the first page a player opens is quick: fonts, then a few pages loaded and drawn
         // once, full screen, off screen. A cold JVM takes several times longer over its first pictures. Then the
         // first picture of every placed screen's page, kept so its first viewers are sent it without waiting.
@@ -114,12 +116,28 @@ public final class MCGUIPlugin extends JavaPlugin {
         screens.load();
         UiCommand command = new UiCommand(this, new FrameworkCommand(framework));
         org.bukkit.command.PluginCommand mcgui = getCommand("mcgui");
-        mcgui.setExecutor(command);
-        mcgui.setTabCompleter(command);
+        if (Threads.folia()) {
+            // On Folia a command runs on its sender's region's thread (the console's on the global one): holding the lock.
+            mcgui.setExecutor((sender, cmd, label, args) -> {
+                boolean[] handled = new boolean[1];
+                Threads.locked(() -> handled[0] = command.onCommand(sender, cmd, label, args));
+                return handled[0];
+            });
+            mcgui.setTabCompleter((sender, cmd, label, args) -> {
+                List<List<String>> out = new ArrayList<>(1);
+                Threads.locked(() -> out.add(command.onTabComplete(sender, cmd, label, args)));
+                return out.get(0);
+            });
+        } else {
+            mcgui.setExecutor(command);
+            mcgui.setTabCompleter(command);
+        }
         if (cfg.getBoolean("gui-alias", true)) registerAlias(mcgui, "gui", "gui-alias");
         if (cfg.getBoolean("ui-alias", true)) registerAlias(mcgui, "ui", "ui-alias");
         var meter = framework.meter();
-        tasks.add(Bukkit.getScheduler().runTaskTimer(this, () -> {
+        // Folia: each seated player's page on their own thread (Screens.tick(Player)).
+        playerTicks = Threads.PlayerTicks.start(this, p -> screens.tick(p, Platform.tick()));
+        tasks.add(Threads.globalTimer(this, () -> {
             meter.begin();
             int tick = Platform.tick();
             try {
@@ -181,7 +199,9 @@ public final class MCGUIPlugin extends JavaPlugin {
         if (heartbeat != null) heartbeat.stop();
         if (updates != null) updates.stop();
         Page.SCHEMES.remove("head");
-        tasks.forEach(BukkitTask::cancel);
+        tasks.forEach(Tasks.Handle::cancel);
+        if (playerTicks != null) playerTicks.stop();
+        playerTicks = null;
         tasks.clear();
         if (watcher != null) watcher.cancel();
         if (screens != null) screens.shutdown();
@@ -220,7 +240,7 @@ public final class MCGUIPlugin extends JavaPlugin {
     private void watch() {
         if (watcher != null) watcher.cancel();
         watcher = cfg.getBoolean("live-reload", true)
-                ? Bukkit.getScheduler().runTaskTimerAsynchronously(this, () -> pages.checkForChanges(), 20, 20) : null;
+                ? Threads.asyncTimer(this, () -> pages.checkForChanges(), 20, 20) : null;
     }
 
     /**

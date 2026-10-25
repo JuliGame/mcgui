@@ -30,7 +30,8 @@ import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerResourcePackStatusEvent;
 import org.bukkit.plugin.java.JavaPlugin;
-import org.bukkit.scheduler.BukkitTask;
+import ai.resourcepack.common.scheduler.Tasks;
+import ai.resourcepack.ui.framework.platform.Threads;
 
 import java.util.ArrayList;
 import java.util.IdentityHashMap;
@@ -55,7 +56,9 @@ public final class Framework implements UIFramework, Listener {
     private Pipeline pipeline;
     private Walls walls;
     private Views views;
-    private final List<BukkitTask> tasks = new ArrayList<>();
+    private final List<Tasks.Handle> tasks = new ArrayList<>();
+    private Threads.PlayerTicks playerTicks;
+    private java.util.concurrent.Executor serverThread;
     private final TickMeter meter = new TickMeter();
     /**
      * This tick's assignments, made into a list kept for it; and the last handed to the sender, never changed after.
@@ -86,6 +89,7 @@ public final class Framework implements UIFramework, Listener {
 
     /** Starts it, as the config says; false if this server is not one it can drive. */
     public boolean enable() {
+        Threads.useFoliaTicks();
         settings = Settings.load(plugin.getConfig());
         Cpu.configure(settings.cpuThreads);
         String version = plugin.getServer().getBukkitVersion().split("-")[0];
@@ -114,11 +118,13 @@ public final class Framework implements UIFramework, Listener {
         sender = new MapSender(wire, palette, settings.bytesPerSecond, plugin.getLogger());
         views = new Views(plugin, settings, nms, pipeline, id -> pack != null && pack.has(id), sender, palette, settings.mapIdBase);
         walls = new Walls(plugin, nms, settings.mapIdBase + Views.VIEW_ID_SPAN, settings.viewDistance, settings.reach, views::seated, views::hides);
-        var pm = plugin.getServer().getPluginManager();
-        pm.registerEvents(this, plugin);
-        pm.registerEvents(walls, plugin);
-        pm.registerEvents(views, plugin);
-        tasks.add(Bukkit.getScheduler().runTaskTimer(plugin, this::tick, 1, 1));
+        serverThread = Threads.server(plugin, nms.serverThread());
+        Threads.register(this, plugin);
+        Threads.register(walls, plugin);
+        Threads.register(views, plugin);
+        tasks.add(Threads.globalTimer(plugin, this::tick, 1, 1));
+        // Folia: what each player's view and aim need, on their own thread (see Threads).
+        playerTicks = Threads.PlayerTicks.start(plugin, this::playerTick);
         sender.start();
         // Players already online (a reload): hand them the pack again, and read their clicks on walls.
         for (Player p : Bukkit.getOnlinePlayers()) {
@@ -132,8 +138,10 @@ public final class Framework implements UIFramework, Listener {
     /** Stops it: closes every view, takes down every wall, stops serving the pack. */
     public void disable() {
         UIFramework.Holder.set(null);
-        tasks.forEach(BukkitTask::cancel);
+        tasks.forEach(Tasks.Handle::cancel);
         tasks.clear();
+        if (playerTicks != null) playerTicks.stop();
+        playerTicks = null;
         if (views != null) step("close the open views", () -> views.closeAll(CloseReason.SHUTDOWN));
         if (walls != null) step("remove the walls", walls::removeAll);
         // After the views, whose closing still writes through them.
@@ -157,12 +165,19 @@ public final class Framework implements UIFramework, Listener {
     }
 
     private void tick() {
+        if (Threads.folia()) Threads.countTick();
         meter.begin();
         try {
             work();
         } finally {
             meter.end(Platform.tick());
         }
+    }
+
+    /** Folia only: [player]'s share of the tick, on their thread. Elsewhere {@link #work} does it for everybody. */
+    private void playerTick(Player player) {
+        views.tick(player);
+        walls.tick(player);
     }
 
     private void work() {
@@ -225,6 +240,7 @@ public final class Framework implements UIFramework, Listener {
 
     @Override
     public View openView(Player player, ViewContent content, ViewOptions options) {
+        if (Threads.folia() && !Threads.owns(player)) throw new IllegalStateException("A view is opened from " + player.getName() + "'s own thread (on Folia, their region's)");
         return views.open(player, content, options == null ? ViewOptions.DEFAULT : options);
     }
 
@@ -245,7 +261,7 @@ public final class Framework implements UIFramework, Listener {
 
     @Override
     public java.util.concurrent.Executor serverThread() {
-        return nms.serverThread();
+        return serverThread;
     }
 
     /** What the plugin's tick tasks cost the server thread (MC GUI's own tick adds to it too). */
@@ -276,7 +292,7 @@ public final class Framework implements UIFramework, Listener {
 
     /** Clicks on a wall's frames, which only the clients have, read off [player]'s connection (see Pipeline.useEntities). */
     private void readUses(Player player) {
-        pipeline.useEntities(player, id -> nms.serverThread().execute(() -> walls.frameUsed(player, id)));
+        pipeline.useEntities(player, id -> Threads.player(plugin, player, nms.serverThread()).execute(() -> walls.frameUsed(player, id)));
     }
 
     @EventHandler

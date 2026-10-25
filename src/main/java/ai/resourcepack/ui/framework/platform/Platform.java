@@ -75,6 +75,27 @@ public final class Platform {
         return new IllegalStateException(t);
     }
 
+    // ------------------------------------------------------------------ teleporting
+
+    private static final MethodHandle TELEPORT_ASYNC = virtual(org.bukkit.entity.Entity.class, "teleportAsync",
+            MethodType.methodType(java.util.concurrent.CompletableFuture.class, org.bukkit.Location.class));
+
+    /**
+     * Teleports [entity] to [to]: at once, except on Folia, which refuses {@code teleport} and moves an entity with
+     * {@code teleportAsync} (Paper API), done when the future completes.
+     */
+    @SuppressWarnings("unchecked")
+    public static java.util.concurrent.CompletableFuture<Boolean> teleport(org.bukkit.entity.Entity entity, org.bukkit.Location to) {
+        if (Threads.folia() && TELEPORT_ASYNC != null) {
+            try {
+                return (java.util.concurrent.CompletableFuture<Boolean>) TELEPORT_ASYNC.invoke(entity, to);
+            } catch (Throwable t) {
+                throw rethrow(t);
+            }
+        }
+        return java.util.concurrent.CompletableFuture.completedFuture(entity.teleport(to));
+    }
+
     // ------------------------------------------------------------------ the tick
 
     private static volatile IntSupplier ticks;

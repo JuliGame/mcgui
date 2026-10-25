@@ -1,6 +1,7 @@
 package ai.resourcepack.ui.framework.world;
 
 import ai.resourcepack.ui.framework.platform.Platform;
+import ai.resourcepack.ui.framework.platform.Threads;
 import ai.resourcepack.ui.framework.Settings;
 import ai.resourcepack.ui.framework.api.Canvas;
 import ai.resourcepack.ui.framework.api.Click;
@@ -538,7 +539,7 @@ public final class Views implements Listener {
         player.addPotionEffect(new PotionEffect(PotionEffectType.INVISIBILITY, PotionEffect.INFINITE_DURATION, 0, false, false, false));
         // Rain and snow are drawn between the camera and the picture: clear skies for this player only.
         player.setPlayerWeather(WeatherType.CLEAR);
-        for (Player other : Bukkit.getOnlinePlayers()) if (other != player) other.hidePlayer(plugin, player);
+        for (Player other : Bukkit.getOnlinePlayers()) if (other != player) Threads.now(plugin, other, () -> other.hidePlayer(plugin, player));
         return view;
     }
 
@@ -820,51 +821,63 @@ public final class Views implements Listener {
     /** Every tick: learn mice, switch waiting players to their view, and turn mouse movement into pointer movement. */
     public void tick() {
         learnMice();
+        // Folia: each view on its player's thread instead (tick(Player)).
+        if (Threads.folia()) return;
         int now = Platform.tick();
         for (ViewImpl v : views.values()) {
             Player p = Bukkit.getPlayer(v.player);
             if (p == null) continue;
-            if (!v.revealed) {
-                if (v.stage == 1) {
-                    // Taking the world: kept once the client has had a few frames with the signature since it answered
-                    // the ping sent with it, or at the latest when keepBy is up.
-                    int since = v.takenSince;
-                    if ((since < 0 || now < since + KEEP_AFTER) && now < v.keepBy) continue;
-                    keep(p, v);
-                } else {
-                    if (now < v.deadline) {
-                        // Written to the network is not yet shown: wait for the client to have handled the tiles too.
-                        if (!v.pinged && sender.delivered(v.player, v.wall)) {
-                            v.pinged = true;
-                            pipeline.afterClientCaughtUp(p, () -> v.caughtUp = true);
-                        }
-                        if (!v.caughtUp) continue;
-                    }
-                    if (v.keeps) {
-                        take(p, v);
-                        continue;
-                    }
-                    reveal(p, v);
-                }
-            }
-            if (v.keeps) {
-                signature(p, v);
-                // The panel grew (something opened past it): its new tiles' frames, once their maps have reached the client.
-                if (!v.wall.allShown() && sender.delivered(v.player, v.wall)) v.wall.showTo(p);
-            }
-            if (v.layers != null && v.revealed) frameLayers(p, v);
-            // A client that never takes the teleport (another plugin cancelled it), or a kept overlay's turn, must not
-            // leave the mouse dead.
-            if (v.awaitingTeleport && now >= v.settleBy) v.awaitingTeleport = false;
-            if (v.aligning && now >= v.keepBy) v.aligning = false;
-            if (v.clientPointer) {
-                keepStill(p, v);
-                settleClicks(v, now);
-            }
-            report(v);
-            movePointer(v);
-            if (now % 40 == 0) v.privateView.refresh(p);
+            tick(p, v, now);
         }
+    }
+
+    /** Folia: [player]'s view's tick, on their thread. */
+    public void tick(Player player) {
+        ViewImpl v = views.get(player.getUniqueId());
+        if (v != null) tick(player, v, Platform.tick());
+    }
+
+    private void tick(Player p, ViewImpl v, int now) {
+        if (!v.revealed) {
+            if (v.stage == 1) {
+                // Taking the world: kept once the client has had a few frames with the signature since it answered
+                // the ping sent with it, or at the latest when keepBy is up.
+                int since = v.takenSince;
+                if ((since < 0 || now < since + KEEP_AFTER) && now < v.keepBy) return;
+                keep(p, v);
+            } else {
+                if (now < v.deadline) {
+                    // Written to the network is not yet shown: wait for the client to have handled the tiles too.
+                    if (!v.pinged && sender.delivered(v.player, v.wall)) {
+                        v.pinged = true;
+                        pipeline.afterClientCaughtUp(p, () -> v.caughtUp = true);
+                    }
+                    if (!v.caughtUp) return;
+                }
+                if (v.keeps) {
+                    take(p, v);
+                    return;
+                }
+                reveal(p, v);
+            }
+        }
+        if (v.keeps) {
+            signature(p, v);
+            // The panel grew (something opened past it): its new tiles' frames, once their maps have reached the client.
+            if (!v.wall.allShown() && sender.delivered(v.player, v.wall)) v.wall.showTo(p);
+        }
+        if (v.layers != null && v.revealed) frameLayers(p, v);
+        // A client that never takes the teleport (another plugin cancelled it), or a kept overlay's turn, must not
+        // leave the mouse dead.
+        if (v.awaitingTeleport && now >= v.settleBy) v.awaitingTeleport = false;
+        if (v.aligning && now >= v.keepBy) v.aligning = false;
+        if (v.clientPointer) {
+            keepStill(p, v);
+            settleClicks(v, now);
+        }
+        report(v);
+        movePointer(v);
+        if (now % 40 == 0) v.privateView.refresh(p);
     }
 
     /**
@@ -964,14 +977,17 @@ public final class Views implements Listener {
             // centre, and their own eye stays the camera.
             hold(p);
             p.setGliding(false);
-            p.teleport(v.seat);
+            Platform.teleport(p, v.seat);
         } else {
-            p.teleport(v.vehicle.getLocation());
-            v.vehicle.addPassenger(p);
-            nms.setCamera(p, v.camera);
+            // Mounted once there: at once, but on Folia once its teleport has finished.
+            Platform.teleport(p, v.vehicle.getLocation()).thenRun(() -> Threads.now(plugin, p, () -> {
+                if (views.get(v.player) != v || !p.isOnline()) return;
+                v.vehicle.addPassenger(p);
+                nms.setCamera(p, v.camera);
+            }));
             // Again once everything has settled, in case the teleport and mount reset it. The empty action
             // bar replaces the game's own "Press Shift to Dismount", which the client shows on mounting.
-            Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            Threads.onLater(plugin, p, () -> {
                 if (views.get(v.player) != v || !p.isOnline()) return;
                 nms.setCamera(p, v.camera);
                 Platform.actionBar(p, Component.empty());
@@ -1134,7 +1150,7 @@ public final class Views implements Listener {
     /** Tell the content now, on the server thread as soon as it is free, rather than at the next tick. */
     private void queueReport(ViewImpl v) {
         if (v.reportQueued.compareAndSet(false, true)) {
-            nms.serverThread().execute(() -> {
+            serverThread(v).execute(() -> {
                 v.reportQueued.set(false);
                 if (!v.closed && views.get(v.player) == v) report(v);
             });
@@ -1186,7 +1202,7 @@ public final class Views implements Listener {
         v.waitingClicks.clear();
         int px = (int) v.clickX, py = (int) v.clickY;
         debug(run.size() + " click(s) placed after " + after + " at " + px + "," + py);
-        nms.serverThread().execute(() -> {
+        serverThread(v).execute(() -> {
             if (v.closed || views.get(v.player) != v) return;
             for (java.util.function.BiConsumer<Integer, Integer> click : run) click.accept(px, py);
         });
@@ -1286,7 +1302,7 @@ public final class Views implements Listener {
         Vector at = pointerSpot(v);
         Location current = pointer.getLocation();
         if (current.getX() != at.getX() || current.getY() != at.getY() || current.getZ() != at.getZ()) {
-            pointer.teleport(new Location(pointer.getWorld(), at.getX(), at.getY(), at.getZ(), current.getYaw(), current.getPitch()));
+            Platform.teleport(pointer, new Location(pointer.getWorld(), at.getX(), at.getY(), at.getZ(), current.getYaw(), current.getPitch()));
         }
     }
 
@@ -1335,7 +1351,32 @@ public final class Views implements Listener {
         if (v.wall.sendsVersion() != before) sender.wake();
     }
 
+    /** Where work about [v] goes from another thread: the server's, or on Folia its player's (see Threads). */
+    private java.util.concurrent.Executor serverThread(ViewImpl v) {
+        if (!Threads.folia()) return nms.serverThread();
+        Player p = Bukkit.getPlayer(v.player);
+        return p == null ? task -> {} : Threads.player(plugin, p, nms.serverThread());
+    }
+
     public void close(Player player, CloseReason reason) {
+        // On Folia only the player's own thread may get them up. Shutting down, nothing more runs there (and the thread
+        // shutting down has no world to do it in): their view is let go of here, and their next join puts them back
+        // (onJoin), as after a crash.
+        if (Threads.folia() && (!plugin.isEnabled() || !Threads.owns(player)) && views.containsKey(player.getUniqueId())) {
+            if (plugin.isEnabled()) {
+                Threads.on(plugin, player, () -> close(player, reason));
+                return;
+            }
+            ViewImpl gone = views.remove(player.getUniqueId());
+            gone.closed = true;
+            pipeline.unwatch(player.getUniqueId());
+            try {
+                gone.content.closed(gone, reason);
+            } catch (RuntimeException | LinkageError e) {
+                failed("on close", e);
+            }
+            return;
+        }
         ViewImpl v = views.remove(player.getUniqueId());
         if (v == null) return;
         v.closed = true;
@@ -1349,7 +1390,7 @@ public final class Views implements Listener {
         // Back where they were, facing where they faced, before the frames and the overlay's signature go: a kept
         // overlay's client shows the world as it was until then, so the first live frame is from the same spot.
         // Not when they have already gone to another world (the move closed the view): that is where they were sent.
-        if (player.isOnline() && player.getWorld() == v.wall.world) player.teleport(v.returnTo);
+        if (player.isOnline() && player.getWorld() == v.wall.world) Platform.teleport(player, v.returnTo);
         for (Entity e : v.entities()) e.remove();
         PotionEffect own = v.previousInvisibility;
         if (own != null && !own.isInfinite()) {
@@ -1395,7 +1436,7 @@ public final class Views implements Listener {
         player.removePotionEffect(PotionEffectType.INVISIBILITY);
         if (invisibility != null) player.addPotionEffect(invisibility);
         player.getPersistentDataContainer().remove(seatKey);
-        for (Player other : Bukkit.getOnlinePlayers()) other.showPlayer(plugin, player);
+        for (Player other : Bukkit.getOnlinePlayers()) Threads.now(plugin, other, () -> other.showPlayer(plugin, player));
         pipeline.conceal(player, false);
         release(player);
     }
@@ -1461,7 +1502,7 @@ public final class Views implements Listener {
         String back = player.getPersistentDataContainer().get(returnKey, PersistentDataType.STRING);
         if (back != null) {
             Location to = decode(back);
-            if (to != null) player.teleport(to);
+            if (to != null) Platform.teleport(player, to);
             player.getPersistentDataContainer().remove(returnKey);
         }
         for (ViewImpl v : views.values()) {
@@ -1521,7 +1562,7 @@ public final class Views implements Listener {
         Input was = v.lastInput;
         v.lastInput = now;
         if (now.isSneak()) {
-            Bukkit.getScheduler().runTask(plugin, () -> close(e.getPlayer(), CloseReason.PLAYER));
+            Threads.on(plugin, e.getPlayer(), () -> close(e.getPlayer(), CloseReason.PLAYER));
             return;
         }
         if (was == null || !v.revealed) return;
@@ -1556,7 +1597,7 @@ public final class Views implements Listener {
 
     /** On the netty thread: the player pressed the drop key, which the client sends whatever their hand holds. */
     private void dropped(ViewImpl v) {
-        nms.serverThread().execute(() -> {
+        serverThread(v).execute(() -> {
             if (!v.closed && v.revealed && views.get(v.player) == v) press(v, Key.DROP);
         });
     }
@@ -1577,7 +1618,7 @@ public final class Views implements Listener {
         if (v == null) return;
         e.setCancelled(true);
         String text = e.getMessage();
-        Bukkit.getScheduler().runTask(plugin, () -> {
+        Threads.on(plugin, e.getPlayer(), () -> {
             if (views.get(v.player) == v) v.content.chat(v, text);
         });
     }
@@ -1588,7 +1629,7 @@ public final class Views implements Listener {
         switch (e.getCause()) {
             case SUFFOCATION, CRAMMING, FALL -> e.setCancelled(true);
             // Hurt: get up and deal with it.
-            default -> Bukkit.getScheduler().runTask(plugin, () -> close(p, CloseReason.INTERRUPTED));
+            default -> Threads.on(plugin, p, () -> close(p, CloseReason.INTERRUPTED));
         }
     }
 
@@ -1597,7 +1638,7 @@ public final class Views implements Listener {
     public void onDismount(EntityDismountEvent e) {
         if (!(e.getEntity() instanceof Player p)) return;
         ViewImpl v = views.get(p.getUniqueId());
-        if (v != null && e.getDismounted() == v.vehicle) Bukkit.getScheduler().runTask(plugin, () -> close(p, CloseReason.PLAYER));
+        if (v != null && e.getDismounted() == v.vehicle) Threads.on(plugin, p, () -> close(p, CloseReason.PLAYER));
     }
 
     @EventHandler(ignoreCancelled = true)

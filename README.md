@@ -2,7 +2,7 @@
 
 Put an HTML page in `plugins/MCGUI/pages/` and it is in the game: on a wall,
 or fullscreen in front of the player, who points with their mouse and clicks.
-Vanilla clients, no mods: a Spigot or Paper plugin and a small resource pack it
+Vanilla clients, no mods: a Spigot, Paper or Folia plugin and a small resource pack it
 builds and serves itself. Edit the file and it updates in game within a second.
 
 No browser runs. MC GUI has its own HTML and CSS renderer, so what works is
@@ -14,7 +14,7 @@ walls and in fullscreen views, with the player's mouse, clicks and keys. The
 [examples](examples/) include an arcade of games and a live world map built on
 it. See [For plugin developers](#for-plugin-developers).
 
-**Needs** Spigot or Paper 1.21.11 or newer, one jar for both (Java 21, or 25 for
+**Needs** Spigot, Paper or Folia 1.21.11 or newer, one jar for all three (Java 21, or 25 for
 26.x). PlaceholderAPI is optional. Build with `./gradlew build` (JDK 17 or 21 to run Gradle); the plugin is
 `build/libs/MCGUI-<version>.jar`. `./gradlew renderSamples` renders
 `samples/*.html` to `build/samples/` to check the renderer by eye.
@@ -463,6 +463,9 @@ pack, the map ids and the seats). From a tag of this repository with
 repositories { maven { url 'https://jitpack.io' } }
 dependencies { compileOnly 'com.github.resourcepack-ai:mcgui:<tag>' }
 ```
+
+On Folia, open a view (`UIFramework.openView`) from the player's own thread, as Folia
+wants anything that changes a player done; `MCGUI.open` can be called from anywhere.
 
 Pages, from `plugins/MCGUI/pages/`:
 

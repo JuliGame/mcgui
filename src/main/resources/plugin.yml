@@ -2,6 +2,8 @@ name: MCGUI
 version: ${version}
 main: ai.resourcepack.ui.MCGUIPlugin
 api-version: '1.21'
+# Folia runs each region of the world on its own thread: framework/platform/Tasks puts every job on the right one.
+folia-supported: true
 # ViaVersion: an overlay asks it which version each player's client is (net/ClientVersion).
 softdepend: [PlaceholderAPI, ViaVersion]
 # Its name until 0.1.1: a plugin that depends on UIEngine still loads after this one.
