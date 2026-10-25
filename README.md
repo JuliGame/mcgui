@@ -15,9 +15,7 @@ walls and in fullscreen views, with the player's mouse, clicks and keys. The
 it. See [For plugin developers](#for-plugin-developers).
 
 **Needs** Spigot or Paper 1.21.11 or newer, one jar for both (Java 21, or 25 for
-26.x). Paper 1.21.9 and Spigot 1.21.10 run it too, with one difference: a 1.21.9 or
-1.21.10 client cannot tell its player is seated, so a fullscreen view there is
-shown as it is to a player without the resource pack. PlaceholderAPI is optional. Build with `./gradlew build` (JDK 17 or 21 to run Gradle); the plugin is
+26.x). PlaceholderAPI is optional. Build with `./gradlew build` (JDK 17 or 21 to run Gradle); the plugin is
 `build/libs/MCGUI-<version>.jar`. `./gradlew renderSamples` renders
 `samples/*.html` to `build/samples/` to check the renderer by eye.
 

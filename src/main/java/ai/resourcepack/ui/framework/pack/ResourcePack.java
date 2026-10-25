@@ -45,8 +45,8 @@ import java.util.zip.ZipOutputStream;
 public final class ResourcePack implements AutoCloseable {
     public static final UUID PACK_ID = UUID.nameUUIDFromBytes("uiengine:pack".getBytes(StandardCharsets.UTF_8));
     public static final Key POINTER_FONT = Key.key("uiengine", "pointer");
-    /** 1.21.9's pack format, the oldest the pack is for; 26.3 is 97.1, and an integer max_format of 97 covers every 97.x. */
-    static final int FORMAT_OLDEST = Shaders.Dialect.V1_21_9.minFormat;
+    /** 1.21.11's pack format, the oldest the pack is for; 26.3 is 97.1, and an integer max_format of 97 covers every 97.x. */
+    static final int FORMAT_OLDEST = Shaders.Dialect.V1_21_11.minFormat;
     static final int FORMAT_26_3 = Shaders.Dialect.V26_3.maxFormat;
 
     private final Settings settings;
@@ -190,7 +190,7 @@ public final class ResourcePack implements AutoCloseable {
             e.put("assets/minecraft/post_effect/entity_outline.json", Shaders.overlayChain());
             e.put("assets/minecraft/post_effect/blur.json", Shaders.menuBlurChain());
             // 26.2 draws clouds after the outline effect, over the still world: none for an overlay's camera there. So for
-            // 1.21.11 and 26.1, whose clouds shader is 26.2's; 1.21.9's is another, and it has no overlays to keep still.
+            // 1.21.11 and 26.1, whose clouds shader is 26.2's.
             for (Shaders.Dialect d : List.of(Shaders.Dialect.V1_21_11, Shaders.Dialect.V26_1, Shaders.Dialect.V26_2)) {
                 e.put(d.overlay() + "/assets/minecraft/shaders/core/rendertype_clouds.vsh", Shaders.cloudsVsh());
             }

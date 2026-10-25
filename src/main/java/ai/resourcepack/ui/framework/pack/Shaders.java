@@ -37,9 +37,9 @@ import java.util.regex.Pattern;
  *
  * <p><b>Before 26.2</b> one shader, {@code rendertype_text}, draws text in the GUI and in the world alike, where 26.2
  * compiles {@code text} once for each with {@code IS_GUI} defined or not; {@link #presplit} makes the one shader do
- * both, deciding by the projection as it runs. 1.21.9 and 1.21.11 read the lightmap themselves (26.1 added
- * {@code sample_lightmap.glsl}), and 1.21.9 to 1.21.10 have no {@code CameraOffset}, so no camera there is ever
- * seated: their clients decode maps but see a view the way a client without the pack does.
+ * both, deciding by the projection as it runs. 1.21.11 reads the lightmap itself (26.1 added
+ * {@code sample_lightmap.glsl}). 1.21.11 is the oldest: 1.21.9 and 1.21.10 have no {@code CameraOffset}, so no camera
+ * there could be told seated.
  */
 public final class Shaders {
     private Shaders() {}
@@ -54,7 +54,7 @@ public final class Shaders {
      * formats its overlay covers (V26_3's are the pack's own: its files are the pack's root).
      */
     public enum Dialect {
-        V1_21_9(773, 69, 74), V1_21_11(774, 75, 83), V26_1(775, 84, 87), V26_2(776, 88, 96), V26_3(777, 97, 97);
+        V1_21_11(774, 75, 83), V26_1(775, 84, 87), V26_2(776, 88, 96), V26_3(777, 97, 97);
 
         public final int protocol;
         public final int minFormat, maxFormat;
@@ -73,11 +73,6 @@ public final class Shaders {
         /** The core text shader's name in this version. */
         public String textShader() {
             return presplit() ? "rendertype_text" : "text";
-        }
-
-        /** Whether this version's shaders can tell a seated camera (they see {@code Globals.CameraOffset}). */
-        public boolean seats() {
-            return this != V1_21_9;
         }
 
         /** The overlay directory this dialect's files go in, or null for the pack's root. */
@@ -183,12 +178,8 @@ public final class Shaders {
             s = s.replace("#moj_import <minecraft:sample_lightmap.glsl>\n", "")
                     .replace("sample_lightmap(Sampler2, UV2)", "texelFetch(Sampler2, UV2 / 16, 0)");
         }
-        if (!d.seats()) s = s.replace("#moj_import <minecraft:globals.glsl>\n", "#moj_import <minecraft:globals.glsl>\n" + NO_CAMERA_OFFSET);
         return s;
     }
-
-    /** For a version whose Globals has no CameraOffset: one no seated camera has, so none is ever seated. */
-    private static final String NO_CAMERA_OFFSET = "const vec3 CameraOffset = vec3(0.37);\n";
 
     private static final Pattern DEFINED = Pattern.compile("!?\\s*defined\\s*\\(\\s*(\\w+)\\s*\\)");
 
@@ -266,15 +257,6 @@ public final class Shaders {
 
     /** Uniform blocks, in each version's member order (std140: the order IS the layout). */
     private static String dynamicTransforms(Dialect d) {
-        if (d == Dialect.V1_21_9) return """
-                layout(std140) uniform DynamicTransforms {
-                    mat4 ModelViewMat;
-                    vec4 ColorModulator;
-                    vec3 ModelOffset;
-                    mat4 TextureMat;
-                    float LineWidth;
-                };
-                """;
         return d == Dialect.V26_3 ? """
                 layout(std140) uniform DynamicTransforms {
                     mat4 ModelViewMat;
@@ -293,14 +275,6 @@ public final class Shaders {
     }
 
     private static String globals(Dialect d) {
-        if (d == Dialect.V1_21_9) return """
-                layout(std140) uniform Globals {
-                    vec2 ScreenSize;
-                    float GlintAlpha;
-                    float GameTime;
-                    int MenuBlurRadius;
-                };
-                """ + NO_CAMERA_OFFSET;
         return d == Dialect.V26_3 ? """
                 layout(std140) uniform Globals {
                     ivec3 CameraBlockPos;

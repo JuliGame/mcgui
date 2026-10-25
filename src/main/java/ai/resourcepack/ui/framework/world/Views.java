@@ -408,26 +408,15 @@ public final class Views implements Listener {
      */
     private boolean runsOverlayChain(Player player) {
         int protocol = ClientVersion.protocol(player);
-        Shaders.Dialect d = Shaders.Dialect.of(protocol);
-        if (d != null && d.seats()) return true;
+        if (Shaders.Dialect.of(protocol) != null) return true;
         debug(player.getName() + "'s client (protocol " + protocol + ") is no version the overlay chain was checked in");
         return false;
-    }
-
-    /**
-     * Whether [player]'s client can tell it is seated: a version whose shaders see the camera's position (not 1.21.9
-     * to 1.21.10), or one newer than every dialect, which the pack's root shaders are written for.
-     */
-    private boolean seats(Player player) {
-        Shaders.Dialect d = Shaders.Dialect.of(ClientVersion.protocol(player));
-        return d == null || d.seats();
     }
 
     public View open(Player player, ViewContent content, ViewOptions options) {
         close(player, CloseReason.CLOSED);
         Canvas canvas = content.canvas();
-        // A client whose shaders cannot see it is seated is shown the view as one without the pack is.
-        boolean withPack = hasPack.test(player.getUniqueId()) && seats(player);
+        boolean withPack = hasPack.test(player.getUniqueId());
         double fov = viewFov(player, withPack ? STRETCHED_FIT : 1.0);
         Location from = player.getLocation();
         // An overlay with the pack keeps the player's own eye as the camera, where it is to within the flag's 1/32 of a

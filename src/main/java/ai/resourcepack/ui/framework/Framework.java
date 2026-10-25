@@ -69,15 +69,37 @@ public final class Framework implements UIFramework, Listener {
         this.plugin = plugin;
     }
 
+    /** Whether Minecraft version [version] ("1.21.10", "26.2") is older than [min]; false where it cannot be read. */
+    static boolean olderThan(String version, int... min) {
+        String[] parts = version.split("\\.");
+        for (int i = 0; i < min.length; i++) {
+            int v;
+            try {
+                v = i < parts.length ? Integer.parseInt(parts[i]) : 0;
+            } catch (NumberFormatException e) {
+                return false;
+            }
+            if (v != min[i]) return v < min[i];
+        }
+        return false;
+    }
+
     /** Starts it, as the config says; false if this server is not one it can drive. */
     public boolean enable() {
         settings = Settings.load(plugin.getConfig());
         Cpu.configure(settings.cpuThreads);
+        String version = plugin.getServer().getBukkitVersion().split("-")[0];
+        if (olderThan(version, 1, 21, 11)) {
+            // 1.21.9 and 1.21.10 clients cannot tell they are seated (their shaders see no camera offset), and a
+            // fullscreen view there is not something to ship.
+            plugin.getLogger().severe("MC GUI needs Spigot or Paper 1.21.11 or newer; this server is " + version + ".");
+            return false;
+        }
         try {
-            ai.resourcepack.ui.framework.net.Names.init(plugin.getServer().getBukkitVersion().split("-")[0]);
+            ai.resourcepack.ui.framework.net.Names.init(version);
             nms = new Nms(plugin.getServer());
         } catch (ReflectiveOperationException | LinkageError e) {
-            plugin.getLogger().log(Level.SEVERE, "This server is not one MC GUI can drive (Spigot or Paper 1.21.9 or newer is needed): " + e, e);
+            plugin.getLogger().log(Level.SEVERE, "This server is not one MC GUI can drive (Spigot or Paper 1.21.11 or newer is needed): " + e, e);
             return false;
         }
         palette = new Palette(nms::mapColor);

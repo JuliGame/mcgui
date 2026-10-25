@@ -36,7 +36,7 @@ public final class Names {
         }
         String resource = "/spigot-names/" + version + ".txt";
         try (InputStream in = Names.class.getResourceAsStream(resource)) {
-            if (in == null) throw new ClassNotFoundException("MC GUI has no names for Spigot " + version + " (it knows 1.21.9 to 1.21.11, and 26.1 on)");
+            if (in == null) throw new ClassNotFoundException("MC GUI has no names for Spigot " + version + " (it knows 1.21.11, and 26.1 on)");
             Map<String, String> runtime = new HashMap<>(), mojang = new HashMap<>(), members = new HashMap<>();
             BufferedReader r = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8));
             for (String line; (line = r.readLine()) != null; ) {
