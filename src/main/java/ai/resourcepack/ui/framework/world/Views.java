@@ -459,7 +459,7 @@ public final class Views implements Listener {
         // With a client-placed pointer the camera is the player's own eye, which turns with the mouse:
         // they are held where it is on the flagged spot (see reveal). Otherwise a camera entity looks at
         // the wall and they sit out of the way.
-        LivingEntity camera = clientPointer ? null : spawnCamera(cam);
+        LivingEntity camera = clientPointer ? null : fixDistance(spawnCamera(cam));
         ArmorStand vehicle = clientPointer ? null : world.spawn(cam.clone().subtract(cam.getDirection().multiply(1.5)).subtract(0, 1.6, 0), ArmorStand.class, a -> {
             a.setMarker(true);
             a.setInvisible(true);
@@ -989,9 +989,34 @@ public final class Views implements Listener {
         }
     }
 
+    /**
+     * The client's third-person distance, {@code camera_distance} (1.21.6+; looked up by name because the API this is
+     * compiled against may not have the constant). F5 moves the camera of whatever it looks through back by that
+     * many blocks, clipped at blocks ({@code Camera.alignWithEntity}), and the shaders know a seated camera by its
+     * exact position: one block back and the view is a loose wall of maps in the world again, with the HUD showing.
+     * At zero the camera stays where the flag is. The second F5 (looking back at the player) still turns the camera
+     * half round, which no distance undoes.
+     */
+    private static final Attribute CAMERA_DISTANCE = Registry.ATTRIBUTE.get(NamespacedKey.minecraft("camera_distance"));
+
     /** What {@link #hold} changes, each under the one key {@code uiengine:seated}. */
-    private static final List<Attribute> HELD = List.of(Attribute.MOVEMENT_SPEED, Attribute.JUMP_STRENGTH, Attribute.GRAVITY,
-            Attribute.STEP_HEIGHT, Attribute.KNOCKBACK_RESISTANCE, Attribute.EXPLOSION_KNOCKBACK_RESISTANCE);
+    private static final List<Attribute> HELD;
+    static {
+        List<Attribute> held = new ArrayList<>(List.of(Attribute.MOVEMENT_SPEED, Attribute.JUMP_STRENGTH, Attribute.GRAVITY,
+                Attribute.STEP_HEIGHT, Attribute.KNOCKBACK_RESISTANCE, Attribute.EXPLOSION_KNOCKBACK_RESISTANCE));
+        if (CAMERA_DISTANCE != null) held.add(CAMERA_DISTANCE);
+        HELD = List.copyOf(held);
+    }
+
+    /** Takes F5's pull-back off a camera entity: never removed, the entity goes with the view. */
+    private LivingEntity fixDistance(LivingEntity camera) {
+        AttributeInstance attr = CAMERA_DISTANCE == null ? null : camera.getAttribute(CAMERA_DISTANCE);
+        if (attr != null) {
+            Platform.addTransient(attr, new AttributeModifier(seatKey, -1, AttributeModifier.Operation.MULTIPLY_SCALAR_1,
+                    org.bukkit.inventory.EquipmentSlotGroup.ANY));
+        }
+        return camera;
+    }
 
     /**
      * Holds [player] still for a client-placed pointer, where nothing they press moves their eye. Their
