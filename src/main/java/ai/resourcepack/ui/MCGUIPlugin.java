@@ -105,6 +105,7 @@ public final class MCGUIPlugin extends JavaPlugin {
         ai.resourcepack.common.banner.StartupBanner banner = ai.resourcepack.common.banner.StartupBanner.begin(this)
                 .name("MC GUI")
                 .tagline("HTML and CSS pages on maps, for vanilla clients.")
+                .docs("https://resourcepack.ai/docs/mcgui")
                 .link("Editor", "https://mcgui.dev")
                 .updates(updates);
         StartupNotes.collect(banner);
