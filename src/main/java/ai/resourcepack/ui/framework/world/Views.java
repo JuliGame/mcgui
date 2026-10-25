@@ -494,6 +494,9 @@ public final class Views implements Listener {
             pointerAt.setPitch(0);
         }
         TextDisplay pointer = !withPack ? null : world.spawn(pointerAt, TextDisplay.class, d -> {
+            // Spigot spawns a display without the location's rotation (Paper keeps it), and a client-placed pointer must
+            // be square to its axis: one left facing south is drawn stretched as the camera turns.
+            d.setRotation(pointerAt.getYaw(), pointerAt.getPitch());
             d.setBackgroundColor(org.bukkit.Color.fromARGB(0));
             d.setShadowed(false);
             d.setBillboard(clientPointer ? Display.Billboard.FIXED : Display.Billboard.CENTER);
