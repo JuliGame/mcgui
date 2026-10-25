@@ -492,8 +492,11 @@ MC GUI runs on Spigot and Paper from the same jar (since 0.3.0; SpigotMC lists o
   --remapped` leaves in `~/.m2/repository/org/spigotmc/minecraft-server/`. **A new
   game class looked up by name goes in `tools/spigot-names.classes` and every table
   is written again**, or it works on Paper and fails on Spigot 1.21.x at startup.
-  Checked: Paper and Spigot 1.21.11 start, and a page opens for the bot on Paper
-  1.21.11. **1.21.11 is the floor, and `Framework.enable` refuses anything older**:
+  Checked in real clients by the owner: walls, fullscreen pages and overlays (blur
+  too) with the client-placed pointer on Paper and Spigot 1.21.11 and 26.1.2.
+  **Spigot spawns an entity without the spawn location's rotation** (Paper keeps it):
+  set it in the spawn consumer, or a client-placed pointer faces south and is drawn
+  stretched as the camera turns. **1.21.11 is the floor, and `Framework.enable` refuses anything older**:
   1.21.9-1.21.10 have no `CameraBlockPos`/`CameraOffset` in `Globals`, so their
   shaders cannot tell a seated camera, and the fallback (the view as a client
   without the pack sees it, the seat's box round it) was seen in a 1.21.10 client
@@ -527,7 +530,7 @@ MC GUI runs on Spigot and Paper from the same jar (since 0.3.0; SpigotMC lists o
   reason. 1.21.11 has no `sample_lightmap.glsl`. Every shader of every overlay was
   compiled with glslang against that version's own includes from its client jar,
   and a 1.21.11 client loaded the pack without a shader error and drew walls and
-  fullscreen pages as 26.x does (seen by the owner). 26.1 is unseen in a client.
+  fullscreen pages as 26.x does (seen by the owner), as did 26.1.
 - **The pack replaces `text.fsh`/`text.vsh` and `position_tex_color`**,
   `post_effect/entity_outline.json` and `post_effect/blur.json`, and in its
   26.2 overlay `rendertype_clouds.vsh` (overlays and menus, below). So do other plugins
