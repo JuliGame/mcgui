@@ -42,10 +42,35 @@ class ShadersTest {
 
     @Test
     void onlyTheClientsThePackWasCheckedInKeepTheWorld() {
+        assertEquals(Shaders.Dialect.V1_21_9, Shaders.Dialect.of(773));
+        assertEquals(Shaders.Dialect.V1_21_11, Shaders.Dialect.of(774));
+        assertEquals(Shaders.Dialect.V26_1, Shaders.Dialect.of(775));
         assertEquals(Shaders.Dialect.V26_2, Shaders.Dialect.of(776));
         assertEquals(Shaders.Dialect.V26_3, Shaders.Dialect.of(777));
+        assertEquals(null, Shaders.Dialect.of(772));
         assertEquals(null, Shaders.Dialect.of(778));
         assertEquals(null, Shaders.Dialect.of(-1));
+    }
+
+    /**
+     * Before 26.2 one text shader draws GUI and world text: no IS_GUI is left to the preprocessor, the GUI's parts are
+     * a run-time test of the projection, and the GUI path writes depth too (a shader that writes it must on every path).
+     */
+    @Test
+    void theTextShaderBefore262DrawsGuiAndWorldTextAlike() {
+        for (Shaders.Dialect d : Shaders.Dialect.values()) {
+            if (!d.presplit()) continue;
+            String vsh = Shaders.textVsh(d, PALETTE), fsh = Shaders.textFsh(d, PALETTE);
+            for (String s : new String[]{vsh, fsh}) {
+                assertFalse(s.contains("IS_GUI") || s.contains("IS_SEE_THROUGH") || s.contains("#if"), d + " left a variant to the preprocessor");
+                assertTrue(s.contains("bool mcb_gui()") && s.contains("if (mcb_gui()) {"), d + " has no run-time GUI test");
+            }
+            assertTrue(fsh.contains("projection.glsl"), d + "'s fragment shader cannot see the projection");
+            assertTrue(Pattern.compile("} else \\{\n(//[^\n]*\n)*gl_FragDepth = mcbDepth;").matcher(fsh).find(), d + "'s GUI text writes no depth");
+            assertFalse(d.compareTo(Shaders.Dialect.V26_1) < 0 && vsh.contains("sample_lightmap"), d + " has no sample_lightmap");
+        }
+        assertFalse(Shaders.Dialect.V1_21_9.seats());
+        assertTrue(Shaders.textVsh(Shaders.Dialect.V1_21_9, PALETTE).contains("const vec3 CameraOffset"));
     }
 
     private static final Pattern VARYING = Pattern.compile("layout\\(location = (\\d+)\\) (flat )?(in|out) (\\w+) (\\w+);");

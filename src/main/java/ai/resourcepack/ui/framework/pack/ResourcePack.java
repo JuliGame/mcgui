@@ -45,10 +45,9 @@ import java.util.zip.ZipOutputStream;
 public final class ResourcePack implements AutoCloseable {
     public static final UUID PACK_ID = UUID.nameUUIDFromBytes("uiengine:pack".getBytes(StandardCharsets.UTF_8));
     public static final Key POINTER_FONT = Key.key("uiengine", "pointer");
-    /** 26.2's pack format; 26.3 is 97.1, and an integer max_format of 97 covers every 97.x. */
-    static final int FORMAT_26_2 = 88;
-    static final int FORMAT_26_3 = 97;
-    static final String OVERLAY_26_2 = "uiengine_26_2";
+    /** 1.21.9's pack format, the oldest the pack is for; 26.3 is 97.1, and an integer max_format of 97 covers every 97.x. */
+    static final int FORMAT_OLDEST = Shaders.Dialect.V1_21_9.minFormat;
+    static final int FORMAT_26_3 = Shaders.Dialect.V26_3.maxFormat;
 
     private final Settings settings;
     private final Logger logger;
@@ -149,17 +148,24 @@ public final class ResourcePack implements AutoCloseable {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         try (ZipOutputStream zip = new ZipOutputStream(out)) {
             Entries e = new Entries(zip);
+            // 26.3's shaders are the pack's own; every older version's are in an overlay for its formats, which replaces
+            // each of them (a version before 26.2 also reads its text shader by another name, rendertype_text).
+            List<String> overlays = new ArrayList<>();
+            for (Shaders.Dialect d : Shaders.Dialect.values()) {
+                if (d.overlay() != null) overlays.add("""
+                        {"directory": "%s", "min_format": %d, "max_format": %d}""".formatted(d.overlay(), d.minFormat, d.maxFormat));
+            }
             e.put("pack.mcmeta", """
                     {
                       "pack": {"description": "MC GUI", "min_format": %d, "max_format": %d},
-                      "overlays": {"entries": [{"directory": "%s", "min_format": %d, "max_format": %d}]}
+                      "overlays": {"entries": [%s]}
                     }
-                    """.formatted(FORMAT_26_2, FORMAT_26_3, OVERLAY_26_2, FORMAT_26_2, FORMAT_26_3 - 1));
+                    """.formatted(FORMAT_OLDEST, FORMAT_26_3, String.join(", ", overlays)));
             for (Shaders.Dialect d : Shaders.Dialect.values()) {
-                String assets = (d == Shaders.Dialect.V26_3 ? "" : OVERLAY_26_2 + "/") + "assets/";
+                String assets = (d.overlay() == null ? "" : d.overlay() + "/") + "assets/";
                 String root = assets + "minecraft/shaders/core/";
-                e.put(root + "text.vsh", Shaders.textVsh(d, palette));
-                e.put(root + "text.fsh", Shaders.textFsh(d, palette));
+                e.put(root + d.textShader() + ".vsh", Shaders.textVsh(d, palette));
+                e.put(root + d.textShader() + ".fsh", Shaders.textFsh(d, palette));
                 e.put(root + "position_tex_color.vsh", Shaders.positionTexColorVsh(d));
                 e.put(root + "position_tex_color.fsh", Shaders.positionTexColorFsh(d));
                 // The world round an overlay's panel, kept still: passes of the outline post effect, which a glowing
@@ -183,8 +189,11 @@ public final class ResourcePack implements AutoCloseable {
             // The two post effects read the same in both versions, so the 26.2 overlay needs no copy.
             e.put("assets/minecraft/post_effect/entity_outline.json", Shaders.overlayChain());
             e.put("assets/minecraft/post_effect/blur.json", Shaders.menuBlurChain());
-            // 26.2 draws clouds after the outline effect, over the still world: none for an overlay's camera there.
-            e.put(OVERLAY_26_2 + "/assets/minecraft/shaders/core/rendertype_clouds.vsh", Shaders.cloudsVsh());
+            // 26.2 draws clouds after the outline effect, over the still world: none for an overlay's camera there. So for
+            // 1.21.11 and 26.1, whose clouds shader is 26.2's; 1.21.9's is another, and it has no overlays to keep still.
+            for (Shaders.Dialect d : List.of(Shaders.Dialect.V1_21_11, Shaders.Dialect.V26_1, Shaders.Dialect.V26_2)) {
+                e.put(d.overlay() + "/assets/minecraft/shaders/core/rendertype_clouds.vsh", Shaders.cloudsVsh());
+            }
             // The pointer a seated player sees: one glyph per shape on a text display in front of the
             // view. Text, unlike an item, gets no directional shading, so the arrow stays white.
             // The server's own cursors (Pointer.custom) are a provider each, as tall as they are drawn, with the

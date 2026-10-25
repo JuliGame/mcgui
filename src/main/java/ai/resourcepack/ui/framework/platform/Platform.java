@@ -1,5 +1,6 @@
 package ai.resourcepack.ui.framework.platform;
 
+import ai.resourcepack.ui.framework.net.Reflect;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.serializer.gson.GsonComponentSerializer;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
@@ -109,7 +110,7 @@ public final class Platform {
         }
         try {
             Object server = Bukkit.getServer().getClass().getMethod("getServer").invoke(Bukkit.getServer());
-            MethodHandle count = PUBLIC.unreflect(server.getClass().getMethod("getTickCount")).bindTo(server);
+            MethodHandle count = PUBLIC.unreflect(Reflect.method(server.getClass(), "getTickCount")).bindTo(server);
             return () -> {
                 try {
                     return (int) count.invoke();
@@ -176,10 +177,10 @@ public final class Platform {
             try {
                 if (setText == null) {
                     Class<?> craft = Class.forName(Bukkit.getServer().getClass().getPackageName() + ".util.CraftChatMessage");
-                    Class<?> nmsComponent = Class.forName("net.minecraft.network.chat.Component");
+                    Class<?> nmsComponent = Reflect.cls("net.minecraft.network.chat.Component");
                     Object handle = display.getClass().getMethod("getHandle").invoke(display);
                     fromJson = PUBLIC.unreflect(craft.getMethod("fromJSON", String.class));
-                    setText = PUBLIC.unreflect(handle.getClass().getMethod("setText", nmsComponent));
+                    setText = PUBLIC.unreflect(Reflect.method(handle.getClass(), "setText", nmsComponent));
                 }
                 Object handle = display.getClass().getMethod("getHandle").invoke(display);
                 setText.invoke(handle, fromJson.invoke(GsonComponentSerializer.gson().serialize(text)));
@@ -220,7 +221,7 @@ public final class Platform {
         }
         if (serverProtocol < 0) {
             try {
-                serverProtocol = (int) Class.forName("net.minecraft.SharedConstants").getMethod("getProtocolVersion").invoke(null);
+                serverProtocol = (int) Reflect.method(Reflect.cls("net.minecraft.SharedConstants"), "getProtocolVersion").invoke(null);
             } catch (ReflectiveOperationException e) {
                 throw new IllegalStateException("Cannot read the server's protocol version", e);
             }

@@ -34,6 +34,12 @@ import java.util.regex.Pattern;
  * {@code #include} for {@code #moj_import}, reordered uniform blocks, order-independent transparency
  * in the text shader). Sources here are in the 26.3 form; {@link #to262} derives the older one, and the
  * pack ships each in the overlay for its formats.
+ *
+ * <p><b>Before 26.2</b> one shader, {@code rendertype_text}, draws text in the GUI and in the world alike, where 26.2
+ * compiles {@code text} once for each with {@code IS_GUI} defined or not; {@link #presplit} makes the one shader do
+ * both, deciding by the projection as it runs. 1.21.9 and 1.21.11 read the lightmap themselves (26.1 added
+ * {@code sample_lightmap.glsl}), and 1.21.9 to 1.21.10 have no {@code CameraOffset}, so no camera there is ever
+ * seated: their clients decode maps but see a view the way a client without the pack does.
  */
 public final class Shaders {
     private Shaders() {}
@@ -43,14 +49,40 @@ public final class Shaders {
         if (Palette.DIGITS != 8) throw new AssertionError("text.fsh assumes 8 digits a symbol");
     }
 
-    /** The dialects the pack ships, each with the protocol version of the client it was checked in. */
+    /**
+     * The dialects the pack ships, each with the protocol version of the client it was checked in and the pack
+     * formats its overlay covers (V26_3's are the pack's own: its files are the pack's root).
+     */
     public enum Dialect {
-        V26_2(776), V26_3(777);
+        V1_21_9(773, 69, 74), V1_21_11(774, 75, 83), V26_1(775, 84, 87), V26_2(776, 88, 96), V26_3(777, 97, 97);
 
         public final int protocol;
+        public final int minFormat, maxFormat;
 
-        Dialect(int protocol) {
+        Dialect(int protocol, int minFormat, int maxFormat) {
             this.protocol = protocol;
+            this.minFormat = minFormat;
+            this.maxFormat = maxFormat;
+        }
+
+        /** One {@code rendertype_text} for GUI and world text (before 26.2). */
+        public boolean presplit() {
+            return compareTo(V26_2) < 0;
+        }
+
+        /** The core text shader's name in this version. */
+        public String textShader() {
+            return presplit() ? "rendertype_text" : "text";
+        }
+
+        /** Whether this version's shaders can tell a seated camera (they see {@code Globals.CameraOffset}). */
+        public boolean seats() {
+            return this != V1_21_9;
+        }
+
+        /** The overlay directory this dialect's files go in, or null for the pack's root. */
+        public String overlay() {
+            return this == V26_3 ? null : "uiengine_" + name().substring(1).toLowerCase(Locale.ROOT);
         }
 
         /**
@@ -143,11 +175,106 @@ public final class Shaders {
 
     private static String emit(String src, Dialect d) {
         String s = src.lines().map(String::strip).reduce((a, b) -> a + "\n" + b).orElse("") + "\n";
-        return d == Dialect.V26_3 ? s : to262(s);
+        if (d == Dialect.V26_3) return s;
+        s = to262(s);
+        if (d.presplit()) s = presplit(s);
+        if (d.compareTo(Dialect.V26_1) < 0) {
+            // No sample_lightmap.glsl yet: the lightmap read as its own shaders did.
+            s = s.replace("#moj_import <minecraft:sample_lightmap.glsl>\n", "")
+                    .replace("sample_lightmap(Sampler2, UV2)", "texelFetch(Sampler2, UV2 / 16, 0)");
+        }
+        if (!d.seats()) s = s.replace("#moj_import <minecraft:globals.glsl>\n", "#moj_import <minecraft:globals.glsl>\n" + NO_CAMERA_OFFSET);
+        return s;
+    }
+
+    /** For a version whose Globals has no CameraOffset: one no seated camera has, so none is ever seated. */
+    private static final String NO_CAMERA_OFFSET = "const vec3 CameraOffset = vec3(0.37);\n";
+
+    private static final Pattern DEFINED = Pattern.compile("!?\\s*defined\\s*\\(\\s*(\\w+)\\s*\\)");
+
+    /**
+     * [src] (26.2's form) as the one text shader of a version before 26.2, which draws GUI text and world text alike: the
+     * world's variant (no define set), with each {@code #ifdef IS_GUI} or {@code #ifndef IS_GUI} inside a function made
+     * a test of the projection as it runs ({@code mcb_gui()}: a GUI draw is orthographic). Every other conditional is
+     * decided here with nothing defined. Only the forms the sources use are understood; anything else throws.
+     */
+    static String presplit(String src) {
+        record Frame(boolean runtime, boolean parent, boolean taking, boolean done) {}
+        java.util.ArrayDeque<Frame> stack = new java.util.ArrayDeque<>();
+        StringBuilder out = new StringBuilder();
+        int depth = 0;
+        for (String line : src.split("\n", -1)) {
+            String t = line.strip();
+            boolean active = stack.isEmpty() || stack.peek().taking();
+            if (t.startsWith("#ifdef ") || t.startsWith("#ifndef ") || t.startsWith("#if ")) {
+                boolean gui = t.equals("#ifdef IS_GUI") || t.equals("#ifndef IS_GUI");
+                if (gui && depth > 0) {
+                    stack.push(new Frame(true, active, active, true));
+                    if (active) out.append(t.startsWith("#ifdef") ? "if (mcb_gui()) {" : "if (!mcb_gui()) {").append('\n');
+                } else {
+                    boolean cond = t.startsWith("#ifdef ") ? false : t.startsWith("#ifndef ") ? true : condition(t.substring(4));
+                    stack.push(new Frame(false, active, active && cond, cond));
+                }
+            } else if (t.startsWith("#elif ")) {
+                Frame f = stack.pop();
+                if (f.runtime()) throw new IllegalArgumentException("#elif after a run-time IS_GUI test: " + t);
+                boolean cond = condition(t.substring(6));
+                stack.push(new Frame(false, f.parent(), f.parent() && !f.done() && cond, f.done() || cond));
+            } else if (t.equals("#else")) {
+                Frame f = stack.pop();
+                if (f.runtime()) {
+                    if (f.parent()) out.append("} else {\n");
+                    stack.push(f);
+                } else {
+                    stack.push(new Frame(false, f.parent(), f.parent() && !f.done(), true));
+                }
+            } else if (t.equals("#endif")) {
+                Frame f = stack.pop();
+                if (f.runtime() && f.parent()) out.append("}\n");
+            } else if (active) {
+                out.append(line).append('\n');
+                for (char c : t.toCharArray()) depth += c == '{' ? 1 : c == '}' ? -1 : 0;
+            }
+        }
+        if (!stack.isEmpty()) throw new IllegalArgumentException("Unbalanced #if in a shader");
+        String s = out.toString();
+        if (s.endsWith("\n\n")) s = s.substring(0, s.length() - 1);
+        if (!s.contains("mcb_gui()")) return s;
+        s = s.replace("\nvoid main() {", "\nbool mcb_gui() { return ProjMat[3][3] == 1.0; }\n\nvoid main() {");
+        // The fragment shader needs the projection for mcb_gui() too.
+        if (!s.contains("projection.glsl") && !s.contains("uniform Projection")) {
+            s = s.replace("#moj_import <minecraft:dynamictransforms.glsl>\n",
+                    "#moj_import <minecraft:dynamictransforms.glsl>\n#moj_import <minecraft:projection.glsl>\n");
+        }
+        return s;
+    }
+
+    /** A {@code #if} condition with nothing defined: {@code defined(X)} and its negation, joined by && or ||. */
+    private static boolean condition(String expr) {
+        String e = expr.strip();
+        if (e.contains("||")) {
+            for (String part : e.split("\\|\\|")) if (condition(part)) return true;
+            return false;
+        }
+        for (String part : e.split("&&")) {
+            var m = DEFINED.matcher(part.strip());
+            if (!m.matches()) throw new IllegalArgumentException("A shader condition presplit cannot read: " + expr);
+            if (!part.strip().startsWith("!")) return false;
+        }
+        return true;
     }
 
     /** Uniform blocks, in each version's member order (std140: the order IS the layout). */
     private static String dynamicTransforms(Dialect d) {
+        if (d == Dialect.V1_21_9) return """
+                layout(std140) uniform DynamicTransforms {
+                    mat4 ModelViewMat;
+                    vec4 ColorModulator;
+                    vec3 ModelOffset;
+                    mat4 TextureMat;
+                    float LineWidth;
+                };
+                """;
         return d == Dialect.V26_3 ? """
                 layout(std140) uniform DynamicTransforms {
                     mat4 ModelViewMat;
@@ -166,6 +293,14 @@ public final class Shaders {
     }
 
     private static String globals(Dialect d) {
+        if (d == Dialect.V1_21_9) return """
+                layout(std140) uniform Globals {
+                    vec2 ScreenSize;
+                    float GlintAlpha;
+                    float GameTime;
+                    int MenuBlurRadius;
+                };
+                """ + NO_CAMERA_OFFSET;
         return d == Dialect.V26_3 ? """
                 layout(std140) uniform Globals {
                     ivec3 CameraBlockPos;
@@ -425,6 +560,11 @@ public final class Shaders {
                 #ifdef IS_GUI
                     mcbSeated = mcb_seated_now();
                     vertexColor = Color;
+                #if !defined(IS_GUI) && !defined(IS_SEE_THROUGH)
+                    // Before 26.2 this one shader draws GUI text too (see presplit): no fog there.
+                    sphericalVertexDistance = 0.0;
+                    cylindricalVertexDistance = 0.0;
+                #endif
                 #else
                     mcbSeated = mcb_seated_flag();
                     vec4 mcbTint = Color;
@@ -708,6 +848,11 @@ public final class Shaders {
                     else if (mcbSeated > 0.5 && mcbPointer > 0.5) mcbDepth = mcb_in_front(128.0);
                     // A shader that writes gl_FragDepth anywhere must write it on every path.
                     gl_FragDepth = mcbDepth;
+                #else
+                #if !defined(IS_GUI)
+                    // Before 26.2 this one shader draws GUI text too (see presplit), and writes depth there as well.
+                    gl_FragDepth = mcbDepth;
+                #endif
                 #endif
                 #ifdef IS_GUI
                     // The XP level over the hotbar, hidden while seated like the rest of the HUD.

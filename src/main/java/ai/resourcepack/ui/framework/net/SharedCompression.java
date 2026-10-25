@@ -153,26 +153,26 @@ public final class SharedCompression implements AutoCloseable {
         this.log = log;
         MethodHandles.Lookup l = MethodHandles.lookup();
         String net = "net.minecraft.network.";
-        compressClass = Class.forName(net + "CompressionEncoder");
-        prependerClass = Class.forName(net + "Varint21LengthFieldPrepender");
-        encoderClass = Class.forName(net + "PacketEncoder");
-        unbundlerClass = Class.forName(net + "PacketBundleUnpacker");
-        connectionClass = Class.forName(net + "Connection");
-        Class<?> names = Class.forName(net + "HandlerNames");
-        compressName = (String) Reflect.field(names, "COMPRESS").get(null);
-        prependerName = (String) Reflect.field(names, "PREPENDER").get(null);
-        encoderName = (String) Reflect.field(names, "ENCODER").get(null);
-        protocolInfo = encoderClass.getDeclaredField("protocolInfo");
+        compressClass = Reflect.cls(net + "CompressionEncoder");
+        prependerClass = Reflect.cls(net + "Varint21LengthFieldPrepender");
+        encoderClass = Reflect.cls(net + "PacketEncoder");
+        unbundlerClass = Reflect.cls(net + "PacketBundleUnpacker");
+        connectionClass = Reflect.cls(net + "Connection");
+        // HandlerNames' constants, inlined where the game uses them, so a server jar may not carry the class.
+        compressName = "compress";
+        prependerName = "prepender";
+        encoderName = "encoder";
+        protocolInfo = Reflect.field(encoderClass, "protocolInfo");
         protocolInfo.setAccessible(true);
         threshold = l.unreflect(Reflect.method(compressClass, "getThreshold"));
-        Class<?> info = Class.forName(net + "ProtocolInfo");
+        Class<?> info = Reflect.cls(net + "ProtocolInfo");
         protocolId = l.unreflect(Reflect.method(info, "id"));
         protocolCodec = l.unreflect(Reflect.method(info, "codec"));
-        play = Reflect.field(Class.forName(net + "ConnectionProtocol"), "PLAY").get(null);
-        encode = l.unreflect(Reflect.method(Class.forName(net + "codec.StreamEncoder"), "encode", Object.class, Object.class));
+        play = Reflect.field(Reflect.cls(net + "ConnectionProtocol"), "PLAY").get(null);
+        encode = l.unreflect(Reflect.method(Reflect.cls(net + "codec.StreamEncoder"), "encode", Object.class, Object.class));
         bundlerInfo = l.unreflect(Reflect.method(info, "bundlerInfo"));
-        Class<?> bundler = Class.forName(net + "protocol.BundlerInfo");
-        unbundle = l.unreflect(Reflect.method(bundler, "unbundlePacket", Class.forName(net + "protocol.Packet"), Consumer.class));
+        Class<?> bundler = Reflect.cls(net + "protocol.BundlerInfo");
+        unbundle = l.unreflect(Reflect.method(bundler, "unbundlePacket", Reflect.cls(net + "protocol.Packet"), Consumer.class));
         // The compressor Paper's own connections use (libdeflate where Velocity has it for the platform, else
         // java.util.zip), at the server's level, so a patch costs here what it cost there.
         Object loader = Reflect.field(Class.forName("com.velocitypowered.natives.util.Natives"), "compress").get(null);

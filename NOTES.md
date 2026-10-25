@@ -480,6 +480,21 @@ MC GUI runs on Spigot and Paper from the same jar (since 0.3.0; SpigotMC lists o
   not**, so every lookup goes through `net/Reflect`, which tries the public member
   and then opens the declared one. A bare `getField`/`getMethod`/`findConstructor`
   on a game class works on Paper and fails on Spigot at startup.
+- **1.21.9 to 1.21.11 (2026-10-25).** Paper there runs Mojang's names too, and only
+  a few members differ (`ServerboundInteractPacket` is a class with a private
+  `entityId` and says its hand only to a `Handler`; one entity id counter,
+  `Entity.ENTITY_COUNTER`; `HandlerNames` inlined away, so its strings are written
+  in). **Spigot before 26.1 runs Spigot's class names and Mojang's obfuscated member
+  names**, so `net/Names` reads `src/main/resources/spigot-names/<version>.txt` and
+  `Reflect` asks it each class's own name for a member. A table is written by
+  `java tools/SpigotNames.java <maps-mojang.txt> <maps-spigot.csrg>
+  tools/spigot-names.classes <out>` from the mappings `BuildTools --rev <v>
+  --remapped` leaves in `~/.m2/repository/org/spigotmc/minecraft-server/`. **A new
+  game class looked up by name goes in `tools/spigot-names.classes` and every table
+  is written again**, or it works on Paper and fails on Spigot 1.21.x at startup.
+  There is no Spigot 1.21.9 (`--rev 1.21.9` builds 1.21.10, the same protocol).
+  Checked: Paper 1.21.9 and 1.21.11, Spigot 1.21.10 and 1.21.11 start, and a page
+  opens for the bot on Paper 1.21.11 and Spigot 1.21.10.
 - **26.3 rewrote the shader dialect**: `layout(location = N)` on every varying,
   `#include` for `#moj_import`, both uniform blocks reordered, and order-
   independent transparency in `text.fsh`. `Shaders` is written once in the 26.3
@@ -499,6 +514,21 @@ MC GUI runs on Spigot and Paper from the same jar (since 0.3.0; SpigotMC lists o
   did not change, so each chain is one file at the pack root and only its
   shaders come in two dialects. `glslangValidator -V --amb` checks the 26.3
   form offline the way shaderc does (`-S frag` without `-V` the 26.2 one).
+- **Before 26.2** (2026-10-25) there are three more overlays, `uiengine_26_1`
+  (84-87), `uiengine_1_21_11` (75-83) and `uiengine_1_21_9` (69-74), each a full
+  set replacing the root's. The text shader is `rendertype_text` there, ONE shader
+  for GUI and world text (26.2 compiles `text` per `IS_GUI`), so `Shaders.presplit`
+  turns each `#ifdef`/`#ifndef IS_GUI` inside a function into a run-time test of
+  the projection (`mcb_gui()`, orthographic) and decides every other conditional
+  with nothing defined; the GUI path writes depth and zero fog distances for that
+  reason. 1.21.9 and 1.21.11 have no `sample_lightmap.glsl`. **1.21.9-1.21.10 have
+  no `CameraBlockPos`/`CameraOffset` in `Globals`** (and a `LineWidth` in
+  `DynamicTransforms`), so nothing there can tell a seated camera: their overlay
+  decodes maps and is otherwise vanilla, and `Views` shows those players a view as
+  it shows one without the pack (`Dialect.seats`). Every shader of every overlay was
+  compiled with glslang against that version's own includes from its client jar,
+  and a 1.21.11 client loaded the pack without a shader error; overlays, blur and
+  the client-placed pointer on 1.21.11 and 26.1 are unseen in a client.
 - **The pack replaces `text.fsh`/`text.vsh` and `position_tex_color`**,
   `post_effect/entity_outline.json` and `post_effect/blur.json`, and in its
   26.2 overlay `rendertype_clouds.vsh` (overlays and menus, below). So do other plugins

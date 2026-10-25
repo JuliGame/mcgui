@@ -74,9 +74,10 @@ public final class Framework implements UIFramework, Listener {
         settings = Settings.load(plugin.getConfig());
         Cpu.configure(settings.cpuThreads);
         try {
+            ai.resourcepack.ui.framework.net.Names.init(plugin.getServer().getBukkitVersion().split("-")[0]);
             nms = new Nms(plugin.getServer());
         } catch (ReflectiveOperationException | LinkageError e) {
-            plugin.getLogger().log(Level.SEVERE, "This server is not one MC GUI can drive (Spigot or Paper 26.2 or newer is needed): " + e, e);
+            plugin.getLogger().log(Level.SEVERE, "This server is not one MC GUI can drive (Spigot or Paper 1.21.9 or newer is needed): " + e, e);
             return false;
         }
         palette = new Palette(nms::mapColor);

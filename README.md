@@ -14,8 +14,10 @@ walls and in fullscreen views, with the player's mouse, clicks and keys. The
 [examples](examples/) include an arcade of games and a live world map built on
 it. See [For plugin developers](#for-plugin-developers).
 
-**Needs** Spigot or Paper 26.2 or 26.3 (Java 25), one jar for both. PlaceholderAPI
-is optional. Build with `./gradlew build` (JDK 17 or 21 to run Gradle); the plugin is
+**Needs** Spigot or Paper 1.21.11 or newer, one jar for both (Java 21, or 25 for
+26.x). Paper 1.21.9 and Spigot 1.21.10 run it too, with one difference: a 1.21.9 or
+1.21.10 client cannot tell its player is seated, so a fullscreen view there is
+shown as it is to a player without the resource pack. PlaceholderAPI is optional. Build with `./gradlew build` (JDK 17 or 21 to run Gradle); the plugin is
 `build/libs/MCGUI-<version>.jar`. `./gradlew renderSamples` renders
 `samples/*.html` to `build/samples/` to check the renderer by eye.
 
@@ -153,7 +155,7 @@ the pointer is faster than asked.
 ### The pointer and Minecraft's own menus
 
 When a player opens a Minecraft screen over a page, the game frees the mouse
-and their computer's own cursor appears. On Minecraft 26.2 and 26.3 with the resource
+and their computer's own cursor appears. On Minecraft 1.21.11 and newer with the resource
 pack, the page's pointer goes away while the pause menu (or an options screen
 opened from it) is up, and comes back where it was the moment they return to
 the game. That works while "Menu Background Blur" is 1 or more, which is the
@@ -248,7 +250,7 @@ it closes, and the player is back exactly where they were, facing the same way.
 Only the maps the panel covers are sent and drawn. Add `blur`
 (`content="rgba(8, 10, 22, 0.3) blur"`) to blur the world round the panel, as
 the game blurs it behind a menu, at the player's own menu blur setting. All of
-that needs a 26.2 or 26.3 client; on any other version, or where the player has no room to be held still, the
+that needs a 1.21.11 or newer client; on any other version, or where the player has no room to be held still, the
 world shows live round the panel and the server places the pointer (up to a
 tick behind the mouse). On a wall, the wall behind shows through, untinted.
 Players without the pack see the world round the panel too, without a tint.
@@ -507,7 +509,7 @@ runs on the server thread. A wall can show each viewer their own canvas.
 A canvas with `canvas.transparency(true)` lets the world show through where an
 image's alpha is under half, and `canvas.tint(argb)` is what a view lays over
 the world there; `ViewOptions.DEFAULT.blur(true)` blurs the world round the
-opaque part too (26.2 and 26.3 clients).
+opaque part too (1.21.11 and newer clients).
 
 The [examples](examples/) are whole plugins built this way:
 [arcade](examples/arcade/) (thirteen games, on cabinets and fullscreen),
