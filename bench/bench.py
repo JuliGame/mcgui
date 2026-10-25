@@ -189,7 +189,8 @@ class Server:
         shutil.copy(self.jar, f'{self.dir}/plugins/MCGUI.jar')
         shutil.copy(self.arcade, f'{self.dir}/plugins/Arcade.jar')
         shutil.copy(a.probe, f'{self.dir}/plugins/Probe.jar')
-        open(f'{self.dir}/plugins/MCGUI/config.yml', 'w').write(config_yaml({'resource-pack.port': self.pack_port, **dict(s.split('=', 1) for s in a.set)}))
+        # telemetry off: every bench start is a new server id with dozens of fake players, which the usage count read as real servers.
+        open(f'{self.dir}/plugins/MCGUI/config.yml', 'w').write(config_yaml({'resource-pack.port': self.pack_port, 'telemetry': 'false', **dict(s.split('=', 1) for s in a.set)}))
         pages = f'{self.dir}/plugins/MCGUI/pages'
         shutil.copytree(f'{REPO}/src/main/resources/pages', pages, dirs_exist_ok=True)
         shutil.copytree(f'{REPO}/bench/pages', pages, dirs_exist_ok=True)
