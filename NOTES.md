@@ -498,7 +498,8 @@ Reading a position, a world or a UUID is fine from anywhere. How MC GUI copes, a
 - **Testing**: Folia 1.21.11 from `fill.papermc.io` (project `folia`) swapped in for a test server's `paper.jar`.
   Checked with bots: start, commands, a page opened by a player and by the console, clicks, chat, getting up, walls
   (frames, aim, clicks), a seated player hidden from another, quitting while seated, reload, import, a shutdown with
-  somebody seated, a placed wall coming back. Not yet in a real client (the client-placed pointer and overlays).
+  somebody seated, a placed wall coming back. Then by the owner in a real 1.21.11 client (2026-10-25): fullscreen
+  pages with the client-placed pointer, overlays and walls all work.
 
 ## The framework: things that are not obvious
 
