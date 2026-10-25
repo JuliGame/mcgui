@@ -5,15 +5,22 @@ import ai.resourcepack.ui.html.css.Values;
 import ai.resourcepack.ui.html.res.Resources;
 import ai.resourcepack.ui.html.style.Style;
 import ai.resourcepack.ui.html.style.Styler;
+import org.jsoup.nodes.Attribute;
+import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.nodes.Node;
 import org.jsoup.nodes.TextNode;
 
 import java.net.URI;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Turns styled elements into boxes: what each display value means, anonymous blocks round loose
@@ -384,9 +391,48 @@ public final class BoxBuilder {
         double alpha = (color >>> 24) / 255.0;
         Element copy = e.clone();
         if (!copy.hasAttr("xmlns")) copy.attr("xmlns", "http://www.w3.org/2000/svg");
+        borrowDefs(e, copy);
         String markup = copy.outerHtml().replace("currentColor", hex).replace("currentcolor", hex);
         if (alpha < 1) markup = markup.replaceFirst("<svg", "<svg opacity=\"" + alpha + "\"");
         return markup;
+    }
+
+    /** {@code href="#x"}, or any {@code url(#x)} inside an attribute: what an SVG can point at by id. */
+    private static final Pattern SVG_REF = Pattern.compile("^#([^\\s)]+)$|url\\(\\s*['\"]?#([^'\")\\s]+)");
+    private static final int MAX_BORROWED = 64;
+
+    /**
+     * Copies into [copy] what it points at elsewhere in the page. A browser resolves {@code <use href="#x">} and
+     * {@code fill="url(#x)"} against the whole document, so a page may define its symbols and gradients once in a
+     * hidden SVG and use them from every other; drawn on its own, an SVG would find none of them.
+     */
+    private static void borrowDefs(Element original, Element copy) {
+        Document doc = original.ownerDocument();
+        if (doc == null) return;
+        Set<String> have = new HashSet<>();
+        for (Element d : copy.getAllElements()) if (d.hasAttr("id")) have.add(d.id());
+        ArrayDeque<Element> scan = new ArrayDeque<>(List.of(copy));
+        Element defs = null;
+        int borrowed = 0;
+        while (!scan.isEmpty()) {
+            for (Element d : scan.poll().getAllElements()) {
+                for (Attribute a : d.attributes()) {
+                    Matcher m = SVG_REF.matcher(a.getValue().trim());
+                    while (m.find()) {
+                        String id = m.group(1) != null ? m.group(1) : m.group(2);
+                        if (!have.add(id) || borrowed >= MAX_BORROWED) continue;
+                        Element found = doc.getElementById(id);
+                        if (found == null) continue;
+                        if (defs == null) defs = copy.prependElement("defs");
+                        Element taken = found.clone();
+                        for (Element inner : taken.getAllElements()) if (inner.hasAttr("id")) have.add(inner.id());
+                        defs.appendChild(taken);
+                        scan.add(taken);
+                        borrowed++;
+                    }
+                }
+            }
+        }
     }
 
     // ---------------------------------------------------------------- fixing up the tree
