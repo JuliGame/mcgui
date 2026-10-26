@@ -445,7 +445,7 @@ public final class Views implements Listener {
         // On their client only, and not yet: the maps go out first, and the frames only appear once they can show them.
         // In the camera's block whatever the pointer, so no camera turn culls them: F5's view from the front turns a
         // mannequin camera half round as much as a player's own (the maps place themselves, HI_TILED).
-        wall.spawnFor(nms, player, stackBlock(cam));
+        wall.spawnFor(nms, player, MapWall.Stack.at(cam));
         double speed = speedFor(player, canvas, clientPointer);
         LayerSet layers = null;
         // After the tiles' ids and an overlay's signature's (MapWall.signatureMapId).
@@ -454,7 +454,7 @@ public final class Views implements Listener {
             // Hover layers carry the speed to the shader in steps: the server's cursor goes by the same.
             speed = Shaders.layerSpeed(speed);
             MapWall row = new MapWall(world, wall.anchorX, wall.anchorY, wall.anchorZ, wall.facing, layerMaps, 1, firstMapId + canvas.tiles() + 1);
-            row.spawnFor(nms, player, stackBlock(cam));
+            row.spawnFor(nms, player, MapWall.Stack.at(cam));
             int side = (wall.facing.getModZ() != 0 ? Palette.LAYER_ALONG_Z : 0)
                     | (wall.facing.getModX() + wall.facing.getModZ() > 0 ? Palette.LAYER_LOOKS_NEGATIVE : 0);
             layers = new LayerSet(palette, new Canvas(palette, layerMaps, 1, sender::wake), row, canvas.cols(), canvas.rows(), speed, side);
@@ -691,14 +691,6 @@ public final class Views implements Listener {
             }
         }
         return false;
-    }
-
-    /**
-     * The block a client-placed view's frames all lie in, on its floor: the camera's own, so each frame's
-     * culling box (half a block round it) holds the camera, which is half a block up in it.
-     */
-    private static int[] stackBlock(Location cam) {
-        return new int[]{cam.getBlockX(), cam.getBlockY(), cam.getBlockZ()};
     }
 
     /**
