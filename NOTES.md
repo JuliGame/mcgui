@@ -436,7 +436,7 @@ with it. The rig and every result of the 26.3 port are in
 |---|---|
 | `api/` | The public surface: `UIFramework`, `Canvas`, `WallContent`/`WallScreen`, `ViewContent`/`View`, `Pointer`, `Click`, `Key` |
 | `render/Palette` | The map colour table, and the HI (YCbCr in 240 colours) and PLAIN encodings |
-| `pack/` | `Shaders` (both GLSL dialects), `SymbolHash` (the shader's colour lookup), `ResourcePack` (build, upload or serve, who has it), `PackUploader` (packs.resourcepack.ai, the same routes as RP Engine's) |
+| `pack/` | `Shaders` (both GLSL dialects), `SymbolHash` (the shader's colour lookup), `ResourcePack` (build, upload or serve, who has it; the upload is plugin-common's `host/PackUploader`, shared with RP Engine, Dialog Engine and 3D Engine) |
 | `net/` | `Nms` (every server internal, by reflection), `MapSender` (diffed map patches, per-player budget, frame re-pointing), `Wire`/`ServerWire` (what the sender writes through), `Pipeline` (ping answers, the hidden inventory, each connection's frame pointing) |
 | `world/` | `MapWall` (the frames), `MapPool` (placed walls whose frames share maps), `Walls` (placed walls and crosshair input), `Views` (seating, camera, pointer, input), `PrivateView` (entities and placed walls in a seated player's way, hidden from them) |
 

@@ -1,5 +1,6 @@
 package ai.resourcepack.ui.framework.pack;
 
+import ai.resourcepack.common.host.PackUploader;
 import ai.resourcepack.ui.framework.Settings;
 import ai.resourcepack.ui.framework.api.Pointer;
 import ai.resourcepack.ui.framework.render.Palette;
@@ -55,10 +56,8 @@ public final class ResourcePack implements AutoCloseable {
     public final byte[] bytes;
     public final String sha1;
     private final Set<UUID> loaded = ConcurrentHashMap.newKeySet();
-    /** ResourcePack AI's pack host, which mode upload puts the pack on (the same as RP Engine's). */
-    static final String PACK_HOST = "https://packs.resourcepack.ai";
     /** How often a running server tells the pack host it still uses the pack, which forgets one untouched for 30 days. */
-    private static final long TOUCH_HOURS = 6;
+    private static final long TOUCH_HOURS = PackUploader.TOUCH_HOURS;
 
     /** Mode upload: the pack's link on the pack host, once it has it. */
     private volatile String hosted;
@@ -98,7 +97,7 @@ public final class ResourcePack implements AutoCloseable {
                 }
             }
             case UPLOAD -> {
-                PackUploader uploader = new PackUploader(PACK_HOST, agent);
+                PackUploader uploader = new PackUploader(PackUploader.HOST, agent);
                 uploads = Executors.newSingleThreadScheduledExecutor(r -> {
                     Thread t = new Thread(r, "MCGUI-upload");
                     t.setDaemon(true);
@@ -115,7 +114,7 @@ public final class ResourcePack implements AutoCloseable {
     /** Makes sure the pack host has the pack; if it cannot, serves it from here meanwhile (port and public-url). */
     private void host(PackUploader uploader, Runnable onHosted) {
         try {
-            String link = uploader.ensure(bytes, sha1);
+            String link = uploader.ensure(sha1, bytes, "the MC GUI pack");
             boolean first = hosted == null;
             hosted = link;
             if (first) {
