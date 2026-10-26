@@ -411,6 +411,19 @@ public final class PageScript {
         } catch (RhinoException e) {
             report(e);
         }
+        // A promise that failed with nothing to catch it says so, as in a browser's console, rather than nothing at all.
+        cx.getUnhandledPromiseTracker().process(reason -> say(Level.WARNING, "Uncaught (in promise) " + describe(reason)));
+    }
+
+    private static String describe(Object reason) {
+        if (reason instanceof Scriptable o) {
+            Object stack = ScriptableObject.getProperty(o, "stack");
+            String text = Context.toString(o);
+            // The stack's first line says where; the rest is the frames above it.
+            String where = stack instanceof CharSequence st ? st.toString().strip().lines().findFirst().orElse("") : "";
+            return where.isEmpty() ? text : text + " " + where;
+        }
+        return Context.toString(reason);
     }
 
     private double now() {
@@ -589,6 +602,7 @@ public final class PageScript {
             cx.setLanguageVersion(Context.VERSION_ECMASCRIPT);
             cx.setInstructionObserverThreshold(10_000);
             cx.setClassShutter(SHUT);
+            cx.setTrackUnhandledPromiseRejections(true);
             // Rhino looks its regular expressions up as a service, and relocating it into the jar loses that file.
             org.mozilla.javascript.ScriptRuntime.setRegExpProxy(cx, new org.mozilla.javascript.regexp.RegExpImpl());
             return cx;

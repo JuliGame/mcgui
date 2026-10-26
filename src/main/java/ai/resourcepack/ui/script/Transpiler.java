@@ -23,6 +23,9 @@ import java.util.concurrent.TimeUnit;
  * go of once nothing has needed it for {@link #IDLE_NANOS}: it is a few tens of megabytes while loaded. What it makes
  * is kept by the script's text, so a page opened again, or by another player, is not converted again.
  *
+ * <p>Generators are converted too (regenerator), and with them what async becomes: Rhino's own generator functions
+ * have no prototype, so no {@code apply}, which converted async code calls on them.
+ *
  * <p>Babel is told to keep line numbers, so an error in a converted script names the line the author wrote.
  */
 final class Transpiler {
@@ -32,7 +35,7 @@ final class Transpiler {
     private static final String OPTIONS = "{presets: [], sourceType: 'script', retainLines: true, compact: false, comments: false,"
             + " plugins: ['transform-class-properties', 'transform-private-methods', 'transform-private-property-in-object',"
             + " 'transform-class-static-block', 'transform-classes', 'transform-parameters', 'transform-spread',"
-            + " 'transform-destructuring', 'transform-for-of', 'transform-block-scoping', 'transform-async-to-generator',"
+            + " 'transform-destructuring', 'transform-for-of', 'transform-block-scoping', 'transform-async-to-generator', 'transform-regenerator',"
             + " 'transform-object-rest-spread', 'transform-logical-assignment-operators', 'transform-numeric-separator',"
             + " 'transform-optional-catch-binding']}";
 
