@@ -6,8 +6,9 @@ Vanilla clients, no mods: a Spigot, Paper or Folia plugin and a small resource p
 builds and puts on a free pack host for you, nothing to open or set up. Edit the file and it updates in game within a second.
 
 No browser runs. MC GUI has its own HTML and CSS renderer, so what works is
-**static** HTML and CSS: no JavaScript. Links, commands, hover states, scrolling,
-sounds and a few form bits are made to work in game instead (below).
+**static** HTML and CSS. Links, commands, hover states, scrolling, sounds and a
+few form bits are made to work in game instead (below). A page can also run
+JavaScript to draw on a `<canvas>`, for games ([Scripts](#scripts)).
 
 Under the pages is a framework any plugin can draw with: full-colour pictures on
 walls and in fullscreen views, with the player's mouse, clicks and keys. The
@@ -305,6 +306,49 @@ way; the next hover puts it back first, in a few milliseconds. On a test server 
 idle fullscreen market costs under 1 MB a player, against about 19 MB with every
 picture kept whole, and 100 players hovering it run in a 3 GB heap at 20 TPS.
 
+## Scripts
+
+A page can run JavaScript that draws on a `<canvas>`: games, and anything drawn
+fresh every frame. Most pages need none, and a page without a `<script>` works
+exactly as it did before scripts existed.
+
+```html
+<canvas id="game" width="640" height="360"></canvas>
+<script>
+  const ctx = document.getElementById("game").getContext("2d");
+  let x = 300;
+  document.addEventListener("keydown", e => { if (e.key === "a") x -= 20; if (e.key === "d") x += 20; });
+  function frame() {
+    ctx.fillStyle = "#111"; ctx.fillRect(0, 0, 640, 360);
+    ctx.fillStyle = "#5ad1ff"; ctx.fillRect(x, 160, 40, 40);
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+</script>
+```
+
+| A script has | |
+|---|---|
+| The canvas 2D context | rectangles, paths, arcs and ellipses, text, `drawImage`, gradients, transforms, clipping, alpha, compositing, line dashes. Not yet: `getImageData`/`putImageData`, patterns, shadows, filters |
+| Time | `requestAnimationFrame` (20 frames a second, up to 30 with `<meta name="ui:fps" content="30">`), `setTimeout`, `setInterval`, `performance.now()`, promises |
+| Keys (fullscreen) | `keydown` and `keyup` on `document`, with `e.key` `"w"` `"a"` `"s"` `"d"`, `" "` (jump), `"Control"` (sprint), `"q"` and `"1"` to `"9"`: the keys a seated player has. F still goes back, sneaking still closes the page and a `data-key` still clicks |
+| The mouse | `mousemove`, `mousedown`, `mouseup` and `click` on the canvas, with `offsetX`/`offsetY` in CSS pixels |
+| Pictures | `new Image()` with a `src` in the pages folder, or an `<img>` on the page by id, for `drawImage` |
+| Minecraft | `mcgui.sound("entity.experience_orb.pickup 1 1.5")` plays a sound to the player, `mcgui.command("spawn")` runs a command as them (as `data-command` does), `mcgui.player` is their name |
+
+A script cannot change the page's HTML or CSS: draw what changes on the canvas
+and keep the rest in the page. There is no network, no Java and no modules, and
+scripts load from the pages folder only.
+
+Scripts run in [Rhino](https://github.com/mozilla/rhino), on threads of their
+own, never the server's, one copy per player per page. A frame that runs longer
+than 250 ms stops the script, and errors go to the console with the page and the
+line. JavaScript Rhino cannot read (`class`, `...` spread, `async`/`await`,
+`for (const x of ...)`) is converted with [Babel](https://babeljs.io) (bundled,
+MIT) the first time the page opens, which takes a moment; plain functions, `let`
+and loops run as they are. [`examples/scripts/pong.html`](examples/scripts/pong.html)
+is a whole game.
+
 ## What the renderer supports
 
 Selectors (all combinators, attribute selectors, structural pseudo-classes,
@@ -328,8 +372,9 @@ Fonts: Inter (sans-serif and every system UI font name), Source Serif 4
 own letters) and Monocraft (`font-family: Monocraft`, a monospaced take on them)
 are bundled, all under the SIL Open Font License (`fonts/*-OFL.txt`).
 
-Not supported: JavaScript, WOFF fonts, WebP images, video, iframes, floats
-(floated boxes stay in the flow), typing into inputs.
+Not supported: WOFF fonts, WebP images, video, iframes, floats (floated boxes
+stay in the flow), typing into inputs, and scripts changing the page's HTML or CSS
+(a script draws on a canvas: see [Scripts](#scripts)).
 
 ## Fast pages
 
