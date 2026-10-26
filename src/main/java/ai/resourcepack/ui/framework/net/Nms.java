@@ -124,6 +124,7 @@ public final class Nms {
     private final Object noMovement;               // Vec3.ZERO
     private final Object sharedFlags;              // Entity.DATA_SHARED_FLAGS_ID
     private final Object silent;                   // Entity.DATA_SILENT
+    private final Object textOpacity;              // Display.TextDisplay.DATA_TEXT_OPACITY_ID
     private final MethodHandle newRemoveEntities;  // new ClientboundRemoveEntitiesPacket(int...)
     private final MethodHandle nextEntityId;       // UnsafeValues#nextEntityId(World) (26.x) or #nextEntityId() (1.21)
     private final boolean nextEntityIdTakesWorld;
@@ -236,6 +237,7 @@ public final class Nms {
         noMovement = Reflect.field(vec3, "ZERO").get(null);
         sharedFlags = open(nmsEntity, "DATA_SHARED_FLAGS_ID").get(null);
         silent = open(nmsEntity, "DATA_SILENT").get(null);
+        textOpacity = open(Reflect.cls("net.minecraft.world.entity.Display$TextDisplay"), "DATA_TEXT_OPACITY_ID").get(null);
         newRemoveEntities = Reflect.constructor(L, Reflect.cls(game + "ClientboundRemoveEntitiesPacket"), MethodType.methodType(void.class, int[].class)).asFixedArity();
         Object unsafe = server.getUnsafe();
         MethodHandle next;
@@ -551,6 +553,11 @@ public final class Nms {
         };
     }
 
+    /** The packet that sets text display [id]'s text opacity to [opacity] (unsigned) on one client only. */
+    public Object textOpacity(int id, int opacity) {
+        return make(newDataPacket, id, List.of(make(dataValue, textOpacity, (byte) opacity)));
+    }
+
     /** The packet that takes entities [ids] off a client. */
     public Object removeEntities(int[] ids) {
         try {
@@ -668,11 +675,11 @@ public final class Nms {
         }
     }
 
-    /** Puts entity [id] at (x, y, z), gliding there over its teleport duration. */
+    /** Puts entity [id] at (x, y, z), gliding there over its teleport duration, its rotation left as it is. */
     public Object teleport(int id, double x, double y, double z) {
         try {
             Object pmr = newPositionMoveRotation.invoke(newVec3.invoke(x, y, z), newVec3.invoke(0.0, 0.0, 0.0), 0f, 0f);
-            return newTeleport.invoke(id, pmr, java.util.Set.of(), false);
+            return newTeleport.invoke(id, pmr, keepRotation, false);
         } catch (Throwable t) {
             throw rethrow(t);
         }

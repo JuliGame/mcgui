@@ -45,6 +45,8 @@ final class LayerSet implements HoverLayers {
     private final byte[][] shown, source;
     private final Map<Object, int[]> held = new HashMap<>();
     private int used;
+    /** The turn hint every held map carries ({@code Shaders.turnQuarter}; 0 for none yet). Under the lock. */
+    private int quarter;
     /** Bumped whenever which maps are held changes. */
     private volatile int changes;
 
@@ -225,7 +227,7 @@ final class LayerSet implements HoverLayers {
         atX[i] = p.places[k][0];
         atY[i] = p.places[k][1];
         source[i] = p.tiles[k];
-        shown[i] = palette.markLayer(p.tiles[k].clone(), cols, rows, atX[i], atY[i], speed, side, prio, in, out);
+        shown[i] = palette.markLayerHint(palette.markLayer(p.tiles[k].clone(), cols, rows, atX[i], atY[i], speed, side, prio, in, out), quarter);
         given.put(i, shown[i]);
     }
 
@@ -290,6 +292,22 @@ final class LayerSet implements HoverLayers {
     public synchronized void clear() {
         Map<Integer, byte[]> given = new HashMap<>();
         for (Object key : List.copyOf(held.keySet())) release(key, given);
+        canvas.put(given);
+    }
+
+    /**
+     * The player now faces quarter turn [q] ({@code Shaders.turnQuarter}): every held map is marked with it, which
+     * sends the client a pixel a map. Called on every rotation; nothing happens unless the quarter changed.
+     */
+    synchronized void hint(int q) {
+        if (q == quarter) return;
+        quarter = q;
+        Map<Integer, byte[]> given = new HashMap<>();
+        for (int i = 0; i < owner.length; i++) {
+            if (owner[i] == null) continue;
+            shown[i] = palette.markLayerHint(shown[i].clone(), q);
+            given.put(i, shown[i]);
+        }
         canvas.put(given);
     }
 

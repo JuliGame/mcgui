@@ -261,8 +261,9 @@ public final class Palette {
      * {@code Shaders.LAYER_SPEED_SCALE} ([speed], three symbols, high first) and a fourth symbol: four times the
      * [priority] plus the [side] the view is on ({@link #LAYER_ALONG_Z}, {@link #LAYER_LOOKS_NEGATIVE}); then the two
      * rectangles, each edge two symbols (high, low) and each rectangle two 2×2 blocks (left and top, then right and
-     * bottom), include from x = 6 and exclude from x = 10; then [y] (two symbols, top row). Eight 2×2 blocks in all; the
-     * shader never shows the top two rows. Not a copy: [hi] is marked in place.
+     * bottom), include from x = 6 and exclude from x = 10; then [y] (two symbols, top row), and below it the turn hint
+     * ({@link #markLayerHint}). Eight 2×2 blocks in all; the shader never shows the top two rows. Not a copy: [hi] is
+     * marked in place.
      */
     public byte[] markLayer(byte[] hi, int cols, int rows, int x, int y, int speed, int side, int priority, int[] include, int[] exclude) {
         hi[0] = markerId[1];
@@ -280,6 +281,15 @@ public final class Palette {
         hi[133] = symbolId[Math.max(0, Math.min(LAYER_PRIORITIES - 1, priority)) * 4 + (side & 3)];
         rect(hi, 6, include);
         rect(hi, 10, exclude);
+        return hi;
+    }
+
+    /**
+     * Puts a layer's turn hint in [hi] (a map {@link #markLayer} marked): {@code Shaders.turnQuarter}, 0 for none, as the
+     * symbol under its [y]. Not a copy: [hi] is marked in place.
+     */
+    public byte[] markLayerHint(byte[] hi, int quarter) {
+        hi[142] = symbolId[quarter];
         return hi;
     }
 
