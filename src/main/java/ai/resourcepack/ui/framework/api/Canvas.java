@@ -100,7 +100,7 @@ public final class Canvas {
         // Black, with no colours of its own until something is drawn (a 16x9 canvas's are 7 MB, and this runs on the
         // server thread when a viewer reaches a wall). Every tile of a blank canvas encodes to the same bytes, and tiles
         // are never changed once published, so they all share one Tile, as do all blank canvases of this size: what is
-        // made from it alone (HI_OWN, PLAIN) depends only on the size. HI_TILED carries the tile's place (see Tile.tiled).
+        // made from it alone (PLAIN) depends only on the size. HI_TILED carries the tile's place (see Tile.tiled).
         Tile[] all = new Tile[count];
         Arrays.fill(all, blank(palette, cols, rows));
         tiles = all;
@@ -586,7 +586,6 @@ public final class Canvas {
             int tint = this.tint;
             return switch (encoding) {
                 case HI -> t.hi;
-                case HI_OWN -> t.own(palette, cols, rows, tint);
                 case HI_TILED -> {
                     byte[] kept = t.tiled(palette, cols, rows, index, tint);
                     if (kept != null) yield kept;
@@ -614,8 +613,8 @@ public final class Canvas {
         final int bounds;
         /** The colours it was encoded from, if it is shared by its colours ({@link #shareAlike}): never changed. Else null. */
         final byte[] ycc;
-        private byte[] own, plain, tiled;
-        private int ownTint, tiledAt = -1, tiledTint;
+        private byte[] plain, tiled;
+        private int tiledAt = -1, tiledTint;
 
         Tile(byte[] hi, int bounds) {
             this(hi, bounds, null);
@@ -625,15 +624,6 @@ public final class Canvas {
             this.hi = hi;
             this.bounds = bounds;
             this.ycc = ycc;
-        }
-
-        /** Made once for each tint, the first time a view needs it; one array whichever thread asks first. */
-        synchronized byte[] own(Palette palette, int cols, int rows, int tint) {
-            if (own == null || ownTint != tint) {
-                own = palette.markOwn(hi, cols, rows, tint);
-                ownTint = tint;
-            }
-            return own;
         }
 
         /**
@@ -809,9 +799,7 @@ public final class Canvas {
     public enum Encoding {
         /** For players with the engine's resource pack. */
         HI,
-        /** HI, marked as the viewer's own fullscreen view: their client draws it in front of the world. */
-        HI_OWN,
-        /** HI_OWN, carrying each tile's place too, for a view whose pointer the viewer's client draws. */
+        /** HI, marked as tile (col, row) of the viewer's own fullscreen view: their client draws it in its place in the window, in front of the world. */
         HI_TILED,
         /** Plain map colours, for players without the pack. */
         PLAIN

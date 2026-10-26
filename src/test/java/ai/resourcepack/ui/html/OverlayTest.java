@@ -158,7 +158,7 @@ class OverlayTest {
             once.tint(page.overlayTint());
             once.draw(fresh.image(), 0, 0);
             for (int i = 0; i < cols * rows; i++) {
-                for (Canvas.Encoding e : new Canvas.Encoding[]{Canvas.Encoding.HI_OWN, Canvas.Encoding.PLAIN}) {
+                for (Canvas.Encoding e : new Canvas.Encoding[]{Canvas.Encoding.HI_TILED, Canvas.Encoding.PLAIN}) {
                     assertArrayEquals(once.tile(i, e), shown.tile(i, e), "t=" + t + ": tile " + i + " " + e);
                 }
             }

@@ -593,11 +593,8 @@ public final class Shaders {
                             // Its alpha is the turn hint (see mcb_client_pointer), not a fade.
                             mcbTint = vec4(1.0);
                             gl_Position = mcb_flat(mcb_client_pointer(vec2(mcbRgb.gb) * 128.0));
-                        } else if (mcbMap == 2) {
-                            // Their own view's maps carry its columns and rows next to the marker.
-                            mcbGrid = vec2(float(mcb_symbol(ivec2(2, 0))), float(mcb_symbol(ivec2(3, 0))));
                         } else if (mcbMap == 3) {
-                            // A view whose pointer this client places: each map also carries its own column and
+                            // Their own view: each map carries its view's columns and rows and its own column and
                             // row, and goes to its place in the window by those and its corner (the map quad's
                             // texture coordinates are exactly 0 and 1), wherever its frame is and wherever the
                             // camera looks. An overlay sends only the maps its panel covers, so nothing is drawn
@@ -678,10 +675,10 @@ public final class Shaders {
 
                 int mcb_symbol(ivec2 p) { return mcb_symbol_of(texelFetch(Sampler0, p, 0).rgb); }
 
-                // 0: not ours. 1: a screen. 2: the view of whoever is seated at it (bottom markers swapped).
-                // 3: such a view whose pointer their client places, each map carrying its place (both the fourth).
-                // text.vsh then tells two kinds of 3 apart for text.fsh: 5, an overlay's signature map, and 6, a map of
-                // an overlay's panel. 7: a hover layer of a view as 3 (Palette.markLayer): top markers swapped too.
+                // 0: not ours. 1: a screen. 3: the view of whoever is seated at it, each map carrying its place (bottom
+                // markers both the fourth). text.vsh then tells two kinds of 3 apart for text.fsh: 5, an overlay's
+                // signature map, and 6, a map of an overlay's panel. 7: a hover layer of a view (Palette.markLayer): top
+                // markers swapped too.
                 int mcb_screen_map() {
                     if (textureSize(Sampler0, 0) != ivec2(128, 128)) return 0;
                     ivec3 m0 = mcb_fetch(ivec2(0, 0)), m1 = mcb_fetch(ivec2(1, 0));
@@ -691,7 +688,6 @@ public final class Shaders {
                     ivec3 b = mcb_fetch(ivec2(1, 1));
                     if (layer) return a == @M3@ && b == @M3@ ? 7 : 0;
                     if (a == @M2@ && b == @M3@) return 1;
-                    if (a == @M3@ && b == @M2@) return 2;
                     if (a == @M3@ && b == @M3@) return 3;
                     return 0;
                 }
@@ -778,13 +774,6 @@ public final class Shaders {
                 """ : "out vec4 fragColor;\n");
 
         String decoder = decoderCore(palette) + """
-
-                // A seated player's own view and pointer win over any block between them and the camera,
-                // so no blocks need clearing. Scaling depth towards "near" puts both in front of anything
-                // more than a few centimetres from the eye, and the pointer (more) in front of the picture.
-                float mcb_in_front(float k) {
-                    return mcbReversed > 0.5 ? min(gl_FragCoord.z * k, 1.0) : gl_FragCoord.z / k;
-                }
 
                 // The screen is almost never drawn at one map pixel per window pixel. Instead of the
                 // nearest pixel (uneven, shimmering text), average the map pixels under this window
@@ -899,13 +888,14 @@ public final class Shaders {
                         }
                 #ifndef IS_GUI
                         if (mcbMap >= 2 && mcbSeated > 0.5) {
-                            // A view the client places (3, 6) is just behind its pointer, in front of all else: its
-                            // frames are at the camera, so its own depth means nothing. A signature (5) is nearest. A
-                            // hover layer (7) is a step or more in front of its view, the higher its priority (mcbMapInfo.y,
-                            // which is that plus one) the nearer, and still behind the pointer, whichever is drawn first.
+                            // A view (3, 6) is just behind its pointer, in front of all else: its frames are at the
+                            // camera, so its own depth means nothing. A signature (5) is nearest. A hover layer (7) is a
+                            // step or more in front of its view, the higher its priority (mcbMapInfo.y, which is that plus
+                            // one) the nearer, and still behind the pointer, whichever is drawn first. No block between
+                            // the camera and the picture needs clearing.
                             float mcbStep = mcbMap == 7 ? mcbMapInfo.y * 1.2e-7 : 0.0;
                             mcbDepth = mcbMap == 5 ? (mcbReversed > 0.5 ? 1.0 : 0.0)
-                                : mcbMap == 3 || mcbMap >= 6 ? (mcbReversed > 0.5 ? 0.99999 + mcbStep : 0.00001 - mcbStep) : mcb_in_front(64.0);
+                                : (mcbReversed > 0.5 ? 0.99999 + mcbStep : 0.00001 - mcbStep);
                             gl_FragDepth = mcbDepth;
                         }
                 #endif

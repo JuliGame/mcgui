@@ -189,25 +189,9 @@ public final class Palette {
     }
 
     /**
-     * A copy of a HI tile marked as somebody's own fullscreen view of [cols] × [rows] maps: its bottom two
-     * marker colours swapped, the two pixels right of the marker the symbols for its columns and rows, from
-     * which the shader stretches the view to the window, and the 2×2 block after that its [tint] (see
-     * {@link #markTint}). Those two 2×2 blocks show the next one.
-     */
-    public byte[] markOwn(byte[] hi, int cols, int rows, int tint) {
-        byte[] own = hi.clone();
-        own[128] = markerId[3];
-        own[129] = markerId[2];
-        own[2] = symbolId[Math.min(SYMBOLS - 1, cols)];
-        own[3] = symbolId[Math.min(SYMBOLS - 1, rows)];
-        markTint(own, tint);
-        return own;
-    }
-
-    /**
      * A copy of a HI tile marked as tile ([col], [row]) of somebody's own fullscreen view of [cols] × [rows]
-     * maps whose pointer their client draws: both bottom marker colours the fourth, the view's columns
-     * and rows right of the marker and its tint after them as in {@link #markOwn}, and the tile's own column
+     * maps: both bottom marker colours the fourth, the two pixels right of the marker the symbols for its
+     * columns and rows, the 2×2 block after that its [tint] (see {@link #markTint}), and the tile's own column
      * and row below the size. The shader places the tile in the window from these alone, wherever its frame is.
      */
     public byte[] markTiled(byte[] hi, int cols, int rows, int col, int row, int tint) {

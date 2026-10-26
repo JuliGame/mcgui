@@ -71,7 +71,7 @@ class TransparencyTest {
         int tint = 0x8C0A0816;
         c.tint(tint);
         c.draw(panel(), 0, 0);
-        for (Canvas.Encoding e : new Canvas.Encoding[]{Canvas.Encoding.HI_OWN, Canvas.Encoding.HI_TILED}) {
+        for (Canvas.Encoding e : new Canvas.Encoding[]{Canvas.Encoding.HI_TILED}) {
             byte[] own = c.tile(3, e);
             int[] want = {tint >> 16 & 255, tint >> 8 & 255, tint & 255, tint >>> 24};
             int[] at = {4, 5, 132, 133};
