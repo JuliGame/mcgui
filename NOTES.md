@@ -617,6 +617,16 @@ Reading a position, a world or a UUID is fine from anywhere. How MC GUI copes, a
   it is the player's own eye moved at most 1/32 of a block on each. The shaders
   read that back from `Globals.CameraOffset`. That flag is what hides the HUD
   and draws the view in front of the world, for that player only.
+- **F5 moves the camera off the flag**, back along its look by the
+  `camera_distance` attribute (4 blocks; `Camera.alignWithEntity`). Looking dead
+  at the centre that is a whole number of blocks along the axis and the flag
+  still matches, so a quick check passes; with the pointer anywhere else the view
+  drops to a loose wall of maps and the HUD returns. `Views.hold` (and the
+  mannequin camera) zero it under the seated key. Third person front still turns
+  the camera exactly round (the look negated), which the shader cannot tell from
+  a real turn past 90° (the edge is ~144° at default sensitivity), so there the
+  picture holds but the client-drawn pointer sits at the edge; clicks still go
+  where the player really points. Seen on the PC rig, 26.2, 2026-10-26.
 - **A view fills the window because `text.vsh` puts it there.** Its maps carry
   the view's columns and rows in the two pixels right of the marker, and the
   pointer is text whose red is `Shaders.POINTER_RED` with the columns and rows
