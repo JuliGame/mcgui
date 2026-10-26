@@ -3,7 +3,7 @@
 Put an HTML page in `plugins/MCGUI/pages/` and it is in the game: on a wall,
 or fullscreen in front of the player, who points with their mouse and clicks.
 Vanilla clients, no mods: a Spigot, Paper or Folia plugin and a small resource pack it
-builds and serves itself. Edit the file and it updates in game within a second.
+builds and puts on a free pack host for you, nothing to open or set up. Edit the file and it updates in game within a second.
 
 No browser runs. MC GUI has its own HTML and CSS renderer, so what works is
 **static** HTML and CSS: no JavaScript. Links, commands, hover states, scrolling,

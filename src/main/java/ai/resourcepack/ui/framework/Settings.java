@@ -6,7 +6,7 @@ import java.util.Locale;
 
 /** One reading of config.yml. */
 public final class Settings {
-    public enum PackMode { SERVE, EXTERNAL, OFF }
+    public enum PackMode { UPLOAD, SERVE, EXTERNAL, OFF }
 
     public final PackMode packMode;
     public final String packBind;
@@ -40,7 +40,7 @@ public final class Settings {
     public final int cpuThreads;
 
     private Settings(FileConfiguration c) {
-        packMode = PackMode.valueOf(c.getString("resource-pack.mode", "serve").toUpperCase(Locale.ROOT));
+        packMode = PackMode.valueOf(c.getString("resource-pack.mode", "upload").toUpperCase(Locale.ROOT));
         packBind = c.getString("resource-pack.bind", "0.0.0.0");
         packPort = c.getInt("resource-pack.port", 25602);
         packPublicUrl = c.getString("resource-pack.public-url", "");

@@ -109,7 +109,19 @@ public final class Framework implements UIFramework, Listener {
         palette = new Palette(nms::mapColor);
         try {
             pack = new ResourcePack(settings, palette, plugin.getDataFolder().toPath(), plugin.getLogger());
-            pack.start();
+            ResourcePack built = pack;
+            // Once the pack host has it (or this server serves it after all), the players already on are sent it.
+            pack.start("MCGUI/" + plugin.getDescription().getVersion(), () -> {
+                try {
+                    Threads.global(plugin, () -> {
+                        for (Player p : Bukkit.getOnlinePlayers()) {
+                            if (!built.has(p.getUniqueId())) Threads.on(plugin, p, () -> built.send(p));
+                        }
+                    });
+                } catch (IllegalStateException | IllegalArgumentException disabled) {
+                    // MC GUI stopped meanwhile.
+                }
+            });
         } catch (Exception e) {
             plugin.getLogger().log(Level.SEVERE, "Could not build or serve the resource pack", e);
         }

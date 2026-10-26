@@ -27,7 +27,9 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Logger;
@@ -38,8 +40,7 @@ import java.util.zip.ZipOutputStream;
 
 /**
  * Builds the resource pack (the map decoder, the seated-only HUD hiding, the pointer font, the server's
- * own sounds), serves it
- * over plain HTTP if asked, and tracks which players have it loaded, so screens know whether to send
+ * own sounds), puts it on ResourcePack AI's pack host or serves it over plain HTTP, and tracks which players have it loaded, so screens know whether to send
  * them hi-colour maps or plain ones.
  */
 public final class ResourcePack implements AutoCloseable {
@@ -54,7 +55,15 @@ public final class ResourcePack implements AutoCloseable {
     public final byte[] bytes;
     public final String sha1;
     private final Set<UUID> loaded = ConcurrentHashMap.newKeySet();
-    private HttpServer http;
+    /** ResourcePack AI's pack host, which mode upload puts the pack on (the same as RP Engine's). */
+    static final String PACK_HOST = "https://packs.resourcepack.ai";
+    /** How often a running server tells the pack host it still uses the pack, which forgets one untouched for 30 days. */
+    private static final long TOUCH_HOURS = 6;
+
+    /** Mode upload: the pack's link on the pack host, once it has it. */
+    private volatile String hosted;
+    private ScheduledExecutorService uploads;
+    private volatile HttpServer http;
     /** The server's threads: HttpServer.stop() leaves an executor it was given running. */
     private ExecutorService executor;
 
@@ -74,8 +83,67 @@ public final class ResourcePack implements AutoCloseable {
                 "Resource pack built: " + bytes.length + " bytes, sha1 " + sha1 + " (also written to pack.zip)");
     }
 
-    public void start() throws IOException {
-        if (settings.packMode != Settings.PackMode.SERVE) return;
+    /**
+     * Serves or uploads the pack, as the mode says. [agent] names MC GUI to the pack host; [onHosted] runs (on
+     * another thread) once players can be sent a link they could not be before, to send it to those online.
+     */
+    public void start(String agent, Runnable onHosted) throws IOException {
+        switch (settings.packMode) {
+            case SERVE -> {
+                serve();
+                if (settings.packPublicUrl.isBlank()) {
+                    ai.resourcepack.ui.StartupNotes.warn(logger, "Pack link", "public-url is blank, so only a player on this machine can download the pack: set it, or set mode to upload",
+                            "resource-pack.public-url is blank, so players are sent http://127.0.0.1:" + settings.packPort
+                                    + "/pack.zip, which only works for a player on this machine. Set public-url, or set mode to upload.");
+                }
+            }
+            case UPLOAD -> {
+                PackUploader uploader = new PackUploader(PACK_HOST, agent);
+                uploads = Executors.newSingleThreadScheduledExecutor(r -> {
+                    Thread t = new Thread(r, "MCGUI-upload");
+                    t.setDaemon(true);
+                    return t;
+                });
+                // Now, then every few hours: keeps the pack on the host, and tries a failed upload again.
+                uploads.scheduleWithFixedDelay(() -> host(uploader, onHosted), 0, TOUCH_HOURS, TimeUnit.HOURS);
+                ai.resourcepack.ui.StartupNotes.say(logger, "Hosting", "On packs.resourcepack.ai", "Hosting the resource pack on packs.resourcepack.ai");
+            }
+            default -> {}
+        }
+    }
+
+    /** Makes sure the pack host has the pack; if it cannot, serves it from here meanwhile (port and public-url). */
+    private void host(PackUploader uploader, Runnable onHosted) {
+        try {
+            String link = uploader.ensure(bytes, sha1);
+            boolean first = hosted == null;
+            hosted = link;
+            if (first) {
+                if (http != null) logger.info("The resource pack is on packs.resourcepack.ai now: players are sent it from there.");
+                onHosted.run();
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (IOException | RuntimeException e) {
+            // Uploaded before: there for weeks yet, and the next touch is soon enough.
+            if (hosted != null || http != null) return;
+            try {
+                serve();
+                logger.warning("Could not put the resource pack on packs.resourcepack.ai (" + e.getMessage() + "), so this server is serving it on port "
+                        + settings.packPort + " meanwhile" + (settings.packPublicUrl.isBlank()
+                        ? ". With public-url blank, only a player on this machine can download it from there." : ".")
+                        + " The upload is tried again every " + TOUCH_HOURS + " hours.");
+                onHosted.run();
+            } catch (IOException bind) {
+                logger.warning("Could not put the resource pack on packs.resourcepack.ai (" + e.getMessage() + "), nor serve it on port "
+                        + settings.packPort + " (" + bind.getMessage() + "), so players are not sent it. The upload is tried again every "
+                        + TOUCH_HOURS + " hours.");
+            }
+        }
+    }
+
+    private synchronized void serve() throws IOException {
+        if (http != null) return;
         HttpServer server = HttpServer.create(new InetSocketAddress(settings.packBind, settings.packPort), 16);
         server.createContext("/", ex -> {
             try (ex) {
@@ -113,8 +181,13 @@ public final class ResourcePack implements AutoCloseable {
         return switch (settings.packMode) {
             case OFF -> null;
             case EXTERNAL -> settings.packPublicUrl.isBlank() ? null : settings.packPublicUrl;
-            case SERVE -> settings.packPublicUrl.isBlank() ? "http://127.0.0.1:" + settings.packPort + "/pack.zip" : settings.packPublicUrl;
+            case SERVE -> served();
+            case UPLOAD -> hosted != null ? hosted : http != null ? served() : null;
         };
+    }
+
+    private String served() {
+        return settings.packPublicUrl.isBlank() ? "http://127.0.0.1:" + settings.packPort + "/pack.zip" : settings.packPublicUrl;
     }
 
     public void send(Player player) {
@@ -126,9 +199,9 @@ public final class ResourcePack implements AutoCloseable {
         player.addResourcePack(PACK_ID, url + sep + "v=" + sha1, HexFormat.of().parseHex(sha1), settings.packPrompt, settings.packRequired);
     }
 
-    /** Whether players are sent the pack from here (serve, or external with a public-url). */
+    /** Whether players are sent the pack by MC GUI: any mode but off, and external only with a public-url. */
     public boolean offers() {
-        return url() != null;
+        return settings.packMode != Settings.PackMode.OFF && !mergedElsewhere();
     }
 
     /**
@@ -153,6 +226,8 @@ public final class ResourcePack implements AutoCloseable {
 
     @Override
     public void close() {
+        if (uploads != null) uploads.shutdownNow();
+        uploads = null;
         if (http != null) http.stop(0);
         http = null;
         if (executor != null) executor.shutdownNow();

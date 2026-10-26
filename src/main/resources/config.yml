@@ -172,17 +172,23 @@ walls:
 # The resource pack, the screens and the threads below are read when the server starts: /mcgui reload
 # does not change them.
 resource-pack:
-  # serve: MC GUI serves its pack itself and sends it to players on join.
+  # upload: the default. MC GUI uploads its pack to ResourcePack AI's pack host (packs.resourcepack.ai),
+  #   free, and players download it from there: nothing to open or set up, on any host. It is only
+  #   uploaded again when it changes, it is kept while this server uses it (one nothing has used for 30
+  #   days is deleted), and only the Minecraft client can download it. If the upload fails, MC GUI
+  #   serves the pack itself on port and public-url below until it works, and the console says so.
+  # serve: MC GUI serves its pack itself on port, and players are sent public-url. Needs that port open
+  #   and public-url set to an address players can reach.
   # external: MC GUI serves nothing. Host plugins/MCGUI/pack.zip yourself and set public-url, which
   #   players are sent on join; or merge it into another plugin's pack (ItemsAdder, Nexo...) and leave
   #   public-url blank, and a player who loads that pack counts as having MC GUI's.
   # off: no pack. Walls show dithered vanilla map colours, and no page opens fullscreen: views need the pack.
-  mode: serve
-  # Where the built-in server listens. It only ever serves /pack.zip.
+  mode: upload
+  # serve (or upload when it fails): where the built-in server listens. It only ever serves /pack.zip.
   bind: 0.0.0.0
   port: 25602
-  # The URL players download the pack from. Blank means http://127.0.0.1:<port>/pack.zip, which only
-  # works for a player on the same machine: set this on a real server.
+  # serve and external: the URL players download the pack from. Blank (serve) means
+  # http://127.0.0.1:<port>/pack.zip, which only works for a player on the same machine.
   public-url: ""
   required: false
   prompt: "This server's screens need a small resource pack for full colour."

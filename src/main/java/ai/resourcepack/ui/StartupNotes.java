@@ -26,4 +26,11 @@ public final class StartupNotes {
         if (b != null) b.ok(key, text);
         else log.info(logged);
     }
+
+    /** The same for something the owner should fix: a warning in the banner, or [logged] as one. */
+    public static void warn(Logger log, String key, String text, String logged) {
+        StartupBanner b = banner;
+        if (b != null) b.warn(key, text);
+        else log.warning(logged);
+    }
 }
