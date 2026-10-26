@@ -66,9 +66,9 @@ public final class PageScript {
 
     private static final long FRAME_LIMIT_NANOS = 250_000_000L, START_LIMIT_NANOS = 2_000_000_000L;
     private static final int DEFAULT_FPS = 20, MAX_FPS = 30;
-    private static final Object DEADLINE = new Object();
+    static final Object DEADLINE = new Object();
     private static final String PRELUDE = prelude();
-    private static final Factory FACTORY = new Factory();
+    static final Factory FACTORY = new Factory();
     private static volatile ScheduledThreadPoolExecutor pool;
 
     private final Page page;
@@ -139,7 +139,7 @@ public final class PageScript {
         return s;
     }
 
-    private static ScheduledThreadPoolExecutor pool() {
+    static ScheduledThreadPoolExecutor pool() {
         ScheduledThreadPoolExecutor p = pool;
         if (p == null) {
             synchronized (PageScript.class) {
@@ -165,6 +165,7 @@ public final class PageScript {
         ScheduledThreadPoolExecutor p = pool;
         pool = null;
         if (p != null) p.shutdownNow();
+        Transpiler.clear();
     }
 
     /** The page this runs the scripts of. */
@@ -310,6 +311,18 @@ public final class PageScript {
 
     private void boot() {
         if (stopped) return;
+        // What Rhino cannot read is converted first, outside the script's own time limit: Babel may have to load.
+        List<Page.Source> sources = new ArrayList<>();
+        for (Page.Source s : page.scripts) {
+            try {
+                sources.add(new Page.Source(s.name(), Transpiler.prepare(s.code(), s.name())));
+            } catch (Transpiler.Failed e) {
+                say(Level.WARNING, e.getMessage());
+            } catch (RhinoException | IllegalStateException | StackOverflowError e) {
+                log.log(Level.WARNING, "Could not convert the script on " + name + " for Rhino", e);
+            }
+            if (stopped) return;
+        }
         Context cx = FACTORY.enterContext();
         try {
             cx.putThreadLocal(DEADLINE, System.nanoTime() + START_LIMIT_NANOS);
@@ -320,7 +333,7 @@ public final class PageScript {
             onKey = (Function) ScriptableObject.getProperty(api, "key");
             onMouse = (Function) ScriptableObject.getProperty(api, "mouse");
             Function onStart = (Function) ScriptableObject.getProperty(api, "start");
-            for (Page.Source s : page.scripts) {
+            for (Page.Source s : sources) {
                 if (stopped) return;
                 try {
                     cx.evaluateString(scope, s.code(), s.name(), 1, null);
@@ -329,6 +342,7 @@ public final class PageScript {
                 }
             }
             onStart.call(cx, scope, scope, new Object[0]);
+            settle(cx);
         } catch (Overrun e) {
             overran("starting");
             return;
@@ -368,12 +382,14 @@ public final class PageScript {
                 } catch (RhinoException ex) {
                     report(ex);
                 }
+                settle(cx);
             }
             try {
                 onFrame.call(cx, scope, scope, new Object[]{now()});
             } catch (RhinoException ex) {
                 report(ex);
             }
+            settle(cx);
         } catch (Overrun ex) {
             overran("one frame");
             return;
@@ -386,6 +402,15 @@ public final class PageScript {
         }
         compose();
         schedule(System.nanoTime() - t0);
+    }
+
+    /** Runs what promises queued (then, await), as a browser does once each task is done. */
+    private void settle(Context cx) {
+        try {
+            cx.processMicrotasks();
+        } catch (RhinoException e) {
+            report(e);
+        }
     }
 
     private double now() {
@@ -556,7 +581,7 @@ public final class PageScript {
     }
 
     /** Interpreted (so the instruction count is watched), modern JavaScript, and no Java. */
-    private static final class Factory extends ContextFactory {
+    static final class Factory extends ContextFactory {
         @Override
         protected Context makeContext() {
             Context cx = super.makeContext();

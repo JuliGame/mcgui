@@ -48,6 +48,15 @@ class ScriptTest {
     private static final String FOREVER = "<html><body style='margin:0;background:#000'><canvas width=100 height=100></canvas>"
             + "<script>requestAnimationFrame(function () { while (true) {} });</script></body></html>";
 
+    /** Modern JavaScript Rhino cannot read as it is (classes, spread, for-of with const, async): converted, then run. */
+    private static final String MODERN = "<html><body style='margin:0;background:#000'><canvas id=c width=100 height=100></canvas><script>"
+            + "class Shape { #colour; constructor(...rgb) { this.#colour = `rgb(${rgb.join(',')})`; } get colour() { return this.#colour; } }"
+            + "class Square extends Shape { size = 100; draw(ctx) { ctx.fillStyle = this.colour; ctx.fillRect(0, 0, this.size, this.size); } }"
+            + "const parts = [0, 255]; let total = 0; for (const p of parts) total += p;"
+            + "async function ready() { await null; return new Square(...[0, total, 0]); }"
+            + "ready().then(sq => { const ctx = document.querySelector('#c').getContext('2d'); requestAnimationFrame(function f() { sq.draw(ctx); requestAnimationFrame(f); }); });"
+            + "</script></body></html>";
+
     private static final String PLAIN = "<html><body style='margin:0;background:#000'><canvas width=100 height=100></canvas></body></html>";
 
     @TempDir
@@ -61,9 +70,10 @@ class ScriptTest {
         Files.writeString(dir.resolve("game.html"), GAME);
         Files.writeString(dir.resolve("forever.html"), FOREVER);
         Files.writeString(dir.resolve("plain.html"), PLAIN);
+        Files.writeString(dir.resolve("modern.html"), MODERN);
         rig = new SessionRig(dir, 4);
         plugin = rig.plugin(0);
-        for (String name : new String[]{"game", "forever", "plain"}) assertNotNull(rig.pages.load(name).get(30, TimeUnit.SECONDS));
+        for (String name : new String[]{"game", "forever", "plain", "modern"}) assertNotNull(rig.pages.load(name).get(30, TimeUnit.SECONDS));
     }
 
     @AfterEach
@@ -95,6 +105,13 @@ class ScriptTest {
 
         rig.onServer(s::dispose);
         assertNull(script(s), "closing the page stops its script");
+    }
+
+    @Test
+    void modernJavaScriptIsConverted() {
+        Session s = rig.open(plugin, "modern", COLS, ROWS, H);
+        assertTrue(waitFor(() -> green(pixel(s, 50, 50))), "the converted script drew: " + hex(pixel(s, 50, 50)));
+        rig.onServer(s::dispose);
     }
 
     @Test
