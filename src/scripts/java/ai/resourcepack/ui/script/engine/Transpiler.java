@@ -1,4 +1,4 @@
-package ai.resourcepack.ui.script;
+package ai.resourcepack.ui.script.engine;
 
 import org.mozilla.javascript.Context;
 import org.mozilla.javascript.EvaluatorException;

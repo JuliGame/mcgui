@@ -353,6 +353,13 @@ MIT) the first time the page opens, which takes a moment; plain functions, `let`
 and loops run as they are. [`examples/scripts/pong.html`](examples/scripts/pong.html)
 is a whole game.
 
+The script engine is not in the plugin's jar. The first time a page with a script
+opens, MC GUI fetches it from `https://cdn.resourcepack.ai/MCGUI-scripts-<version>.jar`
+(2.4 MB, once), checks it is the exact file that version was built with (its SHA-256
+is in the plugin), and keeps it in `plugins/MCGUI/libs/`. Until it has arrived the
+page shows without its canvases. A server with no internet can put that file there
+by hand. A server that never shows a script never fetches anything.
+
 ## What the renderer supports
 
 Selectors (all combinators, attribute selectors, structural pseudo-classes,

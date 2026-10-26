@@ -1,4 +1,4 @@
-package ai.resourcepack.ui.script;
+package ai.resourcepack.ui.script.engine;
 
 import ai.resourcepack.ui.html.css.Values;
 import ai.resourcepack.ui.html.text.Fonts;

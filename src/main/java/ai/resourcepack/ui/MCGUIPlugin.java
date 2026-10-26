@@ -88,6 +88,8 @@ public final class MCGUIPlugin extends JavaPlugin {
         long t0 = System.nanoTime();
         saveDefaultConfig();
         cfg = getConfig();
+        // Fetched into libs/ the first time a page with a script opens.
+        ai.resourcepack.ui.script.ScriptEngine.configure(getDataFolder().toPath(), getLogger());
         if (updates != null) updates.stop();
         updates = ai.resourcepack.common.update.UpdateCheck.spigot(this, SPIGOT_RESOURCE)
                 .name("MC GUI")
@@ -219,7 +221,7 @@ public final class MCGUIPlugin extends JavaPlugin {
         tasks.clear();
         if (watcher != null) watcher.cancel();
         if (screens != null) screens.shutdown();
-        ai.resourcepack.ui.script.PageScript.shutdown();
+        ai.resourcepack.ui.script.ScriptEngine.shutdown();
         if (pages != null) pages.close();
         if (renderers != null) {
             try {

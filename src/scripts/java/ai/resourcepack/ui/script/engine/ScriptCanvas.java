@@ -1,4 +1,4 @@
-package ai.resourcepack.ui.script;
+package ai.resourcepack.ui.script.engine;
 
 import ai.resourcepack.ui.html.res.Picture;
 import org.mozilla.javascript.Scriptable;

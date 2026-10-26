@@ -18,7 +18,8 @@ import ai.resourcepack.ui.event.PageOpenEvent;
 import ai.resourcepack.ui.html.css.Selector;
 import ai.resourcepack.ui.html.style.Motion;
 import ai.resourcepack.ui.html.style.Style;
-import ai.resourcepack.ui.script.PageScript;
+import ai.resourcepack.ui.script.Script;
+import ai.resourcepack.ui.script.ScriptEngine;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.event.ClickEvent;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -165,7 +166,7 @@ public final class Session {
     /** The hovers the client shows by itself, without a picture (a view with hover layers); null without. */
     private volatile ClientHovers hovers;
     /** The shown page's JavaScript, or null: nearly every page has none, and then nothing here changes how it is drawn. */
-    private volatile PageScript script;
+    private volatile Script script;
     /** Held by every drawing into [canvas] while a page with a script is shown, which draws into it from its own thread too. */
     private final java.util.concurrent.locks.ReentrantLock paintLock = new java.util.concurrent.locks.ReentrantLock();
     /** How long the pointer rests on a hover the client shows by itself before the picture catches up with it ({@link #catchUp}). */
@@ -1009,9 +1010,9 @@ public final class Session {
                 canvas.transparency(f.page().overlay());
                 canvas.builderMark(plugin.builderMark(f.page()));
                 canvas.tint(f.page().overlayTint());
-                // A script's canvases are laid over every picture of its page before it reaches the screen (PageScript.over),
+                // A script's canvases are laid over every picture of its page before it reaches the screen (Script.over),
                 // under the lock its own frames are drawn under. Null, and none of this, for any page without a script.
-                PageScript js = script;
+                Script js = script;
                 if (js != null && js.page() != f.page()) js = null;
                 if (js != null) {
                     paintLock.lock();
@@ -1401,7 +1402,7 @@ public final class Session {
     }
 
     public void dispose() {
-        PageScript js = script;
+        Script js = script;
         script = null;
         if (js != null) js.stop();
         synchronized (this) {
@@ -1415,13 +1416,13 @@ public final class Session {
 
     /** Starts [p]'s scripts for this session, stopping the last page's; nothing for a page without any. */
     private void runScript(Page p) {
-        PageScript was = script;
+        Script was = script;
         if (was != null && was.page() == p) return;
         if (was != null) was.stop();
         script = null;
         if (p == null || !p.scripted() || closed) return;
         resetLayers();
-        script = PageScript.start(p, canvas, paintLock, scale(), plugin.getLogger(), pageName, new PageScript.Host() {
+        script = ScriptEngine.start(p, canvas, paintLock, scale(), plugin.getLogger(), pageName, new Script.Host() {
             @Override
             public void command(String command) {
                 serverThread.execute(() -> {
@@ -1443,6 +1444,13 @@ public final class Session {
                 Player pl = Session.this.player();
                 return pl == null ? null : pl.getName();
             }
+
+            @Override
+            public void redraw() {
+                serverThread.execute(() -> {
+                    if (!closed) pictureArrived();
+                });
+            }
         });
     }
 
@@ -1451,7 +1459,7 @@ public final class Session {
      * any other page, which then handles the key as it always has.
      */
     boolean scriptKey(ai.resourcepack.ui.framework.api.Key key, boolean down) {
-        PageScript js = script;
+        Script js = script;
         if (js == null) return false;
         js.key(Keys.jsKey(key), Keys.jsCode(key), down);
         // A page's own data-key still clicks. The movement keys are the script's rather than the scroll's; F still goes back.
@@ -1498,7 +1506,7 @@ public final class Session {
         pointerAt = now;
         pointerX = x;
         pointerY = y;
-        PageScript js = script;
+        Script js = script;
         if (js != null) js.pointer(x / scale(), y / scale());
         Element seen = at(x, y);
         pointerShape.accept(cursorFor(seen));
@@ -1636,7 +1644,7 @@ public final class Session {
      * shared screen, the one whose commands run and whose placeholders fill them; null for the viewer.
      */
     public void click(int x, int y, Player clicker) {
-        PageScript js = script;
+        Script js = script;
         if (js != null) js.click(x / scale(), y / scale(), false);
         // The picture can be behind the session: the element clicked is found in the session's own copy.
         Element e = counterpart(at(x, y), doc);

@@ -1,10 +1,11 @@
-package ai.resourcepack.ui.script;
+package ai.resourcepack.ui.script.engine;
 
 import ai.resourcepack.ui.framework.api.Canvas;
 import ai.resourcepack.ui.html.HtmlRenderer;
 import ai.resourcepack.ui.html.Page;
 import ai.resourcepack.ui.html.res.Picture;
 import ai.resourcepack.ui.html.res.Pictures;
+import ai.resourcepack.ui.script.Script;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 import org.mozilla.javascript.ClassShutter;
@@ -53,16 +54,7 @@ import java.util.logging.Logger;
  * it is in ({@link #compose}); and a picture of the page drawn meanwhile has the canvases laid over it before it is
  * handed to the screen ({@link #over}), so a hover or a scroll never shows the page without them, not for a moment.
  */
-public final class PageScript {
-    /** What a script may ask of the server: each runs on the server thread, as the viewer. */
-    public interface Host {
-        void command(String command);
-
-        void sound(String sound);
-
-        /** The viewer's name, or null on a screen everyone shares. */
-        String player();
-    }
+public final class PageScript implements Script {
 
     private static final long FRAME_LIMIT_NANOS = 250_000_000L, START_LIMIT_NANOS = 2_000_000_000L;
     private static final int DEFAULT_FPS = 20, MAX_FPS = 30;
@@ -171,12 +163,12 @@ public final class PageScript {
         Transpiler.clear();
     }
 
-    /** The page this runs the scripts of. */
+    @Override
     public Page page() {
         return page;
     }
 
-    /** Stops this one: no more frames, events or drawing. Any thread. */
+    @Override
     public void stop() {
         stopped = true;
         input.clear();
@@ -185,6 +177,7 @@ public final class PageScript {
     // ---------------------------------------------------------------- input (any thread)
 
     /** The pointer moved to (x, y), CSS pixels of the viewport. */
+    @Override
     public void pointer(double x, double y) {
         if (stopped) return;
         // Only the latest place matters: moves still waiting are dropped for it.
@@ -193,6 +186,7 @@ public final class PageScript {
     }
 
     /** A click at (x, y), CSS pixels of the viewport: [right] for the use key. */
+    @Override
     public void click(double x, double y, boolean right) {
         if (stopped) return;
         int button = right ? 2 : 0;
@@ -202,6 +196,7 @@ public final class PageScript {
     }
 
     /** A key went down or up; [key] and [code] as a browser names them ({@code "w"}, {@code "KeyW"}). */
+    @Override
     public void key(String key, String code, boolean down) {
         if (stopped) return;
         input.add(new Object[]{down ? "keydown" : "keyup", key, code});
@@ -213,6 +208,7 @@ public final class PageScript {
      * A picture of the page, [frame], is about to go on the screen: where each canvas now is, and the page's own pixels
      * under it, which a canvas's frame is drawn over. Under [lock].
      */
+    @Override
     public void placed(HtmlRenderer.Frame frame) {
         if (stopped) return;
         BufferedImage img = frame.image();
@@ -251,6 +247,7 @@ public final class PageScript {
      * [img] itself if none is in it, else a copy ([img] may be shared with other pictures). Under [lock], after
      * {@link #placed}.
      */
+    @Override
     public BufferedImage over(BufferedImage img, int x, int y) {
         if (stopped) return img;
         BufferedImage out = img;

@@ -5,7 +5,7 @@ plugins {
 }
 
 group = 'ai.resourcepack'
-version = '0.6.1'
+version = '0.6.2'
 
 java {
     toolchain {
@@ -37,7 +37,26 @@ repositories {
     }
 }
 
+// The script engine: what runs a page's JavaScript (Rhino, Babel, the canvas), built into a jar of its own,
+// MCGUI-scripts-<version>.jar, which the plugin fetches from the CDN the first time a page with a script opens
+// (script/ScriptEngine). Kept out of the plugin's jar for its size (SpigotMC takes 7.68 MB) and so a server that
+// never shows a script never has it. It compiles against the plugin's classes, never their resources: those carry
+// the engine's own hash, which is made from it.
+sourceSets {
+    scripts {
+        compileClasspath += sourceSets.main.output.classesDirs + sourceSets.main.compileClasspath
+        runtimeClasspath += sourceSets.main.output.classesDirs + sourceSets.main.runtimeClasspath
+    }
+    test {
+        compileClasspath += sourceSets.scripts.output
+        runtimeClasspath += sourceSets.scripts.output
+    }
+}
+
 dependencies {
+    // JavaScript, interpreted, with no access to Java: in the script engine's jar only, relocated as the plugin's libraries are.
+    scriptsImplementation 'org.mozilla:rhino:1.9.1'
+    testImplementation 'org.mozilla:rhino:1.9.1'
     compileOnly 'org.spigotmc:spigot-api:1.21.8-R0.1-SNAPSHOT'
     // The server ships netty; the map sender and the packet filters are netty handlers.
     compileOnly 'io.netty:netty-transport:4.2.7.Final'
@@ -45,8 +64,6 @@ dependencies {
     // HTML parsing, and SVG drawing for <svg> and .svg images. Shaded and relocated below.
     implementation 'org.jsoup:jsoup:1.23.2'
     implementation 'com.github.weisj:jsvg:2.2.0'
-    // JavaScript for pages with a <script> (script/PageScript): pure Java, interpreted, no access to Java. Shaded and relocated below.
-    implementation 'org.mozilla:rhino:1.9.1'
     // The anonymous usage count. Shaded and relocated below, so it never meets another plugin's copy.
     implementation 'ai.resourcepack:common:0.6.0'
     // Adventure, for building chat. Spigot has none and Paper's must never meet ours, so it is shaded and
@@ -71,12 +88,45 @@ shadowJar {
     archiveClassifier.set('')
     relocate 'org.jsoup', 'ai.resourcepack.ui.libs.jsoup'
     relocate 'com.github.weisj.jsvg', 'ai.resourcepack.ui.libs.jsvg'
-    relocate 'org.mozilla', 'ai.resourcepack.ui.libs.mozilla'
     relocate 'ai.resourcepack.common', 'ai.resourcepack.ui.libs.common'
     relocate 'net.kyori', 'ai.resourcepack.ui.libs.kyori'
 }
 
 base { archivesName = 'MCGUI' }
+
+// The script engine's jar, in build/engine/ (build/libs/ is the plugin's alone, which the deploy picks up by name).
+// Its references to the plugin's libraries are relocated as the plugin relocates them, and it holds none of them.
+def scriptsJar = tasks.register('scriptsJar', com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
+    archiveBaseName.set('MCGUI-scripts')
+    archiveClassifier.set('')
+    archiveVersion.set(project.version.toString())
+    destinationDirectory.set(layout.buildDirectory.dir('engine'))
+    from sourceSets.scripts.output
+    configurations = [project.configurations.scriptsRuntimeClasspath]
+    relocate 'org.mozilla', 'ai.resourcepack.ui.libs.mozilla'
+    relocate 'org.jsoup', 'ai.resourcepack.ui.libs.jsoup'
+    relocate 'com.github.weisj.jsvg', 'ai.resourcepack.ui.libs.jsvg'
+    relocate 'ai.resourcepack.common', 'ai.resourcepack.ui.libs.common'
+    relocate 'net.kyori', 'ai.resourcepack.ui.libs.kyori'
+    // The same bytes from the same sources, so the hash the plugin pins is the hash of what the deploy uploads.
+    preserveFileTimestamps = false
+    reproducibleFileOrder = true
+}
+
+// The engine's version and SHA-256, in the plugin's jar: the plugin loads no engine but that very file.
+def engineInfo = layout.buildDirectory.dir('generated/engine-info')
+def writeEngineInfo = tasks.register('engineInfo') {
+    dependsOn scriptsJar
+    inputs.file(scriptsJar.flatMap { it.archiveFile })
+    outputs.dir(engineInfo)
+    doLast {
+        def jar = scriptsJar.get().archiveFile.get().asFile
+        def sha = java.security.MessageDigest.getInstance('SHA-256').digest(jar.bytes).encodeHex().toString()
+        def out = new File(engineInfo.get().asFile, 'script-engine.properties')
+        out.parentFile.mkdirs()
+        out.text = ["version=${project.version}", "sha256=${sha}", "size=${jar.length()}", ""].join(System.lineSeparator())
+    }
+}
 
 // The classes alone, without the libraries: what the examples here (and anything else built in the same
 // Gradle run) compile against. The plugin is the shadow jar, MCGUI-<version>.jar.
@@ -85,7 +135,7 @@ jar {
 }
 
 build {
-    dependsOn shadowJar
+    dependsOn shadowJar, scriptsJar
 }
 
 // For plugins that build against MC GUI: the plugin jar itself, with its sources. JitPack builds it
@@ -108,6 +158,8 @@ test {
 }
 
 processResources {
+    dependsOn writeEngineInfo
+    from(engineInfo)
     inputs.property('version', project.version)
     filesMatching('plugin.yml') {
         expand(version: project.version)

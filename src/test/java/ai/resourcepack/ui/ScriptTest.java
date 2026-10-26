@@ -1,7 +1,7 @@
 package ai.resourcepack.ui;
 
 import ai.resourcepack.ui.framework.api.Key;
-import ai.resourcepack.ui.script.PageScript;
+import ai.resourcepack.ui.script.Script;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -142,7 +142,7 @@ class ScriptTest {
     @Test
     void aFrameThatNeverEndsIsStopped() {
         Session s = rig.open(plugin, "forever", COLS, ROWS, H);
-        PageScript js = script(s);
+        Script js = script(s);
         assertNotNull(js);
         assertTrue(waitFor(() -> stopped(js)), "the script was stopped");
         // The server thread was never involved: it answers at once.
@@ -198,21 +198,31 @@ class ScriptTest {
 
     private static String hex(int c) { return String.format("#%06x", c & 0xFFFFFF); }
 
-    private static PageScript script(Session s) {
+    private static Script script(Session s) {
         try {
             Field f = Session.class.getDeclaredField("script");
             f.setAccessible(true);
-            return (PageScript) f.get(s);
+            return (Script) f.get(s);
         } catch (ReflectiveOperationException e) {
             throw new IllegalStateException(e);
         }
     }
 
-    private static boolean stopped(PageScript js) {
+    /** Whether the script was stopped: the engine's own, behind the stand-in that waits for the engine, if it is one. */
+    private static boolean stopped(Script js) {
         try {
-            Field f = PageScript.class.getDeclaredField("stopped");
+            Object real = js;
+            try {
+                Field r = js.getClass().getDeclaredField("real");
+                r.setAccessible(true);
+                real = r.get(js);
+            } catch (NoSuchFieldException direct) {
+                // The engine's own already.
+            }
+            if (real == null) return false;
+            Field f = real.getClass().getDeclaredField("stopped");
             f.setAccessible(true);
-            return f.getBoolean(js);
+            return f.getBoolean(real);
         } catch (ReflectiveOperationException e) {
             throw new IllegalStateException(e);
         }
