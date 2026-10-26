@@ -219,6 +219,7 @@ public final class MCGUIPlugin extends JavaPlugin {
         tasks.clear();
         if (watcher != null) watcher.cancel();
         if (screens != null) screens.shutdown();
+        ai.resourcepack.ui.script.PageScript.shutdown();
         if (pages != null) pages.close();
         if (renderers != null) {
             try {

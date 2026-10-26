@@ -28,6 +28,27 @@ final class Keys {
         };
     }
 
+    /** [key] as a script's KeyboardEvent.key has it: {@code "w"}, {@code " "}, {@code "Control"}, {@code "1"}. */
+    static String jsKey(Key key) {
+        return switch (key) {
+            case JUMP -> " ";
+            case SPRINT -> "Control";
+            default -> name(key);
+        };
+    }
+
+    /** [key] as a script's KeyboardEvent.code has it: {@code "KeyW"}, {@code "Space"}, {@code "ControlLeft"}, {@code "Digit1"}. */
+    static String jsCode(Key key) {
+        return switch (key) {
+            case JUMP -> "Space";
+            case SPRINT -> "ControlLeft";
+            default -> {
+                String n = name(key);
+                yield Character.isDigit(n.charAt(0)) ? "Digit" + n : "Key" + n.toUpperCase(Locale.ROOT);
+            }
+        };
+    }
+
     /** The keys a {@code data-key} names, separated by spaces or commas, each as {@link #name} has it. */
     static Set<String> names(String attr) {
         Set<String> out = new TreeSet<>();

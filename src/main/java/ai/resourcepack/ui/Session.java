@@ -18,6 +18,7 @@ import ai.resourcepack.ui.event.PageOpenEvent;
 import ai.resourcepack.ui.html.css.Selector;
 import ai.resourcepack.ui.html.style.Motion;
 import ai.resourcepack.ui.html.style.Style;
+import ai.resourcepack.ui.script.PageScript;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.event.ClickEvent;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -163,6 +164,10 @@ public final class Session {
     private final Runnable lookAgain;
     /** The hovers the client shows by itself, without a picture (a view with hover layers); null without. */
     private volatile ClientHovers hovers;
+    /** The shown page's JavaScript, or null: nearly every page has none, and then nothing here changes how it is drawn. */
+    private volatile PageScript script;
+    /** Held by every drawing into [canvas] while a page with a script is shown, which draws into it from its own thread too. */
+    private final java.util.concurrent.locks.ReentrantLock paintLock = new java.util.concurrent.locks.ReentrantLock();
     /** How long the pointer rests on a hover the client shows by itself before the picture catches up with it ({@link #catchUp}). */
     private static final long CATCH_UP_NANOS = 100_000_000L;
     /** When the pointer last moved (nanoTime), and how fast, canvas pixels a second. */
@@ -246,7 +251,8 @@ public final class Session {
         ClientHovers h = hovers;
         HtmlRenderer.Frame f = frame;
         // While something on the page moves its picture changes many times a second, and every change takes the layers off.
-        if (h == null || f == null || !still() || job.stopped()) return;
+        // A script's canvas changes without a picture, so a hover drawn ahead of it would show an old frame of it.
+        if (h == null || f == null || !still() || job.stopped() || script != null) return;
         java.util.function.BooleanSupplier stop = () -> job.stopped() || renderers.queued() || !HoverAhead.quiet();
         long c0 = CPU.getCurrentThreadCpuTime();
         List<Element> drawn = drawnHover;
@@ -339,6 +345,7 @@ public final class Session {
         hoverSoundAt = null;
         motion = new Motion();
         shownAt = Platform.tick();
+        runScript(p);
         Player viewerNow = player();
         Sounds.play(viewerNow, p.meta("ui:open-sound"));
         if (viewerNow != null) Bukkit.getPluginManager().callEvent(new PageOpenEvent(viewerNow, n, screen));
@@ -390,6 +397,7 @@ public final class Session {
             motion = new Motion();
             shownAt = Platform.tick();
             refreshTicks = refreshSetting(p);
+            runScript(p);
             render();
         }, serverThread);
     }
@@ -424,6 +432,7 @@ public final class Session {
         shownAt = Platform.tick();
         refreshTicks = refreshSetting(page);
         nextRefresh = Platform.tick() + refreshTicks;
+        runScript(page);
         Player pl = player();
         if (pl != null) Platform.actionBar(pl, Component.text("Could not show " + failed + ": see the console", NamedTextColor.RED));
         render();
@@ -772,7 +781,7 @@ public final class Session {
         // picture at each tick: one draws it, the others take it (AnimFrames).
         AnimFrames.Shared share = null, landedFrame = offeredFrame;
         offeredFrame = null;
-        AnimFrames.Key frameKey = animating && !moving.personal() ? frameKey(p, held, s, fragment, scale, hoverKey, pressKey) : null;
+        AnimFrames.Key frameKey = animating && !moving.personal() && !p.scripted() ? frameKey(p, held, s, fragment, scale, hoverKey, pressKey) : null;
         if (frameKey != null) {
             AnimFrames frames = plugin.animFrames();
             if (landedFrame != null) {
@@ -1000,6 +1009,15 @@ public final class Session {
                 canvas.transparency(f.page().overlay());
                 canvas.builderMark(plugin.builderMark(f.page()));
                 canvas.tint(f.page().overlayTint());
+                // A script's canvases are laid over every picture of its page before it reaches the screen (PageScript.over),
+                // under the lock its own frames are drawn under. Null, and none of this, for any page without a script.
+                PageScript js = script;
+                if (js != null && js.page() != f.page()) js = null;
+                if (js != null) {
+                    paintLock.lock();
+                    js.placed(f);
+                }
+                try {
                 if (partial) {
                     // Only the changed rectangle goes to the canvas, so only its tiles are re-encoded and re-sent.
                     int x0 = Math.max(0, (int) Math.floor(changed.getX() * scale)), y0 = Math.max(0, (int) Math.floor(changed.getY() * scale));
@@ -1008,7 +1026,10 @@ public final class Session {
                     // Over another player's picture: shown with this player's values drawn in, as one change, so their
                     // values are never on this canvas, not even for a moment.
                     if (tookTheirs) canvas.show(theirs.canvas, x1 > x0 && y1 > y0 ? f.image().getSubimage(x0, y0, x1 - x0, y1 - y0) : null, x0, y0);
-                    else if (x1 > x0 && y1 > y0) canvas.draw(f.image().getSubimage(x0, y0, x1 - x0, y1 - y0), x0, y0);
+                    else if (x1 > x0 && y1 > y0) {
+                        java.awt.image.BufferedImage part = f.image().getSubimage(x0, y0, x1 - x0, y1 - y0);
+                        canvas.draw(js == null ? part : js.over(part, x0, y0), x0, y0);
+                    }
                 } else {
                     // Moved by whole map rows on the same page: the canvas moves too, so its viewers' frames are pointed
                     // at the maps their clients already have and only the rows that came in are sent.
@@ -1017,11 +1038,15 @@ public final class Session {
                         // Both views cut from the same picture: what stayed in view is the same pixels, moved, so only
                         // the rows that came in are drawn (converting the whole view is most of a notch's work).
                         int band = Math.abs(rows) * ScrollCache.TILE, y0 = rows > 0 ? canvas.height() - band : 0;
-                        canvas.scroll(rows, f.image().getSubimage(0, y0, canvas.width(), band), 0, y0);
+                        java.awt.image.BufferedImage in = f.image().getSubimage(0, y0, canvas.width(), band);
+                        canvas.scroll(rows, js == null ? in : js.over(in, 0, y0), 0, y0);
                     } else {
                         // Anything else may differ elsewhere too: the whole view, and only tiles that then differ are encoded.
-                        canvas.scroll(rows, f.image(), 0, 0);
+                        canvas.scroll(rows, js == null ? f.image() : js.over(f.image(), 0, 0), 0, 0);
                     }
+                }
+                } finally {
+                    if (js != null) paintLock.unlock();
                 }
                 drawnHover = hoverKey;
                 drawnPress = pressKey;
@@ -1304,6 +1329,8 @@ public final class Session {
     private FirstPictures.Key firstKey(Page p, Document d, double s, String fragment, double scale) {
         HtmlRenderer.Frame f = frame;
         if (!plugin.firstPictures().enabled() || fragment != null || s != 0 || hover != null || pressed != null) return null;
+        // What a script draws is this session's alone.
+        if (p.scripted()) return null;
         if (!pristine || filled == null || filled.source() != p.document || d != null && f != null && f.document() == d) return null;
         // A face that has not arrived yet would be kept as its stand-in. A page that moves is kept with the motion it was
         // drawn with (its transitions' starting points, when its animations that end began), which the taker takes on.
@@ -1374,6 +1401,9 @@ public final class Session {
     }
 
     public void dispose() {
+        PageScript js = script;
+        script = null;
+        if (js != null) js.stop();
         synchronized (this) {
             closed = true;
             cache = null;
@@ -1381,6 +1411,52 @@ public final class Session {
         }
         hoverAhead.drop();
         resetLayers();
+    }
+
+    /** Starts [p]'s scripts for this session, stopping the last page's; nothing for a page without any. */
+    private void runScript(Page p) {
+        PageScript was = script;
+        if (was != null && was.page() == p) return;
+        if (was != null) was.stop();
+        script = null;
+        if (p == null || !p.scripted() || closed) return;
+        resetLayers();
+        script = PageScript.start(p, canvas, paintLock, scale(), plugin.getLogger(), pageName, new PageScript.Host() {
+            @Override
+            public void command(String command) {
+                serverThread.execute(() -> {
+                    Player pl = Session.this.player();
+                    if (pl != null && !closed) Bukkit.dispatchCommand(pl, command);
+                });
+            }
+
+            @Override
+            public void sound(String sound) {
+                serverThread.execute(() -> {
+                    Player pl = Session.this.player();
+                    if (pl != null && !closed) Sounds.play(pl, sound);
+                });
+            }
+
+            @Override
+            public String player() {
+                Player pl = Session.this.player();
+                return pl == null ? null : pl.getName();
+            }
+        });
+    }
+
+    /**
+     * A key went [down] or up on a page with a script: handed to it, and true if the script has it to itself. False on
+     * any other page, which then handles the key as it always has.
+     */
+    boolean scriptKey(ai.resourcepack.ui.framework.api.Key key, boolean down) {
+        PageScript js = script;
+        if (js == null) return false;
+        js.key(Keys.jsKey(key), Keys.jsCode(key), down);
+        // A page's own data-key still clicks. The movement keys are the script's rather than the scroll's; F still goes back.
+        if (down && key != ai.resourcepack.ui.framework.api.Key.SWAP_HANDS) key(Keys.name(key));
+        return key != ai.resourcepack.ui.framework.api.Key.SWAP_HANDS;
     }
 
     private void resetLayers() {
@@ -1422,6 +1498,8 @@ public final class Session {
         pointerAt = now;
         pointerX = x;
         pointerY = y;
+        PageScript js = script;
+        if (js != null) js.pointer(x / scale(), y / scale());
         Element seen = at(x, y);
         pointerShape.accept(cursorFor(seen));
         Element e = counterpart(seen, doc);
@@ -1558,6 +1636,8 @@ public final class Session {
      * shared screen, the one whose commands run and whose placeholders fill them; null for the viewer.
      */
     public void click(int x, int y, Player clicker) {
+        PageScript js = script;
+        if (js != null) js.click(x / scale(), y / scale(), false);
         // The picture can be behind the session: the element clicked is found in the session's own copy.
         Element e = counterpart(at(x, y), doc);
         if (e == null) return;

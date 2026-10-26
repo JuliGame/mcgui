@@ -45,6 +45,8 @@ dependencies {
     // HTML parsing, and SVG drawing for <svg> and .svg images. Shaded and relocated below.
     implementation 'org.jsoup:jsoup:1.23.2'
     implementation 'com.github.weisj:jsvg:2.2.0'
+    // JavaScript for pages with a <script> (script/PageScript): pure Java, interpreted, no access to Java. Shaded and relocated below.
+    implementation 'org.mozilla:rhino:1.9.1'
     // The anonymous usage count. Shaded and relocated below, so it never meets another plugin's copy.
     implementation 'ai.resourcepack:common:0.6.0'
     // Adventure, for building chat. Spigot has none and Paper's must never meet ours, so it is shaded and
@@ -69,6 +71,7 @@ shadowJar {
     archiveClassifier.set('')
     relocate 'org.jsoup', 'ai.resourcepack.ui.libs.jsoup'
     relocate 'com.github.weisj.jsvg', 'ai.resourcepack.ui.libs.jsvg'
+    relocate 'org.mozilla', 'ai.resourcepack.ui.libs.mozilla'
     relocate 'ai.resourcepack.common', 'ai.resourcepack.ui.libs.common'
     relocate 'net.kyori', 'ai.resourcepack.ui.libs.kyori'
 }

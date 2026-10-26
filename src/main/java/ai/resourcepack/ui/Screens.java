@@ -349,6 +349,8 @@ public final class Screens implements Listener {
 
         @Override
         public void key(View v, Key key, boolean down) {
+            // A page with a script has the keys, up and down; any other page carries on as below.
+            if (session.scriptKey(key, down)) return;
             if (!down) return;
             if (session.key(Keys.name(key))) return;
             switch (key) {

@@ -1,0 +1,163 @@
+<!doctype html>
+<html>
+<head>
+<meta name="ui:fps" content="30">
+<style>
+  html, body { margin: 0; height: 100%; background: #0b0f1a; color: #e8ecf5; font-family: sans-serif; }
+  .wrap { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; gap: 14px; }
+  h1 { margin: 0; font-size: 28px; letter-spacing: 2px; }
+  canvas { border: 3px solid #2b3550; border-radius: 6px; }
+  p { margin: 0; color: #8b95ad; font-size: 14px; }
+  button { background: #2b3550; color: #e8ecf5; border: 0; border-radius: 4px; padding: 8px 18px; font-size: 14px; cursor: pointer; }
+  button:hover { background: #3d4a70; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>PONG</h1>
+  <canvas id="game" width="640" height="360"></canvas>
+  <p>Move the mouse or hold W / S to steer. Space or click to serve. First to 5 wins.</p>
+  <button data-action="close" data-key="q">Quit (Q)</button>
+</div>
+<script>
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+
+  var PADDLE_H = 70, PADDLE_W = 10, BALL = 10, WIN = 5;
+  var player = { y: H / 2 - PADDLE_H / 2, score: 0 };
+  var cpu = { y: H / 2 - PADDLE_H / 2, score: 0 };
+  var ball = { x: W / 2, y: H / 2, vx: 0, vy: 0 };
+  var keys = {};
+  var pointerY = null;
+  var waiting = true, winner = null;
+  var last = performance.now();
+  var flash = 0;
+
+  document.addEventListener('keydown', function (e) {
+    keys[e.key] = true;
+    if (e.key === ' ') serve();
+  });
+  document.addEventListener('keyup', function (e) { keys[e.key] = false; });
+  canvas.addEventListener('mousemove', function (e) { pointerY = e.offsetY; keys.w = keys.s = false; });
+  canvas.addEventListener('click', function () { serve(); });
+
+  function serve() {
+    if (!waiting) return;
+    if (winner) { player.score = cpu.score = 0; winner = null; }
+    waiting = false;
+    ball.x = W / 2; ball.y = H / 2;
+    var angle = (Math.random() - 0.5) * Math.PI / 3;
+    var dir = Math.random() < 0.5 ? -1 : 1;
+    ball.vx = Math.cos(angle) * 300 * dir;
+    ball.vy = Math.sin(angle) * 300;
+    mcgui.sound('ui.button.click 0.5 1.4');
+  }
+
+  function point(toPlayer) {
+    if (toPlayer) player.score++; else cpu.score++;
+    mcgui.sound(toPlayer ? 'entity.experience_orb.pickup 0.8 1' : 'block.note_block.bass 1 0.6');
+    if (player.score >= WIN) winner = 'You win!';
+    else if (cpu.score >= WIN) winner = 'Computer wins';
+    if (winner) mcgui.sound(player.score >= WIN ? 'ui.toast.challenge_complete 0.6 1' : 'entity.villager.no 0.8 1');
+    waiting = true;
+    ball.vx = ball.vy = 0;
+    ball.x = W / 2; ball.y = H / 2;
+  }
+
+  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+  function update(dt) {
+    // The player: the pointer if it has been used, else W and S.
+    if (keys.w) player.y -= 380 * dt;
+    if (keys.s) player.y += 380 * dt;
+    if (pointerY !== null && !keys.w && !keys.s) player.y += (pointerY - PADDLE_H / 2 - player.y) * Math.min(1, dt * 18);
+    player.y = clamp(player.y, 0, H - PADDLE_H);
+
+    // The computer follows the ball, a little slower than it can move.
+    var target = ball.y - PADDLE_H / 2;
+    cpu.y += clamp(target - cpu.y, -240 * dt, 240 * dt);
+    cpu.y = clamp(cpu.y, 0, H - PADDLE_H);
+
+    if (waiting) return;
+    ball.x += ball.vx * dt;
+    ball.y += ball.vy * dt;
+    if (ball.y < 0) { ball.y = 0; ball.vy = -ball.vy; mcgui.sound('block.note_block.hat 0.4 1.6'); }
+    if (ball.y > H - BALL) { ball.y = H - BALL; ball.vy = -ball.vy; mcgui.sound('block.note_block.hat 0.4 1.6'); }
+
+    // Paddles: the further from the middle it hits, the steeper it leaves, and every hit is a little faster.
+    if (ball.vx < 0 && ball.x <= 20 + PADDLE_W && ball.x >= 20 - BALL && ball.y + BALL >= player.y && ball.y <= player.y + PADDLE_H) {
+      bounce(player, 1);
+    }
+    if (ball.vx > 0 && ball.x + BALL >= W - 20 - PADDLE_W && ball.x <= W - 20 && ball.y + BALL >= cpu.y && ball.y <= cpu.y + PADDLE_H) {
+      bounce(cpu, -1);
+    }
+    if (ball.x < -BALL) point(false);
+    if (ball.x > W) point(true);
+  }
+
+  function bounce(paddle, dir) {
+    var hit = (ball.y + BALL / 2 - (paddle.y + PADDLE_H / 2)) / (PADDLE_H / 2);
+    var speed = Math.min(720, Math.hypot(ball.vx, ball.vy) * 1.06);
+    var angle = hit * Math.PI / 3.2;
+    ball.vx = Math.cos(angle) * speed * dir;
+    ball.vy = Math.sin(angle) * speed;
+    flash = 1;
+    mcgui.sound('block.note_block.pling 0.6 ' + (1 + Math.abs(hit) * 0.6).toFixed(2));
+  }
+
+  function draw() {
+    var g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#111a2e');
+    g.addColorStop(1, '#070a12');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.lineWidth = 3;
+    ctx.setLineDash([10, 12]);
+    ctx.beginPath();
+    ctx.moveTo(W / 2, 0);
+    ctx.lineTo(W / 2, H);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.fillStyle = '#e8ecf5';
+    ctx.font = 'bold 44px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillText(String(player.score), W / 2 - 60, 16);
+    ctx.fillText(String(cpu.score), W / 2 + 60, 16);
+
+    ctx.fillStyle = '#5ad1ff';
+    ctx.fillRect(20, player.y, PADDLE_W, PADDLE_H);
+    ctx.fillStyle = '#ff6b8a';
+    ctx.fillRect(W - 20 - PADDLE_W, cpu.y, PADDLE_W, PADDLE_H);
+
+    ctx.fillStyle = flash > 0 ? 'rgb(255,' + Math.round(255 - flash * 80) + ',120)' : '#ffffff';
+    ctx.beginPath();
+    ctx.arc(ball.x + BALL / 2, ball.y + BALL / 2, BALL / 2, 0, Math.PI * 2);
+    ctx.fill();
+
+    if (waiting) {
+      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      ctx.fillRect(0, H / 2 - 40, W, 80);
+      ctx.fillStyle = '#ffffff';
+      ctx.textBaseline = 'middle';
+      ctx.font = 'bold 26px sans-serif';
+      ctx.fillText(winner ? winner + '  Press Space to play again' : 'Press Space to serve', W / 2, H / 2);
+    }
+  }
+
+  function frame(now) {
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    flash = Math.max(0, flash - dt * 4);
+    update(dt);
+    draw();
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+</script>
+</body>
+</html>

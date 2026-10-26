@@ -338,6 +338,14 @@ public final class Page implements Resources {
     private boolean siblingStates;
     /** Files this page read: when any changes, it is loaded again. */
     public final Set<Path> dependencies = new LinkedHashSet<>();
+    /**
+     * The page's JavaScript, in document order: each {@code <script>}'s text, or the file its {@code src} names, with
+     * the name it is reported by. Empty for nearly every page, and then nothing about scripts happens at all.
+     */
+    public final List<Source> scripts = new ArrayList<>();
+
+    /** A script's [name] (the page or the file, for its errors) and its [code]. */
+    public record Source(String name, String code) {}
     public final List<String> problems = new ArrayList<>();
 
     private Page(Path file, String html, Loader loader) {
@@ -367,6 +375,35 @@ public final class Page implements Resources {
         this.fonts = Fonts.bundled().withPageFonts(fontFaces(loader));
         this.shaper = new TextShaper(fonts);
         loadImages(loader);
+        loadScripts(loader);
+    }
+
+    /** Whether the page runs JavaScript (see {@link #scripts}). */
+    public boolean scripted() {
+        return !scripts.isEmpty();
+    }
+
+    private void loadScripts(Loader loader) {
+        String own = file.getFileName() == null ? "page" : file.getFileName().toString();
+        for (Element e : document.select("script")) {
+            String type = e.attr("type").trim().toLowerCase(Locale.ROOT);
+            // Only JavaScript: a JSON block or a template is data, as in a browser.
+            if (!type.isEmpty() && !type.equals("text/javascript") && !type.equals("application/javascript") && !type.equals("module")) continue;
+            String src = e.attr("src");
+            if (src.isBlank()) {
+                if (!e.data().isBlank()) scripts.add(new Source(own, e.data()));
+                continue;
+            }
+            URI target = resolve(uri, src);
+            if (target == null || !"file".equals(target.getScheme())) {
+                // A script from the web would be a second way to change what a page does after it was reviewed.
+                problems.add("Scripts load from the pages folder only: " + src);
+                continue;
+            }
+            String code = sheet(target, loader);
+            if (code == null) problems.add("Could not load script " + src);
+            else scripts.add(new Source(src, code));
+        }
     }
 
     /**
