@@ -173,9 +173,10 @@ walls:
 # does not change them.
 resource-pack:
   # serve: MC GUI serves its pack itself and sends it to players on join.
-  # external: MC GUI serves nothing; host plugins/MCGUI/pack.zip yourself (or merge it into
-  #   your own pack) and set public-url, which players are sent on join.
-  # off: no pack. Screens fall back to dithered vanilla map colours, and views are cut through the world.
+  # external: MC GUI serves nothing. Host plugins/MCGUI/pack.zip yourself and set public-url, which
+  #   players are sent on join; or merge it into another plugin's pack (ItemsAdder, Nexo...) and leave
+  #   public-url blank, and a player who loads that pack counts as having MC GUI's.
+  # off: no pack. Walls show dithered vanilla map colours, and no page opens fullscreen: views need the pack.
   mode: serve
   # Where the built-in server listens. It only ever serves /pack.zip.
   bind: 0.0.0.0

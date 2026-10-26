@@ -145,7 +145,7 @@ public final class SharedCompressionBench {
         MapWall wall = new MapWall(null, 0, 100, 0, BlockFace.NORTH, COLS, ROWS, 7000);
         // 100 MB/s: every change goes in one pass (a burst is 25 MB), and a slow draw between passes cannot
         // overflow the sender's refill (bytes per second times nanoseconds), as Integer.MAX_VALUE does past 4 s.
-        MapSender sender = new MapSender(wire, palette, 100_000_000, Logger.getAnonymousLogger());
+        MapSender sender = new MapSender(wire, 100_000_000, Logger.getAnonymousLogger());
         List<Canvas> canvases = new ArrayList<>();
         List<MapSender.Assignment> assignments = new ArrayList<>();
         Canvas one = new Canvas(palette, COLS, ROWS);
@@ -159,7 +159,7 @@ public final class SharedCompressionBench {
             wire.digests.put(p, MessageDigest.getInstance("SHA-1"));
             Canvas c = sharedWall ? one : new Canvas(palette, COLS, ROWS);
             if (!canvases.contains(c)) canvases.add(c);
-            assignments.add(new MapSender.Assignment(p, wall, c, Canvas.Encoding.HI, null));
+            assignments.add(new MapSender.Assignment(p, wall, c, Canvas.Encoding.HI));
         }
         sender.update(assignments);
         long tid = Thread.currentThread().threadId();

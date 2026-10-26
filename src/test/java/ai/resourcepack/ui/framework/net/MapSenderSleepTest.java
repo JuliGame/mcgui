@@ -44,8 +44,8 @@ class MapSenderSleepTest {
     void aPictureLeftPartSentKeepsTheLoopLooking() throws InterruptedException {
         Canvas canvas = new Canvas(PALETTE, COLS, ROWS);
         // Four tiles a second, a quarter second's worth to start with: the first pass gets one tile of four out.
-        sender = new MapSender(client, PALETTE, 4 * 128 * 128, Logger.getAnonymousLogger());
-        sender.update(List.of(new MapSender.Assignment(player(), wall, canvas, Canvas.Encoding.HI, null)));
+        sender = new MapSender(client, 4 * 128 * 128, Logger.getAnonymousLogger());
+        sender.update(List.of(new MapSender.Assignment(player(), wall, canvas, Canvas.Encoding.HI)));
         canvas.draw(noise(1), W, H, 0, 0);
         sender.pass();
         client.deliver();
@@ -62,9 +62,9 @@ class MapSenderSleepTest {
     /** At rest the loop thread waits for good (not on a timer); a new picture still goes out straight away. */
     @Test
     void asleepAtRestAndAwakeForANewPicture() throws InterruptedException {
-        sender = new MapSender(client, PALETTE, Integer.MAX_VALUE, Logger.getAnonymousLogger());
+        sender = new MapSender(client, Integer.MAX_VALUE, Logger.getAnonymousLogger());
         Canvas canvas = new Canvas(PALETTE, COLS, ROWS, sender::wake);
-        sender.update(List.of(new MapSender.Assignment(player(), wall, canvas, Canvas.Encoding.HI, null)));
+        sender.update(List.of(new MapSender.Assignment(player(), wall, canvas, Canvas.Encoding.HI)));
         sender.start();
         Thread loop = thread("MCGUI-send");
         canvas.draw(noise(2), W, H, 0, 0);

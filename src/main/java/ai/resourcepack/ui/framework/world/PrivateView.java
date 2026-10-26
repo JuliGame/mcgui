@@ -1,55 +1,43 @@
 package ai.resourcepack.ui.framework.world;
 
 import org.bukkit.Location;
-import org.bukkit.Material;
 import org.bukkit.World;
-import org.bukkit.block.BlockState;
-import org.bukkit.block.data.BlockData;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.util.BoundingBox;
 
-import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Predicate;
 
 /**
  * A view's wall exists for one player only and does not move anything: its frames are shown to them
- * alone, wherever it needs to be to fill their view, even inside the ground. With the resource pack
- * their client draws it in front of every block (the HI_OWN marker), so the world round the picture
- * stays whole. Without it, [clearBlocks]: they alone are told that the blocks between their eyes and
- * the picture are air, a cone exactly the picture's outline as seen from the camera. Nothing changes
- * on the server. Entities in the way are hidden from them, and placed walls in the way take their
- * frames off their client (see {@link #hides}).
+ * alone, wherever it needs to be to fill their view, even inside the ground. Their client draws it in
+ * front of every block (the resource pack's HI_OWN marker), so the world round the picture stays whole,
+ * and no block is ever touched or hidden: a view needs the pack (see Framework#openView). Entities in
+ * the way are hidden from them, and placed walls in the way take their frames off their client (see
+ * {@link #hides}).
  */
 final class PrivateView {
-    private static final BlockData AIR = Material.AIR.createBlockData();
     /** A block that only touches the pyramid along a face or edge hides nothing. */
     private static final double EPS = 1e-6;
 
     private final MapWall wall;
     private final Location camera;
-    private final boolean clearBlocks;
     /** Hide what is between the camera and the picture; not for an overlay, whose picture is no place in the world. */
     private final boolean hideInView;
-    /** Everything this player has been told is air, so all of it is put back. */
-    private final Set<Pos> cleared = new HashSet<>();
     /** Entities in the way that this player stops seeing meanwhile: a mob, another player. */
     private final Set<Entity> unseen = new HashSet<>();
     /** Whether this view hides each placed wall asked about (see {@link #hides}): neither moves, so worked out once. */
     private final Map<MapWall, Boolean> hidesWall = new IdentityHashMap<>();
     private Plugin plugin;
 
-    PrivateView(MapWall wall, Location camera, boolean clearBlocks, boolean hideInView) {
+    PrivateView(MapWall wall, Location camera, boolean hideInView) {
         this.wall = wall;
         this.camera = camera;
-        this.clearBlocks = clearBlocks;
         this.hideInView = hideInView;
     }
 
@@ -58,18 +46,9 @@ final class PrivateView {
         refresh(player);
     }
 
-    /** Send the air again: the client forgets it whenever the server sends those blocks for any reason. */
+    /** Hides what has come into the way since: an entity that walked in. */
     void refresh(Player player) {
         if (!player.isOnline() || player.getWorld() != wall.world) return;
-        if (clearBlocks) {
-            Set<Pos> now = cone();
-            cleared.addAll(now);
-            if (!now.isEmpty()) {
-                Map<Pos, BlockData> air = new HashMap<>();
-                for (Pos p : now) air.put(p, AIR);
-                send(player, air);
-            }
-        }
         if (plugin == null || !hideInView) return;
         Pyramid p = pyramid();
         if (p == null) return;
@@ -129,32 +108,6 @@ final class PrivateView {
     void close(Plugin plugin, Player player, Predicate<Entity> stillHidden) {
         for (Entity e : unseen) if (e.isValid() && !stillHidden.test(e)) player.showEntity(plugin, e);
         unseen.clear();
-        if (!player.isOnline() || player.getWorld() != wall.world || cleared.isEmpty()) return;
-        World world = wall.world;
-        Map<Pos, BlockData> real = new HashMap<>();
-        for (Pos p : cleared) {
-            if (world.isChunkLoaded(p.x() >> 4, p.z() >> 4)) real.put(p, world.getBlockAt(p.x(), p.y(), p.z()).getBlockData());
-        }
-        send(player, real);
-        cleared.clear();
-    }
-
-    /** A block in the world. */
-    private record Pos(int x, int y, int z) {}
-
-    /**
-     * Tells [player] the blocks in [blocks] are what it says, and the world itself nothing: Bukkit's way, as block
-     * states, which the server sends a section to a packet.
-     */
-    private void send(Player player, Map<Pos, BlockData> blocks) {
-        List<BlockState> states = new ArrayList<>(blocks.size());
-        for (Map.Entry<Pos, BlockData> e : blocks.entrySet()) {
-            Pos p = e.getKey();
-            BlockState state = wall.world.getBlockAt(p.x(), p.y(), p.z()).getState();
-            state.setBlockData(e.getValue());
-            states.add(state);
-        }
-        player.sendBlockChanges(states);
     }
 
     /**
@@ -212,27 +165,6 @@ final class PrivateView {
                 Math.floor(min(xs) - 1), Math.max(world.getMinHeight(), Math.floor(Math.min(camera.getY(), c.getY() - halfH) - 1)), Math.floor(min(zs) - 1),
                 Math.ceil(max(xs) + 1), Math.min(world.getMaxHeight() - 1.0, Math.ceil(Math.max(camera.getY(), c.getY() + halfH) + 1)), Math.ceil(max(zs) + 1));
         return new Pyramid(depth, u0 / depth, halfW / depth, v0 / depth, halfH / depth, bounds);
-    }
-
-    /** Solid blocks that could hide any part of the picture from the camera: those reaching into the pyramid. */
-    private Set<Pos> cone() {
-        World world = wall.world;
-        Pyramid p = pyramid();
-        Set<Pos> out = new HashSet<>();
-        if (p == null) return out;
-        BoundingBox b = p.bounds;
-        for (int x = (int) b.getMinX(); x <= (int) b.getMaxX(); x++) {
-            for (int z = (int) b.getMinZ(); z <= (int) b.getMaxZ(); z++) {
-                if (!world.isChunkLoaded(x >> 4, z >> 4)) continue;
-                // The whole column first: most are outside and need no per-block test.
-                if (!p.reaches(x, b.getMinY(), z, x + 1.0, b.getMaxY() + 1, z + 1.0, 0)) continue;
-                for (int y = (int) b.getMinY(); y <= (int) b.getMaxY(); y++) {
-                    if (!p.reaches(x, y, z, x + 1.0, y + 1.0, z + 1.0, 0)) continue;
-                    if (!world.getBlockAt(x, y, z).getType().isAir()) out.add(new Pos(x, y, z));
-                }
-            }
-        }
-        return out;
     }
 
     private static double min(double[] v) {

@@ -80,8 +80,8 @@ public final class TileBench {
         MapWall wall = new MapWall(null, 0, 100, 0, BlockFace.NORTH, COLS, ROWS, 5000);
         RecordingWire client = new RecordingWire(wall);
         client.deflate = true;
-        MapSender sender = new MapSender(client, palette, Integer.MAX_VALUE, Logger.getAnonymousLogger());
-        sender.update(List.of(new MapSender.Assignment(RecordingWire.player(), wall, canvas, Canvas.Encoding.HI, null)));
+        MapSender sender = new MapSender(client, Integer.MAX_VALUE, Logger.getAnonymousLogger());
+        sender.update(List.of(new MapSender.Assignment(RecordingWire.player(), wall, canvas, Canvas.Encoding.HI)));
         HtmlRenderer.Frame open = HtmlRenderer.render(page, W, H, SCALE, 0, Selector.State.NONE);
         canvas.draw(open.image(), 0, 0);
         settle(sender, client, new long[1]);

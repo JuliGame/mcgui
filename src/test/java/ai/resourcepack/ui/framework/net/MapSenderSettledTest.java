@@ -37,8 +37,8 @@ class MapSenderSettledTest {
         MapWall wall = new MapWall(null, 0, 100, 0, BlockFace.NORTH, COLS, ROWS, 7000);
         client = new Client(wall);
         canvas = new Canvas(PALETTE, COLS, ROWS);
-        sender = new MapSender(client, PALETTE, Integer.MAX_VALUE, Logger.getAnonymousLogger());
-        sender.update(List.of(new MapSender.Assignment(player(), wall, canvas, Canvas.Encoding.HI, null)));
+        sender = new MapSender(client, Integer.MAX_VALUE, Logger.getAnonymousLogger());
+        sender.update(List.of(new MapSender.Assignment(player(), wall, canvas, Canvas.Encoding.HI)));
     }
 
     /**

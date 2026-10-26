@@ -28,11 +28,12 @@ it. See [For plugin developers](#for-plugin-developers).
 - **Views.** A player sits: their camera locks onto a picture only they can
   see, their mouse moves a pointer across it, the attack and use keys click, the
   wheel scrolls, movement keys are keys and sneaking gets up. They are put back
-  exactly where they stood. With the pack the picture fills the whole window,
-  whatever its shape and their FOV.
+  exactly where they stood. The picture fills the whole window, whatever its
+  shape and their FOV. Views need the pack: a player without it is offered it
+  again rather than seated.
 - **Colour.** With the pack, maps carry YCbCr 4:2:0 in 240 map colours and the
   pack's text shader decodes them, smoothly scaled, unlit and unfogged. Without
-  it, players get dithered vanilla map colours.
+  it, walls show dithered vanilla map colours.
 - **Sounds.** Every `.ogg` in `plugins/MCGUI/sounds/` goes into the pack
   as a sound named after its path: `sounds/menu/open.ogg` plays as
   `uiengine:menu/open`, from a page, `/playsound` or any plugin. Names are lower
@@ -62,7 +63,7 @@ depends on `UIEngine` still loads.
 | `/mcgui list` · `/mcgui reload` | Pages and screens · read the config and every page again |
 | `/mcgui import <code>` | Writes pages made on [mcgui.dev](https://mcgui.dev) into the pages folder (the code is on its Send to server screen). Importing the same project again removes the files it no longer has, unless they were changed on the server |
 | `/mcgui test wall\|view [cols] [rows] [player]` | Puts a test picture on the wall you look at, or opens one fullscreen: the framework working with no page at all |
-| `/mcgui fov <degrees>` | Fits views to your FOV setting, for players without the pack (the server cannot read it) |
+| `/mcgui fov <degrees>` | Tells the server your FOV setting, which it cannot read |
 | `/mcgui pointer [speed]` | Your pointer speed in views, 0.25 to 4 times the server's (`views.pointer-speed`); without a number, shows it and the mouse sensitivity read from your turning |
 | `/mcgui pack` · `stats` · `clear` | Re-send the pack · what the plugin costs the server now (see below) · remove test walls |
 | `/mcgui debug <player> point <x> <y>` · `click` · `scroll <n>` · `speed` · `close` | Drive a player's view from the console; `speed` shows its pointer speed and where it came from |
@@ -191,8 +192,7 @@ The two numbers are the pixel that points, in the picture's own pixels (the
 top left if left out). The keyword after it is what players see on a server
 without that cursor. A picture 16 pixels tall is the arrow's size; up to 32 is
 drawn bigger, and a taller one is scaled to 32 (128 a side at most, 64 cursors
-at most). Players without the resource pack see it drawn into the map, in the
-nearest map colours.
+at most).
 
 `/mcgui import` copies any picture an imported page uses as a cursor into the
 cursors folder for you, and says when the server needs a restart to show it.
@@ -251,7 +251,6 @@ the game blurs it behind a menu, at the player's own menu blur setting. All of
 that needs a 1.21.11 or newer client; on any other version, or where the player has no room to be held still, the
 world shows live round the panel and the server places the pointer (up to a
 tick behind the mouse). On a wall, the wall behind shows through, untinted.
-Players without the pack see the world round the panel too, without a tint.
 
 Controls while a page is open: mouse moves the pointer, either button clicks,
 the wheel (or W/S) scrolls, F goes back, sneak closes; and any key the page

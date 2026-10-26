@@ -38,7 +38,8 @@ public interface UIFramework {
      * Seats [player] at a fullscreen view of [content]'s canvas. Their view switches once the picture
      * has reached them; until then they see the world. Any view they already had closes first.
      *
-     * @throws IllegalStateException if there is no room for the view where they are
+     * @throws IllegalStateException if there is no room for the view where they are, or [player] has not loaded the
+     *                               resource pack, which every view needs (it is offered to them again)
      */
     View openView(Player player, ViewContent content, ViewOptions options);
 

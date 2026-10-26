@@ -56,9 +56,9 @@ class MapPoolTest {
             Canvas canvas = new Canvas(PALETTE, COLS, ROWS);
             canvas.shareAlike(true);
             canvases.add(canvas);
-            out.add(new MapSender.Assignment(player, wall, canvas, Canvas.Encoding.HI, null));
+            out.add(new MapSender.Assignment(player, wall, canvas, Canvas.Encoding.HI));
         }
-        sender = new MapSender(client, PALETTE, bytesPerSecond, Logger.getAnonymousLogger());
+        sender = new MapSender(client, bytesPerSecond, Logger.getAnonymousLogger());
         sender.update(out);
     }
 

@@ -65,8 +65,8 @@ class TileScrollTest {
         canvas = new Canvas(palette, COLS, ROWS);
         MapWall wall = new MapWall(null, 0, 100, 0, BlockFace.NORTH, COLS, ROWS, 5000);
         client = new RecordingWire(wall);
-        sender = new MapSender(client, palette, Integer.MAX_VALUE, Logger.getAnonymousLogger());
-        sender.update(List.of(new MapSender.Assignment(RecordingWire.player(), wall, canvas, encoding, null)));
+        sender = new MapSender(client, Integer.MAX_VALUE, Logger.getAnonymousLogger());
+        sender.update(List.of(new MapSender.Assignment(RecordingWire.player(), wall, canvas, encoding)));
         // Part way down, so the view can go up three rows and down three.
         at = 4 * ROW;
         canvas.draw(HtmlRenderer.render(LONG, W, H, SCALE, at, state).image(), 0, 0);

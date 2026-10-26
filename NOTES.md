@@ -438,7 +438,7 @@ with it. The rig and every result of the 26.3 port are in
 | `render/Palette` | The map colour table, and the HI (YCbCr in 240 colours) and PLAIN encodings |
 | `pack/` | `Shaders` (both GLSL dialects), `SymbolHash` (the shader's colour lookup), `ResourcePack` (build, serve, who has it) |
 | `net/` | `Nms` (every server internal, by reflection), `MapSender` (diffed map patches, per-player budget, frame re-pointing), `Wire`/`ServerWire` (what the sender writes through), `Pipeline` (ping answers, the hidden inventory, each connection's frame pointing) |
-| `world/` | `MapWall` (the frames), `MapPool` (placed walls whose frames share maps), `Walls` (placed walls and crosshair input), `Views` (seating, camera, pointer, input), `PrivateView` (fake air for players without the pack) |
+| `world/` | `MapWall` (the frames), `MapPool` (placed walls whose frames share maps), `Walls` (placed walls and crosshair input), `Views` (seating, camera, pointer, input), `PrivateView` (entities and placed walls in a seated player's way, hidden from them) |
 
 ## Spigot and Paper: one jar
 
@@ -502,6 +502,16 @@ Reading a position, a world or a UUID is fine from anywhere. How MC GUI copes, a
   pages with the client-placed pointer, overlays and walls all work.
 
 ## The framework: things that are not obvious
+
+- **A view needs the pack, and there is no fallback (owner's instruction, 2026-10-26).** A view's picture hangs
+  wherever it fills the player's view, often inside the ground, and only the pack's shaders draw it in front of the
+  world. Without the pack, `PrivateView` used to tell the player alone that every block between their eyes and the
+  picture was air, with a server-drawn pointer in plain map colours: to a player whose pack had failed to download
+  (a blank `public-url`, which only works on the server's own machine), `/mcgui open` sat them down and cleared the
+  area round them. That whole path is gone. `Framework.openView` refuses instead and offers the pack again, so the
+  reason reaches whoever opened it. Walls still work without the pack, in plain colours. `external` with a blank
+  `public-url` means the pack is merged into another plugin's, which sends it under its own id, so any pack a player
+  loads marks them as having ours (`ResourcePack.mergedElsewhere`); before, those players always got the fallback.
 
 - **The server internals are reached by reflection**, so the plugin compiles against the plain 1.21.8 API and needs
   no paperweight. Every member is looked up once in `Nms`'s constructor; a
@@ -688,8 +698,7 @@ Reading a position, a world or a UUID is fine from anywhere. How MC GUI copes, a
   client version the chain was never seen to run in (`Shaders.Dialect.of` the
   protocol `net/ClientVersion` reads: ViaVersion's word where it is installed,
   else the handshake's), an overlay falls back to the server pointer with a
-  mannequin camera (the world live round it); without the pack, to a wall with
-  the world showing through. A client that loads the pack but not the chain
+  mannequin camera (the world live round it). A client that loads the pack but not the chain
   would otherwise see the world turn with the pointer (main's jar on 26.3 did:
   opening the market overlay swung the world about 115 px, and moving the
   pointer changed a quarter of the window round the panel). A new dialect adds its

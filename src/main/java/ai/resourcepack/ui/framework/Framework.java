@@ -115,8 +115,8 @@ public final class Framework implements UIFramework, Listener {
         }
         pipeline = new Pipeline(nms, plugin.getLogger());
         wire = new ServerWire(nms, pipeline, settings.sharedCompression ? SharedCompression.create(ServerWire.packets(nms), plugin.getLogger()) : null);
-        sender = new MapSender(wire, palette, settings.bytesPerSecond, plugin.getLogger());
-        views = new Views(plugin, settings, nms, pipeline, id -> pack != null && pack.has(id), sender, palette, settings.mapIdBase);
+        sender = new MapSender(wire, settings.bytesPerSecond, plugin.getLogger());
+        views = new Views(plugin, settings, nms, pipeline, sender, palette, settings.mapIdBase);
         walls = new Walls(plugin, nms, settings.mapIdBase + Views.VIEW_ID_SPAN, settings.viewDistance, settings.reach, views::seated, views::hides);
         serverThread = Threads.server(plugin, nms.serverThread());
         Threads.register(this, plugin);
@@ -207,7 +207,7 @@ public final class Framework implements UIFramework, Listener {
                 Canvas.Encoding encoding = hasPack(viewer) ? Canvas.Encoding.HI : Canvas.Encoding.PLAIN;
                 MapSender.Assignment a = kept < last.size() ? last.get(kept) : null;
                 if (a == null || a.player() != viewer || a.canvas() != canvas || a.encoding() != encoding) {
-                    a = new MapSender.Assignment(viewer, wall.map(), canvas, encoding, null);
+                    a = new MapSender.Assignment(viewer, wall.map(), canvas, encoding);
                     if (kept < last.size()) last.set(kept, a);
                     else last.add(a);
                 }
@@ -241,6 +241,18 @@ public final class Framework implements UIFramework, Listener {
     @Override
     public View openView(Player player, ViewContent content, ViewOptions options) {
         if (Threads.folia() && !Threads.owns(player)) throw new IllegalStateException("A view is opened from " + player.getName() + "'s own thread (on Folia, their region's)");
+        // A view's picture hangs wherever it fills the player's view, often inside the ground, and only the pack's
+        // shaders draw it in front of the world. Without the pack there is no view: never one cut out of the world.
+        // Said to the player (whoever opens a view for somebody else checks hasPack first), with no apostrophes,
+        // which MC GUI's chat reads as quotes.
+        if (!hasPack(player)) {
+            if (pack != null && pack.offers()) {
+                pack.send(player);
+                throw new IllegalStateException("You have not loaded the resource pack that screens need. It has been offered to you again.");
+            }
+            if (pack != null && pack.mergedElsewhere()) throw new IllegalStateException("You have not loaded the resource pack that screens need.");
+            throw new IllegalStateException("Screens need the MC GUI resource pack, which is turned off on this server (resource-pack.mode).");
+        }
         return views.open(player, content, options == null ? ViewOptions.DEFAULT : options);
     }
 
@@ -303,7 +315,8 @@ public final class Framework implements UIFramework, Listener {
 
     @EventHandler
     public void onPack(PlayerResourcePackStatusEvent e) {
-        if (pack == null || !ResourcePack.PACK_ID.equals(e.getID())) return;
+        // Merged into another plugin's pack, ours never arrives under its own id: that pack is ours too.
+        if (pack == null || !ResourcePack.PACK_ID.equals(e.getID()) && !pack.mergedElsewhere()) return;
         switch (e.getStatus()) {
             case SUCCESSFULLY_LOADED -> pack.markLoaded(e.getPlayer().getUniqueId());
             case DECLINED, FAILED_DOWNLOAD, INVALID_URL, FAILED_RELOAD, DISCARDED -> pack.forget(e.getPlayer().getUniqueId());

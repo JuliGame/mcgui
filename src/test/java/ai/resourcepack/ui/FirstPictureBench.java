@@ -225,8 +225,8 @@ public final class FirstPictureBench {
             case "equals" -> self == a[0];
             default -> null;
         });
-        MapSender sender = new MapSender(wire, PALETTE, Integer.MAX_VALUE, Logger.getAnonymousLogger());
-        sender.update(List.of(new MapSender.Assignment(player, wall, c, Canvas.Encoding.HI, null)));
+        MapSender sender = new MapSender(wire, Integer.MAX_VALUE, Logger.getAnonymousLogger());
+        sender.update(List.of(new MapSender.Assignment(player, wall, c, Canvas.Encoding.HI)));
         drain(sender, patches);
         if (page != null) {
             c.draw(page, 0, 0);

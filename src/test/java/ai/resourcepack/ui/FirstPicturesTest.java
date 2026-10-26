@@ -432,8 +432,8 @@ class FirstPicturesTest {
     private static int patchesFor(Canvas canvas) {
         MapWall wall = new MapWall(null, 0, 100, 0, BlockFace.NORTH, COLS, ROWS, 7000);
         Client client = new Client();
-        MapSender sender = new MapSender(client, PALETTE, Integer.MAX_VALUE, Logger.getAnonymousLogger());
-        sender.update(List.of(new MapSender.Assignment(player(), wall, canvas, Canvas.Encoding.HI, null)));
+        MapSender sender = new MapSender(client, Integer.MAX_VALUE, Logger.getAnonymousLogger());
+        sender.update(List.of(new MapSender.Assignment(player(), wall, canvas, Canvas.Encoding.HI)));
         for (int i = 0; i < 4; i++) sender.pass();
         return client.patches;
     }

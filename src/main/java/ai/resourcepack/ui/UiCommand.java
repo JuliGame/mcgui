@@ -3,6 +3,7 @@ package ai.resourcepack.ui;
 import ai.resourcepack.ui.framework.platform.Platform;
 import ai.resourcepack.ui.chat.Chat;
 import ai.resourcepack.ui.framework.FrameworkCommand;
+import ai.resourcepack.ui.framework.api.UIFramework;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
@@ -174,13 +175,21 @@ final class UiCommand implements TabExecutor {
             say(sender, "There is no page called '" + page + "' in " + plugin.pages().root().getFileName() + "/.", NamedTextColor.RED);
             return;
         }
+        // Without the pack the page cannot open, and the reason is the player's to read: it is said to them, and the
+        // sender opening it for them hears why in their own words.
+        java.util.function.Consumer<String> problem = target != sender && !UIFramework.get().hasPack(target)
+                ? reason -> {
+                    say(target, reason, NamedTextColor.RED);
+                    say(sender, target.getName() + " has not loaded the resource pack that screens need.", NamedTextColor.RED);
+                }
+                : reason -> say(sender, reason, NamedTextColor.RED);
         try {
             // A page not loaded yet opens when it has; what goes wrong then is told here too.
-            if (!plugin.screens().open(target, page, problem -> say(sender, problem, NamedTextColor.RED))) {
+            if (!plugin.screens().open(target, page, problem)) {
                 say(sender, "Could not open '" + page + "': see the console.", NamedTextColor.RED);
             }
         } catch (IllegalStateException e) {
-            say(sender, e.getMessage(), NamedTextColor.RED);
+            problem.accept(e.getMessage());
         }
     }
 

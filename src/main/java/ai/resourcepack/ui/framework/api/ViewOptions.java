@@ -12,8 +12,7 @@ package ai.resourcepack.ui.framework.api;
  *                    (26.2) only the maps its panel covers are sent and drawn, the player's view stays exactly where it
  *                    was, and the world round the panel is the picture of it their client took as the view opened,
  *                    kept still (and frozen) until it closes, under the canvas's tint, while the pointer follows the
- *                    mouse at frame rate. Without the pack, the canvas fills the view, the world showing where it is
- *                    transparent.
+ *                    mouse at frame rate.
  */
 public record ViewOptions(int pointerSize, boolean blur, boolean overlay) {
     public static final ViewOptions DEFAULT = new ViewOptions(0, false, false);

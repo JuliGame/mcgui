@@ -1,8 +1,6 @@
 package ai.resourcepack.ui.framework.net;
 
 import ai.resourcepack.ui.framework.api.Canvas;
-import ai.resourcepack.ui.framework.api.Pointer;
-import ai.resourcepack.ui.framework.render.Palette;
 import ai.resourcepack.ui.framework.world.MapPool;
 import ai.resourcepack.ui.framework.world.MapWall;
 import org.bukkit.entity.Player;
@@ -50,14 +48,8 @@ import java.util.logging.Logger;
  * draw call every frame, so a lobby of walls showing one page costs it one wall's maps.
  */
 public final class MapSender implements AutoCloseable {
-    /**
-     * One player looking at one wall, showing [canvas] in [encoding]. [pointer] is drawn into PLAIN tiles
-     * only (players with the pack see a smooth pointer entity instead); null for none.
-     */
-    public record Assignment(Player player, MapWall wall, Canvas canvas, Canvas.Encoding encoding, PointerSpot pointer) {}
-
-    /** A pointer drawn into plain maps: where its hot pixel is, in canvas pixels, and its shape. */
-    public record PointerSpot(int x, int y, Pointer shape) {}
+    /** One player looking at one wall, showing [canvas] in [encoding]. */
+    public record Assignment(Player player, MapWall wall, Canvas canvas, Canvas.Encoding encoding) {}
 
     private static final class Viewer {
         final Map<Integer, byte[]> sent = new ConcurrentHashMap<>(); // map id -> exact array the client last got
@@ -72,8 +64,6 @@ public final class MapSender implements AutoCloseable {
         final AtomicLong inFlight = new AtomicLong();
         /** The same for each wall, so delivered() for one wall never waits on another that keeps changing. */
         final Map<MapWall, AtomicLong> wallInFlight = new ConcurrentHashMap<>();
-        /** Plain tiles with the pointer drawn in, by map id, with what each was made from. */
-        final Map<Integer, Pointed> pointed = new ConcurrentHashMap<>(); // also read by delivered(), on the main thread
         /** Which map each frame shows on their client; null until the wire can keep it, and until then each shows its own. */
         volatile Wire.Frames pointing;
         /** This pass's patches, made together (on several threads, see Wire#patches) and written with one flush. */
@@ -89,8 +79,6 @@ public final class MapSender implements AutoCloseable {
     /** One patch on its way: the tile it brings map [id] up to, and the wall's in-flight count it is in. */
     private record Patch(int id, byte[] tile, int cost, AtomicLong wallInFlight) {}
 
-    private record Pointed(byte[] base, PointerSpot spot, byte[] tile) {}
-
     /** The tiles of one snapshot of a canvas still to send, in order. */
     private static final class Frame {
         final Canvas canvas;
@@ -99,13 +87,12 @@ public final class MapSender implements AutoCloseable {
         int[] maps;
         final ArrayDeque<Integer> queue = new ArrayDeque<>();
         /**
-         * The last time every tile was found on the client already: that drawing, pointing, pointer and forget
-         * count. While all four stay the same nothing can differ, and the tile by tile check is skipped: with
+         * The last time every tile was found on the client already: that drawing, pointing and forget
+         * count. While all three stay the same nothing can differ, and the tile by tile check is skipped: with
          * dozens of walls in range of dozens of players, that check was most of this thread's time.
          */
         Canvas.Snapshot settled;
         int[] settledMaps;
-        PointerSpot settledPointer;
         int settledForgets;
         /** The wall's {@link MapWall#sendsVersion} when settled: an overlay's panel that grew has new tiles to send. */
         int settledSends;
@@ -117,7 +104,6 @@ public final class MapSender implements AutoCloseable {
     }
 
     private final Wire wire;
-    private final Palette palette;
     private final int bytesPerSecond;
     /**
      * Map bytes (uncompressed) a player may have queued but unwritten: 800 KB at the default budget, which a 4 MB
@@ -155,9 +141,8 @@ public final class MapSender implements AutoCloseable {
 
     private record Watch(Canvas canvas, Canvas.Encoding encoding) {}
 
-    public MapSender(Wire wire, Palette palette, int bytesPerSecond, Logger log) {
+    public MapSender(Wire wire, int bytesPerSecond, Logger log) {
         this.wire = wire;
-        this.palette = palette;
         this.bytesPerSecond = bytesPerSecond;
         this.maxInFlight = Math.max(800_000L, bytesPerSecond / 10L);
         this.burst = bytesPerSecond / 2L;
@@ -202,7 +187,7 @@ public final class MapSender implements AutoCloseable {
         int[] maps = maps(v, wall);
         Canvas.Snapshot snap = a.canvas.snapshot();
         for (int t = 0; t < wall.tiles(); t++) {
-            if (wall.sends(t) && v.sent.get(maps[t]) != tileFor(a, v, snap, t)) return false;
+            if (wall.sends(t) && v.sent.get(maps[t]) != snap.tile(t, a.encoding)) return false;
         }
         return true;
     }
@@ -325,33 +310,6 @@ public final class MapSender implements AutoCloseable {
         return wall.ownMaps();
     }
 
-    /** The tile [a]'s viewer should have: the canvas's, with the pointer drawn in for plain viewers. */
-    private byte[] tileFor(Assignment a, Viewer v, Canvas.Snapshot snap, int t) {
-        byte[] base = snap.tile(t, a.encoding);
-        PointerSpot spot = a.pointer;
-        if (spot == null || a.encoding != Canvas.Encoding.PLAIN || spot.shape == Pointer.HIDDEN) return base;
-        int tx = (t % a.wall.cols) * 128, ty = (t / a.wall.cols) * 128;
-        int left = spot.x - spot.shape.hotX, top = spot.y - spot.shape.hotY;
-        Pointer shape = spot.shape;
-        if (left >= tx + 128 || left + shape.width() <= tx || top >= ty + 128 || top + shape.height() <= ty) return base;
-        int id = a.wall.mapId(t);
-        Pointed cached = v.pointed.get(id);
-        if (cached != null && cached.base == base && cached.spot.equals(spot)) return cached.tile;
-        byte[] tile = base.clone();
-        // A map has no partial transparency: a pixel at least half covered is drawn, in the nearest map colour.
-        for (int y = 0; y < shape.height(); y++) {
-            for (int x = 0; x < shape.width(); x++) {
-                int c = shape.argb(x, y);
-                if ((c >>> 24) < 128) continue;
-                int px = left + x - tx, py = top + y - ty;
-                if (px < 0 || py < 0 || px >= 128 || py >= 128) continue;
-                tile[py * 128 + px] = palette.plain(c & 0xFFFFFF);
-            }
-        }
-        v.pointed.put(id, new Pointed(base, spot, tile));
-        return tile;
-    }
-
     private void send(Assignment a, Viewer v) {
         int tiles = a.wall.tiles();
         if (a.canvas.cols() != a.wall.cols || a.canvas.rows() != a.wall.rows) return;
@@ -366,17 +324,16 @@ public final class MapSender implements AutoCloseable {
             int[] maps = maps(v, a.wall);
             int forgets = v.forgets.get();
             if (snap.sameAs(frame.settled) && maps == frame.settledMaps && forgets == frame.settledForgets
-                    && a.wall.sendsVersion() == frame.settledSends && java.util.Objects.equals(a.pointer, frame.settledPointer)) return;
+                    && a.wall.sendsVersion() == frame.settledSends) return;
             boolean changed = false;
             for (int t = 0; t < tiles; t++) {
                 // Outside an overlay's panel: never sent, as if the client had it already.
-                frame.tile[t] = a.wall.sends(t) ? tileFor(a, v, snap, t) : v.sent.get(maps[t]);
+                frame.tile[t] = a.wall.sends(t) ? snap.tile(t, a.encoding) : v.sent.get(maps[t]);
                 changed |= frame.tile[t] != v.sent.get(maps[t]);
             }
             if (!changed) {
                 frame.settled = snap;
                 frame.settledMaps = maps;
-                frame.settledPointer = a.pointer;
                 frame.settledForgets = forgets;
                 frame.settledSends = a.wall.sendsVersion();
                 return;

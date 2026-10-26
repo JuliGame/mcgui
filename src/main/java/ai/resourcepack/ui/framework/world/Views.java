@@ -87,7 +87,6 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Predicate;
 import java.util.logging.Level;
 
 /**
@@ -164,7 +163,6 @@ public final class Views implements Listener {
     private final Settings settings;
     private final Nms nms;
     private final Pipeline pipeline;
-    private final Predicate<UUID> hasPack;
     private final int firstMapId;
     private final MapSender sender;
     private final Palette palette;
@@ -174,12 +172,11 @@ public final class Views implements Listener {
     private final Map<UUID, MouseSteps> mice = new HashMap<>();
     private final EntityType mannequin;
 
-    public Views(Plugin plugin, Settings settings, Nms nms, Pipeline pipeline, Predicate<UUID> hasPack, MapSender sender, Palette palette, int firstMapId) {
+    public Views(Plugin plugin, Settings settings, Nms nms, Pipeline pipeline, MapSender sender, Palette palette, int firstMapId) {
         this.plugin = plugin;
         this.settings = settings;
         this.nms = nms;
         this.pipeline = pipeline;
-        this.hasPack = hasPack;
         this.sender = sender;
         this.palette = palette;
         this.firstMapId = firstMapId;
@@ -200,7 +197,6 @@ public final class Views implements Listener {
         final Canvas canvas;
         final MapWall wall;
         final ViewOptions options;
-        final boolean withPack;
         /** The player's client places the pointer (and the picture) itself, from where their own eye looks. */
         final boolean clientPointer;
         /**
@@ -296,7 +292,7 @@ public final class Views implements Listener {
         volatile boolean revealed, closed;
         volatile boolean caughtUp;
 
-        ViewImpl(Player p, ViewContent content, Canvas canvas, MapWall wall, ViewOptions options, boolean withPack, boolean clientPointer, boolean keeps,
+        ViewImpl(Player p, ViewContent content, Canvas canvas, MapWall wall, ViewOptions options, boolean clientPointer, boolean keeps,
                  double speed, ArmorStand vehicle, Location seat, LivingEntity camera, Interaction target, TextDisplay pointer, BlockDisplay glow,
                  Location returnTo, Location cameraAt, LayerSet layers) {
             this.player = p.getUniqueId();
@@ -304,7 +300,6 @@ public final class Views implements Listener {
             this.canvas = canvas;
             this.wall = wall;
             this.options = options;
-            this.withPack = withPack;
             this.clientPointer = clientPointer;
             this.keeps = keeps;
             this.glow = glow;
@@ -320,7 +315,7 @@ public final class Views implements Listener {
             this.previousWeather = p.getPlayerWeather();
             this.previousInvisibility = p.getPotionEffect(PotionEffectType.INVISIBILITY);
             this.returnTo = returnTo;
-            this.privateView = new PrivateView(wall, cameraAt, !withPack, !keeps);
+            this.privateView = new PrivateView(wall, cameraAt, !keeps);
             this.layers = layers;
             this.openedAt = Platform.tick();
             this.deadline = openedAt + REVEAL_TIMEOUT;
@@ -417,15 +412,14 @@ public final class Views implements Listener {
     public View open(Player player, ViewContent content, ViewOptions options) {
         close(player, CloseReason.CLOSED);
         Canvas canvas = content.canvas();
-        boolean withPack = hasPack.test(player.getUniqueId());
-        double fov = viewFov(player, withPack ? STRETCHED_FIT : 1.0);
+        double fov = viewFov(player, STRETCHED_FIT);
         Location from = player.getLocation();
         // An overlay with the pack keeps the player's own eye as the camera, where it is to within the flag's 1/32 of a
         // block, and their client keeps the world round the panel as it was (see Shaders.overlayChain): so the world
         // neither moves when it opens nor turns with the pointer. Its frames lie at the camera and its maps place
         // themselves in the window, so its wall is only a set of map ids.
         // The signature map takes the id after the tiles', which must stay inside the views' 1024 (VIEW_ID_SPAN).
-        Location eye = withPack && settings.clientPointer && options.overlay() && canvas.cols() * canvas.rows() < 1024
+        Location eye = settings.clientPointer && options.overlay() && canvas.cols() * canvas.rows() < 1024
                 && runsOverlayChain(player) ? overlayEye(player) : null;
         boolean keeps = eye != null;
         MapWall wall = keeps ? new MapWall(player.getWorld(), eye.getBlockX(), eye.getBlockY(), eye.getBlockZ(),
@@ -437,8 +431,8 @@ public final class Views implements Listener {
         // spot by the player's own eye where they can be held (see clientEye). Without one, the server pointer. An
         // overlay with nowhere to hold the player has the server's too (the world shows live round it, still): a
         // client-placed pointer turns the player's own camera, and only a kept world does not turn with it.
-        if (!keeps && withPack && settings.clientPointer && !options.overlay()) eye = clientEye(player, wall.facing);
-        if (withPack && settings.clientPointer && eye == null) debug("no room to hold " + player.getName() + " still, or no overlay chain: the server places their pointer");
+        if (!keeps && settings.clientPointer && !options.overlay()) eye = clientEye(player, wall.facing);
+        if (settings.clientPointer && eye == null) debug("no room to hold " + player.getName() + " still, or no overlay chain: the server places their pointer");
         boolean clientPointer = eye != null;
         Location seat = null;
         if (clientPointer) {
@@ -494,7 +488,7 @@ public final class Views implements Listener {
             pointerAt.setYaw(MapWall.yawFacing(wall.facing.getModX(), wall.facing.getModZ()));
             pointerAt.setPitch(0);
         }
-        TextDisplay pointer = !withPack ? null : world.spawn(pointerAt, TextDisplay.class, d -> {
+        TextDisplay pointer = world.spawn(pointerAt, TextDisplay.class, d -> {
             // Spigot spawns a display without the location's rotation (Paper keeps it), and a client-placed pointer must
             // be square to its axis: one left facing south is drawn stretched as the camera turns.
             d.setRotation(pointerAt.getYaw(), pointerAt.getPitch());
@@ -520,7 +514,7 @@ public final class Views implements Listener {
         if (vehicle != null) player.showEntity(plugin, vehicle);
         if (camera != null) player.showEntity(plugin, camera);
 
-        ViewImpl view = new ViewImpl(player, content, canvas, wall, options, withPack, clientPointer, keeps, speed, vehicle, seat, camera, target, pointer, glow, from, cam, layers);
+        ViewImpl view = new ViewImpl(player, content, canvas, wall, options, clientPointer, keeps, speed, vehicle, seat, camera, target, pointer, glow, from, cam, layers);
         views.put(player.getUniqueId(), view);
         // Remembered on the player, so a crash mid-view cannot leave them stuck in adventure mode or in the ground.
         player.getPersistentDataContainer().set(seatKey, PersistentDataType.STRING, player.getGameMode().name());
@@ -1306,7 +1300,7 @@ public final class Views implements Listener {
         }
     }
 
-    /** What every open view needs sent: its wall, its canvas, and for plain viewers the pointer. */
+    /** What every open view needs sent: its wall and its canvas. */
     public void assignments(Collection<MapSender.Assignment> out) {
         for (ViewImpl v : views.values()) {
             Player p = Bukkit.getPlayer(v.player);
@@ -1325,14 +1319,9 @@ public final class Views implements Listener {
             v.shown = canvas;
             if (v.keeps) panel(v, canvas.snapshot());
             Canvas.Encoding hi = v.clientPointer ? Canvas.Encoding.HI_TILED : Canvas.Encoding.HI_OWN;
-            if (v.withPack) {
-                out.add(new MapSender.Assignment(p, v.wall, canvas, hi, null));
-                // After the view's own, so a layer taken off as the picture under it changes goes out in the same pass.
-                if (v.layers != null) out.add(new MapSender.Assignment(p, v.layers.wall, v.layers.canvas, Canvas.Encoding.HI, null));
-            } else {
-                out.add(new MapSender.Assignment(p, v.wall, canvas, Canvas.Encoding.PLAIN,
-                        v.revealed ? new MapSender.PointerSpot((int) v.cursorX, (int) v.cursorY, v.shape) : null));
-            }
+            out.add(new MapSender.Assignment(p, v.wall, canvas, hi));
+            // After the view's own, so a layer taken off as the picture under it changes goes out in the same pass.
+            if (v.layers != null) out.add(new MapSender.Assignment(p, v.layers.wall, v.layers.canvas, Canvas.Encoding.HI));
         }
     }
 

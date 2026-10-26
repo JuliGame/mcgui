@@ -126,6 +126,19 @@ public final class ResourcePack implements AutoCloseable {
         player.addResourcePack(PACK_ID, url + sep + "v=" + sha1, HexFormat.of().parseHex(sha1), settings.packPrompt, settings.packRequired);
     }
 
+    /** Whether players are sent the pack from here (serve, or external with a public-url). */
+    public boolean offers() {
+        return url() != null;
+    }
+
+    /**
+     * External with no public-url: the pack is merged into another plugin's (ItemsAdder, Nexo...), which sends it under
+     * its own id, so any pack a player loads counts as ours.
+     */
+    public boolean mergedElsewhere() {
+        return settings.packMode == Settings.PackMode.EXTERNAL && settings.packPublicUrl.isBlank();
+    }
+
     public boolean has(UUID player) {
         return loaded.contains(player);
     }
