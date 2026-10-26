@@ -638,16 +638,22 @@ Reading a position, a world or a UUID is fine from anywhere. How MC GUI copes, a
   frames lie in its block like a client-placed view's (never culled), and the
   server's pointer, `FIXED` square to the axis (a billboard would face the turned
   camera), is turned back in the shader when it is behind the camera.
-  `Nms.teleport` keeps rotation for it. Measured on the PC rig on 1.21.11,
-  26.1.2, 26.2 and 26.3 clients: the pointer within the 4 px of the detector at
-  five points (turns to ±127°) in all three perspectives, fullscreen and
-  overlay, client and server pointer, and hover layers lighting only under it.
+  `Nms.teleport` keeps rotation for it. Measured on the PC rig (2026-10-26),
+  each client on a server of its own version, Paper, Spigot and Folia, 1.21.11
+  to 26.3: the pointer within 8 px at seven points (turns to ±127°, pitch to
+  ±64°) in all three perspectives, fullscreen and overlay, client and server
+  pointer, hover layers lighting only under it; and through a proxy holding
+  every byte 100 and 250 ms each way, turning 120° in 2 s to 150 ms.
 - **A view fills the window because `text.vsh` puts it there.** Every map
   carries the view's columns and rows in the two pixels right of the marker and
   its own column and row below them (`Canvas.Encoding.HI_TILED`), and goes to
   its place in the window from those, wherever its frame is: all of a view's
-  frames lie in the camera's block (`MapWall.spawnFor` with a stack), inside the
-  client's view frustum whichever way the camera looks. The server's pointer is
+  frames lie in the camera's block (`MapWall.Stack`), on its floor or, when the
+  camera is in the block's upper half, its ceiling, so the camera is inside each
+  frame's culling box (the box grown half a block) and no turn can cull them.
+  Always on the floor, an overlay (the standing eye is 0.65 up its block) lost
+  every map, and with them its tint and kept world, in a band of looking up
+  round 36°, and F5's front view looking down as much. The server's pointer is
   text whose red is `Shaders.POINTER_RED` with the columns and rows in green and
   blue; while seated its vertices go to their distance from the camera's axis,
   in blocks, over half the picture's size: the window edge to edge, at any FOV
