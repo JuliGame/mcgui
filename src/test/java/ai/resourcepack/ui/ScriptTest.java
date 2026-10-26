@@ -57,6 +57,12 @@ class ScriptTest {
             + "ready().then(sq => { const ctx = document.querySelector('#c').getContext('2d'); requestAnimationFrame(function f() { sq.draw(ctx); requestAnimationFrame(f); }); });"
             + "</script></body></html>";
 
+    /** A command at once, one from a timer, and one from the player's W. */
+    private static final String COMMANDS = "<html><body style='margin:0;background:#000'><canvas width=10 height=10></canvas><script>"
+            + "mcgui.command('on-open'); setTimeout(function () { mcgui.command('from-timer'); }, 0);"
+            + "document.addEventListener('keydown', function (e) { if (e.key === 'w') mcgui.command('/pressed'); });"
+            + "</script></body></html>";
+
     private static final String PLAIN = "<html><body style='margin:0;background:#000'><canvas width=100 height=100></canvas></body></html>";
 
     @TempDir
@@ -71,9 +77,10 @@ class ScriptTest {
         Files.writeString(dir.resolve("forever.html"), FOREVER);
         Files.writeString(dir.resolve("plain.html"), PLAIN);
         Files.writeString(dir.resolve("modern.html"), MODERN);
+        Files.writeString(dir.resolve("commands.html"), COMMANDS);
         rig = new SessionRig(dir, 4);
         plugin = rig.plugin(0);
-        for (String name : new String[]{"game", "forever", "plain", "modern"}) assertNotNull(rig.pages.load(name).get(30, TimeUnit.SECONDS));
+        for (String name : new String[]{"game", "forever", "plain", "modern", "commands"}) assertNotNull(rig.pages.load(name).get(30, TimeUnit.SECONDS));
     }
 
     @AfterEach
@@ -112,6 +119,24 @@ class ScriptTest {
         Session s = rig.open(plugin, "modern", COLS, ROWS, H);
         assertTrue(waitFor(() -> green(pixel(s, 50, 50))), "the converted script drew: " + hex(pixel(s, 50, 50)));
         rig.onServer(s::dispose);
+    }
+
+    @Test
+    void commandsRunOnlyFromThePlayersOwnPress() throws Exception {
+        java.util.UUID id = java.util.UUID.randomUUID();
+        SessionRig.PLAYERS.put(id, "Tester");
+        try {
+            SessionRig.COMMANDS.clear();
+            Session s = rig.open(plugin, "commands", COLS, ROWS, H, id);
+            Thread.sleep(500);
+            rig.onServer(() -> s.scriptKey(Key.UP, true));
+            assertTrue(waitFor(() -> SessionRig.COMMANDS.contains("pressed")), "a key press runs it: " + SessionRig.COMMANDS);
+            assertFalse(SessionRig.COMMANDS.contains("on-open"), "not as the page opens");
+            assertFalse(SessionRig.COMMANDS.contains("from-timer"), "not from a timer");
+            rig.onServer(s::dispose);
+        } finally {
+            SessionRig.PLAYERS.remove(id);
+        }
     }
 
     @Test

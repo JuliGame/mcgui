@@ -98,6 +98,9 @@ public final class PageScript {
     private Function onFrame, onKey, onMouse;
     private int logged;
     private long logWindow;
+    /** A click or key press of the player's is being handled (script thread): only then may it run a command. */
+    private boolean activated;
+    private boolean refusedCommand;
 
     /** A canvas on the screen: [rect] in canvas pixels (may reach past the edges), the part of it in view, and the page there. */
     private record Placed(Rectangle rect, Rectangle visible, BufferedImage under) {}
@@ -376,6 +379,8 @@ public final class PageScript {
             cx.putThreadLocal(DEADLINE, t0 + FRAME_LIMIT_NANOS);
             Object[] e;
             while ((e = input.poll()) != null) {
+                // A press, as a browser counts user activation: a key going down, a click. Not a move or a release.
+                activated = "keydown".equals(e[0]) || "mousedown".equals(e[0]) || "click".equals(e[0]) || "contextmenu".equals(e[0]);
                 try {
                     if (e.length == 3) onKey.call(cx, scope, scope, e);
                     else onMouse.call(cx, scope, scope, e);
@@ -383,6 +388,7 @@ public final class PageScript {
                     report(ex);
                 }
                 settle(cx);
+                activated = false;
             }
             try {
                 onFrame.call(cx, scope, scope, new Object[]{now()});
@@ -518,7 +524,17 @@ public final class PageScript {
         fn(n, "command", (c, a) -> {
             String cmd = Context.toString(a[0]).trim();
             if (cmd.startsWith("/")) cmd = cmd.substring(1);
-            if (!cmd.isEmpty()) host.command(cmd);
+            if (cmd.isEmpty()) return null;
+            // Only while the player's own press is being handled, as data-command needs their click: else a page could
+            // run commands as whoever opens it (an op, say) the moment it opens, with nothing on screen to say so.
+            if (!activated) {
+                if (!refusedCommand) {
+                    refusedCommand = true;
+                    say(Level.WARNING, "mcgui.command(\"" + cmd + "\") was not run: a script runs commands only from the player's own click or key press");
+                }
+                return null;
+            }
+            host.command(cmd);
             return null;
         });
         fn(n, "sound", (c, a) -> {

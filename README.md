@@ -334,10 +334,14 @@ exactly as it did before scripts existed.
 | Keys (fullscreen) | `keydown` and `keyup` on `document`, with `e.key` `"w"` `"a"` `"s"` `"d"`, `" "` (jump), `"Control"` (sprint), `"q"` and `"1"` to `"9"`: the keys a seated player has. F still goes back, sneaking still closes the page and a `data-key` still clicks |
 | The mouse | `mousemove`, `mousedown`, `mouseup` and `click` on the canvas, with `offsetX`/`offsetY` in CSS pixels |
 | Pictures | `new Image()` with a `src` in the pages folder, or an `<img>` on the page by id, for `drawImage` |
-| Minecraft | `mcgui.sound("entity.experience_orb.pickup 1 1.5")` plays a sound to the player, `mcgui.command("spawn")` runs a command as them (as `data-command` does), `mcgui.player` is their name |
+| Minecraft | `mcgui.sound("entity.experience_orb.pickup 1 1.5")` plays a sound to the player, `mcgui.command("spawn")` runs a command as them (as `data-command` does), only while their own click or key press is being handled, `mcgui.player` is their name |
 
 A script cannot change the page's HTML or CSS: draw what changes on the canvas
-and keep the rest in the page. There is no network, no Java and no modules, and
+and keep the rest in the page. A command a script asks for at any other moment
+(as the page opens, from a timer) is not run and the console says so, the way a
+browser opens a popup only from a click: else a page could run commands as
+whoever opens it, an op included, with nothing on screen to say so. A reward at
+the end of a game is a "Claim" the player clicks. There is no network, no Java and no modules, and
 scripts load from the pages folder only.
 
 Scripts run in [Rhino](https://github.com/mozilla/rhino), on threads of their
