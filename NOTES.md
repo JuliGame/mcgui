@@ -405,6 +405,24 @@ the improved-transparency fix are in `rigs/ovl/` (`measure.py`).
   warm-up, an animation frame, a hover drawn ahead), how long the last 512 waited for a pool thread and ran.
   `RenderBudget` counts the renders it gave up. Anything new that runs every tick on the server thread belongs
   inside the metered tasks.
+- **`/mcgui debug <player> trace on` times each open on a live server** (`framework/OpenTrace`; the README's "If
+  menus open slowly" is what server owners are told to run). One log line per open, in ms from the command:
+  page loaded, render queued/started/done (`Session.submit`'s job, or "kept" when `adopt` took a first picture),
+  tiles written (first and last write `MapSender.write` saw land for that player, raw bytes, and what of them
+  `SharedCompression` sized), all written (`Views.show` saw `delivered`), an overlay's take and its pong, the frames
+  sent (`reveal`/`keep`), and `client confirmed`: a ping sent after them, answered (`shownTo`). With the
+  player's ping, the connection's compression in words (`SharedCompression.describe`: the threshold and why shared
+  compression refuses it), the client version, server software and Paper's tick time, and the proxy forwarding the
+  server is set up for (Paper's `GlobalConfiguration` Velocity switch, Spigot's `bungee`). While it is on for a
+  player, a counting handler sits just in front of `prepender` in their connection (`connection sent`: every byte
+  on the wire meanwhile): head-side of `prepender`, where `SharedCompression`'s checks never look. Off, every hook
+  is one read of a static volatile (`OpenTrace.of`), with no clock read and nothing allocated; keep it that way
+  when adding one (the `MapSender.write` callback is per batch, the render job's per picture). The server only
+  sees the socket take the bytes: behind a slow link they leave the server at once and take their time on the
+  way, which only `client confirmed` shows (all written 61 ms, confirmed 797 ms, on a first open at 4 Mbit/s).
+  Checked against the real client (`rigs/dlv/tracecheck.py`, a 1.21.11 client through `lagproxy.py` at
+  100 ms each way and 4 Mbit/s): the page was on screen 10 to 45 ms after `client confirmed` on reopens and first
+  opens alike, a frame or two plus the wait for the tick that ran the command.
 - **Nothing runs at rest, and a quiet tick allocates next to nothing.** With nobody at a screen the send loop sleeps,
   the arcade's loop is stopped, a cabinet nobody is in range of pauses, and the page loader threads time out.
   A tick in which nobody comes, goes or changes what they look at reuses the last tick's lists: `Walls.viewers`
@@ -762,6 +780,18 @@ Reading a position, a world or a UUID is fine from anywhere. How MC GUI copes, a
   100 ms after the client had the signature (`Views.taken`, the round trip
   counting towards it): the client must have drawn a frame with the glowing
   switch before the panel reaches it, or the panel is in the picture taken.
+  If the ping never comes back the keep waits out `KEEP_TIMEOUT` (1 s): an
+  overlay then opens exactly a second after the command, the world plain for
+  that second (a server owner, 2026-10-27, on localhost). A plugin that drops pongs
+  between the game's `decoder` and `packet_handler`, where packet plugins
+  sit, does that (reproduced with a test plugin on Paper 1.21.11-132 and 26.2:
+  985–1007 ms, against 146–183 ms). So `Pipeline` puts its pong handler
+  straight after `decoder`, ahead of every other plugin's handler, and keeps
+  when each player last answered: once one of their pings has gone a second
+  unanswered (`Pipeline.pongsLost`), the take counts its pong as back a ping
+  after it went (the panel goes 100 ms after the take) and the keep's
+  alignment gives them their ping and two ticks. The open trace says
+  "pongs lost" when that happens.
   So an overlay opens two round trips after the command, a fullscreen page
   one (see "A view opens as soon as its picture is out", below). A new window
   size drops the persistent target (alpha 0),
@@ -1110,5 +1140,6 @@ Reading a position, a world or a UUID is fine from anywhere. How MC GUI copes, a
 
 `/mcgui test wall` and `/mcgui test view` need nothing else installed.
 `/mcgui debug <player> point|click|scroll|speed|close` drives a view from the
-console, which is how a harness tests one without anybody at the mouse. The
-shaders can only be judged in the real client.
+console, which is how a harness tests one without anybody at the mouse, and
+`/mcgui debug <player> trace on` logs where each of their opens spent its time.
+The shaders can only be judged in the real client.

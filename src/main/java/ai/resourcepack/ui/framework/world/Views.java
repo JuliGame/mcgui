@@ -2,6 +2,7 @@ package ai.resourcepack.ui.framework.world;
 
 import ai.resourcepack.ui.framework.platform.Platform;
 import ai.resourcepack.ui.framework.platform.Threads;
+import ai.resourcepack.ui.framework.OpenTrace;
 import ai.resourcepack.ui.framework.Settings;
 import ai.resourcepack.ui.framework.api.Canvas;
 import ai.resourcepack.ui.framework.api.Click;
@@ -419,6 +420,9 @@ public final class Views implements Listener {
 
     public View open(Player player, ViewContent content, ViewOptions options) {
         close(player, CloseReason.CLOSED);
+        // A page's open began its trace already (Screens.open); any other view's begins here.
+        OpenTrace.Open trace = OpenTrace.of(player.getUniqueId());
+        if (OpenTrace.on() && (trace == null || trace.attached())) trace = OpenTrace.begin(player, "a view");
         Canvas canvas = content.canvas();
         double fov = viewFov(player, STRETCHED_FIT);
         Location from = player.getLocation();
@@ -533,6 +537,7 @@ public final class Views implements Listener {
 
         ViewImpl view = new ViewImpl(player, content, canvas, wall, options, clientPointer, keeps, speed, vehicle, seat, camera, target, pointer, glow, from, cam, layers);
         views.put(player.getUniqueId(), view);
+        if (trace != null) trace.view(view, keeps ? "overlay" : options.overlay() ? "overlay, world live round it" : "fullscreen");
         waiting.add(view);
         // Remembered on the player, so a crash mid-view cannot leave them stuck in adventure mode or in the ground.
         player.getPersistentDataContainer().set(seatKey, PersistentDataType.STRING, player.getGameMode().name());
@@ -873,6 +878,8 @@ public final class Views implements Listener {
      */
     private boolean show(Player p, ViewImpl v, int now) {
         if (now < v.deadline && !sender.delivered(v.player, v.wall)) return false;
+        OpenTrace.Open trace = OpenTrace.of(v.player);
+        if (trace != null && trace.of(v)) trace.mark(OpenTrace.Open.DELIVERED);
         if (v.keeps) {
             // Taking the world since it opened (see take): kept once the client has had long enough with the
             // signature, or at the latest when keepBy is up.
@@ -938,8 +945,20 @@ public final class Views implements Listener {
         v.wall.showSignature(p);
         p.showEntity(plugin, v.glow);
         v.takeSentAt = System.nanoTime();
+        OpenTrace.Open trace = OpenTrace.of(v.player);
+        if (trace != null && trace.of(v)) trace.mark(OpenTrace.Open.TAKE_SENT);
+        if (pipeline.pongsLost(v.player)) {
+            // Their answers never reach us (another plugin keeps pongs from the handler): rather than wait out keepBy
+            // for one, count it as back a round trip (their ping) after it went, so the panel goes 100 ms after the take.
+            long rtt = p.getPing() * 1_000_000L;
+            v.takeRtt = rtt;
+            v.takenAt = v.takeSentAt + rtt;
+            if (trace != null && trace.of(v)) trace.note("pongs lost: their pings go unanswered, so the take's answer is not waited for");
+        }
         pipeline.afterClientCaughtUp(p, () -> {
             long now = System.nanoTime();
+            if (trace != null && trace.of(v)) trace.mark(OpenTrace.Open.TAKE_PONG);
+            if (v.takenAt != Long.MIN_VALUE) return; // counted as back already (pongsLost)
             v.takeRtt = now - v.takeSentAt;
             v.takenAt = now;
             look(v);
@@ -969,7 +988,8 @@ public final class Views implements Listener {
      */
     private void keep(Player p, ViewImpl v) {
         v.stage = 2;
-        v.keepBy = Platform.tick() + SETTLE_TIMEOUT;
+        // Until the client has taken the turn below; a player whose pongs are lost is given their ping and two ticks.
+        v.keepBy = Platform.tick() + (pipeline.pongsLost(v.player) ? 2 + p.getPing() / 50 : SETTLE_TIMEOUT);
         v.aligning = true;
         v.serverTurns.incrementAndGet();
         v.revealed = true;
@@ -989,6 +1009,7 @@ public final class Views implements Listener {
             v.aligning = false;
             v.serverTurns.incrementAndGet();
         });
+        shownTo(p, v);
     }
 
     /** A kept overlay's signature flags: blur if asked, and kept once it has been taken. */
@@ -1043,6 +1064,17 @@ public final class Views implements Listener {
                 Platform.actionBar(p, Component.empty());
             }, 5);
         }
+        shownTo(p, v);
+    }
+
+    /** A traced open's view went out: its line is logged once the client answers the ping sent after it. */
+    private void shownTo(Player p, ViewImpl v) {
+        OpenTrace.Open trace = OpenTrace.of(v.player);
+        if (trace == null || !trace.of(v)) return;
+        trace.mark(OpenTrace.Open.SHOWN);
+        pipeline.afterClientCaughtUp(p, trace::confirmed);
+        // Logged anyway if the answer never comes (pongs lost).
+        Threads.onLater(plugin, p, () -> trace.finish("the client's answer to the check after the view never came (5 s)"), 100);
     }
 
     /**
@@ -1478,6 +1510,8 @@ public final class Views implements Listener {
         if (v == null) return;
         v.closed = true;
         waiting.remove(v);
+        OpenTrace.Open trace = OpenTrace.of(player.getUniqueId());
+        if (trace != null && trace.of(v) && !v.revealed) trace.finish("closed (" + reason + ") before it was shown");
         pipeline.unwatch(player.getUniqueId());
         // The player first, and the content after: a content that throws must never leave them seated,
         // invisible and hidden, with the view already gone so that nothing could close it again.

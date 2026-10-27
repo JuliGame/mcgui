@@ -128,6 +128,7 @@ public final class Framework implements UIFramework, Listener {
         pipeline = new Pipeline(nms, plugin.getLogger());
         wire = new ServerWire(nms, pipeline, settings.sharedCompression ? SharedCompression.create(ServerWire.packets(nms), plugin.getLogger()) : null);
         sender = new MapSender(wire, settings.bytesPerSecond, plugin.getLogger());
+        OpenTrace.start(plugin.getLogger(), nms, wire, sender);
         views = new Views(plugin, settings, nms, pipeline, sender, palette, settings.mapIdBase);
         walls = new Walls(plugin, nms, settings.mapIdBase + Views.VIEW_ID_SPAN, settings.viewDistance, settings.reach, views::seated, views::hides);
         serverThread = Threads.server(plugin, nms.serverThread());
@@ -150,6 +151,7 @@ public final class Framework implements UIFramework, Listener {
     /** Stops it: closes every view, takes down every wall, stops serving the pack. */
     public void disable() {
         UIFramework.Holder.set(null);
+        OpenTrace.stop();
         tasks.forEach(Tasks.Handle::cancel);
         tasks.clear();
         if (playerTicks != null) playerTicks.stop();

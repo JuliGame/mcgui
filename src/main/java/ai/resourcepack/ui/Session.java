@@ -1,5 +1,6 @@
 package ai.resourcepack.ui;
 
+import ai.resourcepack.ui.framework.OpenTrace;
 import ai.resourcepack.ui.framework.platform.Platform;
 import ai.resourcepack.ui.framework.platform.Threads;
 import ai.resourcepack.ui.framework.api.Canvas;
@@ -831,7 +832,11 @@ public final class Session {
         // asks for, and an animation's next moment (which differs from the last by time alone) after the rest.
         Renders.Kind kind = frame == null || frame.page() != p ? Renders.Kind.SHOW
                 : animating && sameView(p, held, s, fragment, scale, hoverKey, pressKey) ? Renders.Kind.MOTION : Renders.Kind.PICTURE;
+        OpenTrace.Open trace = OpenTrace.of(viewer);
+        if (trace != null) trace.mark(OpenTrace.Open.QUEUED);
         renderers.execute(kind, () -> {
+            OpenTrace.Open traced = OpenTrace.of(viewer);
+            if (traced != null) traced.mark(OpenTrace.Open.STARTED);
             boolean published = false, drawnAhead = false, shareSettled = false, tookTheirs = false;
             Motion m = moving;
             if (m != null) {
@@ -1050,6 +1055,7 @@ public final class Session {
                     if (js != null) paintLock.unlock();
                 }
                 drawnHover = hoverKey;
+                if (traced != null) traced.mark(OpenTrace.Open.DRAWN);
                 drawnPress = pressKey;
                 drawnMoved = m != null ? m.moved() : Set.of();
                 drawnName = name;
@@ -1352,6 +1358,8 @@ public final class Session {
         long t0 = System.nanoTime();
         HtmlRenderer.Frame f = picture.frame;
         canvas.show(picture.canvas);
+        OpenTrace.Open trace = OpenTrace.of(viewer);
+        if (trace != null) trace.mark(OpenTrace.Open.KEPT);
         // A copy of the same page filled with the same values, with nothing hovered, pressed or clicked: the very same document.
         doc = picture.document();
         borrowed = f.image();

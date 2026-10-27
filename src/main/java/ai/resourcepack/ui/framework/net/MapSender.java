@@ -1,6 +1,7 @@
 package ai.resourcepack.ui.framework.net;
 
 import ai.resourcepack.ui.framework.api.Canvas;
+import ai.resourcepack.ui.framework.OpenTrace;
 import ai.resourcepack.ui.framework.world.MapPool;
 import ai.resourcepack.ui.framework.world.MapWall;
 import org.bukkit.entity.Player;
@@ -209,6 +210,14 @@ public final class MapSender implements AutoCloseable {
         held.remove(player);
         Viewer v = viewers.remove(player);
         if (v != null) left.put(player, new long[]{v.budget, System.nanoTime()});
+    }
+
+    /** How many maps [player]'s client holds from the sender, on screens now or kept from before (for a trace). */
+    public long held(UUID player) {
+        Viewer v = viewers.get(player);
+        if (v != null) return v.sent.size();
+        Held h = held.get(player);
+        return h == null ? 0 : h.tiles.size();
     }
 
     /** [run] is run whenever a pass ends or a write lands, on whichever thread that was: something may be delivered now. */
@@ -726,6 +735,7 @@ public final class MapSender implements AutoCloseable {
             queued = wire.write(player, packets, together, ok -> {
                 if (ok) bytesSent.addAndGet(cost);
                 else forget(v, patches);
+                if (ok && OpenTrace.on()) traced(OpenTrace.of(player.getUniqueId()), packets, patches.size(), cost);
                 landed(v, patches, cost);
             });
         } finally {
@@ -735,6 +745,21 @@ public final class MapSender implements AutoCloseable {
                 landed(v, patches, cost);
             }
         }
+    }
+
+    /** A traced player's [patches] patches went out in [packets], [cost] map bytes in all: what of them was compressed for all. */
+    private void traced(OpenTrace.Open trace, List<Object> packets, int patches, long cost) {
+        if (trace == null) return;
+        long wireBytes = 0;
+        int shared = 0;
+        for (Object p : packets) {
+            long size = wire.wireBytes(p);
+            if (size >= 0) {
+                wireBytes += size;
+                shared++;
+            }
+        }
+        trace.written(cost, wireBytes, patches, shared);
     }
 
     /**

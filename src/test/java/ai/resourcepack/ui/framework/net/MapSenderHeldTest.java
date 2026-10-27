@@ -83,6 +83,18 @@ class MapSenderHeldTest {
         assertTrue(sender.delivered(again));
     }
 
+    /** What an open trace says the client holds: nothing at first, the page once shown and after leaving, nothing after a reset. */
+    @Test
+    void heldCountsTheMapsTheClientHas() {
+        assertEquals(0, sender.held(player.getUniqueId()));
+        show();
+        assertEquals(COLS * ROWS, sender.held(player.getUniqueId()));
+        leave();
+        assertEquals(COLS * ROWS, sender.held(player.getUniqueId()), "kept for a reopen");
+        sender.reset(player.getUniqueId());
+        assertEquals(0, sender.held(player.getUniqueId()));
+    }
+
     /** A new view's wall at the same ids, given [page]: tiles sent until it is delivered. */
     private int show() {
         client.sent = 0;

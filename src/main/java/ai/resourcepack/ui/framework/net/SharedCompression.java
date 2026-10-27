@@ -459,18 +459,39 @@ public final class SharedCompression implements AutoCloseable {
      * only, so it can run on any thread; [say] tells the log, once for each reason, why a connection cannot.
      */
     private Route route(Channel channel, boolean say) {
+        Object checked = check(channel);
+        return checked instanceof String why ? refuse(say, why) : (Route) checked;
+    }
+
+    /** For a trace: whether [channel] compresses, from what size, and whether it takes the patches compressed here. */
+    String describe(Channel channel) {
+        ChannelHandler compress = channel.pipeline().get(compressName);
+        String level;
+        try {
+            level = compress == null ? "not compressed" : compress.getClass() == compressClass
+                    ? "compressed from " + (int) threshold.invoke(compress) + " bytes" : "compressed by " + compress.getClass().getName();
+        } catch (Throwable t) {
+            throw Nms.rethrow(t);
+        }
+        Object checked = check(channel);
+        return level + (checked instanceof Route ? ", shared compression used"
+                : checked instanceof String why ? ", shared compression not used: " + why : ", shared compression not ready yet");
+    }
+
+    /** {@link #route}'s answer: the route, why there is none (a string), or null for a moment (switching protocol). */
+    private Object check(Channel channel) {
         if (!channel.getClass().getName().startsWith("io.netty.")) {
-            return refuse(say, "its channel is a " + channel.getClass().getName() + " (a plugin wraps the connection)");
+            return "its channel is a " + channel.getClass().getName() + " (a plugin wraps the connection)";
         }
         ChannelPipeline p = channel.pipeline();
         List<String> names = p.names();
         int at = names.indexOf(compressName);
         ChannelHandler compress = at < 0 ? null : p.get(compressName);
-        if (compress == null) return refuse(say, "it is not compressed (network-compression-threshold is -1)");
-        if (compress.getClass() != compressClass) return refuse(say, "its compression is " + compress.getClass().getName());
+        if (compress == null) return "it is not compressed (network-compression-threshold is -1)";
+        if (compress.getClass() != compressClass) return "its compression is " + compress.getClass().getName();
         ChannelHandler prepender = p.get(prependerName);
         if (at == 0 || !prependerName.equals(names.get(at - 1)) || prepender == null || prepender.getClass() != prependerClass) {
-            return refuse(say, "something sits between its compression and its framing");
+            return "something sits between its compression and its framing";
         }
         Object encoder = null;
         for (int i = at + 1; i < names.size(); i++) {
@@ -481,7 +502,7 @@ public final class SharedCompression implements AutoCloseable {
             if (k == encoderClass && name.equals(encoderName)) encoder = h;
             else if (k == unbundlerClass || k == connectionClass || h instanceof LeavesMapsAlone) continue;
             else if (name.equals(HACKFIX) && k.getName().startsWith(connectionClass.getName() + "$")) continue;
-            else return refuse(say, "handler '" + name + "' (" + k.getName() + ") sees its packets on their way out and would not see map pictures");
+            else return "handler '" + name + "' (" + k.getName() + ") sees its packets on their way out and would not see map pictures";
         }
         if (encoder == null) return null; // not in a protocol yet, or switching (configuration): for a moment
         try {

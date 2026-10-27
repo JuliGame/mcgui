@@ -1,5 +1,6 @@
 package ai.resourcepack.ui;
 
+import ai.resourcepack.ui.framework.OpenTrace;
 import ai.resourcepack.ui.framework.platform.Platform;
 import ai.resourcepack.ui.framework.platform.Threads;
 import ai.resourcepack.ui.framework.api.Canvas;
@@ -381,20 +382,30 @@ public final class Screens implements Listener {
     public boolean open(Player player, String page, Consumer<String> problem) {
         String n = plugin.pages().normalise(page);
         if (n == null || !plugin.pages().exists(n)) return false;
+        // Timed from here for a traced player (/mcgui debug <player> trace on).
+        OpenTrace.begin(player, n);
         if (!Threads.owns(player) && Threads.folia()) {
             // Folia: seated from their own thread, as soon as it runs.
             Threads.on(plugin, player, () -> {
                 try {
-                    if (!open(player, page, problem)) problem.accept("No page called '" + page + "'.");
+                    if (!openNow(player, n, problem)) problem.accept("No page called '" + page + "'.");
                 } catch (IllegalStateException e) {
                     problem.accept(e.getMessage());
                 }
             });
             return true;
         }
+        return openNow(player, n, problem);
+    }
+
+    /** {@link #open} on the player's own thread, page [n] by its normalised name. */
+    private boolean openNow(Player player, String n, Consumer<String> problem) {
+        if (!plugin.pages().exists(n)) return false;
         UUID id = player.getUniqueId();
         Page p = plugin.pages().loaded(n);
         if (p != null) {
+            OpenTrace.Open trace = OpenTrace.of(id);
+            if (trace != null) trace.loadedAlready();
             opening.remove(id);
             return seat(player, n, p);
         }
@@ -404,8 +415,10 @@ public final class Screens implements Listener {
             if (!opening.remove(id, ticket)) return;
             Player now = Bukkit.getPlayer(id);
             if (now == null) return;
+            OpenTrace.Open trace = OpenTrace.of(id);
+            if (trace != null) trace.mark(OpenTrace.Open.LOADED);
             try {
-                if (loaded == null || !seat(now, n, loaded)) problem.accept("Could not open '" + page + "': see the console.");
+                if (loaded == null || !seat(now, n, loaded)) problem.accept("Could not open '" + n + "': see the console.");
             } catch (IllegalStateException e) {
                 problem.accept(e.getMessage());
             }

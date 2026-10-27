@@ -81,10 +81,10 @@ permissions:
     description: Remove every test wall, whoever placed it, with /mcgui clear.
     default: op
   mcgui.debug:
-    description: Drive your own open view with /mcgui debug (point, click, scroll, speed, close), for testing.
+    description: Drive your own open view with /mcgui debug (point, click, scroll, speed, close), for testing, and trace your own opens (trace on|off).
     default: op
   mcgui.debug.others:
-    description: Drive another player's open view with /mcgui debug <player>.
+    description: Drive another player's open view, or trace their opens, with /mcgui debug <player>.
     default: op
   mcgui.fov:
     description: Fit views to your field of view with /mcgui fov.

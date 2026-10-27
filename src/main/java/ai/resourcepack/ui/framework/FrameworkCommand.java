@@ -159,14 +159,23 @@ public final class FrameworkCommand implements TabExecutor {
      * /mcgui debug &lt;player&gt; point &lt;x&gt; &lt;y&gt; | click [right] | scroll &lt;notches&gt; | speed | layer
      * &lt;left&gt; &lt;top&gt; &lt;right&gt; &lt;bottom&gt; [rrggbb] | layer clear | close: drive a player's view from the
      * console, for testing without anybody at the mouse. A debug layer is a block of colour over that rectangle that
-     * their client shows while its pointer is in it.
+     * their client shows while its pointer is in it. /mcgui debug &lt;player&gt; trace on|off: a line in the log for
+     * each page or view they open, saying where its time went (OpenTrace); needs no open view.
      */
     private void debug(CommandSender sender, String[] args) {
         Player p = args.length > 1 ? org.bukkit.Bukkit.getPlayerExact(args[1]) : null;
+        if (p != null && args.length > 2 && args[2].equalsIgnoreCase("trace")) {
+            if (p != sender && !permitted(sender, othersPermissionFor("debug"))) return;
+            boolean on = args.length > 3 ? args[3].equalsIgnoreCase("on") : !OpenTrace.traced(p.getUniqueId());
+            OpenTrace.trace(p.getUniqueId(), on);
+            say(sender, on ? "Each page or view " + p.getName() + " opens now logs one line, \"Open trace: ...\", in the server's console"
+                    + " (until /mcgui debug " + p.getName() + " trace off or a restart)." : "No longer tracing " + p.getName() + "'s opens.", NamedTextColor.GRAY);
+            return;
+        }
         View view = p == null ? null : plugin.viewOf(p);
         if (view == null || args.length < 3) {
-            say(sender, "/mcgui debug <player> point <x> <y> | click [right] | scroll <n> | speed | layer <l> <t> <r> <b> [rrggbb] | layer clear | close"
-                    + " (the player needs an open view)", NamedTextColor.RED);
+            say(sender, "/mcgui debug <player> trace on|off | point <x> <y> | click [right] | scroll <n> | speed | layer <l> <t> <r> <b> [rrggbb]"
+                    + " | layer clear | close (all but trace need an open view)", NamedTextColor.RED);
             return;
         }
         if (p != sender && !permitted(sender, othersPermissionFor("debug"))) return;

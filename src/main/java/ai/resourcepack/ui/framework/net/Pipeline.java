@@ -35,6 +35,8 @@ public final class Pipeline {
     private static final String FILTER = "uiengine_conceal";
     private static final String FRAMES = "uiengine_frames";
     private static final String USES = "uiengine_uses";
+    /** HandlerNames.DECODER: packets, decoded, come out of it. */
+    private static final String DECODER = "decoder";
     /** The player's own 36 slots, which every container other than the inventory itself ends with. */
     private static final int PLAYER_SLOTS = 36;
 
@@ -73,7 +75,26 @@ public final class Pipeline {
         default void dropped() {}
     }
 
-    private record Pending(UUID player, Runnable then) {}
+    private record Pending(UUID player, Runnable then, long sentAt) {}
+
+    /** When each player last answered one of the engine's pings (nanoTime): see {@link #pongsLost}. */
+    private final Map<UUID, Long> answered = new ConcurrentHashMap<>();
+    /** How long a ping may go unanswered before the player's pongs count as lost. */
+    private static final long LOST_NANOS = 1_000_000_000L;
+
+    /**
+     * Whether [player]'s answers to the engine's pings are not reaching it: one has been waited for over a second, and
+     * nothing they answered came back since it was sent. Something in their connection (another plugin, a proxy)
+     * keeps the pongs from the handler; whatever waits for them should not wait for them again.
+     */
+    public boolean pongsLost(UUID player) {
+        long now = System.nanoTime();
+        Long last = answered.get(player);
+        for (Pending w : waiting.values()) {
+            if (w.player.equals(player) && now - w.sentAt > LOST_NANOS && (last == null || last - w.sentAt < 0)) return true;
+        }
+        return false;
+    }
 
     /**
      * Hand [player]'s turning to [mouse] as each packet arrives rather than a tick later, and stop the
@@ -118,7 +139,7 @@ public final class Pipeline {
         Channel channel = nms.channel(player);
         if (channel == null) return;
         int id = pingIds.incrementAndGet();
-        waiting.put(id, new Pending(player.getUniqueId(), then));
+        waiting.put(id, new Pending(player.getUniqueId(), then, System.nanoTime()));
         channel.eventLoop().execute(() -> {
             ChannelPipeline p = channel.pipeline();
             if (!ours(p.get(PONGS))) install(p, PONGS, new Pongs());
@@ -135,7 +156,10 @@ public final class Pipeline {
             Integer id = nms.pongId(msg);
             if (id != null) {
                 Pending w = waiting.remove(id);
-                if (w != null) w.then.run();
+                if (w != null) {
+                    answered.put(w.player, System.nanoTime());
+                    w.then.run();
+                }
             }
             ctx.fireChannelRead(msg);
         }
@@ -219,6 +243,7 @@ public final class Pipeline {
         filters.remove(player);
         // A ping the player never answered would otherwise keep its view, canvas and all, for good.
         waiting.values().removeIf(w -> w.player.equals(player));
+        answered.remove(player);
     }
 
     /**
@@ -236,10 +261,14 @@ public final class Pipeline {
     /**
      * Puts [handler] in as [name], in place of any other handler of that name. False if the anchor is
      * missing, which happens only once netty has torn the channel down; then there is nothing to handle.
+     * The pongs' handler goes straight after the game's decoder, before any other plugin's handler: one that
+     * drops or holds back pongs it did not ask for (seen as overlays waiting a whole second for theirs) never
+     * gets between the engine and its answers.
      */
     private boolean install(ChannelPipeline p, String name, ChannelHandler handler) {
         if (p.get(nms.packetHandlerName) == null) return false;
         if (p.get(name) != null) p.replace(name, name, handler);
+        else if (name.equals(PONGS) && p.get(DECODER) != null) p.addAfter(DECODER, name, handler);
         else p.addBefore(nms.packetHandlerName, name, handler);
         return true;
     }

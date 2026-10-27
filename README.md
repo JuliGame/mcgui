@@ -70,6 +70,7 @@ depends on `UIEngine` still loads.
 | `/mcgui pointer [speed]` | Your pointer speed in views, 0.25 to 4 times the server's (`views.pointer-speed`); without a number, shows it and the mouse sensitivity read from your turning |
 | `/mcgui pack` · `stats` · `clear` | Re-send the pack · what the plugin costs the server now (see below) · remove test walls |
 | `/mcgui debug <player> point <x> <y>` · `click` · `scroll <n>` · `speed` · `close` | Drive a player's view from the console; `speed` shows its pointer speed and where it came from |
+| `/mcgui debug <player> trace on\|off` | Log one line for each page the player opens, saying where its time went (see "If menus open slowly") |
 
 ### Permissions
 
@@ -91,8 +92,8 @@ node as well.
 | `mcgui.test.others` | `/mcgui test ... <player>` for somebody else | op |
 | `mcgui.stats` | `/mcgui stats` | op |
 | `mcgui.clear` | `/mcgui clear` (removes every test wall, whoever placed it) | op |
-| `mcgui.debug` | `/mcgui debug` on your own view | op |
-| `mcgui.debug.others` | `/mcgui debug` on another player's view | op |
+| `mcgui.debug` | `/mcgui debug` on your own view, and tracing your own opens | op |
+| `mcgui.debug.others` | `/mcgui debug` on another player's view or opens | op |
 | `mcgui.fov` | `/mcgui fov` | everyone |
 | `mcgui.pointer` | `/mcgui pointer` | everyone |
 | `mcgui.pack` | `/mcgui pack` | everyone |
@@ -480,6 +481,54 @@ maps apart, so going between them does not resend either.
 
 Leave `network-compression-threshold` in `server.properties` at its default (256).
 At -1 (no compression) the same first opens took 5 seconds on that link.
+
+## If menus open slowly
+
+MC GUI can time each page a player opens and write one line about it to the
+server's console. That line tells us where the time went: the server, the
+network or the player's game. To capture it:
+
+1. Run `/mcgui debug <player> trace on`, from the console or in game, for a player
+   who sees the delay. It needs `mcgui.debug`, plus `mcgui.debug.others` to trace
+   somebody else.
+2. Have that player open the slow menu the way they always do, four or five
+   times, a few seconds apart. Also do it once straight after they join, and once
+   after a menu of the other kind (fullscreen or overlay) if you use both.
+3. Run `/mcgui debug <player> trace off`. A restart turns it off too.
+4. Send us every line containing `Open trace:` from `logs/latest.log`, and say
+   roughly how long each open felt.
+
+Tracing costs nothing while it is off, and only the traced player's opens are
+timed while it is on.
+
+Each line gives times in milliseconds from when the server ran the open
+command:
+
+| Part | What it means |
+|---|---|
+| `page loaded` | The page file was read (0 and "was loaded" if it was in memory already) |
+| `render queued`, `started`, `done` | The picture waited for a drawing thread, then was drawn. A large `done` means a heavy page or a busy server. "picture kept from an earlier open" means one already drawn was reused |
+| `tiles written` | The first and last map pictures handed to the connection, how many, and how big before and after compression. "none" means the player's game still had them all |
+| `all written` | The whole picture is out of the server |
+| `take sent`, `its pong` | Overlays only: the player's game is asked to capture the world behind the menu and answers. One round trip |
+| `frames and camera sent` (`panel and frames sent` for an overlay) | The menu is on its way |
+| `client confirmed` | The player's game answered a check sent straight after the menu, so it had the whole menu by then. Players see the menu at about this time after they ran the command |
+| `connection sent` | Everything the connection sent meanwhile, compressed, as it went out |
+| `ping`, `connection`, `client`, `server`, `proxy` | The player's ping, whether the connection is compressed (and whether MC GUI could compress its pictures once for every player, or what stopped it), their game version, the server software and its average tick time, and whether a Velocity or BungeeCord proxy forwards players to this server |
+
+How to read it: if `client confirmed` is about `frames ... sent` plus the ping,
+the time is the network's round trip and nothing is wrong on the server. If it is
+much later than that, the connection is slow to carry the pictures (look at
+`connection sent`) or the player's game is busy. If `render ... done` or
+`all written` are large, the server is the slow part. `its pong -` or "pongs
+lost" means another plugin keeps the player's answers from MC GUI. Overlays no
+longer wait a second for them, but tell us which plugins you run.
+
+`client confirmed` includes the check's trip back to the server, which takes
+about as long as the command's trip there, so it is close to what the player
+sees from pressing the key. On a test client 100 ms each way from the server,
+with a 4 Mbit/s link, the menu was on screen within 40 ms of it (a frame or two,
+and up to one server tick before the command ran).
 
 ## Frame rate
 

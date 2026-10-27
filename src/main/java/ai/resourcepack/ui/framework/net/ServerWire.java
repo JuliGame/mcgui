@@ -70,6 +70,14 @@ public final class ServerWire implements Wire, AutoCloseable {
         return packet instanceof SharedCompression.Compressed c ? c.frame.length : -1;
     }
 
+    /** For a trace: how [player]'s connection compresses, and whether map patches are compressed once for all here. */
+    public String compression(Player player) {
+        Channel channel = nms.channel(player);
+        if (channel == null) return "unknown (no connection)";
+        if (shared != null) return shared.describe(channel);
+        return (channel.pipeline().get("compress") == null ? "not compressed" : "compressed") + ", shared compression off in config.yml";
+    }
+
     @Override
     public Object repoint(MapWall wall, int tile, int mapId) {
         int entity = wall.entityId(tile);
