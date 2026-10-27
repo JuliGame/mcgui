@@ -287,6 +287,8 @@ public final class Views implements Listener {
         /** A pointer report is waiting for the server thread (see turned). */
         final java.util.concurrent.atomic.AtomicBoolean reportQueued = new java.util.concurrent.atomic.AtomicBoolean();
         boolean pinged;
+        /** The turn hint the client's pointer was last given ({@link Shaders#turnHint}), or -1 for none yet. Under the view's lock. */
+        int turnHint = -1;
         /** The hover layers' {@code changes()} their frames on the client last matched (see frameLayers). */
         int layersFramed;
         volatile boolean revealed, closed;
@@ -441,7 +443,9 @@ public final class Views implements Listener {
             seat = cam.clone().subtract(0, standingEyeHeight(player), 0);
         }
         // On their client only, and not yet: the maps go out first, and the frames only appear once they can show them.
-        wall.spawnFor(nms, player, clientPointer ? stackBlock(cam) : null);
+        // In the camera's block whatever the pointer, so no camera turn culls them: F5's view from the front turns a
+        // mannequin camera half round as much as a player's own (the maps place themselves, HI_TILED).
+        wall.spawnFor(nms, player, MapWall.Stack.at(cam));
         double speed = speedFor(player, canvas, clientPointer);
         LayerSet layers = null;
         // After the tiles' ids and an overlay's signature's (MapWall.signatureMapId).
@@ -450,7 +454,7 @@ public final class Views implements Listener {
             // Hover layers carry the speed to the shader in steps: the server's cursor goes by the same.
             speed = Shaders.layerSpeed(speed);
             MapWall row = new MapWall(world, wall.anchorX, wall.anchorY, wall.anchorZ, wall.facing, layerMaps, 1, firstMapId + canvas.tiles() + 1);
-            row.spawnFor(nms, player, stackBlock(cam));
+            row.spawnFor(nms, player, MapWall.Stack.at(cam));
             int side = (wall.facing.getModZ() != 0 ? Palette.LAYER_ALONG_Z : 0)
                     | (wall.facing.getModX() + wall.facing.getModZ() > 0 ? Palette.LAYER_LOOKS_NEGATIVE : 0);
             layers = new LayerSet(palette, new Canvas(palette, layerMaps, 1, sender::wake), row, canvas.cols(), canvas.rows(), speed, side);
@@ -459,7 +463,7 @@ public final class Views implements Listener {
         // With a client-placed pointer the camera is the player's own eye, which turns with the mouse:
         // they are held where it is on the flagged spot (see reveal). Otherwise a camera entity looks at
         // the wall and they sit out of the way.
-        LivingEntity camera = clientPointer ? null : spawnCamera(cam);
+        LivingEntity camera = clientPointer ? null : fixDistance(spawnCamera(cam));
         ArmorStand vehicle = clientPointer ? null : world.spawn(cam.clone().subtract(cam.getDirection().multiply(1.5)).subtract(0, 1.6, 0), ArmorStand.class, a -> {
             a.setMarker(true);
             a.setInvisible(true);
@@ -482,19 +486,19 @@ public final class Views implements Listener {
             i.setVisibleByDefault(false);
         });
         Location pointerAt = cam.clone();
-        if (clientPointer) {
-            // Ahead on the flagged axis, square to it and facing the camera; its distance tells the shader the speed.
-            pointerAt.add(cam.getDirection().multiply(Shaders.clientPointerDistance(speed)));
-            pointerAt.setYaw(MapWall.yawFacing(wall.facing.getModX(), wall.facing.getModZ()));
-            pointerAt.setPitch(0);
-        }
+        // Ahead on the flagged axis for a client-placed pointer, where its distance tells the shader the speed. Either
+        // pointer is square to the axis, facing the camera, never turned to it: F5's view from the front turns the
+        // camera half round, and the shader turns the server's pointer with it (a billboard would face it already).
+        if (clientPointer) pointerAt.add(cam.getDirection().multiply(Shaders.clientPointerDistance(speed)));
+        pointerAt.setYaw(MapWall.yawFacing(wall.facing.getModX(), wall.facing.getModZ()));
+        pointerAt.setPitch(0);
         TextDisplay pointer = world.spawn(pointerAt, TextDisplay.class, d -> {
-            // Spigot spawns a display without the location's rotation (Paper keeps it), and a client-placed pointer must
-            // be square to its axis: one left facing south is drawn stretched as the camera turns.
+            // Spigot spawns a display without the location's rotation (Paper keeps it), and the pointer must be square
+            // to its axis: one left facing south is drawn stretched as the camera turns.
             d.setRotation(pointerAt.getYaw(), pointerAt.getPitch());
             d.setBackgroundColor(org.bukkit.Color.fromARGB(0));
             d.setShadowed(false);
-            d.setBillboard(clientPointer ? Display.Billboard.FIXED : Display.Billboard.CENTER);
+            d.setBillboard(Display.Billboard.FIXED);
             d.setBrightness(new Display.Brightness(15, 15));
             d.setTeleportDuration(clientPointer ? 0 : 1);
             d.setPersistent(false);
@@ -687,14 +691,6 @@ public final class Views implements Listener {
             }
         }
         return false;
-    }
-
-    /**
-     * The block a client-placed view's frames all lie in, on its floor: the camera's own, so each frame's
-     * culling box (half a block round it) holds the camera, which is half a block up in it.
-     */
-    private static int[] stackBlock(Location cam) {
-        return new int[]{cam.getBlockX(), cam.getBlockY(), cam.getBlockZ()};
     }
 
     /**
@@ -931,6 +927,7 @@ public final class Views implements Listener {
         v.privateView.open(plugin, p);
         movePointer(v);
         p.showEntity(plugin, v.pointer);
+        resendTurnHint(v);
         pipeline.afterClientCaughtUp(p, () -> {
             v.aligning = false;
             v.serverTurns.incrementAndGet();
@@ -963,6 +960,7 @@ public final class Views implements Listener {
             // Spawned for them where it belongs: the server's later moves of it never reach them (see Pipeline.watch).
             movePointer(v);
             p.showEntity(plugin, v.pointer);
+            resendTurnHint(v);
             if (!v.clientPointer) sendPointer(v);
         }
         if (v.clientPointer) {
@@ -989,9 +987,34 @@ public final class Views implements Listener {
         }
     }
 
+    /**
+     * The client's third-person distance, {@code camera_distance} (1.21.6+; looked up by name because the API this is
+     * compiled against may not have the constant). F5 moves the camera of whatever it looks through back by that
+     * many blocks, clipped at blocks ({@code Camera.alignWithEntity}), and the shaders know a seated camera by its
+     * exact position: one block back and the view is a loose wall of maps in the world again, with the HUD showing.
+     * At zero the camera stays where the flag is. The second F5 (looking back at the player) still turns the camera
+     * half round, which no distance undoes.
+     */
+    private static final Attribute CAMERA_DISTANCE = Registry.ATTRIBUTE.get(NamespacedKey.minecraft("camera_distance"));
+
     /** What {@link #hold} changes, each under the one key {@code uiengine:seated}. */
-    private static final List<Attribute> HELD = List.of(Attribute.MOVEMENT_SPEED, Attribute.JUMP_STRENGTH, Attribute.GRAVITY,
-            Attribute.STEP_HEIGHT, Attribute.KNOCKBACK_RESISTANCE, Attribute.EXPLOSION_KNOCKBACK_RESISTANCE);
+    private static final List<Attribute> HELD;
+    static {
+        List<Attribute> held = new ArrayList<>(List.of(Attribute.MOVEMENT_SPEED, Attribute.JUMP_STRENGTH, Attribute.GRAVITY,
+                Attribute.STEP_HEIGHT, Attribute.KNOCKBACK_RESISTANCE, Attribute.EXPLOSION_KNOCKBACK_RESISTANCE));
+        if (CAMERA_DISTANCE != null) held.add(CAMERA_DISTANCE);
+        HELD = List.copyOf(held);
+    }
+
+    /** Takes F5's pull-back off a camera entity: never removed, the entity goes with the view. */
+    private LivingEntity fixDistance(LivingEntity camera) {
+        AttributeInstance attr = CAMERA_DISTANCE == null ? null : camera.getAttribute(CAMERA_DISTANCE);
+        if (attr != null) {
+            Platform.addTransient(attr, new AttributeModifier(seatKey, -1, AttributeModifier.Operation.MULTIPLY_SCALAR_1,
+                    org.bukkit.inventory.EquipmentSlotGroup.ANY));
+        }
+        return camera;
+    }
 
     /**
      * Holds [player] still for a client-placed pointer, where nothing they press moves their eye. Their
@@ -1100,6 +1123,31 @@ public final class Views implements Listener {
     }
 
     /**
+     * Tells a client-placed pointer's shader which way the player really faces, as [turn] (degrees from the
+     * picture's centre) to within a sector ({@link Shaders#turnHint}), whenever that changes, and the hover
+     * layers to within a quarter turn. F5's view from the front turns the camera exactly round, which no shader
+     * can tell from the player turning round; the hint can, being nowhere near a half turn out. Straight from
+     * this thread, so the client hears it a round trip after its own rotation. Under the view's lock.
+     */
+    private void sendTurnHint(ViewImpl v, double turn) {
+        if (!v.clientPointer || v.pointerId < 0) return;
+        int hint = Shaders.turnHint(turn);
+        if (hint != v.turnHint) {
+            v.turnHint = hint;
+            pipeline.sendNow(v.player, nms.textOpacity(v.pointerId, hint));
+        }
+        if (v.layers != null) v.layers.hint(Shaders.turnQuarter(turn));
+    }
+
+    /** Just after the pointer is (re)spawned for its player, whose client then has it at full opacity: no hint. */
+    private void resendTurnHint(ViewImpl v) {
+        synchronized (v) {
+            v.turnHint = -1;
+            sendTurnHint(v, v.primed ? wrap(v.lastYaw - v.refYaw) : 0);
+        }
+    }
+
+    /**
      * A client-placed pointer: where the player looks IS the cursor, worked out exactly as their shader
      * does (the picture's centre plus the speed times the turn from straight at it, held inside the
      * picture), from the same rotation, so the two agree for every rotation the client sends. Past an
@@ -1113,6 +1161,7 @@ public final class Views implements Listener {
         // (the same angle, give or take whole turns, nearest to where the last rotation left it), so a
         // flick right round the back is still undone the way it went.
         double turn = wrap(yaw - v.refYaw);
+        sendTurnHint(v, turn);
         v.turnYaw = v.primed ? turn + 360 * Math.round((v.turnYaw + wrap(yaw - v.lastYaw) - turn) / 360) : turn;
         v.lastYaw = yaw;
         v.primed = true;
@@ -1318,7 +1367,7 @@ public final class Views implements Listener {
             if (canvas.cols() != v.wall.cols || canvas.rows() != v.wall.rows) canvas = v.canvas;
             v.shown = canvas;
             if (v.keeps) panel(v, canvas.snapshot());
-            Canvas.Encoding hi = v.clientPointer ? Canvas.Encoding.HI_TILED : Canvas.Encoding.HI_OWN;
+            Canvas.Encoding hi = Canvas.Encoding.HI_TILED;
             out.add(new MapSender.Assignment(p, v.wall, canvas, hi));
             // After the view's own, so a layer taken off as the picture under it changes goes out in the same pass.
             if (v.layers != null) out.add(new MapSender.Assignment(p, v.layers.wall, v.layers.canvas, Canvas.Encoding.HI));

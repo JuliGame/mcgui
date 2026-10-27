@@ -44,7 +44,7 @@ public final class MapWall {
     private Nms nms;
     /** A view's one viewer; null for a placed wall. */
     private Player owner;
-    private int[] ownerStack;
+    private Stack ownerStack;
     private boolean shownToOwner;
     /**
      * A placed wall's: the players whose clients have its frames now, as a list (going through it makes nothing) and
@@ -166,6 +166,27 @@ public final class MapWall {
     }
 
     /**
+     * Where a view's frames all lie: in the camera's block, on its floor ([face] UP) when the camera is in the block's
+     * lower half and on its ceiling (DOWN) otherwise. The client culls an entity whose box, grown by half a block
+     * ({@code EntityRenderer.shouldRender}), is outside the view frustum; a frame holding a map is a block square and a
+     * 16th deep, so grown it reaches from half a block below its block's floor to 9/16 above it (or the same from the
+     * ceiling down), and the camera is always inside it: inside the box, no turn of the camera can cull it. On the
+     * floor whatever the camera's height, an overlay (the player's own eye, 0.65 up its block when standing) lost
+     * every map, so its panel, tint and kept world, in a band of looking up round 36° (with a 70° FOV, the bottom
+     * of the view just above the frames), and F5's view from the front lost it looking down as much.
+     */
+    public record Stack(int x, int y, int z, BlockFace face) {
+        public static Stack at(org.bukkit.Location cam) {
+            double y = Math.floor(cam.getY());
+            return new Stack(cam.getBlockX(), (int) y, cam.getBlockZ(), cam.getY() - y < 0.5 ? BlockFace.UP : BlockFace.DOWN);
+        }
+
+        int[] block() {
+            return new int[]{x, y, z};
+        }
+    }
+
+    /**
      * Frames for [viewer] alone, which only their client ever holds: sent to them by {@link #showTo}, taken
      * off by {@link #despawn}. Real frames, even hidden from everybody else, cost the server every tick for
      * every player near them: the entity tracker checks each one against each nearby player, and Paper's
@@ -173,12 +194,11 @@ public final class MapWall {
      * player, that grew with the square of the players seated together: 50 seated side by side took the tick
      * from 4 ms to 116 ms. These cost nothing per tick.
      *
-     * With [stack] (a block) every frame lies in that one block, on its floor, rather than laid out as the
-     * wall: for a view whose maps the viewer's client places in the window by what each map carries (see
-     * Canvas.Encoding.HI_TILED). A frame lying at the camera's own block is inside the client's view frustum
-     * whichever way the camera looks, so it is never culled.
+     * With [stack] every frame lies in the camera's own block ({@link Stack}) rather than laid out as the wall: for
+     * a view whose maps the viewer's client places in the window by what each map carries (see
+     * Canvas.Encoding.HI_TILED).
      */
-    public void spawnFor(Nms nms, Player viewer, int[] stack) {
+    public void spawnFor(Nms nms, Player viewer, Stack stack) {
         despawn();
         this.nms = nms;
         owner = viewer;
@@ -259,7 +279,7 @@ public final class MapWall {
         if (nms == null || viewer != owner) throw new IllegalStateException("Only a view's own viewer is shown its frames");
         int[] ids = entityIds;
         if (framed == null || framed.length != ids.length) framed = new boolean[ids.length];
-        BlockFace face = ownerStack == null ? facing : BlockFace.UP;
+        BlockFace face = ownerStack == null ? facing : ownerStack.face();
         ThreadLocalRandom random = ThreadLocalRandom.current();
         List<Object> out = new ArrayList<>();
         boolean any = false;
@@ -267,7 +287,7 @@ public final class MapWall {
             if (framed[t] || !sends(t)) continue;
             framed[t] = true;
             any = true;
-            int[] b = ownerStack == null ? tileBlock(t % cols, t / cols) : ownerStack;
+            int[] b = ownerStack == null ? tileBlock(t % cols, t / cols) : ownerStack.block();
             out.addAll(nms.frameAppears(ids[t], new UUID(random.nextLong(), random.nextLong()), b[0], b[1], b[2], face, mapId(t)));
             // A client takes at most 4096 packets in one bundle.
             if (out.size() >= BUNDLE_MAX) {
@@ -297,7 +317,7 @@ public final class MapWall {
         if (nms == null || viewer != owner) throw new IllegalStateException("Only a view's own viewer is shown its frames");
         int[] ids = entityIds;
         if (framed == null || framed.length != ids.length) framed = new boolean[ids.length];
-        BlockFace face = ownerStack == null ? facing : BlockFace.UP;
+        BlockFace face = ownerStack == null ? facing : ownerStack.face();
         ThreadLocalRandom random = ThreadLocalRandom.current();
         List<Object> out = new ArrayList<>();
         int[] gone = new int[ids.length];
@@ -310,7 +330,7 @@ public final class MapWall {
                 gone[g++] = ids[t];
                 continue;
             }
-            int[] b = ownerStack == null ? tileBlock(t % cols, t / cols) : ownerStack;
+            int[] b = ownerStack == null ? tileBlock(t % cols, t / cols) : ownerStack.block();
             out.addAll(nms.frameAppears(ids[t], new UUID(random.nextLong(), random.nextLong()), b[0], b[1], b[2], face, mapId(t)));
         }
         if (g > 0) out.add(0, nms.removeEntities(java.util.Arrays.copyOf(gone, g)));
@@ -354,7 +374,7 @@ public final class MapWall {
         if (signatureFrame < 0) signatureFrame = nms.nextEntityId(world);
         ThreadLocalRandom random = ThreadLocalRandom.current();
         nms.send(viewer, nms.bundle(nms.frameAppears(signatureFrame, new UUID(random.nextLong(), random.nextLong()),
-                ownerStack[0], ownerStack[1], ownerStack[2], BlockFace.UP, signatureMapId())));
+                ownerStack.x(), ownerStack.y(), ownerStack.z(), ownerStack.face(), signatureMapId())));
         shownToOwner = true;
     }
 

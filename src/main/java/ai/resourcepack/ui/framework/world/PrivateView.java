@@ -15,8 +15,8 @@ import java.util.function.Predicate;
 
 /**
  * A view's wall exists for one player only and does not move anything: its frames are shown to them
- * alone, wherever it needs to be to fill their view, even inside the ground. Their client draws it in
- * front of every block (the resource pack's HI_OWN marker), so the world round the picture stays whole,
+ * alone, in their camera's block, and their client draws each map in its place in the window in front of
+ * every block (the resource pack's HI_TILED marker), so the world round the picture stays whole,
  * and no block is ever touched or hidden: a view needs the pack (see Framework#openView). Entities in
  * the way are hidden from them, and placed walls in the way take their frames off their client (see
  * {@link #hides}).

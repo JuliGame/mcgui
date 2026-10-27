@@ -253,8 +253,8 @@ included, which other plugins can see.
 - **What an open view holds** (round 4, Memory). A canvas keeps its colours a map at a time (`Canvas.ycc`, one
   128x128x3 block per tile, null for black), shared copy-on-write per map by `copy`/`show`; a session's canvas also
   shares alike (`Canvas.shareAlike`, `Canvas.Alike`): every tile it encodes is looked up by its colours (and palette,
-  size, transparency) among every live tile, so players' views of one page publish one `Tile` (its HI, HI_OWN,
-  HI_TILED, PLAIN and colours) wherever they look alike, and a viewer who has it is sent nothing. A shared map is
+  size, transparency) among every live tile, so players' views of one page publish one `Tile` (its HI, HI_TILED,
+  PLAIN and colours) wherever they look alike, and a viewer who has it is sent nothing. A shared map is
   never drawn into in place: each changed map costs a 48 KB copy on the next drawing (why arcade canvases do not
   share alike). HI_TILED is kept on the `Tile` for the first place asked (`Tile.tiled`), per canvas only elsewhere.
   A session's frame image is put away after `park-pictures-after` (5 s) with nothing drawn and the pointer still
@@ -617,16 +617,49 @@ Reading a position, a world or a UUID is fine from anywhere. How MC GUI copes, a
   it is the player's own eye moved at most 1/32 of a block on each. The shaders
   read that back from `Globals.CameraOffset`. That flag is what hides the HUD
   and draws the view in front of the world, for that player only.
-- **A view fills the window because `text.vsh` puts it there.** Its maps carry
-  the view's columns and rows in the two pixels right of the marker, and the
-  pointer is text whose red is `Shaders.POINTER_RED` with the columns and rows
-  in green and blue. While seated, each of their vertices goes to its distance
-  from the camera's axis, in blocks, over half the picture's size: the window
-  edge to edge, at any FOV or window shape. So the wall is placed to fill only
-  60% of the player's view (`Views.STRETCHED_FIT`): a frame the client thinks
-  is off screen is culled before any shader runs. The pointer sits ON the
-  picture's plane (the remap reads its distance from the axis there) and wins
-  the depth test by a larger factor than the picture.
+- **F5 must leave a view alone, and does** (2026-10-26). The first press pulls
+  the camera back along its look by the `camera_distance` attribute (4 blocks;
+  `Camera.alignWithEntity`), off the flag: looking dead at the centre that is a
+  whole number of blocks along the axis and the flag still matches, so a quick
+  check passes, but with the pointer anywhere else the view drops to a loose
+  wall of maps and the HUD returns. `Views.hold` (and `fixDistance` on the
+  mannequin) zero it under the seated key; Spigot saves modifiers, so it is in
+  `HELD` for `onJoin` too. The second press turns the camera exactly round (yaw
+  half round, pitch negated: the look negated). For a client-placed pointer no
+  shader can tell that from the player really turning past 90°, which is
+  ordinary (the picture's edge is ~144° at default sensitivity), so the server
+  tells it: `Views.sendTurnHint` puts the player's turn, to a 64th of a turn,
+  in the pointer's text opacity (one entity-data packet from the netty thread
+  when the sector changes; `Shaders.turnHint`), and `mcb_hot` takes whichever of
+  the look and its negation is within a quarter turn of it. A hint that far out
+  would need a quarter turn inside one round trip. Hover layers get a quarter
+  turn in each held map (`LayerSet.hint`, the symbol under its y). A mannequin
+  camera is level, so the turn is exactly half round about the vertical: its
+  frames lie in its block like a client-placed view's (never culled), and the
+  server's pointer, `FIXED` square to the axis (a billboard would face the turned
+  camera), is turned back in the shader when it is behind the camera.
+  `Nms.teleport` keeps rotation for it. Measured on the PC rig (2026-10-26),
+  each client on a server of its own version, Paper, Spigot and Folia, 1.21.11
+  to 26.3: the pointer within 8 px at seven points (turns to ±127°, pitch to
+  ±64°) in all three perspectives, fullscreen and overlay, client and server
+  pointer, hover layers lighting only under it; and through a proxy holding
+  every byte 100 and 250 ms each way, turning 120° in 2 s to 150 ms.
+- **A view fills the window because `text.vsh` puts it there.** Every map
+  carries the view's columns and rows in the two pixels right of the marker and
+  its own column and row below them (`Canvas.Encoding.HI_TILED`), and goes to
+  its place in the window from those, wherever its frame is: all of a view's
+  frames lie in the camera's block (`MapWall.Stack`), on its floor or, when the
+  camera is in the block's upper half, its ceiling, so the camera is inside each
+  frame's culling box (the box grown half a block) and no turn can cull them.
+  Always on the floor, an overlay (the standing eye is 0.65 up its block) lost
+  every map, and with them its tint and kept world, in a band of looking up
+  round 36°, and F5's front view looking down as much. The server's pointer is
+  text whose red is `Shaders.POINTER_RED` with the columns and rows in green and
+  blue; while seated its vertices go to their distance from the camera's axis,
+  in blocks, over half the picture's size: the window edge to edge, at any FOV
+  or window shape. It sits ON the picture's plane (the wall is still placed to
+  fill 60% of the player's view, `Views.STRETCHED_FIT`, which `PrivateView`
+  reads too), and both pointers are as near as depth goes.
 - **Transparent is map colour 0** (`Canvas.transparency`): a pixel under half
   alpha is kept as YCbCr (0, 0, 0), which no RGB colour converts to
   (`Palette.isClear`), and sent as colour 0, which the client draws as
@@ -823,7 +856,7 @@ Reading a position, a world or a UUID is fine from anywhere. How MC GUI copes, a
   frame. Only HI tiles are made when a picture is drawn: a PLAIN tile is
   made the first time somebody without the pack looks at it.
 - **A scroll by whole tiles moves maps, not pixels.** `Canvas.scroll(rows, ...)`
-  rotates the picture and keeps each moved tile's arrays (and the HI_OWN and
+  rotates the picture and keeps each moved tile's arrays (and the HI_TILED and
   PLAIN tiles made from them). `MapSender` sees that a tile a frame should show
   is already in another of the wall's maps on that client, and points the frame
   at it (an item-frame data packet with a filled map of that id) instead of

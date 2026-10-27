@@ -141,7 +141,7 @@ class SharedTilesTest {
         paint(b, picture.clone(), W, H, 0, 0);
         paint(c, picture.clone(), W, H, 0, 0);
         for (int t = 0; t < COLS * ROWS; t++) {
-            for (Canvas.Encoding e : new Canvas.Encoding[]{Canvas.Encoding.HI, Canvas.Encoding.HI_OWN, Canvas.Encoding.HI_TILED, Canvas.Encoding.PLAIN}) {
+            for (Canvas.Encoding e : new Canvas.Encoding[]{Canvas.Encoding.HI, Canvas.Encoding.HI_TILED, Canvas.Encoding.PLAIN}) {
                 assertSame(a.canvas.tile(t, e), b.canvas.tile(t, e), "alike: tile " + t + " " + e);
             }
             assertNotSame(a.canvas.tile(t, Canvas.Encoding.HI), c.canvas.tile(t, Canvas.Encoding.HI), "c shares alike");

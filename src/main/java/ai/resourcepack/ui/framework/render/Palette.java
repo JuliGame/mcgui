@@ -189,25 +189,9 @@ public final class Palette {
     }
 
     /**
-     * A copy of a HI tile marked as somebody's own fullscreen view of [cols] × [rows] maps: its bottom two
-     * marker colours swapped, the two pixels right of the marker the symbols for its columns and rows, from
-     * which the shader stretches the view to the window, and the 2×2 block after that its [tint] (see
-     * {@link #markTint}). Those two 2×2 blocks show the next one.
-     */
-    public byte[] markOwn(byte[] hi, int cols, int rows, int tint) {
-        byte[] own = hi.clone();
-        own[128] = markerId[3];
-        own[129] = markerId[2];
-        own[2] = symbolId[Math.min(SYMBOLS - 1, cols)];
-        own[3] = symbolId[Math.min(SYMBOLS - 1, rows)];
-        markTint(own, tint);
-        return own;
-    }
-
-    /**
      * A copy of a HI tile marked as tile ([col], [row]) of somebody's own fullscreen view of [cols] × [rows]
-     * maps whose pointer their client draws: both bottom marker colours the fourth, the view's columns
-     * and rows right of the marker and its tint after them as in {@link #markOwn}, and the tile's own column
+     * maps: both bottom marker colours the fourth, the two pixels right of the marker the symbols for its
+     * columns and rows, the 2×2 block after that its [tint] (see {@link #markTint}), and the tile's own column
      * and row below the size. The shader places the tile in the window from these alone, wherever its frame is.
      */
     public byte[] markTiled(byte[] hi, int cols, int rows, int col, int row, int tint) {
@@ -261,8 +245,9 @@ public final class Palette {
      * {@code Shaders.LAYER_SPEED_SCALE} ([speed], three symbols, high first) and a fourth symbol: four times the
      * [priority] plus the [side] the view is on ({@link #LAYER_ALONG_Z}, {@link #LAYER_LOOKS_NEGATIVE}); then the two
      * rectangles, each edge two symbols (high, low) and each rectangle two 2×2 blocks (left and top, then right and
-     * bottom), include from x = 6 and exclude from x = 10; then [y] (two symbols, top row). Eight 2×2 blocks in all; the
-     * shader never shows the top two rows. Not a copy: [hi] is marked in place.
+     * bottom), include from x = 6 and exclude from x = 10; then [y] (two symbols, top row), and below it the turn hint
+     * ({@link #markLayerHint}). Eight 2×2 blocks in all; the shader never shows the top two rows. Not a copy: [hi] is
+     * marked in place.
      */
     public byte[] markLayer(byte[] hi, int cols, int rows, int x, int y, int speed, int side, int priority, int[] include, int[] exclude) {
         hi[0] = markerId[1];
@@ -280,6 +265,15 @@ public final class Palette {
         hi[133] = symbolId[Math.max(0, Math.min(LAYER_PRIORITIES - 1, priority)) * 4 + (side & 3)];
         rect(hi, 6, include);
         rect(hi, 10, exclude);
+        return hi;
+    }
+
+    /**
+     * Puts a layer's turn hint in [hi] (a map {@link #markLayer} marked): {@code Shaders.turnQuarter}, 0 for none, as the
+     * symbol under its [y]. Not a copy: [hi] is marked in place.
+     */
+    public byte[] markLayerHint(byte[] hi, int quarter) {
+        hi[142] = symbolId[quarter];
         return hi;
     }
 
