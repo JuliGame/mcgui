@@ -681,7 +681,16 @@ public final class Shaders {
                     }
                     // A hover layer not shown, or not seated: every vertex behind the far plane, so it draws no pixel.
                     if (mcbMap == 7 && mcbMapInfo.y < 0.5) gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
+                    // A view's own maps (3 and up) show only to its seated camera. They lie on the floor or ceiling of
+                    // the camera's block (MapWall.Stack), so a camera not flagged (the frames there a moment before the
+                    // eye is, or a moment after it is put back) drew them where they lie: pieces of the picture, huge,
+                    // round the camera.
+                    if (mcbMap >= 3 && mcbSeated < 0.5) gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
                 #ifdef IS_SEE_THROUGH
+                    // See-through text (text displays with see_through, name tags' faint pass) is drawn with no depth
+                    // test, so over a seated camera's view too, and an overlay keeps what lies on its panel as its own:
+                    // there it moved with the pointer. None for a seated camera (its pointer is not see-through).
+                    if (mcbSeated > 0.5 && mcbPointer < 0.5) gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
                     vertexColor = mcbTint;
                 #else
                     sphericalVertexDistance = fog_spherical_distance(Position);
@@ -1801,6 +1810,121 @@ public final class Shaders {
                     if (mcb_flag_axis() == 1) gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
                     vertexDistance = fog_spherical_distance(pos);
                     vertexColor = (useTopColor ? faceColors[1] : faceColors[direction]) * CloudColor;
+                }
+                """, Dialect.V26_2);
+    }
+
+    /**
+     * {@code rendertype_world_border.vsh} (before 26.3), drawing nothing for an overlay's camera: 1.21.11 to 26.2 draw
+     * the world border with the weather, after the overlay chain, so without improved transparency it was drawn live
+     * over the still world, turning with the pointer (with it, it is blended in with the weather, which the pack's
+     * {@link #transparencyChain} keeps, but the shader cannot tell the two apart). As with clouds, an overlay there
+     * shows none. 26.3 draws it in the main pass, into the kept picture.
+     */
+    public static String worldBorderVsh() {
+        return emit("""
+                #version 330
+
+                #moj_import <minecraft:dynamictransforms.glsl>
+                #moj_import <minecraft:projection.glsl>
+                #moj_import <minecraft:globals.glsl>
+
+                in vec3 Position;
+                in vec2 UV0;
+
+                out vec2 texCoord0;
+
+                """ + helpers(VERTEX_HELPERS) + """
+
+                void main() {
+                    vec3 pos = Position + ModelOffset;
+                    gl_Position = ProjMat * ModelViewMat * vec4(pos, 1.0);
+                    // An overlay's camera: outside the clip volume, so nothing is drawn.
+                    if (mcb_flag_axis() == 1) gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
+                    texCoord0 = (TextureMat * vec4(UV0, 0.0, 1.0)).xy;
+                }
+                """, Dialect.V26_2);
+    }
+
+    /** What see-through text's hiding (see {@link #seeThroughVsh}) tests: a seated camera, and not the pointer's colour. */
+    private static final String SEE_THROUGH_HIDDEN = """
+
+            // See-through text has no depth test, so for a seated camera it would draw over the view, and an overlay
+            // keeps what lies on its panel as its own: there it moved with the pointer. None for a seated camera.
+            bool mcb_hidden_see_through() {
+                ivec3 rgb = ivec3(round(Color.rgb * 255.0));
+                bool pointer = (rgb.r == @PR@ || rgb.r == @PC@) && rgb.g > 0 && rgb.b > 0;
+                return mcb_flag_axis() >= 0 && !pointer;
+            }
+            """.replace("@PR@", String.valueOf(POINTER_RED)).replace("@PC@", String.valueOf(CLIENT_POINTER_RED));
+
+    /**
+     * Before 26.2, {@code rendertype_text_see_through.vsh} and {@code rendertype_text_intensity_see_through.vsh}
+     * ([textured]) and {@code rendertype_text_background_see_through.vsh}: the game's own, drawing nothing for a seated
+     * camera (as text.vsh's {@code IS_SEE_THROUGH} variant from 26.2). Their pipelines have no depth test: a text display
+     * with see_through, or a name tag's faint pass, drew over an overlay's panel and moved there with the pointer.
+     */
+    public static String seeThroughVsh(boolean textured) {
+        return emit("""
+                #version 330
+
+                #moj_import <minecraft:dynamictransforms.glsl>
+                #moj_import <minecraft:projection.glsl>
+                #moj_import <minecraft:globals.glsl>
+
+                in vec3 Position;
+                in vec4 Color;
+                """ + (textured ? "in vec2 UV0;\n" : "") + """
+
+                out vec4 vertexColor;
+                """ + (textured ? "out vec2 texCoord0;\n" : "") + helpers(VERTEX_HELPERS) + SEE_THROUGH_HIDDEN + """
+
+                void main() {
+                    gl_Position = ProjMat * ModelViewMat * vec4(Position, 1.0);
+                    if (mcb_hidden_see_through()) gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
+                    vertexColor = Color;
+                """ + (textured ? "texCoord0 = UV0;\n" : "") + """
+                }
+                """, Dialect.V26_1);
+    }
+
+    /** 26.2's {@code text_background.vsh}, its see-through variant drawing nothing for a seated camera (see {@link #seeThroughVsh}). */
+    public static String textBackgroundVsh() {
+        return emit("""
+                #version 330
+
+                #ifndef IS_SEE_THROUGH
+                #moj_import <minecraft:fog.glsl>
+                #moj_import <minecraft:sample_lightmap.glsl>
+                #endif
+
+                #moj_import <minecraft:dynamictransforms.glsl>
+                #moj_import <minecraft:projection.glsl>
+                #moj_import <minecraft:globals.glsl>
+
+                in vec3 Position;
+                in vec4 Color;
+                #ifndef IS_SEE_THROUGH
+                in ivec2 UV2;
+                uniform sampler2D Sampler2;
+                out float sphericalVertexDistance;
+                out float cylindricalVertexDistance;
+                #endif
+
+                out vec4 vertexColor;
+                """ + helpers(VERTEX_HELPERS) + SEE_THROUGH_HIDDEN + """
+
+                void main() {
+                    gl_Position = ProjMat * ModelViewMat * vec4(Position, 1.0);
+
+                #ifndef IS_SEE_THROUGH
+                    sphericalVertexDistance = fog_spherical_distance(Position);
+                    cylindricalVertexDistance = fog_cylindrical_distance(Position);
+                    vertexColor = Color * sample_lightmap(Sampler2, UV2);
+                #else
+                    if (mcb_hidden_see_through()) gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
+                    vertexColor = Color;
+                #endif
                 }
                 """, Dialect.V26_2);
     }

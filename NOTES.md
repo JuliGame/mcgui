@@ -800,6 +800,27 @@ Reading a position, a world or a UUID is fine from anywhere. How MC GUI copes, a
   picture and the pack leaves 26.3's clouds alone. Measured on a 26.3 client
   (classic and improved transparency): opening moves the world 0 px, a 6°
   turn changes no pixel outside the panel, the pointer shows in about 1 ms.
+  **What else escaped the kept world** (2026-10-27, an everything-scene on
+  1.21.11 to 26.2 vanilla clients and 26.2 with Sodium and ImmediatelyFast,
+  rig in `rigs/ovs/`): text displays, name tags, holograms,
+  displays, mobs, signs, banners, frames, fire, portals, beacon beams,
+  particles (26.x) and every translucent block stayed still, with one
+  exception each. See-through text (`see_through` text displays, a name
+  tag's faint pass) has no depth test, so it drew over the panel, which the
+  compose keeps as the view's own: it moved there with the pointer. It now
+  draws nothing for any seated camera (text.vsh's `IS_SEE_THROUGH`, 26.2's
+  `text_background.vsh`, the three `*_see_through.vsh` before 26.2), so it is
+  missing from the kept picture too. The world border is drawn with the
+  weather, after the chain, so without improved transparency it moved:
+  `rendertype_world_border.vsh` draws none for an overlay's camera, as clouds.
+  And a view's maps (kind 3 and up) lie in the camera's block, so a camera
+  not yet (or no longer) flagged drew them where they lie, huge pieces of the
+  page round the camera for a moment as an overlay opened or closed (a 1.21.11
+  client through ViaVersion showed it on every close): text.vsh now draws them
+  only for a seated camera. Still open: 1.21.11 without improved
+  transparency draws particles over the kept world now and then (`/particle`,
+  a death's poof): its particle pipeline does not declare `Globals`, so
+  `particle.vsh`'s test reads whatever is bound there.
   Without the signature no pass of ours draws a pixel: nobody else's game
   changes. Each of our passes has its own vertex shader (`overlayTakeVsh`,
   `overlayBlurVsh`, `overlaySignedVsh`) that reads the signature (and whether a

@@ -336,13 +336,23 @@ public final class ResourcePack implements AutoCloseable {
             // The two post effects every version has read the same in each, so the overlays need no copy.
             e.put("assets/minecraft/post_effect/entity_outline.json", Shaders.overlayChain());
             e.put("assets/minecraft/post_effect/blur.json", Shaders.menuBlurChain());
-            // Before 26.3 clouds are drawn after the outline effect, over the still world: none for an overlay's camera
-            // there (1.21.11's and 26.1's clouds shader is 26.2's). And improved transparency blends translucent blocks
-            // in after it, in an effect 26.3 does not have.
+            // Before 26.3 clouds and the world border are drawn after the outline effect, over the still world: none
+            // for an overlay's camera there (1.21.11's and 26.1's shaders for both are 26.2's). And improved
+            // transparency blends translucent blocks in after it, in an effect 26.3 does not have.
             for (Shaders.Dialect d : List.of(Shaders.Dialect.V1_21_11, Shaders.Dialect.V26_1, Shaders.Dialect.V26_2)) {
                 e.put(d.overlay() + "/assets/minecraft/shaders/core/rendertype_clouds.vsh", Shaders.cloudsVsh());
+                e.put(d.overlay() + "/assets/minecraft/shaders/core/rendertype_world_border.vsh", Shaders.worldBorderVsh());
                 e.put(d.overlay() + "/assets/minecraft/post_effect/transparency.json", Shaders.transparencyChain());
             }
+            // See-through text draws over a seated camera's view (no depth test): none there. 26.2 and 26.3 have it in
+            // text.vsh (and 26.2's background in text_background.vsh); before 26.2 each is a shader of its own.
+            for (Shaders.Dialect d : List.of(Shaders.Dialect.V1_21_11, Shaders.Dialect.V26_1)) {
+                String core = d.overlay() + "/assets/minecraft/shaders/core/";
+                e.put(core + "rendertype_text_see_through.vsh", Shaders.seeThroughVsh(true));
+                e.put(core + "rendertype_text_intensity_see_through.vsh", Shaders.seeThroughVsh(true));
+                e.put(core + "rendertype_text_background_see_through.vsh", Shaders.seeThroughVsh(false));
+            }
+            e.put(Shaders.Dialect.V26_2.overlay() + "/assets/minecraft/shaders/core/text_background.vsh", Shaders.textBackgroundVsh());
             // 1.21.11 draws particles after it too.
             e.put(Shaders.Dialect.V1_21_11.overlay() + "/assets/minecraft/shaders/core/particle.vsh", Shaders.particleVsh());
             // The pointer a seated player sees: one glyph per shape on a text display in front of the
