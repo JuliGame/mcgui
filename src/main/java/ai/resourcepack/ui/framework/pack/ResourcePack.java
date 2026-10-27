@@ -318,6 +318,11 @@ public final class ResourcePack implements AutoCloseable {
                 e.put(post + "overlay_mask.fsh", Shaders.overlayMaskFsh(d));
                 e.put(post + "overlay_compose.fsh", Shaders.overlayComposeFsh(d));
                 e.put(post + "overlay_outline.fsh", Shaders.overlayOutlineFsh(d));
+                // ... and again in the improved transparency effect before 26.3, which gets the signature handed on.
+                if (d != Shaders.Dialect.V26_3) {
+                    e.put(post + "overlay_relay.fsh", Shaders.overlayRelayFsh(d));
+                    e.put(post + "overlay_relay.vsh", Shaders.overlayRelayVsh(d));
+                }
                 // Each pass draws over only as much of the window as it writes (nothing for most frames).
                 e.put(post + "overlay_take.vsh", Shaders.overlayTakeVsh(d));
                 e.put(post + "overlay_blur.vsh", Shaders.overlayBlurVsh(d));
@@ -328,14 +333,18 @@ public final class ResourcePack implements AutoCloseable {
                 e.put(post + "pointer_grow.fsh", Shaders.pointerGrowFsh(d));
                 e.put(post + "pointer_fill.fsh", Shaders.pointerFillFsh(d));
             }
-            // The two post effects read the same in both versions, so the 26.2 overlay needs no copy.
+            // The two post effects every version has read the same in each, so the overlays need no copy.
             e.put("assets/minecraft/post_effect/entity_outline.json", Shaders.overlayChain());
             e.put("assets/minecraft/post_effect/blur.json", Shaders.menuBlurChain());
-            // 26.2 draws clouds after the outline effect, over the still world: none for an overlay's camera there. So for
-            // 1.21.11 and 26.1, whose clouds shader is 26.2's.
+            // Before 26.3 clouds are drawn after the outline effect, over the still world: none for an overlay's camera
+            // there (1.21.11's and 26.1's clouds shader is 26.2's). And improved transparency blends translucent blocks
+            // in after it, in an effect 26.3 does not have.
             for (Shaders.Dialect d : List.of(Shaders.Dialect.V1_21_11, Shaders.Dialect.V26_1, Shaders.Dialect.V26_2)) {
                 e.put(d.overlay() + "/assets/minecraft/shaders/core/rendertype_clouds.vsh", Shaders.cloudsVsh());
+                e.put(d.overlay() + "/assets/minecraft/post_effect/transparency.json", Shaders.transparencyChain());
             }
+            // 1.21.11 draws particles after it too.
+            e.put(Shaders.Dialect.V1_21_11.overlay() + "/assets/minecraft/shaders/core/particle.vsh", Shaders.particleVsh());
             // The pointer a seated player sees: one glyph per shape on a text display in front of the
             // view. Text, unlike an item, gets no directional shading, so the arrow stays white.
             // The server's own cursors (Pointer.custom) are a provider each, as tall as they are drawn, with the

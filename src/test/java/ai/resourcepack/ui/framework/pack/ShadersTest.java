@@ -148,6 +148,61 @@ class ShadersTest {
     }
 
     /**
+     * The improved-transparency effect (before 26.3) is JSON the game reads: the game's own composite into "final" first,
+     * as the game ships it, then the signature relayed, the same keeping passes as the outline effect on "final", the
+     * game's own blit to main before the compose. It names only targets it declares or the game gives it
+     * (LevelTargetBundle.SORTING_TARGETS), and each vertex shader of ours reads only samplers its pass binds.
+     */
+    @Test
+    void transparencyChainKeepsTheCompositeAsTheOutlineEffectKeepsTheWorld() {
+        com.google.gson.JsonObject chain = com.google.gson.JsonParser.parseString(Shaders.transparencyChain()).getAsJsonObject();
+        com.google.gson.JsonObject targets = chain.getAsJsonObject("targets");
+        assertTrue(targets.getAsJsonObject("tr_kept").get("persistent").getAsBoolean());
+        com.google.gson.JsonArray passes = chain.getAsJsonArray("passes");
+        java.util.Set<String> known = new java.util.HashSet<>(targets.keySet());
+        known.addAll(java.util.List.of("minecraft:main", "minecraft:translucent", "minecraft:item_entity", "minecraft:particles",
+                "minecraft:clouds", "minecraft:weather"));
+        java.util.List<String> order = new java.util.ArrayList<>();
+        for (var p : passes) {
+            com.google.gson.JsonObject pass = p.getAsJsonObject();
+            order.add(pass.get("fragment_shader").getAsString());
+            assertTrue(known.contains(pass.get("output").getAsString()), pass.toString());
+            java.util.Set<String> samplers = new java.util.HashSet<>();
+            for (var in : pass.getAsJsonArray("inputs")) {
+                assertTrue(known.contains(in.getAsJsonObject().get("target").getAsString()), pass.toString());
+                samplers.add(in.getAsJsonObject().get("sampler_name").getAsString() + "Sampler");
+            }
+            String vsh = pass.get("vertex_shader").getAsString();
+            if (vsh.equals("minecraft:core/screenquad")) continue;
+            for (Shaders.Dialect d : java.util.List.of(Shaders.Dialect.V1_21_11, Shaders.Dialect.V26_1, Shaders.Dialect.V26_2)) {
+                String src = switch (vsh) {
+                    case "uiengine:post/overlay_relay" -> Shaders.overlayRelayVsh(d);
+                    case "uiengine:post/overlay_take" -> Shaders.overlayTakeVsh(d);
+                    case "uiengine:post/overlay_blur" -> Shaders.overlayBlurVsh(d);
+                    case "uiengine:post/overlay_signed_main" -> Shaders.overlaySignedVsh(d, "MainSampler");
+                    case "uiengine:post/overlay_signed_in" -> Shaders.overlaySignedVsh(d, "InSampler");
+                    default -> throw new AssertionError("no vertex shader " + vsh);
+                };
+                var declared = java.util.regex.Pattern.compile("uniform sampler2D (\\w+);").matcher(src);
+                while (declared.find()) assertTrue(samplers.contains(declared.group(1)), declared.group(1) + " in " + pass);
+            }
+        }
+        assertEquals(java.util.List.of("minecraft:post/transparency", "uiengine:post/overlay_relay", "uiengine:post/overlay_take",
+                "uiengine:post/overlay_blur", "uiengine:post/overlay_blur", "uiengine:post/overlay_blur", "uiengine:post/overlay_blur",
+                "uiengine:post/overlay_blur", "uiengine:post/overlay_mask", "minecraft:post/blit", "uiengine:post/overlay_compose"), order);
+        assertEquals("final", passes.get(0).getAsJsonObject().get("output").getAsString());
+        assertEquals("minecraft:main", passes.get(passes.size() - 1).getAsJsonObject().get("output").getAsString());
+        for (Shaders.Dialect d : java.util.List.of(Shaders.Dialect.V1_21_11, Shaders.Dialect.V26_1, Shaders.Dialect.V26_2)) {
+            for (String s : new String[]{Shaders.overlayRelayFsh(d), Shaders.overlayRelayVsh(d)}) {
+                assertFalse(s.contains("@"), "a placeholder was left in " + s);
+                assertFalse(s.contains("layout(location"), s);
+            }
+        }
+        // 1.21.11 has no sample_lightmap.glsl.
+        assertFalse(Shaders.particleVsh().contains("@") || Shaders.particleVsh().contains("sample_lightmap"));
+    }
+
+    /**
      * The menu blur is JSON the game reads: our three pointer passes, ending on main, then the game's own six box-blur
      * passes as it ships them (main to swap and back, horizontal then vertical, at the player's own radius). It names
      * only targets it declares or main (LevelTargetBundle.MAIN_TARGETS), and its shaders have every placeholder filled.

@@ -381,6 +381,21 @@ changed: the overlay must open on the server pointer, the world must not turn
 with it. The rig and every result of the 26.3 port are in
 `rigs/r4/Ver263/` (`pc263.py`, `validate.py`).
 
+**A client that never shows its window** (2026-10-27), so a test can run while
+somebody uses the PC: a game window takes the foreground once as it is
+created. A `-javaagent` that rewrites the calls hides it for good, and the
+game renders and screenshots as usual (snap the main target from a probe
+agent; join with `ConnectScreen.startConnecting`, not portablemc's `-s`,
+which stops at the pack prompt). GLFW clients (1.21.11 to 26.2):
+`glfwDefaultWindowHints` also sets VISIBLE/FOCUSED/FOCUS_ON_SHOW false and
+`glfwShowWindow`/`FocusWindow`/`RequestWindowAttention` do nothing; 26.3 is
+SDL: `SDL_WINDOW_HIDDEN` or-ed into `SDL_CreateWindow`'s flags,
+`SDL_Show`/`Raise`/`Restore`/`FlashWindow` do nothing. Both need Java 24+
+(`java.lang.classfile`; portablemc `--jvm` the launcher's Java 25 for
+1.21.11). Checked with a windowless foreground logger on every version: the
+foreground never left the user's own window. The rig, agents and results of
+the improved-transparency fix are in `rigs/ovl/` (`measure.py`).
+
 ## Measuring: `/mcgui stats` and the bench
 
 - **`/mcgui stats` is what the plugin costs a live server** (`Stats`; `/mcgui stats json` for scripts).
@@ -741,9 +756,36 @@ Reading a position, a world or a UUID is fine from anywhere. How MC GUI copes, a
   0.99999, pointer and signature at 1) by that picture under the tint, and
   clears the outline target (another glowing entity's outline would be drawn
   where it is now). A new window size drops the persistent target (alpha 0),
-  and it is taken again from the frame then. 26.2 draws clouds, weather and
-  particles after the chain, so its `rendertype_clouds.vsh` draws no clouds for
-  an overlay's camera (and under Fabulous, water and particles stay live). 26.3
+  and it is taken again from the frame then. While the world is being taken
+  the compose leaves it as drawn (tint and blur come with the panel), so
+  that improved transparency can take it whole (below). Before 26.3 clouds
+  are drawn after the chain, so the pack's `rendertype_clouds.vsh` draws none
+  for an overlay's camera; 1.21.11 draws particles after it too (its
+  `particle.vsh` likewise; 26.1 and 26.2 draw them in the main pass), and
+  weather is already clear for anybody at a view (`setPlayerWeather`).
+  **Improved transparency (1.21.11's Fabulous) before 26.3** draws
+  translucent blocks (water, glass, ice, stained glass), dropped items,
+  particles, weather and clouds into targets of their own and blends them in
+  with `post_effect/transparency.json`, after the chain: they were missing
+  from the kept picture and drawn live at the turning camera, so they moved
+  with the pointer while solid blocks stayed (reported 2026-10-27). The pack's
+  own `transparency.json` (`Shaders.transparencyChain`, in the three
+  pre-26.3 overlays only: 26.3 has no such effect) runs the game's composite
+  into `final`, then the same keeping passes on `final` with a persistent
+  target of its own, the game's blit, and the compose. It cannot see the
+  outline chain's targets (`LevelTargetBundle.SORTING_TARGETS`), and the
+  signature in main is already covered with world by then, so the outline
+  compose hands the signature on in the alpha of main's twelve bottom-left
+  pixels (a byte each; main's alpha is never shown, and screenshots come out
+  opaque) and `overlay_relay` draws it back over `final`'s four. Measured on
+  the PC (2026-10-27, each client on a Paper server of its own version, a
+  page with a small panel in front of leaves, ice, water, stained glass,
+  glass and stone, the pointer moved three times): pixels outside the panel
+  and pointer that changed, with improved transparency, went from 39–44k
+  (26.2, 26.1.2) and 100–131k (1.21.11) to 0, translucent blocks from
+  63–86% of their pixels to 0, solid blocks 0 throughout; without it 0 stays
+  0, and 1.21.11's 4.7–5.9k (particles) went to 0; 26.3 was 0 before and
+  after in both modes; fullscreen pages came out identical to the pixel. 26.3
   draws all of the world in its main pass (clouds, weather, improved
   transparency's blend included) before the chain, so they are in the kept
   picture and the pack leaves 26.3's clouds alone. Measured on a 26.3 client

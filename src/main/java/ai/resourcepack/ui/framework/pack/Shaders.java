@@ -19,8 +19,11 @@ import java.util.regex.Pattern;
  *   <li>A post effect, {@code post_effect/entity_outline.json}, which the game runs whenever a glowing
  *       entity is drawn: besides the outlines, it keeps the world an overlay page's player saw when it
  *       opened and shows it, still, round the panel ({@link #overlayChain}).</li>
- *   <li>{@code rendertype_clouds.vsh} draws no clouds over that still world (26.2 only: 26.3 draws its
- *       clouds before the outline effect, so they are in the kept picture).</li>
+ *   <li>{@code rendertype_clouds.vsh} draws no clouds over that still world (before 26.3: 26.3 draws its clouds
+ *       before the outline effect, so they are in the kept picture), nor 1.21.11's {@code particle.vsh} particles.</li>
+ *   <li>A post effect, {@code post_effect/transparency.json} (before 26.3), the game's improved transparency, which
+ *       blends translucent blocks, particles and the like in after the outline effect: it keeps the world whole round
+ *       the panel again ({@link #transparencyChain}).</li>
  *   <li>A post effect, {@code post_effect/blur.json}, the game's menu blur, which first takes the pointer out
  *       of the picture, so it does not show under the pause menu beside the system's own cursor
  *       ({@link #menuBlurChain}).</li>
@@ -1288,9 +1291,10 @@ public final class Shaders {
      *   drawn is taken, blurred if the view asks (three rounds of a horizontal and a vertical box blur at the
      *   player's own menu blur setting, as the game's menu blur), into {@code ov_kept}, which the chain keeps
      *   from frame to frame. Otherwise these six passes draw nothing.</li>
-     *   <li>Everything not the view's own (its panel and pointer are at a depth nothing else reaches) is
+     *   <li>Once kept, everything not the view's own (its panel and pointer are at a depth nothing else reaches) is
      *   replaced by the kept picture under the view's tint. So the world round the panel is still and lined up
-     *   with what the player saw, however their camera turns as the pointer moves.</li>
+     *   with what the player saw, however their camera turns as the pointer moves. While it is being taken the
+     *   world is left as drawn, so that {@link #transparencyChain} can take it whole.</li>
      *   <li>The outlines are cleared: another entity's would be drawn where it is now.</li>
      * </ol>
      *
@@ -1301,15 +1305,85 @@ public final class Shaders {
      */
     public static String overlayChain() {
         StringBuilder passes = new StringBuilder(OUTLINE_PASSES);
-        String[] from = {"minecraft:main", "ov_a", "ov_b", "ov_a", "ov_b", "ov_a"};
-        String[] to = {"ov_a", "ov_b", "ov_a", "ov_b", "ov_a", "ov_kept"};
+        passes.append(",\n").append(keepPasses("minecraft:main", "ov_a", "ov_b", "ov_kept"));
+        passes.append(",\n").append("""
+                    {
+                      "vertex_shader": "uiengine:post/overlay_signed_in",
+                      "fragment_shader": "uiengine:post/overlay_outline",
+                      "inputs": [{"sampler_name": "In", "target": "ov_a"}],
+                      "output": "minecraft:entity_outline"
+                    }""");
+        return "{\n  \"targets\": {\"swap\": {}, \"ov_a\": {}, \"ov_b\": {}, \"ov_kept\": {\"persistent\": true}},\n  \"passes\": [\n"
+                + passes + "\n  ]\n}\n";
+    }
+
+    /**
+     * {@code post_effect/transparency.json}: the game's own improved transparency (1.21.11's Fabulous graphics), then
+     * an overlay's world kept once more. Before 26.3 the game draws translucent blocks (water, glass, ice), dropped
+     * items, particles, weather and clouds into targets of their own and blends them over the world in this effect,
+     * after {@link #overlayChain} has kept the world: so they were missing from the kept picture and drawn live over
+     * it, turning with the pointer. Here the composite is taken and kept round the panel by the same passes. This
+     * effect cannot see the outline effect's targets, and the signature there is already covered with world, so
+     * {@link #overlayComposeFsh} hands it on in the alpha of the window's twelve bottom-left pixels and
+     * {@link #overlayRelayFsh} draws it back over the composite's four. Without a signature only the game's own two
+     * passes draw. 26.3 has no such effect: its improved transparency blends in the main pass, before the outline one.
+     */
+    public static String transparencyChain() {
+        String composite = """
+                    {
+                      "vertex_shader": "minecraft:core/screenquad",
+                      "fragment_shader": "minecraft:post/transparency",
+                      "inputs": [
+                        {"sampler_name": "Main", "target": "minecraft:main"},
+                        {"sampler_name": "MainDepth", "target": "minecraft:main", "use_depth_buffer": true},
+                        {"sampler_name": "Translucent", "target": "minecraft:translucent"},
+                        {"sampler_name": "TranslucentDepth", "target": "minecraft:translucent", "use_depth_buffer": true},
+                        {"sampler_name": "ItemEntity", "target": "minecraft:item_entity"},
+                        {"sampler_name": "ItemEntityDepth", "target": "minecraft:item_entity", "use_depth_buffer": true},
+                        {"sampler_name": "Particles", "target": "minecraft:particles"},
+                        {"sampler_name": "ParticlesDepth", "target": "minecraft:particles", "use_depth_buffer": true},
+                        {"sampler_name": "Clouds", "target": "minecraft:clouds"},
+                        {"sampler_name": "CloudsDepth", "target": "minecraft:clouds", "use_depth_buffer": true},
+                        {"sampler_name": "Weather", "target": "minecraft:weather"},
+                        {"sampler_name": "WeatherDepth", "target": "minecraft:weather", "use_depth_buffer": true}
+                      ],
+                      "output": "final"
+                    },
+                    {
+                      "vertex_shader": "uiengine:post/overlay_relay",
+                      "fragment_shader": "uiengine:post/overlay_relay",
+                      "inputs": [{"sampler_name": "Main", "target": "minecraft:main"}],
+                      "output": "final"
+                    }""";
+        String blit = """
+                    {
+                      "vertex_shader": "minecraft:core/screenquad",
+                      "fragment_shader": "minecraft:post/blit",
+                      "inputs": [{"sampler_name": "In", "target": "final"}],
+                      "uniforms": {"BlitConfig": [{"name": "ColorModulate", "type": "vec4", "value": [1.0, 1.0, 1.0, 1.0]}]},
+                      "output": "minecraft:main"
+                    }""";
+        return "{\n  \"targets\": {\"final\": {}, \"tr_a\": {}, \"tr_b\": {}, \"tr_kept\": {\"persistent\": true}},\n  \"passes\": [\n"
+                + composite + ",\n" + keepPasses("final", "tr_a", "tr_b", "tr_kept", blit) + "\n  ]\n}\n";
+    }
+
+    /**
+     * The passes that keep an overlay's world, from [world] (the frame as drawn, the signature in its four
+     * bottom-left pixels): six that take it into the persistent [kept], blurred if asked, a mask of the view's own
+     * pixels into [a], then [beforeCompose] (passes that leave [a] and [kept] alone), and the compose into main.
+     */
+    private static String keepPasses(String world, String a, String b, String kept, String... beforeCompose) {
+        StringBuilder passes = new StringBuilder();
+        String[] from = {world, a, b, a, b, a};
+        String[] to = {a, b, a, b, a, kept};
         for (int k = 0; k < 6; k++) {
             String dir = k % 2 == 0 ? "1.0, 0.0" : "0.0, 1.0";
             String inputs = k == 0
-                    ? "{\"sampler_name\": \"In\", \"target\": \"minecraft:main\"}, {\"sampler_name\": \"Kept\", \"target\": \"ov_kept\"}"
-                    : "{\"sampler_name\": \"In\", \"target\": \"" + from[k] + "\"}, {\"sampler_name\": \"Main\", \"target\": \"minecraft:main\"}";
+                    ? "{\"sampler_name\": \"In\", \"target\": \"" + world + "\"}, {\"sampler_name\": \"Kept\", \"target\": \"" + kept + "\"}"
+                    : "{\"sampler_name\": \"In\", \"target\": \"" + from[k] + "\"}, {\"sampler_name\": \"Main\", \"target\": \"" + world + "\"}";
             String shader = k == 0 ? "overlay_take" : "overlay_blur";
-            passes.append(",\n").append("""
+            if (k > 0) passes.append(",\n");
+            passes.append("""
                     {
                       "vertex_shader": "uiengine:post/%s",
                       "fragment_shader": "uiengine:post/%s",
@@ -1322,23 +1396,18 @@ public final class Shaders {
                     {
                       "vertex_shader": "uiengine:post/overlay_signed_main",
                       "fragment_shader": "uiengine:post/overlay_mask",
-                      "inputs": [{"sampler_name": "Main", "target": "minecraft:main"}, {"sampler_name": "MainDepth", "target": "minecraft:main", "use_depth_buffer": true}],
-                      "output": "ov_a"
-                    },
+                      "inputs": [{"sampler_name": "Main", "target": "%s"}, {"sampler_name": "MainDepth", "target": "minecraft:main", "use_depth_buffer": true}],
+                      "output": "%s"
+                    }""".formatted(world, a));
+        for (String pass : beforeCompose) passes.append(",\n").append(pass);
+        passes.append(",\n").append("""
                     {
                       "vertex_shader": "uiengine:post/overlay_signed_in",
                       "fragment_shader": "uiengine:post/overlay_compose",
-                      "inputs": [{"sampler_name": "In", "target": "ov_a"}, {"sampler_name": "Kept", "target": "ov_kept"}],
+                      "inputs": [{"sampler_name": "In", "target": "%s"}, {"sampler_name": "Kept", "target": "%s"}],
                       "output": "minecraft:main"
-                    },
-                    {
-                      "vertex_shader": "uiengine:post/overlay_signed_in",
-                      "fragment_shader": "uiengine:post/overlay_outline",
-                      "inputs": [{"sampler_name": "In", "target": "ov_a"}],
-                      "output": "minecraft:entity_outline"
-                    }""");
-        return "{\n  \"targets\": {\"swap\": {}, \"ov_a\": {}, \"ov_b\": {}, \"ov_kept\": {\"persistent\": true}},\n  \"passes\": [\n"
-                + passes + "\n  ]\n}\n";
+                    }""".formatted(a, kept));
+        return passes.toString();
     }
 
     /** How {@link #overlayChain}'s shaders read an overlay's signature. */
@@ -1515,7 +1584,12 @@ public final class Shaders {
                 """);
     }
 
-    /** Into main: the view's own where it is, the kept world under the tint everywhere else (the live one if none is kept). */
+    /**
+     * Into main: the view's own where it is, the kept world under the tint everywhere else; while the world is still
+     * being taken (not yet kept), the world as drawn, untinted, so {@link #transparencyChain} can take it whole. The
+     * signature's pixels show the world above them, and the signature goes on in the alpha of the window's twelve
+     * bottom-left pixels, a byte each, for {@link #overlayRelayFsh} (alpha in main is never shown).
+     */
     public static String overlayComposeFsh(Dialect d) {
         return overlayShader(d, """
                 uniform sampler2D InSampler;
@@ -1524,16 +1598,65 @@ public final class Shaders {
                 void main() {
                     ivec2 at = ivec2(gl_FragCoord.xy);
                     vec4 tint;
-                    if (ov_signature(InSampler, tint) == 0) discard;
+                    int flags = ov_signature(InSampler, tint);
+                    if (flags == 0) discard;
                     bool signature = at.y == 0 && at.x < 4;
+                    float alpha = at.y == 0 && at.x < 12 ? texelFetch(InSampler, ivec2(at.x / 3, 0), 0)[at.x % 3] : 1.0;
                     vec4 here = texelFetch(InSampler, at, 0);
                     if (here.a > 0.5 && !signature) {
-                        fragColor = vec4(here.rgb, 1.0);
+                        fragColor = vec4(here.rgb, alpha);
+                        return;
+                    }
+                    vec3 live = texelFetch(InSampler, signature ? ivec2(at.x, 1) : at, 0).rgb;
+                    if ((flags & @KEPT@) == 0) {
+                        fragColor = vec4(live, alpha);
                         return;
                     }
                     vec4 kept = texelFetch(KeptSampler, at, 0);
-                    vec3 world = kept.a > 0.5 ? kept.rgb : texelFetch(InSampler, signature ? ivec2(at.x, 1) : at, 0).rgb;
-                    fragColor = vec4(mix(world, tint.rgb, tint.a), 1.0);
+                    fragColor = vec4(mix(kept.a > 0.5 ? kept.rgb : live, tint.rgb, tint.a), alpha);
+                }
+                """);
+    }
+
+    /** The signature texel [i] (0 to 3) as {@link #overlayComposeFsh} hands it on, in the alpha of [s]'s bottom-left pixels. */
+    private static final String OVERLAY_RELAYED = """
+
+            ivec3 ov_relayed(sampler2D s, int i) {
+                return ivec3(round(vec3(texelFetch(s, ivec2(3 * i, 0), 0).a, texelFetch(s, ivec2(3 * i + 1, 0), 0).a,
+                        texelFetch(s, ivec2(3 * i + 2, 0), 0).a) * 255.0));
+            }
+
+            bool ov_relay_signed(sampler2D s) {
+                return ov_relayed(s, 0) == ivec3(@SIG0@) && ov_relayed(s, 3) == ivec3(0, 0, @SIG3@);
+            }
+            """;
+
+    /** {@link #transparencyChain}'s second pass: the signature handed on in main's alpha, back over the composite's four bottom-left pixels. */
+    public static String overlayRelayFsh(Dialect d) {
+        return overlayShader(d, """
+                uniform sampler2D MainSampler;
+                """ + OVERLAY_RELAYED + """
+
+                void main() {
+                    ivec2 at = ivec2(gl_FragCoord.xy);
+                    if (at.y != 0 || at.x >= 4 || !ov_relay_signed(MainSampler)) discard;
+                    fragColor = vec4(vec3(ov_relayed(MainSampler, at.x)) / 255.0, 1.0);
+                }
+                """);
+    }
+
+    /** Its triangle: the four bottom-left pixels with a signature handed on, else nothing. */
+    public static String overlayRelayVsh(Dialect d) {
+        return overlayVertexShader(d, """
+
+                uniform sampler2D MainSampler;
+                """ + OVERLAY_RELAYED + """
+
+                void main() {
+                    vec2 uv = ov_uv();
+                    // Legs eight pixels along and two up: the four bottom-left pixels' centres are inside.
+                    if (ov_relay_signed(MainSampler)) gl_Position = vec4(uv * vec2(8.0, 2.0) / vec2(textureSize(MainSampler, 0)) - 1.0, 0.0, 1.0);
+                    else ov_none();
                 }
                 """);
     }
@@ -1614,9 +1737,9 @@ public final class Shaders {
     }
 
     /**
-     * {@code rendertype_clouds.vsh} (26.2 only), drawing nothing for an overlay's camera: 26.2 draws clouds after the
-     * overlay chain, so they would move over the still world as the camera turns with the pointer. 26.3 draws them
-     * before it, into the kept picture.
+     * {@code rendertype_clouds.vsh} (before 26.3), drawing nothing for an overlay's camera: 1.21.11 to 26.2 draw clouds
+     * after the overlay chain, so they would move over the still world as the camera turns with the pointer. 26.3 draws
+     * them before it, into the kept picture.
      */
     public static String cloudsVsh() {
         return emit("""
@@ -1680,6 +1803,50 @@ public final class Shaders {
                     vertexColor = (useTopColor ? faceColors[1] : faceColors[direction]) * CloudColor;
                 }
                 """, Dialect.V26_2);
+    }
+
+    /**
+     * {@code particle.vsh} (1.21.11 only), drawing nothing for an overlay's camera: 1.21.11 draws particles after the
+     * outline effect, so without improved transparency they would move over the still world as the camera turns with
+     * the pointer. As with clouds, an overlay there shows none. 26.1 and later draw them in the main pass (or, with
+     * improved transparency, into a target {@link #transparencyChain} keeps), and weather, drawn with this shader after
+     * the outline effect, is already clear for anybody at a view ({@code Views}).
+     */
+    public static String particleVsh() {
+        return emit("""
+                #version 330
+
+                #moj_import <minecraft:fog.glsl>
+                #moj_import <minecraft:dynamictransforms.glsl>
+                #moj_import <minecraft:projection.glsl>
+                #moj_import <minecraft:sample_lightmap.glsl>
+                #moj_import <minecraft:globals.glsl>
+
+                in vec3 Position;
+                in vec2 UV0;
+                in vec4 Color;
+                in ivec2 UV2;
+
+                uniform sampler2D Sampler2;
+
+                out float sphericalVertexDistance;
+                out float cylindricalVertexDistance;
+                out vec2 texCoord0;
+                out vec4 vertexColor;
+
+                """ + helpers(VERTEX_HELPERS) + """
+
+                void main() {
+                    gl_Position = ProjMat * ModelViewMat * vec4(Position, 1.0);
+                    // An overlay's camera: outside the clip volume, so nothing is drawn.
+                    if (mcb_flag_axis() == 1) gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
+
+                    sphericalVertexDistance = fog_spherical_distance(Position);
+                    cylindricalVertexDistance = fog_cylindrical_distance(Position);
+                    texCoord0 = UV0;
+                    vertexColor = Color * sample_lightmap(Sampler2, UV2);
+                }
+                """, Dialect.V1_21_11);
     }
 
     private static String uints(int[] values) {
