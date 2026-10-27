@@ -276,12 +276,17 @@ public final class MapWall {
      * grown and the new tiles have reached them. Whether any were shown.
      */
     public boolean showTo(Player viewer) {
+        return showTo(viewer, List.of());
+    }
+
+    /** As {@link #showTo(Player)}, with [first] at the head of the first bundle: the client handles them with the frames, in one go. */
+    public boolean showTo(Player viewer, List<Object> first) {
         if (nms == null || viewer != owner) throw new IllegalStateException("Only a view's own viewer is shown its frames");
         int[] ids = entityIds;
         if (framed == null || framed.length != ids.length) framed = new boolean[ids.length];
         BlockFace face = ownerStack == null ? facing : ownerStack.face();
         ThreadLocalRandom random = ThreadLocalRandom.current();
-        List<Object> out = new ArrayList<>();
+        List<Object> out = new ArrayList<>(first);
         boolean any = false;
         for (int t = 0; t < ids.length; t++) {
             if (framed[t] || !sends(t)) continue;

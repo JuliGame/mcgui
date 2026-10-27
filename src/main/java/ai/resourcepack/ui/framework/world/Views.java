@@ -149,11 +149,11 @@ public final class Views implements Listener {
     /** Pixels across the screen a desktop pointer at Windows' default speed crosses in as many mouse counts: views.pointer-speed 1. */
     private static final double DESKTOP_WIDTH = 1920;
     /**
-     * Ticks a kept overlay's client takes the world for (see take) after answering the ping sent with the signature:
-     * a new entity, the glowing switch, is first drawn a frame after it arrives, and the panel must not come before
-     * the world has been taken without it.
+     * How long a kept overlay's client takes the world for (see take) before the panel may reach it, counted from when
+     * it had the signature and the glowing switch: a new entity is first drawn a frame after it arrives, and the panel
+     * must not come before the world has been taken without it. The round trip counts towards it (see keep).
      */
-    private static final int KEEP_AFTER = 2;
+    private static final long KEEP_AFTER_NANOS = 100_000_000L;
     /** Ticks after which a kept overlay is kept regardless, if its client never answers. */
     private static final int KEEP_TIMEOUT = 20;
     /** Map ids every view shares, from map-id-base (each player only ever sees their own view's frames): its own maps, then its hover layers'. */
@@ -167,6 +167,8 @@ public final class Views implements Listener {
     private final MapSender sender;
     private final Palette palette;
     private final Map<UUID, ViewImpl> views = new ConcurrentHashMap<>();
+    /** The views still opening (not revealed): what {@link #progressed} looks at. */
+    private final java.util.Set<ViewImpl> waiting = ConcurrentHashMap.newKeySet();
     private final NamespacedKey seatKey, returnKey, fovKey, stepKey, pointerKey;
     /** What each online player's mouse turns them by a count, being learned (server thread). */
     private final Map<UUID, MouseSteps> mice = new HashMap<>();
@@ -187,6 +189,7 @@ public final class Views implements Listener {
         this.pointerKey = new NamespacedKey(plugin, "pointer-speed");
         // 1.21.9+: a camera with a player's eye height (see spawnCamera).
         this.mannequin = Registry.ENTITY_TYPE.get(NamespacedKey.minecraft("mannequin"));
+        sender.onProgress(this::progressed);
     }
 
     public final class ViewImpl implements View {
@@ -207,12 +210,15 @@ public final class Views implements Listener {
         /** A kept overlay's switch for that post effect: a glowing display that draws nothing anybody sees. */
         final BlockDisplay glow;
         /**
-         * A kept overlay: 0 until it opens, 1 while the client takes the world (the signature sent, no panel yet), 2
-         * once it keeps it (the panel shown). [takenSince]: the tick the client was known to be taking it, -1 before.
+         * A kept overlay: 1 from its opening while the client takes the world (the signature sent, no panel yet), 2
+         * once it keeps it (the panel shown). [takenAt]: when (nanoTime) the client was known to be taking it,
+         * Long.MIN_VALUE before.
          */
         int stage;
-        volatile int takenSince = -1;
-        /** The tick a kept overlay is kept by at the latest, if the client never answers the ping. */
+        volatile long takenAt = Long.MIN_VALUE;
+        /** When the signature went out (nanoTime), and how long its ping took to come back. */
+        volatile long takeSentAt, takeRtt;
+        /** The tick a kept overlay stops waiting for its client to answer the ping sent with the signature. */
         int keepBy;
         /** A kept overlay's turn to the picture's axis, sent with the switch to keeping, until the client has answered the ping after it. */
         volatile boolean aligning;
@@ -286,13 +292,13 @@ public final class Views implements Listener {
         boolean pointerMoved;
         /** A pointer report is waiting for the server thread (see turned). */
         final java.util.concurrent.atomic.AtomicBoolean reportQueued = new java.util.concurrent.atomic.AtomicBoolean();
-        boolean pinged;
         /** The turn hint the client's pointer was last given ({@link Shaders#turnHint}), or -1 for none yet. Under the view's lock. */
         int turnHint = -1;
         /** The hover layers' {@code changes()} their frames on the client last matched (see frameLayers). */
         int layersFramed;
         volatile boolean revealed, closed;
-        volatile boolean caughtUp;
+        /** A look at this view, still opening, is queued on its server thread (see progressed). */
+        final java.util.concurrent.atomic.AtomicBoolean showQueued = new java.util.concurrent.atomic.AtomicBoolean();
 
         ViewImpl(Player p, ViewContent content, Canvas canvas, MapWall wall, ViewOptions options, boolean clientPointer, boolean keeps,
                  double speed, ArmorStand vehicle, Location seat, LivingEntity camera, Interaction target, TextDisplay pointer, BlockDisplay glow,
@@ -416,16 +422,23 @@ public final class Views implements Listener {
         Canvas canvas = content.canvas();
         double fov = viewFov(player, STRETCHED_FIT);
         Location from = player.getLocation();
+        // Overlays and fullscreen pages keep their maps apart, in the two halves of the views' ids, where both fit in
+        // half (tiles, signature and hover layers): the client keeps every map's colours, so going from one kind to the
+        // other and back, or opening either again, sends only what differs (MapSender.held). Anything bigger starts at
+        // the first id and simply overwrites.
+        int half = VIEW_ID_SPAN / 2;
+        int base = firstMapId + (options.overlay() && canvas.tiles() + 1 + Math.max(0, settings.hoverLayers) <= half ? half : 0);
+        int span = VIEW_ID_SPAN - (base - firstMapId);
         // An overlay with the pack keeps the player's own eye as the camera, where it is to within the flag's 1/32 of a
         // block, and their client keeps the world round the panel as it was (see Shaders.overlayChain): so the world
         // neither moves when it opens nor turns with the pointer. Its frames lie at the camera and its maps place
         // themselves in the window, so its wall is only a set of map ids.
-        // The signature map takes the id after the tiles', which must stay inside the views' 1024 (VIEW_ID_SPAN).
-        Location eye = settings.clientPointer && options.overlay() && canvas.cols() * canvas.rows() < 1024
+        // The signature map takes the id after the tiles', which must stay inside the views' ids (VIEW_ID_SPAN).
+        Location eye = settings.clientPointer && options.overlay() && canvas.tiles() < span
                 && runsOverlayChain(player) ? overlayEye(player) : null;
         boolean keeps = eye != null;
         MapWall wall = keeps ? new MapWall(player.getWorld(), eye.getBlockX(), eye.getBlockY(), eye.getBlockZ(),
-                cardinal(player).getOppositeFace(), canvas.cols(), canvas.rows(), firstMapId) : inFront(player, canvas.cols(), canvas.rows(), fov);
+                cardinal(player).getOppositeFace(), canvas.cols(), canvas.rows(), base) : inFront(player, canvas.cols(), canvas.rows(), fov, base);
         if (wall == null) throw new IllegalStateException("There isn't enough room around " + player.getName() + " for a view");
         World world = wall.world;
         Location cam = wall.cameraLocation(fov);
@@ -449,11 +462,11 @@ public final class Views implements Listener {
         double speed = speedFor(player, canvas, clientPointer);
         LayerSet layers = null;
         // After the tiles' ids and an overlay's signature's (MapWall.signatureMapId).
-        int layerMaps = Math.min(settings.hoverLayers, VIEW_ID_SPAN - canvas.tiles() - 1);
+        int layerMaps = Math.min(settings.hoverLayers, span - canvas.tiles() - 1);
         if (clientPointer && layerMaps > 0) {
             // Hover layers carry the speed to the shader in steps: the server's cursor goes by the same.
             speed = Shaders.layerSpeed(speed);
-            MapWall row = new MapWall(world, wall.anchorX, wall.anchorY, wall.anchorZ, wall.facing, layerMaps, 1, firstMapId + canvas.tiles() + 1);
+            MapWall row = new MapWall(world, wall.anchorX, wall.anchorY, wall.anchorZ, wall.facing, layerMaps, 1, base + canvas.tiles() + 1);
             row.spawnFor(nms, player, MapWall.Stack.at(cam));
             int side = (wall.facing.getModZ() != 0 ? Palette.LAYER_ALONG_Z : 0)
                     | (wall.facing.getModX() + wall.facing.getModZ() > 0 ? Palette.LAYER_LOOKS_NEGATIVE : 0);
@@ -520,6 +533,7 @@ public final class Views implements Listener {
 
         ViewImpl view = new ViewImpl(player, content, canvas, wall, options, clientPointer, keeps, speed, vehicle, seat, camera, target, pointer, glow, from, cam, layers);
         views.put(player.getUniqueId(), view);
+        waiting.add(view);
         // Remembered on the player, so a crash mid-view cannot leave them stuck in adventure mode or in the ground.
         player.getPersistentDataContainer().set(seatKey, PersistentDataType.STRING, player.getGameMode().name());
         player.getPersistentDataContainer().set(returnKey, PersistentDataType.STRING, encode(from));
@@ -538,6 +552,9 @@ public final class Views implements Listener {
         // Rain and snow are drawn between the camera and the picture: clear skies for this player only.
         player.setPlayerWeather(WeatherType.CLEAR);
         for (Player other : Bukkit.getOnlinePlayers()) if (other != player) Threads.now(plugin, other, () -> other.hidePlayer(plugin, player));
+        // A kept overlay's client starts taking the world now, while its panel is drawn and sent, so the round trip that
+        // needs is over by the time the panel is there.
+        if (keeps) take(player, view);
         return view;
     }
 
@@ -792,9 +809,9 @@ public final class Views implements Listener {
 
     /**
      * A wall in front of [player] at eye level, far enough away to fill their view from about their
-     * own block column. Its frames can be inside the ground: they are drawn in front of it.
+     * own block column, its maps from [firstMap]. Its frames can be inside the ground: they are drawn in front of it.
      */
-    private MapWall inFront(Player player, int cols, int rows, double fov) {
+    private MapWall inFront(Player player, int cols, int rows, double fov, int firstMap) {
         BlockFace toward = cardinal(player);
         BlockFace facing = toward.getOppositeFace();
         World world = player.getWorld();
@@ -804,7 +821,7 @@ public final class Views implements Listener {
         int cx = player.getLocation().getBlockX() + toward.getModX() * ahead;
         int cz = player.getLocation().getBlockZ() + toward.getModZ() * ahead;
         int half = (cols - 1) / 2;
-        MapWall wall = new MapWall(world, cx - facing.getModZ() * half, top, cz + facing.getModX() * half, facing, cols, rows, firstMapId);
+        MapWall wall = new MapWall(world, cx - facing.getModZ() * half, top, cz + facing.getModX() * half, facing, cols, rows, firstMap);
         return wall.placeable() ? wall : null;
     }
 
@@ -828,29 +845,7 @@ public final class Views implements Listener {
     }
 
     private void tick(Player p, ViewImpl v, int now) {
-        if (!v.revealed) {
-            if (v.stage == 1) {
-                // Taking the world: kept once the client has had a few frames with the signature since it answered
-                // the ping sent with it, or at the latest when keepBy is up.
-                int since = v.takenSince;
-                if ((since < 0 || now < since + KEEP_AFTER) && now < v.keepBy) return;
-                keep(p, v);
-            } else {
-                if (now < v.deadline) {
-                    // Written to the network is not yet shown: wait for the client to have handled the tiles too.
-                    if (!v.pinged && sender.delivered(v.player, v.wall)) {
-                        v.pinged = true;
-                        pipeline.afterClientCaughtUp(p, () -> v.caughtUp = true);
-                    }
-                    if (!v.caughtUp) return;
-                }
-                if (v.keeps) {
-                    take(p, v);
-                    return;
-                }
-                reveal(p, v);
-            }
-        }
+        if (!v.revealed && !show(p, v, now)) return;
         if (v.keeps) {
             signature(p, v);
             // The panel grew (something opened past it): its new tiles' frames, once their maps have reached the client.
@@ -871,6 +866,44 @@ public final class Views implements Listener {
     }
 
     /**
+     * Shows a view still opening once its picture is out, and says whether it is shown. Shown once every tile is
+     * written to the connection: what is sent after it (the frames, the camera) reaches the client behind the tiles
+     * and is handled after them, so the first frame it draws with the view has the whole picture. No ping is needed
+     * for that, only for what the client must have drawn meanwhile (see keep).
+     */
+    private boolean show(Player p, ViewImpl v, int now) {
+        if (now < v.deadline && !sender.delivered(v.player, v.wall)) return false;
+        if (v.keeps) {
+            // Taking the world since it opened (see take): kept once the client has had long enough with the
+            // signature, or at the latest when keepBy is up.
+            if (!taken(p, v) && now < v.keepBy) return false;
+            keep(p, v);
+        } else {
+            reveal(p, v);
+        }
+        return true;
+    }
+
+    /**
+     * The sender wrote something, or finished a pass (any thread): each view still opening is looked at again on its
+     * server thread between ticks, not at the next tick (up to 50 ms later).
+     */
+    private void progressed() {
+        if (waiting.isEmpty()) return;
+        for (ViewImpl v : waiting) look(v);
+    }
+
+    /** Looks at [v], still opening, on its server thread as soon as it is free (any thread; one look queued at a time). */
+    private void look(ViewImpl v) {
+        if (!v.showQueued.compareAndSet(false, true)) return;
+        serverThread(v).execute(() -> {
+            v.showQueued.set(false);
+            Player p = Bukkit.getPlayer(v.player);
+            if (p != null && !v.revealed && !v.closed && views.get(v.player) == v) show(p, v, Platform.tick());
+        });
+    }
+
+    /**
      * Gives the client a frame for each hover-layer map a layer holds, and takes the rest away (LayerSet), once the maps
      * as they are now have been written to it: a new frame then shows its layer's map, and one taken away was already
      * marked to show nothing, in the same pass as the picture that made its layer stale.
@@ -886,10 +919,11 @@ public final class Views implements Listener {
     }
 
     /**
-     * A kept overlay, first step: the player is held where they are, their eye on the flag (at most 1/32 of a block
-     * off, their rotation untouched), and their client is sent the signature (map and frame) and the glowing switch,
-     * but not yet the panel. From the next frame it draws, the post effect takes the world as it is every frame
-     * (Shaders.overlayChain), which is still exactly what the player was looking at.
+     * A kept overlay, first step, as it opens: the player is held where they are, their eye on the flag (at most 1/32 of
+     * a block off, their rotation untouched), and their client is sent the signature (map and frame) and the glowing
+     * switch, but not yet the panel, which is drawn and sent meanwhile. From the next frame it draws, the post effect
+     * takes the world as it is every frame (Shaders.overlayChain) and shows it as it is, untinted: nothing changes on
+     * screen but the HUD going, until the panel and the tint come together (keep).
      */
     private void take(Player p, ViewImpl v) {
         v.stage = 1;
@@ -903,14 +937,35 @@ public final class Views implements Listener {
         signature(p, v);
         v.wall.showSignature(p);
         p.showEntity(plugin, v.glow);
-        pipeline.afterClientCaughtUp(p, () -> v.takenSince = Platform.tick());
+        v.takeSentAt = System.nanoTime();
+        pipeline.afterClientCaughtUp(p, () -> {
+            long now = System.nanoTime();
+            v.takeRtt = now - v.takeSentAt;
+            v.takenAt = now;
+            look(v);
+        });
     }
 
     /**
-     * A kept overlay, second step: the signature says the world is kept, and the player is turned to face the
-     * picture's axis, level, which the client pointer starts from (the camera turning is not seen: the world round
-     * the panel is the kept one), in one bundle, so the first frame after it shows both or neither. Then the panel
-     * and the pointer, which shows once the turn has been taken.
+     * Whether a kept overlay's client has been taking the world long enough for the panel to be sent: it has answered
+     * the ping sent with the signature, and the panel will reach it at least {@link #KEEP_AFTER_NANOS} after it had the
+     * signature. It had it before it answered, and the keep takes half a round trip to arrive as the answer took the
+     * other half: so the wait after the answer is that less the round trip, the player's ping (their average) or this
+     * ping's, whichever is less.
+     */
+    private static boolean taken(Player p, ViewImpl v) {
+        long at = v.takenAt;
+        if (at == Long.MIN_VALUE) return false;
+        long rtt = Math.min(p.getPing() * 1_000_000L, v.takeRtt);
+        return System.nanoTime() - at >= KEEP_AFTER_NANOS - rtt;
+    }
+
+    /**
+     * A kept overlay, second step: the signature says the world is kept, the player is turned to face the picture's
+     * axis, level, which the client pointer starts from (the camera turning is not seen: the world round the panel is
+     * the kept one), and the panel's frames appear, in one bundle, so the first frame after it shows all of them or
+     * none (a frame of the tint without the panel was seen on a slow link). Then the pointer, which shows once the turn
+     * has been taken.
      */
     private void keep(Player p, ViewImpl v) {
         v.stage = 2;
@@ -918,12 +973,14 @@ public final class Views implements Listener {
         v.aligning = true;
         v.serverTurns.incrementAndGet();
         v.revealed = true;
-        int flags = signatureFlags(v);
+        waiting.remove(v);
+        // The whole signature, kept, with the tint of the picture now shown (the canvas had none when it opened).
+        int tint = v.shown.tint(), flags = signatureFlags(v);
+        v.signatureTint = tint;
         v.signatureFlags = flags;
-        nms.send(p, nms.bundle(List.of(
-                nms.mapPatch(v.wall.signatureMapId(), 6, 0, 1, 1, new byte[]{palette.signatureFlags(flags)}),
-                nms.rotate(v.refYaw, false, 0f, false))));
-        v.wall.showTo(p);
+        v.wall.showTo(p, List.of(
+                nms.mapPatch(v.wall.signatureMapId(), 0, 0, 128, 128, palette.markSignature(v.wall.cols, v.wall.rows, tint, flags)),
+                nms.rotate(v.refYaw, false, 0f, false)));
         v.privateView.open(plugin, p);
         movePointer(v);
         p.showEntity(plugin, v.pointer);
@@ -953,6 +1010,7 @@ public final class Views implements Listener {
         v.settleBy = Platform.tick() + SETTLE_TIMEOUT;
         v.awaitingTeleport = true;
         v.revealed = true;
+        waiting.remove(v);
         // All in one tick, so the client applies them together with the camera switch.
         v.wall.showTo(p);
         v.privateView.open(plugin, p);
@@ -1407,6 +1465,7 @@ public final class Views implements Listener {
             }
             ViewImpl gone = views.remove(player.getUniqueId());
             gone.closed = true;
+            waiting.remove(gone);
             pipeline.unwatch(player.getUniqueId());
             try {
                 gone.content.closed(gone, reason);
@@ -1418,6 +1477,7 @@ public final class Views implements Listener {
         ViewImpl v = views.remove(player.getUniqueId());
         if (v == null) return;
         v.closed = true;
+        waiting.remove(v);
         pipeline.unwatch(player.getUniqueId());
         // The player first, and the content after: a content that throws must never leave them seated,
         // invisible and hidden, with the view already gone so that nothing could close it again.

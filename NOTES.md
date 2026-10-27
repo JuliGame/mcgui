@@ -749,13 +749,22 @@ Reading a position, a world or a UUID is fine from anywhere. How MC GUI copes, a
   window's four bottom-left pixels and `text.fsh` writes there a check, the
   tint, the flags (blur, kept, reversed depth) and a second check. The chain
   keeps the game's four outline passes, then: while the overlay opens
-  (`Views.take`: no panel yet) it copies the world, blurred if asked, into a
-  persistent target every frame; once kept (`Views.keep`: the flag flipped and
-  the player turned to the picture's axis in one bundle, then the panel and
-  pointer) it replaces everything not at the view's own depth (the panel at
-  0.99999, pointer and signature at 1) by that picture under the tint, and
+  (`Views.take`, sent the moment it opens, while the panel is drawn and sent: no
+  panel yet) it copies the world, blurred if asked, into a persistent target every
+  frame and leaves the window as the game drew it (no tint yet: only the HUD goes,
+  the eye being flagged); once kept (`Views.keep`: the whole signature with the
+  kept flag and the picture's tint, the turn to the picture's axis and the panel's
+  frames in one bundle, then the pointer) it replaces everything not at the view's
+  own depth (the panel at 0.99999, pointer and signature at 1) by that picture
+  under the tint, and
   clears the outline target (another glowing entity's outline would be drawn
-  where it is now). A new window size drops the persistent target (alpha 0),
+  where it is now). The keep waits for the take's ping to come back, and for
+  100 ms after the client had the signature (`Views.taken`, the round trip
+  counting towards it): the client must have drawn a frame with the glowing
+  switch before the panel reaches it, or the panel is in the picture taken.
+  So an overlay opens two round trips after the command, a fullscreen page
+  one (see "A view opens as soon as its picture is out", below). A new window
+  size drops the persistent target (alpha 0),
   and it is taken again from the frame then. While the world is being taken
   the compose leaves it as drawn (tint and blur come with the panel), so
   that improved transparency can take it whole (below). Before 26.3 clouds
@@ -1000,7 +1009,68 @@ Reading a position, a world or a UUID is fine from anywhere. How MC GUI copes, a
   every path, or the driver may drop the whole shader.
 - **Map ids**: views share `[map-id-base, +1024)` (each player only ever sees
   their own view's frames), walls count up from there, fresh each start. They
-  have no saved data, so vanilla never sends anything for them.
+  have no saved data, so vanilla never sends anything for them. An overlay's
+  maps (tiles, signature, hover layers) take the upper half and a fullscreen
+  page's the lower (`Views.open`, where the page fits in half: anything bigger
+  starts at the first id and overwrites), so going fullscreen to overlay and
+  back leaves each kind's maps on the client: it keeps every map's colours for
+  as long as its connection lasts, and `MapSender.held` (kept when a player
+  leaves every screen, dropped on `reset`, on another connection or when a
+  patch was still in flight) tells the sender what they are, so a page shown
+  again costs only what differs.
+- **A view opens as soon as its picture is out, not a round trip later**
+  (`Views.show`, run from the tick and, between ticks, by `MapSender.onProgress`
+  when a write lands). The old open waited for every tile to be written and
+  then for a ping to come back (`Pipeline.afterClientCaughtUp`) before it showed
+  the view, and an overlay then began taking its world: a second ping and 2
+  more ticks, the signature and the glowing switch sent only then and the
+  panel only after that. So a command took the command's own round trip plus
+  the ping's (two) for a fullscreen page and three and about 100 ms for an
+  overlay; and a fullscreen to overlay switch drew the overlay into the maps
+  the fullscreen page held, so all of them were sent again. Frames and camera
+  sent after the last tile reach the client behind it on the same connection
+  and are handled after it, so no ping is needed for the first frame to be
+  whole. An overlay's take is sent when it opens, while its panel is drawn and
+  sent, so the take's round trip is hidden when the picture is slow and is the
+  whole wait when it is not. What is left is the command's own trip there and
+  back for any view, and an overlay's second round trip (above).
+  Measured on the PC (2026-10-27): a real 26.2 client through `lagproxy.py` (a
+  proxy that holds each byte one way for the given time and can cap the rate),
+  the market page fullscreen and as an overlay, command to the first frame that
+  shows the finished page and keeps showing it (`matrix.py` and `cold.py` in
+  `rigs/delay/`: 32 x 18 samples of the framebuffer every frame).
+  One-way delay, and 4 Mbit/s down for `/4`; ms, before then after (median of
+  three; the first open after joining, a range of two, as one open in the
+  before runs took twice as long as its twin):
+
+  | Link | Fullscreen | Overlay | Fullscreen, then overlay | First open after joining: fullscreen | overlay |
+  |---|--:|--:|--:|--:|--:|
+  | 0 ms | 165 → 36 | 270 → 163 | 270 → 171 | 160–371 → 100–110 | 239–338 → 146–169 |
+  | 100 ms | 501 → 256 | 791 → 407 | 825 → 422 | 568–1371 → 279–319 | 867–898 → 412–429 |
+  | 250 ms | 1150 → 550 | 1667 → 1054 | 1669 → 1014 | 1189–1191 → 578–598 | 1774–2018 → 1021–1026 |
+  | 100 ms, 4 Mbit | 1133 → 254 | 1230 → 431 | 1246 → 431 | 1077–1094 → 792–817 | 1237–1267 → 711–722 |
+  | 250 ms, 4 Mbit | 1636 → 592 | 2121 → 1052 | 2144 → 1032 | 1646–1707 → 1126–1127 | 2197–2207 → 1063–1072 |
+
+  The first three columns are a page the client has had before (reopened);
+  before the change every open sent the whole picture. A fullscreen page is
+  about one round trip plus 50 ms (500 ms is one round trip at 250 ms each
+  way), an overlay two round trips plus up to 55 ms, and at 0 ms the overlay's
+  100 ms margin shows. The first open after joining is bound by the transfer
+  on the slow links (at 100 ms and 4 Mbit/s, 550 ms more than a reopen
+  fullscreen, 290 ms more as an overlay). In the fullscreen to overlay
+  switch the world is shown plain (no clouds, hand or HUD) for the take's round
+  trip between the two pictures; the world behind the overlay is the one that
+  was taken (outside the panel the frame before it and the finished overlay
+  correlate at 0.9999 with no shift, three strips).
+  **`network-compression-threshold=-1` costs a first open about 4 seconds on a
+  slow link**: the same cold first opens at 4 Mbit/s (100 and 250 ms one way)
+  took 5.0 to 5.3 s fullscreen and 4.4 to 4.8 s as an overlay with it, against
+  0.8 and 0.7 s (100 ms) or 1.1 s (250 ms) at the default 256 (a 16x9 page is
+  144 maps of 16 KB, 2.4 MB
+  before compression). The shared compression cannot help there: it refuses a
+  connection with no compressor (`SharedCompression`, "it is not compressed").
+  Reopened pages send only what differs, so they do not need it. Not
+  measured: a server behind a proxy.
 - **The mannequin camera** (1.21.9+) has a player's eye height. An armour stand
   (the fallback) makes the client glide its eye height for most of a second,
   off the flagged position the whole time.

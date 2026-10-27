@@ -460,6 +460,27 @@ for that by eye. `sh gradlew animBench -Pdir=path/to/pages -Ppages=page` prints
 what a page's animations cost the server a second at 1, 10 and 50 viewers
 (`page:hover:.card` hovers each viewer over the cards in turn).
 
+## Opening over a network
+
+A page opens one round trip after the command, and an overlay page (`ui:overlay`)
+two: the player's game has to take the world as it is before the page reaches it,
+so that is asked the moment the page opens, while it is drawn and sent. On a real
+26.2 client with the market page, 100 ms each way, a fullscreen page was on screen
+256 ms after the command and an overlay 407 ms; at 250 ms each way 550 and 1,054
+(a round trip is 200 and 500 ms). Going from a fullscreen page to an overlay took
+about what an overlay does. Players see the world, plain, for a round trip
+between the two.
+
+The first page a player opens after joining sends its whole picture, up to 2.4 MB
+before compression for a 16×9 page. On a 4 Mbit/s link that took 800 ms
+fullscreen and 700 ms as an overlay at 100 ms each way, against 250 and 430 ms
+once the player has had the page: their game keeps what it was sent, and a page
+shown again sends only what differs. Fullscreen and overlay pages keep their
+maps apart, so going between them does not resend either.
+
+Leave `network-compression-threshold` in `server.properties` at its default (256).
+At -1 (no compression) the same first opens took 5 seconds on that link.
+
 ## Frame rate
 
 What a page costs the player's own client, per frame, is mostly how many

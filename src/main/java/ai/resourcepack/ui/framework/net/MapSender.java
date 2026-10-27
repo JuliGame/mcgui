@@ -129,6 +129,18 @@ public final class MapSender implements AutoCloseable {
      * from there, so stepping out of range and back cannot earn a fresh burst; anyone else starts with a full one.
      */
     private final Map<UUID, long[]> left = new ConcurrentHashMap<>();
+    /**
+     * What the clients of players who left every screen still hold, by map id, until they come back: a client keeps a
+     * map's colours for as long as its connection lasts, whatever world it goes to, so a page shown again (a menu
+     * reopened, a wall walked back to) costs only what differs from what it had. The tiles are held weakly: one nobody
+     * else keeps alive any more can never be the tile asked for again (tiles are compared by identity), so it is
+     * simply sent. Tied to the connection it was sent on ({@link Wire.Frames}, one per connection).
+     */
+    private final Map<UUID, Held> held = new ConcurrentHashMap<>();
+    /** Run whenever a pass ends or a write lands (any thread): what was not delivered may be now. */
+    private volatile Runnable progress;
+
+    private record Held(Wire.Frames connection, Map<Integer, java.lang.ref.WeakReference<byte[]>> tiles) {}
     private long lastWarning;
     /** This pass: how many viewers each canvas has in each encoding, so a tile more than one is sent is made once. */
     private final Map<Watch, Integer> watching = new HashMap<>();
@@ -192,10 +204,43 @@ public final class MapSender implements AutoCloseable {
         return true;
     }
 
-    /** Forget what a player has, so everything is resent (new world, rejoin, pack change). */
+    /** Forget what a player has, so everything is resent (rejoin, pack change). */
     public void reset(UUID player) {
+        held.remove(player);
         Viewer v = viewers.remove(player);
         if (v != null) left.put(player, new long[]{v.budget, System.nanoTime()});
+    }
+
+    /** [run] is run whenever a pass ends or a write lands, on whichever thread that was: something may be delivered now. */
+    public void onProgress(Runnable run) {
+        progress = run;
+    }
+
+    private void progressed() {
+        Runnable run = progress;
+        if (run != null) run.run();
+    }
+
+    /** [v], who left every screen, is dropped: what their client holds is kept for when they come back (see {@link #held}). */
+    private void remember(UUID id, Viewer v) {
+        // Patches still on their way could yet fail, and then the client never had them.
+        if (v.pointing == null || v.inFlight.get() != 0) {
+            held.remove(id);
+            return;
+        }
+        Map<Integer, java.lang.ref.WeakReference<byte[]>> tiles = new HashMap<>(v.sent.size() * 2);
+        v.sent.forEach((map, tile) -> tiles.put(map, new java.lang.ref.WeakReference<>(tile)));
+        held.put(id, new Held(v.pointing, tiles));
+    }
+
+    /** [v] is back on a screen, on [connection]: what their client still holds, as it was when they left. */
+    private void recall(UUID id, Viewer v, Wire.Frames connection) {
+        Held h = held.remove(id);
+        if (h == null || h.connection != connection) return;
+        h.tiles.forEach((map, ref) -> {
+            byte[] tile = ref.get();
+            if (tile != null) v.sent.putIfAbsent(map, tile);
+        });
     }
 
     /**
@@ -263,7 +308,7 @@ public final class MapSender implements AutoCloseable {
             Viewer v = viewers.computeIfAbsent(a.player.getUniqueId(), k -> fresh(k, now));
             if (seen.add(a.player.getUniqueId())) {
                 v.budget = Math.min(v.budget + refill, burst);
-                if (v.pointing == null) v.pointing = wire.frames(a.player);
+                if (v.pointing == null && (v.pointing = wire.frames(a.player)) != null) recall(a.player.getUniqueId(), v, v.pointing);
             }
             v.walls.add(a.wall);
             // Each on its own: one that fails must not hold up every assignment after it.
@@ -280,11 +325,12 @@ public final class MapSender implements AutoCloseable {
                 warn(e);
             }
         }
-        // Players who left every screen: drop their state so walking back resends everything, keeping their budget a moment.
+        // Players who left every screen: drop their state, keeping their budget a moment and what their client holds.
         for (var it = viewers.entrySet().iterator(); it.hasNext(); ) {
             var e = it.next();
             if (seen.contains(e.getKey())) continue;
             left.put(e.getKey(), new long[]{e.getValue().budget, now});
+            remember(e.getKey(), e.getValue());
             it.remove();
         }
         left.values().removeIf(was -> now - was[1] > 500_000_000L); // refilled to the full burst by now anyway
@@ -300,6 +346,7 @@ public final class MapSender implements AutoCloseable {
             for (Frame f : v.frames.values()) left |= !f.queue.isEmpty();
         }
         unsent = left;
+        progressed();
     }
 
     /** The map each of [wall]'s frames shows [v]'s client. Never changed: a new pointing is a new array. */
@@ -707,6 +754,8 @@ public final class MapSender implements AutoCloseable {
         // several times the in-flight limit, so without this each remaining slice waited out a timer
         // (measured: whole picture on screen 83.6 -> 66.6 ms median).
         wake();
+        // The last of a picture written: a view waiting for it can be shown now, not at the next tick.
+        progressed();
     }
 
     /** The smallest rectangle {x, y, w, h} covering every byte that differs, or null if none does. */
