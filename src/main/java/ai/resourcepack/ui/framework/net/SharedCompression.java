@@ -41,8 +41,10 @@ import java.util.logging.Logger;
  * <p>Only where nothing else can tell the difference: a connection is used only while its channel is netty's
  * own, its {@code compress} and {@code prepender} are Minecraft's, its encoder is in the game protocol, and no
  * handler that is not Minecraft's or ours sees packets on their way out. Anything that reads or rewrites
- * packets (ViaVersion, ProtocolLib, PacketEvents) would never see the map patches written past it, so with
- * any of them in a connection that connection gets packet objects as before, and that is said once in the log.
+ * packets (ProtocolLib, PacketEvents, ViaVersion translating for another game version) would never see the map
+ * patches written past it, so with any of them in a connection that connection gets packet objects as before,
+ * and that is said once in the log. ViaVersion's handler on a connection it has nothing to translate for passes
+ * every packet on untouched, so it does not stop this ({@link ViaVersionState}).
  */
 public final class SharedCompression implements AutoCloseable {
     /** The packets written instead, where a connection cannot take the compressed bytes. */
@@ -502,7 +504,14 @@ public final class SharedCompression implements AutoCloseable {
             if (k == encoderClass && name.equals(encoderName)) encoder = h;
             else if (k == unbundlerClass || k == connectionClass || h instanceof LeavesMapsAlone) continue;
             else if (name.equals(HACKFIX) && k.getName().startsWith(connectionClass.getName() + "$")) continue;
-            else return "handler '" + name + "' (" + k.getName() + ") sees its packets on their way out and would not see map pictures";
+            else {
+                ViaVersionState.Stand via = ViaVersionState.stand(h);
+                if (via == ViaVersionState.Stand.PASSES) continue;
+                if (via == ViaVersionState.Stand.TRANSLATES) {
+                    return "ViaVersion is translating its packets for another game version (handler '" + name + "', " + k.getName() + ")";
+                }
+                return "handler '" + name + "' (" + k.getName() + ") sees its packets on their way out and would not see map pictures";
+            }
         }
         if (encoder == null) return null; // not in a protocol yet, or switching (configuration): for a moment
         try {

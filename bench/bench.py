@@ -189,6 +189,8 @@ class Server:
         shutil.copy(self.jar, f'{self.dir}/plugins/MCGUI.jar')
         shutil.copy(self.arcade, f'{self.dir}/plugins/Arcade.jar')
         shutil.copy(a.probe, f'{self.dir}/plugins/Probe.jar')
+        for extra in a.plugin:
+            shutil.copy(extra, f'{self.dir}/plugins/{os.path.basename(extra)}')
         # telemetry off: every bench start is a new server id with dozens of fake players, which the usage count read as real servers.
         open(f'{self.dir}/plugins/MCGUI/config.yml', 'w').write(config_yaml({'resource-pack.port': self.pack_port, 'telemetry': 'false', **dict(s.split('=', 1) for s in a.set)}))
         pages = f'{self.dir}/plugins/MCGUI/pages'
@@ -693,6 +695,8 @@ def main():
     p.add_argument('--tag', default='')
     p.add_argument('--set', action='append', default=[], metavar='KEY=VALUE',
                    help='a config.yml setting for the server, dotted (views.hover-layers=32); repeatable')
+    p.add_argument('--plugin', action='append', default=[], metavar='JAR',
+                   help='another plugin jar for the server (ViaVersion, say), to bench MC GUI beside it; repeatable')
     p.add_argument('--hover-pages', default='market',
                    help='pages the hover cell runs on, comma separated (vanilla ones need --vanilla)')
     a = p.parse_args()

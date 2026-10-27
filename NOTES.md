@@ -373,7 +373,7 @@ agent is the same source built against the 26.3 `client.jar`
 it); `snap`, `ptrwatch`, `mouse` and `gui` all work. The PC's server is 26.2,
 so put ViaVersion (5.12.2 knows 26.3) in its plugins for the session: a 26.3
 client then joins it cleanly (the plugin turns shared compression off for a
-connection Via handles). `pc-restore.sh` removes it again. Improved
+connection Via translates; see "Shared compression and ViaVersion"). `pc-restore.sh` removes it again. Improved
 transparency (26.3's part of Fabulous) is `improvedTransparency` in the 26.3
 game folder's `options.txt`. To see what a version the chain was never
 checked in gets, build with that dialect's protocol in `Shaders.Dialect`
@@ -499,6 +499,20 @@ MC GUI runs on Spigot and Paper from the same jar (since 0.3.0; SpigotMC lists o
   level's own counter (`Level.getNextEntityId`).
 - **Shared compression is Paper's only**: it uses the Velocity natives Paper bundles. On Spigot each connection
   compresses its own map packets, as with shared compression off.
+- **Shared compression and ViaVersion** (`SharedCompression.check`, `ViaVersionState`): ViaVersion's `via-encoder`
+  sits between `encoder` and `compress`, so it sees every packet before compression, and shared compression
+  used to refuse every connection while Via was installed (the trace said "handler 'via-encoder' ... sees its
+  packets"). Via marks a connection inactive when its login succeeds if the client is on the server's own version
+  (`ClientboundBaseProtocol1_7`: no non-base protocol in the pipeline), and `via-encoder` then passes each
+  packet on untouched (`UserConnection.shouldTransformPacket()` is false). So a connection whose Via handler
+  answers false (asked each time the pipeline is looked at, through `ViaChannelHandler.connection()` by
+  reflection, no Via dependency) takes shared compression; one Via translates for, or whose Via cannot be asked,
+  still does not ("ViaVersion is translating its packets for another game version"). `bench/bench.py --plugin
+  ViaVersion.jar --only hover` measures it: 50 players hovering the market, Netty IO threads 77 ms of CPU a second
+  without Via, 303 with Via refusing (every connection compressing its own copy of every patch), 78 with this.
+  On the real clients (Paper 26.2 with ViaVersion 5.12.2): a 26.2 client's open trace says "shared compression
+  used" (98 of 144 patches compressed once for all), a 26.3 client's "ViaVersion is translating its packets for
+  another game version" and its maps are right on screen.
 - **Testing**: the mineflayer bot cannot join 26.3 (protocol 777), even through ViaBackwards (it is kicked for
   an invalid move). On 26.2 with ViaVersion and ViaBackwards it joins as 26.1, so 26.2 is where a bot can drive
   both servers; 26.3 needs a real client.
