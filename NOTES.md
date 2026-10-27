@@ -851,6 +851,16 @@ Reading a position, a world or a UUID is fine from anywhere. How MC GUI copes, a
   transparency draws particles over the kept world now and then (`/particle`,
   a death's poof): its particle pipeline does not declare `Globals`, so
   `particle.vsh`'s test reads whatever is bound there.
+  **The held player's view keeps its width** (2026-10-27): holding a player (flying, speed zero) widened their view
+  by 10% as an overlay opened (`AbstractClientPlayer.getFieldOfViewModifier`: 1.1 for flying, times
+  `(movement speed / walking speed + 1) / 2` when the walking speed is not zero), so the kept world was taken
+  9–12% zoomed out, and the release sent the abilities (walking speed back) a tick before the attributes, so for
+  a few frames the speed was zero against a real walking speed: a view half as wide, a 1.8× zoom pop that eased
+  back over 400 ms. `Pipeline` now tells a held client the walking speed as it is and a movement speed of
+  `2 / 1.1 - 1` of it (`Nms.heldAttributes`, whatever the server says), and `Nms.resendMovement` sends the
+  attributes and abilities in one write on hold and on release: the view is the same width held and free.
+  Measured (26.1.2, 26.2 Paper, 26.2 Folia): the wall's scale after an open 0.91 (was 1.00), the close's 0.88..1.79
+  (was 1.00). Holding sprint still widens it (the client's own sprint modifier on the speed).
   Without the signature no pass of ours draws a pixel: nobody else's game
   changes. Each of our passes has its own vertex shader (`overlayTakeVsh`,
   `overlayBlurVsh`, `overlaySignedVsh`) that reads the signature (and whether a

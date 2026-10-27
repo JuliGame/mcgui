@@ -67,3 +67,9 @@ net.minecraft.world.level.material.MapColor
 net.minecraft.world.level.saveddata.maps.MapId
 net.minecraft.world.level.saveddata.maps.MapItemSavedData$MapPatch
 net.minecraft.world.phys.Vec3
+net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket
+net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket$AttributeSnapshot
+net.minecraft.core.Holder
+net.minecraft.world.entity.ai.attributes.Attributes
+net.minecraft.world.entity.LivingEntity
+net.minecraft.world.entity.ai.attributes.AttributeMap

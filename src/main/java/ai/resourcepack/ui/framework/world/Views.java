@@ -1129,15 +1129,15 @@ public final class Views implements Listener {
                     resistance ? AttributeModifier.Operation.ADD_NUMBER : AttributeModifier.Operation.MULTIPLY_SCALAR_1,
                     org.bukkit.inventory.EquipmentSlotGroup.ANY));
         }
-        pipeline.hold(player.getUniqueId(), true);
-        nms.resendAbilities(player);
+        pipeline.hold(player, true);
+        nms.resendMovement(player);
     }
 
     /** Undoes {@link #hold}, whether or not it was done: safe on every way out, and on join after a crash. */
     private void release(Player player) {
         removeModifiers(player);
-        pipeline.hold(player.getUniqueId(), false);
-        if (player.isOnline()) nms.resendAbilities(player);
+        pipeline.hold(player, false);
+        if (player.isOnline()) nms.resendMovement(player);
     }
 
     /** Takes {@link #hold}'s modifiers off [player], by key: nothing happens to an attribute without one. */

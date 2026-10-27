@@ -48,8 +48,22 @@ public final class Pipeline {
     private final Map<UUID, Mouse> mice = new ConcurrentHashMap<>();
     private final Map<UUID, Integer> pinned = new ConcurrentHashMap<>();
     private final Map<UUID, Filter> filters = new ConcurrentHashMap<>();
-    /** Players held still for a client-placed pointer: their client is told they fly at a speed of nothing. */
-    private final Set<UUID> held = ConcurrentHashMap.newKeySet();
+    /**
+     * Players held still for a client-placed pointer: their client is told they fly at a speed of nothing, and a movement
+     * speed that keeps the width of their view as it was.
+     */
+    private final Map<UUID, Held> held = new ConcurrentHashMap<>();
+
+    /** A held player's entity id, and the walking speed their client was last told (what their movement speed is told against). */
+    private static final class Held {
+        final int entityId;
+        volatile float walking = 0.1f;
+
+        Held(int entityId) {
+            this.entityId = entityId;
+        }
+    }
+
     private final Logger log;
 
     public Pipeline(Nms nms, Logger log) {
@@ -121,14 +135,15 @@ public final class Pipeline {
     }
 
     /**
-     * While [on], every abilities packet to [player] says they fly, cannot stop flying, and move at a
-     * speed of nothing ({@link Nms#heldAbilities}); the server keeps their real abilities, and sending
-     * those again (see {@link Nms#resendAbilities}) after this is turned off puts them back. Needs the
+     * While [on], every abilities packet to [player] says they fly, cannot stop flying, and move at a speed of
+     * nothing ({@link Nms#heldAbilities}), and every attributes packet for them a movement speed that cancels
+     * flying's wider view ({@link Nms#heldAttributes}); the server keeps their real abilities and speed, and
+     * sending those again (see {@link Nms#resendMovement}) after this is turned off puts them back. Needs the
      * handler {@link #conceal} puts in.
      */
-    public void hold(UUID player, boolean on) {
-        if (on) held.add(player);
-        else held.remove(player);
+    public void hold(Player player, boolean on) {
+        if (on) held.put(player.getUniqueId(), new Held(player.getEntityId()));
+        else held.remove(player.getUniqueId());
     }
 
     /**
@@ -435,7 +450,15 @@ public final class Pipeline {
                 promise.trySuccess();
                 return;
             }
-            if (held.contains(id) && nms.isAbilities(msg)) msg = nms.heldAbilities(msg);
+            Held h = held.get(id);
+            if (h != null) {
+                if (nms.isAbilities(msg)) {
+                    h.walking = nms.walkingSpeed(msg);
+                    msg = nms.heldAbilities(msg);
+                } else if (nms.isAttributesOf(msg, h.entityId)) {
+                    msg = nms.heldAttributes(msg, h.walking);
+                }
+            }
             ctx.write(concealed.contains(id) ? blank(msg) : msg, promise);
         }
 

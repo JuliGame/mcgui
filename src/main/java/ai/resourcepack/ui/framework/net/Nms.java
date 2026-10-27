@@ -11,6 +11,7 @@ import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -98,7 +99,19 @@ public final class Nms {
     private final MethodHandle newAbilities;       // new Abilities()
     private final Field abilityFlying, abilityMayfly, abilityInvulnerable, abilityInstabuild;
     private final MethodHandle setFlyingSpeed, setWalkingSpeed;
-    private final MethodHandle onUpdateAbilities; // Player#onUpdateAbilities(), which the server player answers by sending them
+    // A held player's client is also told a movement speed that cancels flying's wider view (see heldAttributes).
+    private final MethodHandle abilitiesWalking;    // ClientboundPlayerAbilitiesPacket#getWalkingSpeed
+    private final Class<?> attributesPacket;        // ClientboundUpdateAttributesPacket
+    private final MethodHandle attributesEntity;    // #getEntityId
+    private final MethodHandle attributesValues;    // #getValues: the AttributeSnapshots
+    private final MethodHandle newAttributesPacket; // new ClientboundUpdateAttributesPacket(int, List<AttributeSnapshot>)
+    private final MethodHandle newAttributesOf;     // new ClientboundUpdateAttributesPacket(int, Collection<AttributeInstance>)
+    private final MethodHandle newSnapshot;         // new AttributeSnapshot(Holder, double, Collection)
+    private final MethodHandle snapshotAttribute;   // AttributeSnapshot#attribute
+    private final Object movementSpeed;             // Attributes.MOVEMENT_SPEED (a Holder)
+    private final MethodHandle getAbilities;        // Player#getAbilities
+    private final MethodHandle getAttributes;       // LivingEntity#getAttributes
+    private final MethodHandle getAttributeInstance; // AttributeMap#getInstance(Holder)
     private final MethodHandle playerTeleport;     // ServerGamePacketListenerImpl#teleport(PositionMoveRotation, Set<Relative>)
     private final java.util.Set<?> keepRotation;   // Relative.X_ROT and Y_ROT: a teleport that leaves the rotation alone
 
@@ -324,7 +337,20 @@ public final class Nms {
         abilityInstabuild = Reflect.field(abilities, "instabuild");
         setFlyingSpeed = L.unreflect(Reflect.method(abilities, "setFlyingSpeed", float.class));
         setWalkingSpeed = L.unreflect(Reflect.method(abilities, "setWalkingSpeed", float.class));
-        onUpdateAbilities = L.unreflect(Reflect.method(Reflect.cls("net.minecraft.world.entity.player.Player"), "onUpdateAbilities"));
+        abilitiesWalking = L.unreflect(Reflect.method(abilitiesPacket, "getWalkingSpeed"));
+        attributesPacket = Reflect.cls(game + "ClientboundUpdateAttributesPacket");
+        attributesEntity = L.unreflect(Reflect.method(attributesPacket, "getEntityId"));
+        attributesValues = L.unreflect(Reflect.method(attributesPacket, "getValues"));
+        Class<?> snapshot = Reflect.cls(game + "ClientboundUpdateAttributesPacket$AttributeSnapshot");
+        Class<?> holder = Reflect.cls("net.minecraft.core.Holder");
+        newAttributesPacket = Reflect.constructor(L, attributesPacket, MethodType.methodType(void.class, int.class, List.class));
+        newAttributesOf = Reflect.constructor(L, attributesPacket, MethodType.methodType(void.class, int.class, Collection.class));
+        newSnapshot = Reflect.constructor(L, snapshot, MethodType.methodType(void.class, holder, double.class, Collection.class));
+        snapshotAttribute = L.unreflect(Reflect.method(snapshot, "attribute"));
+        movementSpeed = Reflect.field(Reflect.cls("net.minecraft.world.entity.ai.attributes.Attributes"), "MOVEMENT_SPEED").get(null);
+        getAbilities = L.unreflect(Reflect.method(Reflect.cls("net.minecraft.world.entity.player.Player"), "getAbilities"));
+        getAttributes = L.unreflect(Reflect.method(Reflect.cls("net.minecraft.world.entity.LivingEntity"), "getAttributes"));
+        getAttributeInstance = L.unreflect(Reflect.method(Reflect.cls("net.minecraft.world.entity.ai.attributes.AttributeMap"), "getInstance", holder));
         Class<?> relative = Reflect.cls("net.minecraft.world.entity.Relative");
         playerTeleport = L.unreflect(Reflect.method(Reflect.cls("net.minecraft.server.network.ServerGamePacketListenerImpl"),
                 "teleport", pmr, java.util.Set.class));
@@ -723,15 +749,35 @@ public final class Nms {
         return tickEndPacket.isInstance(msg);
     }
 
+    /**
+     * The share of the walking speed a held player's client is told their movement speed is: with flying's 1.1 and
+     * {@code (speed / walking speed + 1) / 2} from {@code AbstractClientPlayer.getFieldOfViewModifier}, 1.1 × (r + 1) / 2
+     * is 1 for r = 2 / 1.1 - 1, so the view neither widens as they are held nor narrows as they are let go.
+     */
+    private static final double HELD_SPEED_SHARE = 2 / 1.1 - 1;
+    /** The walking speed of a player whose server says none (a plugin's). */
+    private static final float DEFAULT_WALKING_SPEED = 0.1f;
+
     /** Whether [msg] is the server telling a player what they may do: fly, build, take damage. */
     boolean isAbilities(Object msg) {
         return abilitiesPacket.isInstance(msg);
     }
 
+    /** The walking speed an abilities packet gives (the default one for none). */
+    float walkingSpeed(Object abilities) {
+        try {
+            float speed = (float) abilitiesWalking.invoke(abilities);
+            return speed > 0f ? speed : DEFAULT_WALKING_SPEED;
+        } catch (Throwable t) {
+            throw rethrow(t);
+        }
+    }
+
     /**
      * [abilities] (a player abilities packet) as a held player's client is told them: flying, unable to
-     * stop flying, and at a flying and walking speed of nothing. Invulnerability and instant building are
-     * left as they are.
+     * stop flying, and at a flying speed of nothing. Invulnerability and instant building are left as they
+     * are, and so is the walking speed, which their client only reads to work out the width of the view
+     * (see {@link #heldAttributes}).
      */
     Object heldAbilities(Object abilities) {
         try {
@@ -741,17 +787,61 @@ public final class Nms {
             abilityFlying.set(a, true);
             abilityMayfly.set(a, false);
             setFlyingSpeed.invoke(a, 0f);
-            setWalkingSpeed.invoke(a, 0f);
+            setWalkingSpeed.invoke(a, walkingSpeed(abilities));
             return newAbilitiesPacket.invoke(a);
         } catch (Throwable t) {
             throw rethrow(t);
         }
     }
 
-    /** Sends [player] their abilities again (through the connection's filters, like any other packet). */
-    public void resendAbilities(Player player) {
+    /** Whether [msg] gives the attributes of the entity with id [entityId]. */
+    boolean isAttributesOf(Object msg, int entityId) {
         try {
-            onUpdateAbilities.invoke(handle(player));
+            return attributesPacket.isInstance(msg) && (int) attributesEntity.invoke(msg) == entityId;
+        } catch (Throwable t) {
+            throw rethrow(t);
+        }
+    }
+
+    /**
+     * [attributes] (an attributes packet for a held player) with their movement speed as their client is told it:
+     * {@link #HELD_SPEED_SHARE} of [walking] and no modifiers. The server's own is nothing (the hold takes it
+     * to zero), and with a zero speed and the walking speed told as it is, flying's wider view (1.1) and the speed's
+     * (a half) leave the held view at 0.55: a narrow one for the moment before the release reaches them. At the
+     * share, the view is the same width held and free. The packet itself if it holds no movement speed.
+     */
+    Object heldAttributes(Object attributes, float walking) {
+        try {
+            List<Object> out = new ArrayList<>();
+            boolean changed = false;
+            for (Object snapshot : (List<?>) attributesValues.invoke(attributes)) {
+                if (snapshotAttribute.invoke(snapshot).equals(movementSpeed)) {
+                    out.add(newSnapshot.invoke(movementSpeed, walking * HELD_SPEED_SHARE, List.of()));
+                    changed = true;
+                } else {
+                    out.add(snapshot);
+                }
+            }
+            return changed ? newAttributesPacket.invoke((int) attributesEntity.invoke(attributes), out) : attributes;
+        } catch (Throwable t) {
+            throw rethrow(t);
+        }
+    }
+
+    /**
+     * Sends [player] their movement speed and abilities as the server has them now, in one write (through the
+     * connection's filters, like any other packet: a held player's are told as {@link #heldAttributes} and
+     * {@link #heldAbilities} say). Together, because their client works out the width of the view from both, and
+     * from only one of them it is for a moment as wide, or as narrow, as that one alone makes it.
+     */
+    public void resendMovement(Player player) {
+        try {
+            Object self = handle(player);
+            Object speed = getAttributeInstance.invoke(getAttributes.invoke(self), movementSpeed);
+            List<Object> packets = new ArrayList<>(2);
+            if (speed != null) packets.add(newAttributesOf.invoke(player.getEntityId(), List.of(speed)));
+            packets.add(newAbilitiesPacket.invoke(getAbilities.invoke(self)));
+            writeNow(player, packets, ok -> {});
         } catch (Throwable t) {
             throw rethrow(t);
         }
