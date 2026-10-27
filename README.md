@@ -34,7 +34,9 @@ it. See [For plugin developers](#for-plugin-developers).
   again rather than seated.
 - **Colour.** With the pack, maps carry YCbCr 4:2:0 in 240 map colours and the
   pack's text shader decodes them, smoothly scaled, unlit and unfogged. Without
-  it, walls show dithered vanilla map colours.
+  it, walls show dithered vanilla map colours. Players running ImmediatelyFast
+  (its map atlas packs every map into one texture) see the same as everyone else,
+  with its default settings.
 - **Sounds.** Every `.ogg` in `plugins/MCGUI/sounds/` goes into the pack
   as a sound named after its path: `sounds/menu/open.ogg` plays as
   `uiengine:menu/open`, from a page, `/playsound` or any plugin. Names are lower

@@ -660,6 +660,29 @@ Reading a position, a world or a UUID is fine from anywhere. How MC GUI copes, a
   or window shape. It sits ON the picture's plane (the wall is still placed to
   fill 60% of the player's view, `Views.STRETCHED_FIT`, which `PrivateView`
   reads too), and both pointers are as near as depth goes.
+- **ImmediatelyFast's map atlas** (2026-10-27). The client mod ImmediatelyFast (Fabric and NeoForge, every
+  version MC GUI supports: 1.14.x for 1.21.11 to 1.17.x for 26.3) copies every map into a 2048 × 2048 texture
+  by default (`map_atlas_generation`, 16 × 16 maps a texture, more textures as needed) and draws each frame's map
+  from its square of it, the quad's texture coordinates that square's. The shaders took "Sampler0 is 128 × 128"
+  to mean "a map", so with the mod every wall showed its raw palette code as noise and a view or overlay drew
+  nothing but a strip of noise on the camera block's ceiling (seen on Fabric 26.2 with ImmediatelyFast 1.16.5, and
+  on 1.21.11 with 1.14.3; `map_atlas_generation: false` alone put it right). Now every map read goes through
+  `mcbBase`, where the map starts in Sampler0: `mcb_texture` tells a map's own texture (1) from one that may hold
+  many (2: square, a multiple of 128 from 256 up, so a font page too, which its texture coordinates or the marker
+  then turn away). A quad corner there is a corner of up to four maps, and the vertex id is offset by whatever
+  was batched before it, so `mcb_locate` finds a view's map by which corner of the camera's block the vertex is
+  (its frames all lie there, `MapWall.Stack`: u along x, v along z on the floor and against it on the ceiling);
+  any other map of ours in such a texture (a wall's) is -1, and `text.fsh` takes the 128 square the pixel is in,
+  per pixel (the marker read every pixel, the fill only near it). ImmediatelyFast 1.16.2+ (26.2) and 1.17 (26.3)
+  would also turn the atlas off for a pack replacing `core/text` whose pack.mcmeta says
+  `"immediatelyfast": {"incompatible_features": ["map_atlas_generation"]}`, but 1.21.11's and 26.1's have no
+  such switch and a pack merged into another plugin's loses its pack.mcmeta, so the pack does not ask. The log
+  line every player of it gets, font atlas resizing turned off for the server pack, is its default for any pack
+  replacing `core/text` and costs MC GUI nothing. Seen right with the mod on in Fabric clients: 26.2 (walls,
+  fullscreen, overlays, hover layers, F5, the server pointer, frames on the floor and the ceiling), 26.1.2 and
+  1.21.11 (walls, fullscreen, overlays); 26.3 only compiled with glslang. Rig:
+  `rigs/ifast/` (`trial.sh` restarts the Fabric client with the mod in or out and any of its config,
+  `scene.sh` takes a wall, a fullscreen page and an overlay).
 - **Transparent is map colour 0** (`Canvas.transparency`): a pixel under half
   alpha is kept as YCbCr (0, 0, 0), which no RGB colour converts to
   (`Palette.isClear`), and sent as colour 0, which the client draws as

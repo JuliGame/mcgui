@@ -476,6 +476,9 @@ public final class Shaders {
                 // for someone's own view its tint: worked out here once per vertex rather than in every pixel.
                 layout(location = 9) flat out vec2 mcbMapInfo;
                 layout(location = 10) flat out vec4 mcbViewTint;
+                // Where the map starts in Sampler0, in pixels: (0, 0) for a map that is its own texture, its place in a
+                // texture of many maps when text.vsh found it (mcb_locate), (-1, -1) when text.fsh must find it.
+                layout(location = 11) flat out vec2 mcbMapBase;
 
                 """ + helpers(VERTEX_HELPERS) + decoderCore(palette) + """
 
@@ -549,6 +552,45 @@ public final class Shaders {
                 }
                 #endif
 
+                // Which of our maps this vertex's quad shows (mcb_screen_map), with mcbBase set to where that map starts in
+                // Sampler0 and mcbUv to which of its corners this vertex is. ImmediatelyFast (a client mod) draws every
+                // map from one big texture by default ("map_atlas_generation"), each 128 x 128 square of it a map, the
+                // quad's texture coordinates that square's: a corner there is a corner of up to four maps. A view's maps
+                // all hang in the camera's block, on its floor or ceiling (MapWall.Stack), so which corner of the block a
+                // vertex is says which of its map it is: u runs along x on both, v along z on the floor and against it
+                // on the ceiling (ItemFrameRenderer, rotation 0). Any other map of ours in such a texture (a wall's)
+                // is -1: drawn where it hangs, it needs nothing from here, and text.fsh finds it pixel by pixel.
+                vec2 mcbUv;
+                int mcb_locate() {
+                    mcbUv = UV0;
+                    int textureKind = mcb_texture();
+                    if (textureKind != 2) return textureKind == 1 ? mcb_screen_map() : 0;
+                    ivec2 size = textureSize(Sampler0, 0);
+                    vec2 at = UV0 * vec2(size) / 128.0, k = round(at);
+                    if (any(greaterThan(abs(at - k), vec2(0.001)))) return 0;
+                    vec3 rel = Position - CameraOffset;
+                    if (mcb_flag_axis() >= 0 && all(greaterThan(rel, vec3(-0.01))) && all(lessThan(rel, vec3(1.01)))) {
+                        vec2 corner = vec2(rel.x > 0.5 ? 1.0 : 0.0, (rel.y < 0.5) == (rel.z > 0.5) ? 1.0 : 0.0);
+                        mcbBase = ivec2(k - corner) * 128;
+                        if (mcb_in_texture(mcbBase, size)) {
+                            int kind = mcb_screen_map();
+                            if (kind >= 3) {
+                                mcbUv = corner;
+                                return kind;
+                            }
+                        }
+                    }
+                    for (int i = 0; i < 4; i++) {
+                        mcbBase = ivec2(k - vec2(float(i & 1), float(i >> 1))) * 128;
+                        if (mcb_in_texture(mcbBase, size) && mcb_screen_map() > 0) {
+                            mcbBase = ivec2(-1);
+                            return -1;
+                        }
+                    }
+                    mcbBase = ivec2(0);
+                    return 0;
+                }
+
                 void main() {
                     gl_Position = ProjMat * ModelViewMat * vec4(Position, 1.0);
                     mcbReversed = mcb_reversed();
@@ -559,10 +601,11 @@ public final class Shaders {
                 #ifdef IS_GRAYSCALE
                     int mcbMap = 0;
                 #else
-                    int mcbMap = mcb_screen_map();
+                    int mcbMap = mcb_locate();
                 #endif
                     mcbMapInfo = vec2(float(mcbMap), mcbMap > 0 && mcbMap != 7 ? mcb_fill_right(mcb_info(mcbMap)) : 0.0);
                     mcbViewTint = mcbMap >= 2 && mcbMap != 7 ? mcb_tint() : vec4(0.0);
+                    mcbMapBase = vec2(mcbBase);
                 #ifdef IS_GUI
                     mcbSeated = mcb_seated_now();
                     vertexColor = Color;
@@ -605,10 +648,10 @@ public final class Shaders {
                                 // An overlay's signature map (Palette.markSignature): over the window's four
                                 // bottom-left pixels, which text.fsh writes for the post effect to read.
                                 mcbMapInfo.x = 5.0;
-                                gl_Position = mcb_flat(vec2(-1.0) + vec2(UV0.x * 8.0, (1.0 - UV0.y) * 2.0) / ScreenSize);
+                                gl_Position = mcb_flat(vec2(-1.0) + vec2(mcbUv.x * 8.0, (1.0 - mcbUv.y) * 2.0) / ScreenSize);
                             } else {
                                 if (mcb_flag_axis() == 1) mcbMapInfo.x = 6.0;
-                                vec2 mcbAt = (mcbTile + UV0) / mcbViewGrid;
+                                vec2 mcbAt = (mcbTile + mcbUv) / mcbViewGrid;
                                 gl_Position = mcb_flat(vec2(mcbAt.x * 2.0 - 1.0, 1.0 - mcbAt.y * 2.0));
                             }
                         } else if (mcbMap == 7) {
@@ -621,7 +664,7 @@ public final class Shaders {
                             if (mcb_layer_on(mcbViewGrid * 128.0, mcbFlags)) {
                                 mcbMapInfo.y = float(mcbFlags >> 2) + 1.0;
                                 vec2 mcbOrigin = vec2(mcb_layer_edge(2, 1), mcb_layer_edge(14, 0) - 2.0);
-                                vec2 mcbAt = (mcbOrigin + UV0 * 128.0) / (mcbViewGrid * 128.0);
+                                vec2 mcbAt = (mcbOrigin + mcbUv * 128.0) / (mcbViewGrid * 128.0);
                                 gl_Position = mcb_flat(vec2(mcbAt.x * 2.0 - 1.0, 1.0 - mcbAt.y * 2.0));
                             }
                         }
@@ -665,7 +708,10 @@ public final class Shaders {
                 // holding its symbol plus one (SymbolHash builds the table).
                 const uint MCB_T[@WORDS@] = @TABLE@;
 
-                ivec3 mcb_fetch(ivec2 p) { return ivec3(round(texelFetch(Sampler0, p, 0).rgb * 255.0)); }
+                // Where the map being read starts in Sampler0: (0, 0) unless the texture holds many maps (mcb_texture).
+                ivec2 mcbBase = ivec2(0);
+
+                ivec3 mcb_fetch(ivec2 p) { return ivec3(round(texelFetch(Sampler0, mcbBase + p, 0).rgb * 255.0)); }
 
                 int mcb_symbol_of(vec3 rgb) {
                     uvec3 c = uvec3(round(rgb * 255.0));
@@ -673,14 +719,23 @@ public final class Shaders {
                     return max(int((MCB_T[slot >> 2u] >> ((slot & 3u) << 3u)) & 255u) - 1, 0);
                 }
 
-                int mcb_symbol(ivec2 p) { return mcb_symbol_of(texelFetch(Sampler0, p, 0).rgb); }
+                int mcb_symbol(ivec2 p) { return mcb_symbol_of(texelFetch(Sampler0, mcbBase + p, 0).rgb); }
 
-                // 0: not ours. 1: a screen. 3: the view of whoever is seated at it, each map carrying its place (bottom
-                // markers both the fourth). text.vsh then tells two kinds of 3 apart for text.fsh: 5, an overlay's
-                // signature map, and 6, a map of an overlay's panel. 7: a hover layer of a view (Palette.markLayer): top
-                // markers swapped too.
+                // 1 if Sampler0 is one map's own texture, 2 if it could hold many 128 x 128 maps side by side (ImmediatelyFast's
+                // map atlas, 2048 square by default, but a font page of 256 or 1024 is as square), 0 if it holds none.
+                int mcb_texture() {
+                    ivec2 size = textureSize(Sampler0, 0);
+                    if (size == ivec2(128, 128)) return 1;
+                    return size.x == size.y && size.x >= 256 && (size.x & 127) == 0 ? 2 : 0;
+                }
+
+                bool mcb_in_texture(ivec2 base, ivec2 size) { return all(greaterThanEqual(base, ivec2(0))) && all(lessThan(base, size)); }
+
+                // Which of ours the map at mcbBase is. 0: not ours. 1: a screen. 3: the view of whoever is seated at it, each
+                // map carrying its place (bottom markers both the fourth). text.vsh then tells two kinds of 3 apart for
+                // text.fsh: 5, an overlay's signature map, and 6, a map of an overlay's panel. 7: a hover layer of a view
+                // (Palette.markLayer): top markers swapped too. Only for a texture mcb_texture says can hold maps.
                 int mcb_screen_map() {
-                    if (textureSize(Sampler0, 0) != ivec2(128, 128)) return 0;
                     ivec3 m0 = mcb_fetch(ivec2(0, 0)), m1 = mcb_fetch(ivec2(1, 0));
                     bool layer = m0 == @M1@ && m1 == @M0@;
                     if (!layer && (m0 != @M0@ || m1 != @M1@)) return 0;
@@ -706,7 +761,7 @@ public final class Shaders {
                 // A 2x2 block's mean luma and its chroma, and 1 (0 for all four when it is transparent).
                 vec4 mcb_block(ivec2 b) {
                     ivec2 p = b * 2;
-                    if (texelFetch(Sampler0, p, 0).a < 0.5) return vec4(0.0);
+                    if (texelFetch(Sampler0, mcbBase + p, 0).a < 0.5) return vec4(0.0);
                     ivec4 s = ivec4(mcb_symbol(p), mcb_symbol(p + ivec2(1, 0)), mcb_symbol(p + ivec2(0, 1)), mcb_symbol(p + ivec2(1, 1)));
                     ivec4 digit = s & 7;
                     return vec4(dot(vec4(s >> 3), vec4(0.25)) / @LUMAMAX@, float(digit.x * 8 + digit.y - 32) / 63.0,
@@ -766,6 +821,7 @@ public final class Shaders {
                 layout(location = 8) flat in float mcbReversed;
                 layout(location = 9) flat in vec2 mcbMapInfo;
                 layout(location = 10) flat in vec4 mcbViewTint;
+                layout(location = 11) flat in vec2 mcbMapBase;
 
                 """ + (d == Dialect.V26_3 ? """
                 #ifndef OIT_ALPHA_ONLY
@@ -804,7 +860,7 @@ public final class Shaders {
                         float ws = w.x + w.y + w.z + w.w;
                         total += ws;
                         ivec2 src = b.y > 0 || b.x > info ? base : fillRight ? ivec2(2 * info + 2, 0) : ivec2(base.x, 2);
-                        vec4 c00 = texelFetch(Sampler0, src, 0);
+                        vec4 c00 = texelFetch(Sampler0, mcbBase + src, 0);
                         if (c00.a < 0.5) continue;
                         ivec4 s = ivec4(mcb_symbol_of(c00.rgb), mcb_symbol(src + ivec2(1, 0)),
                                         mcb_symbol(src + ivec2(0, 1)), mcb_symbol(src + ivec2(1, 1)));
@@ -864,7 +920,29 @@ public final class Shaders {
                     }
                 #endif
                 #ifndef IS_GRAYSCALE
-                    int mcbMap = int(mcbMapInfo.x + 0.5);
+                    int mcbMap = int(round(mcbMapInfo.x));
+                    // Where this pixel is on its map, in map pixels, and how its data blocks are filled (mcb_fill_right).
+                    vec2 mcbTex = texCoord0 * 128.0;
+                    float mcbFill = mcbMapInfo.y;
+                    if (mcbMap != 0) {
+                        // A texture of many maps (ImmediatelyFast's map atlas, see mcb_locate) puts each in a 128 x 128 square.
+                        vec2 mcbScale = vec2(textureSize(Sampler0, 0)) / 128.0;
+                        mcbFootprint *= mcbScale;
+                        if (mcbMap < 0) {
+                            // One text.vsh left to this shader: the map this pixel is on. Only a screen's map (1) is drawn
+                            // where it hangs; a view's that text.vsh could not place in the window shows nothing.
+                            vec2 mcbAt = texCoord0 * 128.0 * mcbScale;
+                            mcbBase = ivec2(floor(mcbAt / 128.0)) * 128;
+                            mcbTex = mcbAt - vec2(mcbBase);
+                            mcbMap = mcb_screen_map();
+                            if (mcbMap > 1) discard;
+                            // Its marker block shows a neighbour's (mcb_sample), worked out only where that is near.
+                            mcbFill = mcbMap == 1 && mcbTex.x < 4.0 && mcbTex.y < 4.0 ? mcb_fill_right(0) : 0.0;
+                        } else {
+                            mcbBase = ivec2(mcbMapBase);
+                            mcbTex = texCoord0 * 128.0 * mcbScale - mcbMapBase;
+                        }
+                    }
                     if (mcbMap > 0) {
                         vec4 mcbColor;
                         if (mcbMap == 5) {
@@ -873,9 +951,9 @@ public final class Shaders {
                         } else {
                             // A hover layer (7) shows only while text.vsh places it, and never its top two rows, its
                             // data: there, and wherever it is transparent, the view under it shows.
-                            if (mcbMap == 7 && (mcbMapInfo.y < 0.5 || texCoord0.y < 2.0 / 128.0)) discard;
+                            if (mcbMap == 7 && (mcbMapInfo.y < 0.5 || mcbTex.y < 2.0)) discard;
                             // A screen emits its own light: no lightmap, tint or fog, so colours are exact day and night.
-                            vec4 mcbPicture = mcb_sample(texCoord0 * 128.0, mcbFootprint, mcb_info(mcbMap), mcbMap != 7 && mcbMapInfo.y > 0.5);
+                            vec4 mcbPicture = mcb_sample(mcbTex, mcbFootprint, mcb_info(mcbMap), mcbMap != 7 && mcbFill > 0.5);
                             // An overlay's panel (6) is there or not, never blended with the world behind it: round it the
                             // post effect shows the world as it was, tinted there. A hover layer likewise over its view.
                             if (mcbMap >= 6) mcbPicture = mcbPicture.a < 0.5 ? vec4(0.0) : vec4(mcbPicture.rgb, 1.0);
