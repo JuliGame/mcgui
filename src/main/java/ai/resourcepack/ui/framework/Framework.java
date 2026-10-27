@@ -331,7 +331,11 @@ public final class Framework implements UIFramework, Listener {
         if (pack == null || !ResourcePack.PACK_ID.equals(e.getID()) && !pack.mergedElsewhere()) return;
         switch (e.getStatus()) {
             case SUCCESSFULLY_LOADED -> pack.markLoaded(e.getPlayer().getUniqueId());
-            case DECLINED, FAILED_DOWNLOAD, INVALID_URL, FAILED_RELOAD, DISCARDED -> pack.forget(e.getPlayer().getUniqueId());
+            case DECLINED, FAILED_DOWNLOAD, INVALID_URL, FAILED_RELOAD -> pack.markRefused(e.getPlayer().getUniqueId());
+            // Merged elsewhere, a discarded pack is usually the other plugin's being sent again, not ours going.
+            case DISCARDED -> {
+                if (!pack.mergedElsewhere()) pack.forget(e.getPlayer().getUniqueId());
+            }
             default -> {}
         }
         // Their maps change meaning: send everything again in the right encoding.

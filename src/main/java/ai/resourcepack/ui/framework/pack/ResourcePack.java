@@ -37,6 +37,7 @@ import java.util.logging.Logger;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
 
 /**
@@ -56,6 +57,8 @@ public final class ResourcePack implements AutoCloseable {
     public final byte[] bytes;
     public final String sha1;
     private final Set<UUID> loaded = ConcurrentHashMap.newKeySet();
+    /** Merged elsewhere: players a pack was declined by or failed for, with none loaded since. */
+    private final Set<UUID> refused = ConcurrentHashMap.newKeySet();
     /** How often a running server tells the pack host it still uses the pack, which forgets one untouched for 30 days. */
     private static final long TOUCH_HOURS = PackUploader.TOUCH_HOURS;
 
@@ -78,6 +81,8 @@ public final class ResourcePack implements AutoCloseable {
         this.sha1 = sha1(bytes);
         Files.createDirectories(dataFolder);
         Files.write(dataFolder.resolve("pack.zip"), bytes);
+        // ItemsAdder merges another plugin's pack from a folder, never a zip (merge_other_plugins_resourcepacks_folders).
+        if (settings.packMode == Settings.PackMode.EXTERNAL) unpack(bytes, dataFolder.resolve(FOLDER), logger);
         ai.resourcepack.ui.StartupNotes.say(logger, "Pack", "Built, " + Math.max(1, bytes.length / 1024) + " KB (pack.zip)",
                 "Resource pack built: " + bytes.length + " bytes, sha1 " + sha1 + " (also written to pack.zip)");
     }
@@ -107,6 +112,13 @@ public final class ResourcePack implements AutoCloseable {
                 uploads.scheduleWithFixedDelay(() -> host(uploader, onHosted), 0, TOUCH_HOURS, TimeUnit.HOURS);
                 ai.resourcepack.ui.StartupNotes.say(logger, "Hosting", "On packs.resourcepack.ai", "Hosting the resource pack on packs.resourcepack.ai");
             }
+            case EXTERNAL -> ai.resourcepack.ui.StartupNotes.say(logger, "Pack", settings.packPublicUrl.isBlank()
+                            ? "External: merge plugins/MCGUI/" + FOLDER + " into your pack plugin's"
+                            : "External: players are sent public-url",
+                    settings.packPublicUrl.isBlank()
+                            ? "resource-pack.mode is external with no public-url: merge plugins/MCGUI/" + FOLDER
+                                    + " (or pack.zip) into another plugin's pack, which players must load for pages to open"
+                            : "resource-pack.mode is external: players are sent " + settings.packPublicUrl);
             default -> {}
         }
     }
@@ -211,16 +223,57 @@ public final class ResourcePack implements AutoCloseable {
         return settings.packMode == Settings.PackMode.EXTERNAL && settings.packPublicUrl.isBlank();
     }
 
+    /**
+     * Merged elsewhere, a player has the pack unless one was refused and none has loaded since: the other plugin may
+     * send it while the player is still joining (ItemsAdder does), and Paper reports no pack status from then.
+     */
     public boolean has(UUID player) {
-        return loaded.contains(player);
+        return loaded.contains(player) || mergedElsewhere() && !refused.contains(player);
     }
 
     public void markLoaded(UUID player) {
         loaded.add(player);
+        refused.remove(player);
+    }
+
+    /** A pack was declined, or failed to load. */
+    public void markRefused(UUID player) {
+        if (mergedElsewhere()) {
+            if (!loaded.contains(player)) refused.add(player);
+        } else {
+            loaded.remove(player);
+        }
     }
 
     public void forget(UUID player) {
         loaded.remove(player);
+        refused.remove(player);
+    }
+
+    /** Mode external: the pack unpacked, for a plugin that merges folders. Rewritten every start. */
+    public static final String FOLDER = "pack";
+
+    private static void unpack(byte[] zip, Path dir, Logger logger) throws IOException {
+        Path mcmeta = dir.resolve("pack.mcmeta");
+        if (Files.exists(dir)) {
+            // Only ever a folder this wrote: anything else in its place is somebody's, and left alone.
+            if (!Files.isRegularFile(mcmeta) || !Files.readString(mcmeta).contains("\"MC GUI\"")) {
+                logger.warning("plugins/MCGUI/" + FOLDER + " is not the pack MC GUI unpacks, so it was left as it is");
+                return;
+            }
+            try (Stream<Path> walk = Files.walk(dir)) {
+                for (Path f : walk.sorted(java.util.Comparator.reverseOrder()).toList()) Files.delete(f);
+            }
+        }
+        Path root = dir.toAbsolutePath().normalize();
+        try (ZipInputStream in = new ZipInputStream(new java.io.ByteArrayInputStream(zip))) {
+            for (ZipEntry entry; (entry = in.getNextEntry()) != null; ) {
+                Path out = root.resolve(entry.getName()).normalize();
+                if (!out.startsWith(root) || entry.isDirectory()) continue;
+                Files.createDirectories(out.getParent());
+                Files.write(out, in.readAllBytes());
+            }
+        }
     }
 
     @Override
