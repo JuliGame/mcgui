@@ -470,7 +470,7 @@ the improved-transparency fix are in `rigs/ovl/` (`measure.py`).
 | `api/` | The public surface: `UIFramework`, `Canvas`, `WallContent`/`WallScreen`, `ViewContent`/`View`, `Pointer`, `Click`, `Key` |
 | `render/Palette` | The map colour table, and the HI (YCbCr in 240 colours) and PLAIN encodings |
 | `pack/` | `Shaders` (both GLSL dialects), `SymbolHash` (the shader's colour lookup), `ResourcePack` (build, upload or serve, who has it; the upload is plugin-common's `host/PackUploader`, shared with RP Engine, Dialog Engine and 3D Engine) |
-| `net/` | `Nms` (every server internal, by reflection), `MapSender` (diffed map patches, per-player budget, frame re-pointing), `Wire`/`ServerWire` (what the sender writes through), `Pipeline` (ping answers, the hidden inventory, each connection's frame pointing) |
+| `net/` | `Nms` (every server internal, by reflection), `MapSender` (diffed map patches, per-player budget, frame re-pointing), `Wire`/`ServerWire` (what the sender writes through), `Pipeline` (ping answers, the hidden inventory, particles kept from an overlay's player, each connection's frame pointing) |
 | `world/` | `MapWall` (the frames), `MapPool` (placed walls whose frames share maps), `Walls` (placed walls and crosshair input), `Views` (seating, camera, pointer, input), `PrivateView` (entities and placed walls in a seated player's way, hidden from them) |
 
 ## Spigot and Paper: one jar
@@ -861,10 +861,36 @@ Reading a position, a world or a UUID is fine from anywhere. How MC GUI copes, a
   not yet (or no longer) flagged drew them where they lie, huge pieces of the
   page round the camera for a moment as an overlay opened or closed (a 1.21.11
   client through ViaVersion showed it on every close): text.vsh now draws them
-  only for a seated camera. Still open: 1.21.11 without improved
-  transparency draws particles over the kept world now and then (`/particle`,
-  a death's poof): its particle pipeline does not declare `Globals`, so
-  `particle.vsh`'s test reads whatever is bound there.
+  only for a seated camera.
+  **Particles behind an overlay** (2026-10-28): 1.21.11 without improved
+  transparency drew them over the kept world and turned them with the camera
+  (`/particle`, a death's puff, campfire smoke: 75–94k changed pixels in a
+  scene of every kind, rig `rigs/ovp/rig/parts.py`). Its particle pass
+  (`ParticleFeatureRenderer`) binds DynamicTransforms, Projection and Fog,
+  never `Globals`, and `GlProgram.setupUniforms` numbers a pipeline's own
+  blocks first and the built-in ones it finds after, so `particle.vsh` read
+  `Globals` from binding 3, whatever the last pass left there (it depended on
+  where the camera looked: hidden at some pointer spots, not at others). The
+  outline effect runs straight before the particles, so 1.21.11's copy of it
+  (`Shaders.overlayChain(true)`, in the 1.21.11 overlay) gives its last pass
+  two blocks of its own after SamplerInfo, which `overlay_outline.fsh`
+  declares and reads: the game binds its `Globals` at 3 there, and the
+  particles read this frame's camera. Measured on Paper and Spigot 1.21.11
+  (overlay open, pointer moved, sources firing every second): 75–94k changed
+  pixels to 0 in eight runs, 0 with improved transparency, the scene matrix
+  0 throughout (its set A had 3–8k), and with no view open the particles all
+  still show, a glowing entity in sight or not (205k changed pixels before,
+  202–210k after); walls and fullscreen pages came out identical. A particle
+  group that submits models (an item being picked up) binds the entity
+  pipelines in between and can still take binding 3 for that frame. Besides,
+  `Pipeline` sends a player behind a kept overlay nothing that only makes
+  particles (`Nms.onlyParticles`: the server's particles, and entity and
+  level events whose only effect is particles, e.g. 60 a death's puff, 2000 a
+  dispenser's smoke), on every version; events that also play a sound or
+  change state (2001 a block breaking, 2002 a splash, 3 a death) pass. With
+  those sources firing, the client's live particles (`ParticleEngine.
+  countParticles`) went from 90–250 to 0 on 1.21.11 and 26.2. On its own the
+  filter left 64k changed pixels (client-side smoke and the events that pass).
   **The held player's view keeps its width** (2026-10-27): holding a player (flying, speed zero) widened their view
   by 10% as an overlay opened (`AbstractClientPlayer.getFieldOfViewModifier`: 1.1 for flying, times
   `(movement speed / walking speed + 1) / 2` when the walking speed is not zero), so the kept world was taken

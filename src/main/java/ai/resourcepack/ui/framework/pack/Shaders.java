@@ -1311,17 +1311,26 @@ public final class Shaders {
      * alone. Each pass's vertex shader works out what its fragments would do and gives the game's window-sized
      * triangle only that much ({@link #overlayTakeVsh}): otherwise every pass costs a fragment for every pixel even
      * when it draws nothing.
+     *
+     * <p>[particlesAfter] (1.21.11's copy, in its overlay) for a game that draws particles straight after this effect
+     * with a pass that never binds {@code Globals} ({@code ParticleFeatureRenderer}), so {@link #particleVsh} reads
+     * whatever buffer was last bound where its program looks for it: binding 3, after the pipeline's DynamicTransforms,
+     * Projection and Fog ({@code GlProgram.setupUniforms} numbers a pipeline's blocks first, then the built-in ones it
+     * finds). The last pass here then declares two blocks of its own after SamplerInfo, so the game binds its
+     * {@code Globals} at 3 too, and the particles read this frame's camera.
      */
-    public static String overlayChain() {
+    public static String overlayChain(boolean particlesAfter) {
         StringBuilder passes = new StringBuilder(OUTLINE_PASSES);
         passes.append(",\n").append(keepPasses("minecraft:main", "ov_a", "ov_b", "ov_kept"));
         passes.append(",\n").append("""
                     {
                       "vertex_shader": "uiengine:post/overlay_signed_in",
                       "fragment_shader": "uiengine:post/overlay_outline",
-                      "inputs": [{"sampler_name": "In", "target": "ov_a"}],
+                      "inputs": [{"sampler_name": "In", "target": "ov_a"}],%s
                       "output": "minecraft:entity_outline"
-                    }""");
+                    }""".formatted(!particlesAfter ? "" : """
+
+                      "uniforms": {"OverlayHold1": [{"name": "Hold1", "type": "float", "value": 0.0}], "OverlayHold2": [{"name": "Hold2", "type": "float", "value": 0.0}]},"""));
         return "{\n  \"targets\": {\"swap\": {}, \"ov_a\": {}, \"ov_b\": {}, \"ov_kept\": {\"persistent\": true}},\n  \"passes\": [\n"
                 + passes + "\n  ]\n}\n";
     }
@@ -1670,17 +1679,32 @@ public final class Shaders {
                 """);
     }
 
-    /** Clears the outlines while an overlay is open: another glowing entity's would be drawn where it is now, over the still world. */
+    /**
+     * Clears the outlines while an overlay is open: another glowing entity's would be drawn where it is now, over the
+     * still world. On 1.21.11 it also declares the two blocks {@code overlayChain(true)} gives it, and reads them, its
+     * SamplerInfo and its Globals, so all four stay in the program in that order and the game binds Globals at 3, where
+     * the particles drawn next look for it ({@link #overlayChain}).
+     */
     public static String overlayOutlineFsh(Dialect d) {
-        return overlayShader(d, """
+        boolean hold = d == Dialect.V1_21_11;
+        return overlayShader(d, (!hold ? "" : """
+                layout(std140) uniform OverlayHold1 {
+                    float Hold1;
+                };
+
+                layout(std140) uniform OverlayHold2 {
+                    float Hold2;
+                };
+
+                """) + """
                 uniform sampler2D InSampler;
 
                 void main() {
                     vec4 tint;
-                    if (ov_signature(InSampler, tint) == 0) discard;
+                    if (ov_signature(InSampler, tint) == 0@HOLD@) discard;
                     fragColor = vec4(0.0);
                 }
-                """);
+                """.replace("@HOLD@", !hold ? "" : " || Hold1 + Hold2 + GameTime + OutSize.x < -1.0"));
     }
 
     /**

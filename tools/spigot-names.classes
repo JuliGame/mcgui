@@ -20,7 +20,10 @@ net.minecraft.network.protocol.game.ClientboundAddEntityPacket
 net.minecraft.network.protocol.game.ClientboundBundlePacket
 net.minecraft.network.protocol.game.ClientboundContainerSetContentPacket
 net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket
+net.minecraft.network.protocol.game.ClientboundEntityEventPacket
 net.minecraft.network.protocol.game.ClientboundEntityPositionSyncPacket
+net.minecraft.network.protocol.game.ClientboundLevelEventPacket
+net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket
 net.minecraft.network.protocol.game.ClientboundMapItemDataPacket
 net.minecraft.network.protocol.game.ClientboundMoveEntityPacket
 net.minecraft.network.protocol.game.ClientboundPlayerAbilitiesPacket

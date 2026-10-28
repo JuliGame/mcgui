@@ -96,7 +96,7 @@ class ShadersTest {
      */
     @Test
     void overlayChainIsWellFormed() {
-        com.google.gson.JsonObject chain = com.google.gson.JsonParser.parseString(Shaders.overlayChain()).getAsJsonObject();
+        com.google.gson.JsonObject chain = com.google.gson.JsonParser.parseString(Shaders.overlayChain(false)).getAsJsonObject();
         com.google.gson.JsonObject targets = chain.getAsJsonObject("targets");
         assertTrue(targets.getAsJsonObject("ov_kept").get("persistent").getAsBoolean());
         com.google.gson.JsonArray passes = chain.getAsJsonArray("passes");
@@ -145,6 +145,30 @@ class ShadersTest {
             }
         }
         assertFalse(Shaders.cloudsVsh().contains("@"));
+    }
+
+    /**
+     * 1.21.11's copy of the outline effect is the same but for its last pass's two blocks, which that version's outline
+     * shader declares (and reads, as it reads SamplerInfo and Globals): so the game numbers SamplerInfo and those two
+     * 0 to 2 and binds Globals at 3, where the particle shader drawn next finds it. No other version's declares them.
+     */
+    @Test
+    void outlineEffectLeavesGlobalsWhereTheParticlesOf1_21_11LookForThem() {
+        com.google.gson.JsonObject plain = com.google.gson.JsonParser.parseString(Shaders.overlayChain(false)).getAsJsonObject();
+        com.google.gson.JsonObject held = com.google.gson.JsonParser.parseString(Shaders.overlayChain(true)).getAsJsonObject();
+        com.google.gson.JsonArray passes = held.getAsJsonArray("passes");
+        com.google.gson.JsonObject last = passes.get(passes.size() - 1).getAsJsonObject();
+        assertEquals("uiengine:post/overlay_outline", last.get("fragment_shader").getAsString());
+        java.util.Set<String> blocks = last.remove("uniforms").getAsJsonObject().keySet();
+        assertEquals(plain, held);
+        String fsh = Shaders.overlayOutlineFsh(Shaders.Dialect.V1_21_11);
+        assertEquals(java.util.Set.of("OverlayHold1", "OverlayHold2"), blocks);
+        for (String b : blocks) assertTrue(fsh.contains("uniform " + b + " {"), fsh);
+        assertTrue(fsh.contains("uniform SamplerInfo") && fsh.contains("globals.glsl"), fsh);
+        assertTrue(fsh.contains("Hold1 + Hold2 + GameTime + OutSize.x"), fsh);
+        for (Shaders.Dialect d : Shaders.Dialect.values()) {
+            if (d != Shaders.Dialect.V1_21_11) assertFalse(Shaders.overlayOutlineFsh(d).contains("OverlayHold"), d.name());
+        }
     }
 
     /**

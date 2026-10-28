@@ -333,8 +333,10 @@ public final class ResourcePack implements AutoCloseable {
                 e.put(post + "pointer_grow.fsh", Shaders.pointerGrowFsh(d));
                 e.put(post + "pointer_fill.fsh", Shaders.pointerFillFsh(d));
             }
-            // The two post effects every version has read the same in each, so the overlays need no copy.
-            e.put("assets/minecraft/post_effect/entity_outline.json", Shaders.overlayChain());
+            // The two post effects every version has read the same in each, so the overlays need no copy, but for
+            // 1.21.11's outline effect, which leaves the particles drawn after it this frame's Globals.
+            e.put("assets/minecraft/post_effect/entity_outline.json", Shaders.overlayChain(false));
+            e.put(Shaders.Dialect.V1_21_11.overlay() + "/assets/minecraft/post_effect/entity_outline.json", Shaders.overlayChain(true));
             e.put("assets/minecraft/post_effect/blur.json", Shaders.menuBlurChain());
             // Before 26.3 clouds and the world border are drawn after the outline effect, over the still world: none
             // for an overlay's camera there (1.21.11's and 26.1's shaders for both are 26.2's). And improved
@@ -353,7 +355,7 @@ public final class ResourcePack implements AutoCloseable {
                 e.put(core + "rendertype_text_background_see_through.vsh", Shaders.seeThroughVsh(false));
             }
             e.put(Shaders.Dialect.V26_2.overlay() + "/assets/minecraft/shaders/core/text_background.vsh", Shaders.textBackgroundVsh());
-            // 1.21.11 draws particles after it too.
+            // 1.21.11 draws particles after it too (and reads its Globals where overlayChain(true) leaves them).
             e.put(Shaders.Dialect.V1_21_11.overlay() + "/assets/minecraft/shaders/core/particle.vsh", Shaders.particleVsh());
             // The pointer a seated player sees: one glyph per shape on a text display in front of the
             // view. Text, unlike an item, gets no directional shading, so the arrow stays white.

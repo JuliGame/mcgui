@@ -53,6 +53,8 @@ public final class Pipeline {
      * speed that keeps the width of their view as it was.
      */
     private final Map<UUID, Held> held = new ConcurrentHashMap<>();
+    /** Players behind a kept overlay, who are sent nothing that only makes particles (see {@link #hideParticles}). */
+    private final Set<UUID> particlesHidden = ConcurrentHashMap.newKeySet();
 
     /** A held player's entity id, and the walking speed their client was last told (what their movement speed is told against). */
     private static final class Held {
@@ -144,6 +146,18 @@ public final class Pipeline {
     public void hold(Player player, boolean on) {
         if (on) held.put(player.getUniqueId(), new Held(player.getEntityId()));
         else held.remove(player.getUniqueId());
+    }
+
+    /**
+     * While [on], nothing that only makes particles reaches [player] ({@link Nms#onlyParticles}: the server's particles,
+     * a death's puff, a dispenser's smoke...). For a player behind a kept overlay: their world is a still picture, and
+     * 1.21.11 without improved transparency draws particles after that picture is laid in, so they moved over it with
+     * the camera. The server keeps sending them to everyone else, and dropping them leaves nothing behind on the client.
+     * Needs the handler {@link #conceal} puts in.
+     */
+    public void hideParticles(Player player, boolean on) {
+        if (on) particlesHidden.add(player.getUniqueId());
+        else particlesHidden.remove(player.getUniqueId());
     }
 
     /**
@@ -254,6 +268,7 @@ public final class Pipeline {
     public void forget(UUID player) {
         concealed.remove(player);
         held.remove(player);
+        particlesHidden.remove(player);
         unwatch(player);
         filters.remove(player);
         // A ping the player never answered would otherwise keep its view, canvas and all, for good.
@@ -311,6 +326,7 @@ public final class Pipeline {
         mice.clear();
         pinned.clear();
         concealed.clear();
+        particlesHidden.clear();
         held.clear();
     }
 
@@ -447,6 +463,10 @@ public final class Pipeline {
         public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
             Integer pin = pinned.get(id);
             if (pin != null && nms.movedEntity(msg) == pin) {
+                promise.trySuccess();
+                return;
+            }
+            if (particlesHidden.contains(id) && nms.onlyParticles(msg)) {
                 promise.trySuccess();
                 return;
             }

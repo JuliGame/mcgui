@@ -545,6 +545,8 @@ public final class Views implements Listener {
         player.setGameMode(GameMode.ADVENTURE);
         // An empty hotbar until they get up, or scrolling would pop up the held item's name.
         pipeline.conceal(player, true);
+        // Behind a kept overlay the world is a still picture: no particles over it (Pipeline.hideParticles).
+        if (keeps) pipeline.hideParticles(player, true);
         pipeline.watch(player, new Pipeline.Mouse() {
             @Override public void turned(float yaw, float pitch) { Views.this.turned(view, yaw, pitch); }
             @Override public void teleported() { view.awaitingTeleport = false; }
@@ -1570,6 +1572,7 @@ public final class Views implements Listener {
         player.getPersistentDataContainer().remove(seatKey);
         for (Player other : Bukkit.getOnlinePlayers()) Threads.now(plugin, other, () -> other.showPlayer(plugin, player));
         pipeline.conceal(player, false);
+        pipeline.hideParticles(player, false);
         release(player);
     }
 

@@ -115,6 +115,13 @@ public final class Nms {
     private final MethodHandle playerTeleport;     // ServerGamePacketListenerImpl#teleport(PositionMoveRotation, Set<Relative>)
     private final java.util.Set<?> keepRotation;   // Relative.X_ROT and Y_ROT: a teleport that leaves the rotation alone
 
+    // What only makes particles on a client: dropped for a player behind an overlay (see onlyParticles).
+    private final Class<?> particlesPacket;        // ClientboundLevelParticlesPacket
+    private final Class<?> entityEventPacket;      // ClientboundEntityEventPacket
+    private final MethodHandle entityEventId;      // #getEventId (a byte)
+    private final Class<?> levelEventPacket;       // ClientboundLevelEventPacket
+    private final MethodHandle levelEventType;     // #getType
+
     // Frames pointed at other maps for one player: the item a frame shows, and the packets it travels in.
     private final Class<?> bundlePacket;           // ClientboundBundlePacket
     private final MethodHandle newBundle;          // new ClientboundBundlePacket(Iterable)
@@ -355,6 +362,11 @@ public final class Nms {
         playerTeleport = L.unreflect(Reflect.method(Reflect.cls("net.minecraft.server.network.ServerGamePacketListenerImpl"),
                 "teleport", pmr, java.util.Set.class));
         keepRotation = java.util.Set.of(enumConstant(relative, "X_ROT"), enumConstant(relative, "Y_ROT"));
+        particlesPacket = Reflect.cls(game + "ClientboundLevelParticlesPacket");
+        entityEventPacket = Reflect.cls(game + "ClientboundEntityEventPacket");
+        entityEventId = L.unreflect(Reflect.method(entityEventPacket, "getEventId"));
+        levelEventPacket = Reflect.cls(game + "ClientboundLevelEventPacket");
+        levelEventType = L.unreflect(Reflect.method(levelEventPacket, "getType"));
     }
 
     /**
@@ -747,6 +759,38 @@ public final class Nms {
     /** Whether [msg] is the client saying one of its ticks has ended (sent after that tick's clicks and rotation). */
     public boolean isTickEnd(Object msg) {
         return tickEndPacket.isInstance(msg);
+    }
+
+    /**
+     * Entity events a client does nothing with but make particles ({@code LivingEntity.handleEntityEvent}, and
+     * {@code Mob}'s 20; no other entity gives these numbers a meaning): 20 a mob's spawning puff, 46 a teleport's
+     * portal trail, 54 a honey block jump, 60 a death's puff, 67 drowning bubbles. A death itself is 3, and an
+     * entity's other events change what the client holds (an item broken, a totem used, an animation), so they pass.
+     */
+    private static final Set<Byte> PARTICLE_ENTITY_EVENTS = Set.of((byte) 20, (byte) 46, (byte) 54, (byte) 60, (byte) 67);
+    /**
+     * Level events a client does nothing with but make particles ({@code LevelEventHandler.levelEvent}): dripstone's
+     * drip, a dispenser's smoke, an eye of ender breaking, a spawner's flames, an explosion's puff, a mob's cloud, white
+     * smoke, bone meal's sparkles twice, a mace's smash, an electric spark, wax off, scraping, an egg cracking, a trial
+     * spawner's flames and its ejection. Every other one plays a sound or changes a block or entity (a block's
+     * breaking, a potion's splash), so it passes.
+     */
+    private static final Set<Integer> PARTICLE_LEVEL_EVENTS = Set.of(1504, 2000, 2003, 2004, 2008, 2009, 2010, 2011, 2012, 2013,
+            3002, 3004, 3005, 3009, 3011, 3017);
+
+    /**
+     * Whether [msg] does nothing on a client but make particles: the server's own ({@code /particle}, plugins'), or an
+     * entity or level event whose only effect is particles ({@link #PARTICLE_ENTITY_EVENTS},
+     * {@link #PARTICLE_LEVEL_EVENTS}). Dropping one costs that client nothing it keeps.
+     */
+    boolean onlyParticles(Object msg) {
+        if (particlesPacket.isInstance(msg)) return true;
+        try {
+            if (entityEventPacket.isInstance(msg)) return PARTICLE_ENTITY_EVENTS.contains((byte) entityEventId.invoke(msg));
+            return levelEventPacket.isInstance(msg) && PARTICLE_LEVEL_EVENTS.contains((int) levelEventType.invoke(msg));
+        } catch (Throwable t) {
+            throw rethrow(t);
+        }
     }
 
     /**

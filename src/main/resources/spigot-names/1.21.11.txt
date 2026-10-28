@@ -83,8 +83,11 @@ C	net.minecraft.network.protocol.game.ClientboundAddEntityPacket	net.minecraft.n
 C	net.minecraft.network.protocol.game.ClientboundBundlePacket	net.minecraft.network.protocol.game.ClientboundBundlePacket
 C	net.minecraft.network.protocol.game.ClientboundContainerSetContentPacket	net.minecraft.network.protocol.game.PacketPlayOutWindowItems
 C	net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket	net.minecraft.network.protocol.game.PacketPlayOutSetSlot
+C	net.minecraft.network.protocol.game.ClientboundEntityEventPacket	net.minecraft.network.protocol.game.PacketPlayOutEntityStatus
 C	net.minecraft.network.protocol.game.ClientboundEntityPositionSyncPacket	net.minecraft.network.protocol.game.ClientboundEntityPositionSyncPacket
 C	net.minecraft.network.protocol.game.ClientboundGameEventPacket	net.minecraft.network.protocol.game.PacketPlayOutGameStateChange
+C	net.minecraft.network.protocol.game.ClientboundLevelEventPacket	net.minecraft.network.protocol.game.PacketPlayOutWorldEvent
+C	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	net.minecraft.network.protocol.game.PacketPlayOutWorldParticles
 C	net.minecraft.network.protocol.game.ClientboundMapItemDataPacket	net.minecraft.network.protocol.game.PacketPlayOutMap
 C	net.minecraft.network.protocol.game.ClientboundMoveEntityPacket	net.minecraft.network.protocol.game.PacketPlayOutEntity
 C	net.minecraft.network.protocol.game.ClientboundPlayerAbilitiesPacket	net.minecraft.network.protocol.game.PacketPlayOutAbilities
@@ -6329,3 +6332,52 @@ F	net.minecraft.world.entity.ai.attributes.Attributes	WAYPOINT_TRANSMIT_RANGE	I
 F	net.minecraft.world.entity.ai.attributes.Attributes	WAYPOINT_RECEIVE_RANGE	J
 M	net.minecraft.world.entity.ai.attributes.Attributes	register	java.lang.String,net.minecraft.world.entity.ai.attributes.Attribute	a
 M	net.minecraft.world.entity.ai.attributes.Attributes	bootstrap	net.minecraft.core.Registry	a
+F	net.minecraft.network.protocol.game.ClientboundEntityEventPacket	STREAM_CODEC	a
+F	net.minecraft.network.protocol.game.ClientboundEntityEventPacket	entityId	b
+F	net.minecraft.network.protocol.game.ClientboundEntityEventPacket	eventId	c
+M	net.minecraft.network.protocol.game.ClientboundEntityEventPacket	write	net.minecraft.network.FriendlyByteBuf	a
+M	net.minecraft.network.protocol.game.ClientboundEntityEventPacket	type		a
+M	net.minecraft.network.protocol.game.ClientboundEntityEventPacket	handle	net.minecraft.network.protocol.game.ClientGamePacketListener	a
+M	net.minecraft.network.protocol.game.ClientboundEntityEventPacket	getEntity	net.minecraft.world.level.Level	a
+M	net.minecraft.network.protocol.game.ClientboundEntityEventPacket	getEventId		b
+M	net.minecraft.network.protocol.game.ClientboundEntityEventPacket	handle	net.minecraft.network.PacketListener	a
+F	net.minecraft.network.protocol.game.ClientboundLevelEventPacket	STREAM_CODEC	a
+F	net.minecraft.network.protocol.game.ClientboundLevelEventPacket	type	b
+F	net.minecraft.network.protocol.game.ClientboundLevelEventPacket	pos	c
+F	net.minecraft.network.protocol.game.ClientboundLevelEventPacket	data	d
+F	net.minecraft.network.protocol.game.ClientboundLevelEventPacket	globalEvent	e
+M	net.minecraft.network.protocol.game.ClientboundLevelEventPacket	write	net.minecraft.network.FriendlyByteBuf	a
+M	net.minecraft.network.protocol.game.ClientboundLevelEventPacket	type		a
+M	net.minecraft.network.protocol.game.ClientboundLevelEventPacket	handle	net.minecraft.network.protocol.game.ClientGamePacketListener	a
+M	net.minecraft.network.protocol.game.ClientboundLevelEventPacket	isGlobalEvent		b
+M	net.minecraft.network.protocol.game.ClientboundLevelEventPacket	getType		e
+M	net.minecraft.network.protocol.game.ClientboundLevelEventPacket	getData		f
+M	net.minecraft.network.protocol.game.ClientboundLevelEventPacket	getPos		g
+M	net.minecraft.network.protocol.game.ClientboundLevelEventPacket	handle	net.minecraft.network.PacketListener	a
+F	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	STREAM_CODEC	a
+F	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	x	b
+F	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	y	c
+F	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	z	d
+F	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	xDist	e
+F	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	yDist	f
+F	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	zDist	g
+F	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	maxSpeed	h
+F	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	count	i
+F	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	overrideLimiter	j
+F	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	alwaysShow	k
+F	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	particle	l
+M	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	write	net.minecraft.network.RegistryFriendlyByteBuf	a
+M	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	type		a
+M	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	handle	net.minecraft.network.protocol.game.ClientGamePacketListener	a
+M	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	isOverrideLimiter		b
+M	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	alwaysShow		e
+M	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	getX		f
+M	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	getY		g
+M	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	getZ		h
+M	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	getXDist		i
+M	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	getYDist		j
+M	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	getZDist		k
+M	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	getMaxSpeed		l
+M	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	getCount		m
+M	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	getParticle		n
+M	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	handle	net.minecraft.network.PacketListener	a
