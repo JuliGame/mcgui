@@ -9,6 +9,7 @@ import javax.imageio.ImageIO;
 import javax.imageio.ImageReadParam;
 import javax.imageio.ImageReader;
 import javax.imageio.stream.ImageInputStream;
+import javax.imageio.stream.MemoryCacheImageInputStream;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.geom.AffineTransform;
@@ -45,8 +46,7 @@ public final class Pictures {
      * their stated size as their natural size, so a page lays them out and crops them as a browser would.
      */
     static Raster bitmap(byte[] data) throws IOException {
-        try (ImageInputStream in = ImageIO.createImageInputStream(new ByteArrayInputStream(data))) {
-            if (in == null) return null;
+        try (ImageInputStream in = memory(data)) {
             Iterator<ImageReader> readers = ImageIO.getImageReaders(in);
             if (!readers.hasNext()) return null;
             ImageReader reader = readers.next();
@@ -65,6 +65,14 @@ public final class Pictures {
         }
     }
 
+    /**
+     * [data] for ImageIO, buffered in memory. ImageIO.createImageInputStream would buffer it through a file in
+     * the temp folder, which on a host with a full /tmp fails every picture.
+     */
+    public static ImageInputStream memory(byte[] data) {
+        return new MemoryCacheImageInputStream(new ByteArrayInputStream(data));
+    }
+
     /** Every [step]th pixel of a w x h bitmap is read, to keep it under {@link #MAX_PIXELS}. */
     private static int step(long w, long h) {
         return w * h > MAX_PIXELS ? (int) Math.ceil(Math.sqrt((double) (w * h) / MAX_PIXELS)) : 1;
@@ -76,8 +84,7 @@ public final class Pictures {
      */
     public static long decodedBytes(byte[] data, String nameHint) {
         if (data == null || data.length == 0 || looksLikeSvg(data, nameHint)) return 0;
-        try (ImageInputStream in = ImageIO.createImageInputStream(new ByteArrayInputStream(data))) {
-            if (in == null) return 0;
+        try (ImageInputStream in = memory(data)) {
             Iterator<ImageReader> readers = ImageIO.getImageReaders(in);
             if (!readers.hasNext()) return 0;
             ImageReader reader = readers.next();

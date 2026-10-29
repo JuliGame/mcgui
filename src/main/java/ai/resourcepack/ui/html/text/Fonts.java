@@ -6,10 +6,17 @@ import java.awt.font.FontRenderContext;
 import java.awt.font.LineMetrics;
 import java.awt.font.TextAttribute;
 import java.awt.geom.AffineTransform;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -48,6 +55,55 @@ public final class Fonts {
         return b;
     }
 
+    /** Where a font goes when Java cannot make its own temporary copy of it; null for nowhere. */
+    private static volatile Path spill;
+    /** Why a bundled face would not load, the first time one did not; null while all have. */
+    private static volatile String bundledProblem;
+
+    /**
+     * [dir] holds a copy of any font Java could not copy to the temp folder itself. Font.createFont copies the
+     * bytes it is given to a file there first, so a host's full /tmp otherwise leaves every page without fonts.
+     */
+    public static void spillTo(Path dir) {
+        spill = dir;
+    }
+
+    /** Why the bundled fonts did not all load (pages then draw in Java's own), or null if they did. */
+    public static String bundledProblem() {
+        return bundledProblem;
+    }
+
+    /** A TrueType font from its bytes, through {@link #spill} when the temp folder will not take it. */
+    private static Font truetype(byte[] data) throws IOException, FontFormatException {
+        try {
+            return Font.createFont(Font.TRUETYPE_FONT, new ByteArrayInputStream(data));
+        } catch (IOException e) {
+            Path dir = spill;
+            if (dir == null) throw e;
+            // Named by its content, and kept: Java goes on reading a font from its file.
+            Path file = dir.resolve(HexFormat.of().formatHex(sha256(data)) + ".ttf");
+            if (!Files.isRegularFile(file) || Files.size(file) != data.length) {
+                Files.createDirectories(dir);
+                Path part = Files.createTempFile(dir, file.getFileName().toString(), ".part");
+                try {
+                    Files.write(part, data);
+                    Files.move(part, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+                } finally {
+                    Files.deleteIfExists(part);
+                }
+            }
+            return Font.createFont(Font.TRUETYPE_FONT, file.toFile());
+        }
+    }
+
+    private static byte[] sha256(byte[] data) {
+        try {
+            return MessageDigest.getInstance("SHA-256").digest(data);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
     private static Fonts loadBundled() {
         Fonts f = new Fonts();
         f.load("inter", "Inter-Light.ttf", 300, false);
@@ -81,21 +137,30 @@ public final class Fonts {
                 "sf mono", "fira code", "fira mono", "source code pro", "liberation mono", "dejavu sans mono", "cascadia code",
                 "cascadia mono", "roboto mono", "ibm plex mono"}) f.aliases.put(n, "jetbrains mono");
         for (String n : new String[]{"minecraft", "minecraftia", "mojangles", "minecraft-font", "minecraftfont", "minecraft ten", "mac's minecraft", "macsminecraft"}) f.aliases.put(n, "macs minecraft");
-        f.fallbacks.add(f.families.get("inter").get(1).font);
-        f.fallbacks.add(f.families.get("jetbrains mono").get(0).font);
-        f.fallbacks.add(f.families.get("source serif 4").get(0).font);
-        f.fallbacks.add(f.families.get("macs minecraft").get(0).font);
-        f.fallbacks.add(f.families.get("monocraft").get(0).font);
+        // A family none of whose faces loaded is Java's own of its kind, so every name above still means something.
+        f.standIn("inter", Font.SANS_SERIF);
+        f.standIn("source serif 4", Font.SERIF);
+        f.standIn("jetbrains mono", Font.MONOSPACED);
+        f.standIn("monocraft", Font.MONOSPACED);
+        f.standIn("macs minecraft", Font.SANS_SERIF);
+        for (String fam : new String[]{"inter", "jetbrains mono", "source serif 4", "macs minecraft", "monocraft"}) {
+            f.fallbacks.add(pick(f.families.get(fam), 400, false).font);
+        }
         f.fallbacks.add(new Font(Font.DIALOG, Font.PLAIN, 1));
         return f;
+    }
+
+    private void standIn(String family, String logical) {
+        if (!families.containsKey(family)) add(family, new Font(logical, Font.PLAIN, 1), 400, false);
     }
 
     private void load(String family, String file, int weight, boolean italic) {
         try (InputStream in = Fonts.class.getResourceAsStream("/fonts/" + file)) {
             if (in == null) return;
-            add(family, Font.createFont(Font.TRUETYPE_FONT, in), weight, italic);
+            add(family, truetype(in.readAllBytes()), weight, italic);
         } catch (IOException | FontFormatException e) {
             // A missing bundled face just narrows the choice of weights.
+            if (bundledProblem == null) bundledProblem = file + ": " + e;
         }
     }
 
@@ -112,7 +177,7 @@ public final class Fonts {
         f.fallbacks.addAll(fallbacks);
         for (PageFont pf : faces) {
             try {
-                Font font = Font.createFont(Font.TRUETYPE_FONT, new java.io.ByteArrayInputStream(pf.data()));
+                Font font = truetype(pf.data());
                 // A page's own font replaces whatever the name meant before (a page can call its font "Arial").
                 String key = pf.family().toLowerCase(Locale.ROOT);
                 f.aliases.remove(key);

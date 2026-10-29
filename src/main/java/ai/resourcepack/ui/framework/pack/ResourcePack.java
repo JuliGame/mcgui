@@ -9,6 +9,8 @@ import net.kyori.adventure.key.Key;
 import org.bukkit.entity.Player;
 
 import javax.imageio.ImageIO;
+import javax.imageio.stream.ImageOutputStream;
+import javax.imageio.stream.MemoryCacheImageOutputStream;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -478,7 +480,11 @@ public final class ResourcePack implements AutoCloseable {
 
     private static byte[] png(BufferedImage image) throws IOException {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
-        ImageIO.write(image, "png", out);
+        // Buffered in memory: ImageIO.write to a plain stream buffers through a file in the temp folder, and a
+        // host's full /tmp then stops the pack building with "No space left on device".
+        try (ImageOutputStream ios = new MemoryCacheImageOutputStream(out)) {
+            if (!ImageIO.write(image, "png", ios)) throw new IOException("This Java has no PNG writer");
+        }
         return out.toByteArray();
     }
 

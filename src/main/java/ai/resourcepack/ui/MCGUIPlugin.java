@@ -90,6 +90,8 @@ public final class MCGUIPlugin extends JavaPlugin {
         cfg = getConfig();
         // Fetched into libs/ the first time a page with a script opens.
         ai.resourcepack.ui.script.ScriptEngine.configure(getDataFolder().toPath(), getLogger());
+        // For when the temp folder is full: Java copies every font there before it can read it.
+        ai.resourcepack.ui.html.text.Fonts.spillTo(getDataFolder().toPath().resolve("cache").resolve("fonts"));
         if (updates != null) updates.stop();
         updates = ai.resourcepack.common.update.UpdateCheck.spigot(this, SPIGOT_RESOURCE)
                 .name("MC GUI")
@@ -136,6 +138,8 @@ public final class MCGUIPlugin extends JavaPlugin {
         // first picture of every placed screen's page, kept so its first viewers are sent it without waiting.
         renderers.execute(Renders.Kind.WARM, () -> {
             ai.resourcepack.ui.html.text.Fonts.bundled();
+            String fontProblem = ai.resourcepack.ui.html.text.Fonts.bundledProblem();
+            if (fontProblem != null) getLogger().warning("Some bundled fonts did not load, so pages draw in Java's own instead: " + fontProblem);
             warmUp();
             warmMillis = (System.nanoTime() - t0) / 1e6;
         });

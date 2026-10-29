@@ -10,7 +10,6 @@ import org.bukkit.entity.Player;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
-import java.io.ByteArrayInputStream;
 import java.net.URI;
 import java.net.URL;
 import java.net.http.HttpClient;
@@ -105,7 +104,7 @@ final class Heads {
         if (!SKIN_HOST.equalsIgnoreCase(uri.getHost())) return null;
         HttpResponse<byte[]> res = http.send(HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(10)).build(), HttpResponse.BodyHandlers.ofByteArray());
         if (res.statusCode() != 200) return null;
-        BufferedImage skin = ImageIO.read(new ByteArrayInputStream(res.body()));
+        BufferedImage skin = ImageIO.read(Pictures.memory(res.body()));
         if (skin == null || skin.getWidth() < 64 || skin.getHeight() < 32) return null;
         // A skin may be drawn larger than 64 wide (HD skins): every coordinate scales with it.
         int u = skin.getWidth() / 64;
