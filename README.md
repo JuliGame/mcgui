@@ -581,21 +581,37 @@ At 1920×1080 (median of 3 rounds):
 
 ## Compatibility
 
-Server plugins checked with MC GUI 0.6.6 on Paper 1.21.11 and 26.2 (2026-10-30): a page opened fullscreen and as an
-overlay, the mouse moved, clicks and scrolls, closed by sneaking and from the console, a teleport and a quit while
-seated, then the player checked (game mode, position, invisibility, items, seen by others).
+Server plugins checked with MC GUI 0.6.6 on Paper, Spigot and Folia 1.21.11 and 26.2 (2026-10-30): a page opened
+fullscreen and as an overlay, the mouse moved, clicks and scrolls, closed by sneaking and from the console, a teleport and
+a quit while seated, then the player checked (game mode, position, invisibility, items, seen by others).
 
 - **Work with nothing to set:** ProtocolLib, PacketEvents, TAB (and team-coloured glowing players and mobs next to an
   overlay), LuckPerms, PlaceholderAPI, GrimAC (no flags while seated, with the mouse and the movement keys held, on a
-  real client), Spartan, AuthMe (a page opened before login stays open through it), Skript and SkBee, JustRTP (a random
-  teleport while seated closes the page and the player lands where it sent them), DecentHolograms, BetterModel,
+  real client), Spartan and NoCheatPlus (Updated) (no flags, checked on a player who is not an op, as ops skip their
+  checks), AuthMe (a page opened before login stays open through it), Skript and SkBee, JustRTP, Citizens,
+  FancyNpcs, FancyHolograms, DecentHolograms and BetterModel (NPCs and holograms standing on the player's spot),
   ViaVersion and ViaBackwards.
+- **EssentialsX:** a vanished player stays vanished through a page, and vanishing while seated holds after it closes;
+  god mode and AFK are kept; `/tp` while seated gets them up where they were sent, and `/back` afterwards takes them to
+  where they stood before the page (MC GUI's own moves never become a `/back` spot).
+- **WorldGuard:** no flag gets in a page's way: `deny-spawn` for every entity MC GUI uses, `mob-spawning`, `ride`,
+  `interact` and `use` denied, and `entry`, `exit` and `exit-via-teleport` denied right next to the player, since a seated
+  player never leaves their own block. A teleport WorldGuard refuses (into a region they may not enter) leaves the page
+  open, as nothing moved.
+- **Multiverse-Core and Multiverse-Inventories:** a world change while seated closes the page, and each world keeps its
+  own inventory as usual.
+- **Paper settings:** entity tracking ranges cut down to 8 blocks (`spigot.yml`) and anti-xray's `engine-mode: 2` change
+  nothing.
+- **Folia:** its `/tp` and plugins' `teleportAsync` move a player without telling other plugins, so before this release a
+  seated player teleported that way was put straight back on their seat. They now get up where they were sent.
 - **Geyser and Floodgate:** Bedrock players cannot load the resource pack, so screens are refused to them with a message
   saying so (since this release; before, with `resource-pack.required: true`, Geyser told the server the pack had loaded
   and they were sat in a view they could not see). Walls show them plain map colours.
-- **Dialog Engine:** a drawn dialog sends Dialog Engine's own pack, which replaces the text shader MC GUI's pages are drawn
-  with. Once a player has opened one, pages do not draw for them until they rejoin. Until a fix ships, keep drawn dialogs
-  (the `drawn/` folder and the drawn samples) off a server that uses MC GUI pages; plain YAML dialogs are fine.
+- **Dialog Engine:** a drawn dialog sends Dialog Engine's own pack, which replaces the shaders MC GUI's pages are drawn
+  with, and before this release no page drew for that player until they rejoined. Now MC GUI sends its pack again before
+  the next page opens (one short resource reload, once), and pages draw. A drawn dialog opened after that shows the
+  player's head in it as a small 8x8 face, since Dialog Engine's pack is then below MC GUI's; the rest of the dialog is
+  unchanged. Plain YAML dialogs are not affected at all.
 - **Every other plugin that teleports a player** (Essentials, /rtp, warps) closes their page first, and they arrive where
   they were sent.
 
