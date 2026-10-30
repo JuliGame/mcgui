@@ -17,6 +17,7 @@ import ai.resourcepack.ui.framework.net.Pipeline;
 import ai.resourcepack.ui.framework.net.ServerWire;
 import ai.resourcepack.ui.framework.net.SharedCompression;
 import ai.resourcepack.ui.framework.pack.ResourcePack;
+import ai.resourcepack.ui.framework.pack.Siblings;
 import ai.resourcepack.ui.framework.render.Palette;
 import ai.resourcepack.ui.framework.world.Views;
 import ai.resourcepack.ui.framework.world.Walls;
@@ -38,6 +39,7 @@ import java.util.ArrayList;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.logging.Level;
 
 /**
@@ -111,12 +113,14 @@ public final class Framework implements UIFramework, Listener {
         try {
             pack = new ResourcePack(settings, palette, plugin.getDataFolder().toPath(), plugin.getLogger());
             ResourcePack built = pack;
+            // So Dialog Engine does not send its pack over ours again each time ours is sent (see ResourcePack.raise).
+            Siblings.register(plugin);
             // Once the pack host has it (or this server serves it after all), the players already on are sent it.
             pack.start("MCGUI/" + plugin.getDescription().getVersion(), () -> {
                 try {
                     Threads.global(plugin, () -> {
                         for (Player p : Bukkit.getOnlinePlayers()) {
-                            if (!built.has(p.getUniqueId())) Threads.on(plugin, p, () -> built.send(p));
+                            if (!built.has(p.getUniqueId()) && !Bedrock.is(p)) Threads.on(plugin, p, () -> built.send(p));
                         }
                     });
                 } catch (IllegalStateException | IllegalArgumentException disabled) {
@@ -131,6 +135,7 @@ public final class Framework implements UIFramework, Listener {
         sender = new MapSender(wire, settings.bytesPerSecond, plugin.getLogger());
         OpenTrace.start(plugin.getLogger(), nms, wire, sender);
         views = new Views(plugin, settings, nms, pipeline, sender, palette, settings.mapIdBase);
+        views.packLoading(p -> pack != null && pack.raising(p.getUniqueId()));
         walls = new Walls(plugin, nms, settings.mapIdBase + Views.VIEW_ID_SPAN, settings.viewDistance, settings.reach, views::seated, views::hides);
         serverThread = Threads.server(plugin, nms.serverThread());
         Threads.register(this, plugin);
@@ -274,6 +279,8 @@ public final class Framework implements UIFramework, Listener {
             if (pack != null && pack.mergedElsewhere()) throw new IllegalStateException("You have not loaded the resource pack that screens need.");
             throw new IllegalStateException("Screens need the MC GUI resource pack, which is turned off on this server (resource-pack.mode).");
         }
+        // Our pack goes on top again if a sibling plugin's went over it; the view then waits for it (Views.packLoading).
+        pack.raise(player);
         return views.open(player, content, options == null ? ViewOptions.DEFAULT : options);
     }
 
@@ -332,14 +339,26 @@ public final class Framework implements UIFramework, Listener {
 
     @EventHandler
     public void onQuit(PlayerQuitEvent e) {
-        if (pack != null) pack.forget(e.getPlayer().getUniqueId());
+        if (pack != null) pack.left(e.getPlayer().getUniqueId());
+        Bedrock.left(e.getPlayer().getUniqueId());
         sender.reset(e.getPlayer().getUniqueId());
     }
 
     @EventHandler
     public void onPack(PlayerResourcePackStatusEvent e) {
+        if (pack == null) return;
+        UUID id = e.getPlayer().getUniqueId();
+        boolean ours = ResourcePack.PACK_ID.equals(e.getID());
+        // A game takes packs in the order they are sent, each above the last: a sibling's taken after ours (Dialog
+        // Engine's) is over ours, and ours sent again is over it (see ResourcePack.markBuried and raise).
+        if (e.getStatus() == PlayerResourcePackStatusEvent.Status.ACCEPTED) {
+            if (ours) pack.markAccepted(id);
+            else if (Siblings.fromSibling(plugin, e.getID())) pack.markBuried(id);
+        }
+        if (ours && e.getStatus() != PlayerResourcePackStatusEvent.Status.ACCEPTED && e.getStatus() != PlayerResourcePackStatusEvent.Status.DOWNLOADED
+                && e.getStatus() != PlayerResourcePackStatusEvent.Status.DISCARDED) pack.raised(id);
         // Merged into another plugin's pack, ours never arrives under its own id: that pack is ours too.
-        if (pack == null || !ResourcePack.PACK_ID.equals(e.getID()) && !pack.mergedElsewhere()) return;
+        if (!ours && !pack.mergedElsewhere()) return;
         switch (e.getStatus()) {
             case SUCCESSFULLY_LOADED -> pack.markLoaded(e.getPlayer().getUniqueId());
             case DECLINED, FAILED_DOWNLOAD, INVALID_URL, FAILED_RELOAD -> pack.markRefused(e.getPlayer().getUniqueId());
