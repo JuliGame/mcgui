@@ -1,5 +1,6 @@
 package ai.resourcepack.ui.framework;
 
+import ai.resourcepack.ui.framework.platform.Bedrock;
 import ai.resourcepack.ui.framework.platform.Platform;
 import ai.resourcepack.ui.framework.api.Canvas;
 import ai.resourcepack.ui.framework.api.CloseReason;
@@ -141,7 +142,7 @@ public final class Framework implements UIFramework, Listener {
         sender.start();
         // Players already online (a reload): hand them the pack again, and read their clicks on walls.
         for (Player p : Bukkit.getOnlinePlayers()) {
-            if (pack != null) pack.send(p);
+            if (!Bedrock.joined(p) && pack != null) pack.send(p);
             readUses(p);
         }
         UIFramework.Holder.set(this);
@@ -252,6 +253,9 @@ public final class Framework implements UIFramework, Listener {
         return walls.place(topLeft, facing, cols, rows, content);
     }
 
+    /** Why a Bedrock player gets no view: said to them, with no apostrophes (MC GUI's chat reads them as quotes). */
+    public static final String BEDROCK_REFUSAL = "Screens work in Minecraft Java Edition only: Bedrock Edition cannot load the resource pack they are drawn with.";
+
     @Override
     public View openView(Player player, ViewContent content, ViewOptions options) {
         if (Threads.folia() && !Threads.owns(player)) throw new IllegalStateException("A view is opened from " + player.getName() + "'s own thread (on Folia, their region's)");
@@ -259,6 +263,9 @@ public final class Framework implements UIFramework, Listener {
         // shaders draw it in front of the world. Without the pack there is no view: never one cut out of the world.
         // Said to the player (whoever opens a view for somebody else checks hasPack first), with no apostrophes,
         // which MC GUI's chat reads as quotes.
+        // Geyser tells the server a required pack loaded when it did not (a Bedrock game cannot load one), so a Bedrock
+        // player is refused here whatever the pack says, before anything about them changes.
+        if (Bedrock.is(player)) throw new IllegalStateException(BEDROCK_REFUSAL);
         if (!hasPack(player)) {
             if (pack != null && pack.offers()) {
                 pack.send(player);
@@ -277,7 +284,7 @@ public final class Framework implements UIFramework, Listener {
 
     @Override
     public boolean hasPack(Player player) {
-        return pack != null && pack.has(player.getUniqueId());
+        return pack != null && !Bedrock.is(player) && pack.has(player.getUniqueId());
     }
 
     @Override
@@ -312,7 +319,9 @@ public final class Framework implements UIFramework, Listener {
     @EventHandler
     public void onJoin(PlayerJoinEvent e) {
         sender.reset(e.getPlayer().getUniqueId());
-        if (pack != null) pack.send(e.getPlayer());
+        // A Bedrock player (Geyser) cannot load a Java pack: none is offered, and walls show them plain map colours.
+        boolean bedrock = Bedrock.joined(e.getPlayer());
+        if (pack != null && !bedrock) pack.send(e.getPlayer());
         readUses(e.getPlayer());
     }
 

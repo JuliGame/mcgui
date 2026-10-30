@@ -180,7 +180,9 @@ final class UiCommand implements TabExecutor {
         java.util.function.Consumer<String> problem = target != sender && !UIFramework.get().hasPack(target)
                 ? reason -> {
                     say(target, reason, NamedTextColor.RED);
-                    say(sender, target.getName() + " has not loaded the resource pack that screens need.", NamedTextColor.RED);
+                    say(sender, ai.resourcepack.ui.framework.platform.Bedrock.is(target)
+                            ? target.getName() + " plays Bedrock Edition, which cannot show screens."
+                            : target.getName() + " has not loaded the resource pack that screens need.", NamedTextColor.RED);
                 }
                 : reason -> say(sender, reason, NamedTextColor.RED);
         try {
