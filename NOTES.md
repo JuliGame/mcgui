@@ -1172,6 +1172,25 @@ Reading a position, a world or a UUID is fine from anywhere. How MC GUI copes, a
   connection with no compressor (`SharedCompression`, "it is not compressed").
   Reopened pages send only what differs, so they do not need it. Not
   measured: a server behind a proxy.
+- **Server plugins (2026-10-30, `rigs/compat/server-plugins/`).** A rig there (`mk.py <ver> <set> <tag>`,
+  `rig.js`, `sum.py`) starts a private Paper 1.21.11 or 26.2 with MC GUI and a set of plugins and drives two mineflayer
+  1.21.11 bots through it (a 1.21.11 bot on 26.2 through ViaBackwards): fullscreen and overlay, sneak and console close,
+  a teleport and a quit while seated, and checks game mode, position, invisibility, items and whether the other bot sees
+  the seated one. A bot cannot fly, so it turns its physics off while the abilities packet says held, and it sends
+  `tick_end` itself (mineflayer never does). `pc/` holds the real-client lane (session1.py). Traps found:
+  **Geyser answers a required pack as loaded** (`JavaClientboundResourcePackPushPacket`: ACCEPTED, DOWNLOADED,
+  SUCCESSFULLY_LOADED, so the server never kicks a Bedrock player), and a Bedrock player was seated in a view of 144
+  maps their game cannot draw; `platform/Bedrock` works out Bedrock players on join (Floodgate's or Geyser's API by
+  reflection, else Floodgate's zero-high-half UUID), `hasPack` is false for them, no pack is offered, and `openView`
+  refuses with `BEDROCK_REFUSAL`. **Dialog Engine's drawn dialogs** stack their own pack above ours (`rpai_head_v*`
+  overlays carry `rendertype_text.vsh`/`text.vsh`, `rpai_dialog_v*` `position_tex_color` and `gui`): after one, every
+  view drew a huge pointer glyph and the world turned with the mouse (real 1.21.11 client, `res/pc-s1-main/`). It merges
+  other plugins' text shaders into its pack, but its library skips every plugin whose main class starts with
+  `ai.resourcepack.` (`ShaderWatch.ours`) and never raises itself over a `SiblingPacks` provider (a `Predicate<UUID>`
+  service from an `ai.resourcepack.` class). Branch `compat/server-plugins-de-raise` registers ours as one and sends
+  our pack again before a view shows when a sibling's was taken after it; not yet checked in a client. GrimAC's
+  `PacketServerPlayerRotation` throws a NullPointerException for every server rotation when it finds no
+  `pre-pe-encoder-grimac` handler (seen with bots only, never with a real client), Grim's bug, harmless to us.
 - **The mannequin camera** (1.21.9+) has a player's eye height. An armour stand
   (the fallback) makes the client glide its eye height for most of a second,
   off the flagged position the whole time.

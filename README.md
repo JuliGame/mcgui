@@ -579,6 +579,26 @@ At 1920×1080 (median of 3 rounds):
 - **Overlay pages** (`ui:overlay`) cost about what an opaque page of the same
   size does; the world round them is a still picture.
 
+## Compatibility
+
+Server plugins checked with MC GUI 0.6.6 on Paper 1.21.11 and 26.2 (2026-10-30): a page opened fullscreen and as an
+overlay, the mouse moved, clicks and scrolls, closed by sneaking and from the console, a teleport and a quit while
+seated, then the player checked (game mode, position, invisibility, items, seen by others).
+
+- **Work with nothing to set:** ProtocolLib, PacketEvents, TAB (and team-coloured glowing players and mobs next to an
+  overlay), LuckPerms, PlaceholderAPI, GrimAC (no flags while seated, with the mouse and the movement keys held, on a
+  real client), Spartan, AuthMe (a page opened before login stays open through it), Skript and SkBee, JustRTP (a random
+  teleport while seated closes the page and the player lands where it sent them), DecentHolograms, BetterModel,
+  ViaVersion and ViaBackwards.
+- **Geyser and Floodgate:** Bedrock players cannot load the resource pack, so screens are refused to them with a message
+  saying so (since this release; before, with `resource-pack.required: true`, Geyser told the server the pack had loaded
+  and they were sat in a view they could not see). Walls show them plain map colours.
+- **Dialog Engine:** a drawn dialog sends Dialog Engine's own pack, which replaces the text shader MC GUI's pages are drawn
+  with. Once a player has opened one, pages do not draw for them until they rejoin. Until a fix ships, keep drawn dialogs
+  (the `drawn/` folder and the drawn samples) off a server that uses MC GUI pages; plain YAML dialogs are fine.
+- **Every other plugin that teleports a player** (Essentials, /rtp, warps) closes their page first, and they arrive where
+  they were sent.
+
 ## For plugin developers
 
 Add `depend: [MCGUI]` to your `plugin.yml` and compile against the plugin
