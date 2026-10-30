@@ -6,6 +6,9 @@ api-version: '1.21'
 folia-supported: true
 # ViaVersion: an overlay asks it which version each player's client is (net/ClientVersion).
 softdepend: [PlaceholderAPI, ViaVersion]
+# Pack plugins that merge plugins/MCGUI/pack into theirs: MC GUI writes it on enabling, so it is there (and this
+# version's) before they build their pack at startup.
+loadbefore: [ItemsAdder, Nexo, Oraxen, CraftEngine, BetterHud]
 # Its name until 0.1.1: a plugin that depends on UIEngine still loads after this one.
 provides: [UIEngine]
 description: "Custom HTML/CSS screens in Minecraft with no limits. Not chest GUIs or Dialogs!"

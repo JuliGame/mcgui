@@ -26,6 +26,7 @@ import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -59,8 +60,8 @@ public final class ResourcePack implements AutoCloseable {
     public final byte[] bytes;
     public final String sha1;
     private final Set<UUID> loaded = ConcurrentHashMap.newKeySet();
-    /** Merged elsewhere: players a pack was declined by or failed for, with none loaded since. */
-    private final Set<UUID> refused = ConcurrentHashMap.newKeySet();
+    /** Merged elsewhere: players a pack was declined by (true) or failed for (false), with none loaded since. */
+    private final Map<UUID, Boolean> refused = new ConcurrentHashMap<>();
     /** How often a running server tells the pack host it still uses the pack, which forgets one untouched for 30 days. */
     private static final long TOUCH_HOURS = PackUploader.TOUCH_HOURS;
 
@@ -230,7 +231,12 @@ public final class ResourcePack implements AutoCloseable {
      * send it while the player is still joining (ItemsAdder does), and Paper reports no pack status from then.
      */
     public boolean has(UUID player) {
-        return loaded.contains(player) || mergedElsewhere() && !refused.contains(player);
+        return loaded.contains(player) || mergedElsewhere() && !refused.containsKey(player);
+    }
+
+    /** Merged elsewhere, and a player has no pack: whether they declined it (rather than their game failing to load it). */
+    public boolean declined(UUID player) {
+        return Boolean.TRUE.equals(refused.get(player));
     }
 
     public void markLoaded(UUID player) {
@@ -238,10 +244,10 @@ public final class ResourcePack implements AutoCloseable {
         refused.remove(player);
     }
 
-    /** A pack was declined, or failed to load. */
-    public void markRefused(UUID player) {
+    /** A pack was declined ([declined]), or failed to download or load. */
+    public void markRefused(UUID player, boolean declined) {
         if (mergedElsewhere()) {
-            if (!loaded.contains(player)) refused.add(player);
+            if (!loaded.contains(player)) refused.put(player, declined);
         } else {
             loaded.remove(player);
         }
@@ -288,58 +294,86 @@ public final class ResourcePack implements AutoCloseable {
         executor = null;
     }
 
+    /** The overlay directory a dialect's files are in: its own, and for 26.3 (whose files are also the root's) uiengine_26_3. */
+    static String overlayOf(Shaders.Dialect d) {
+        return d.overlay() != null ? d.overlay() : "uiengine_26_3";
+    }
+
+    /**
+     * The pack's pack.mcmeta. 26.3's shaders are the pack's own; every older version's are in an overlay for its
+     * formats, which replaces each of them (a version before 26.2 also reads its text shader by another name,
+     * rendertype_text). 26.3's are in an overlay of their own as well: merged into another plugin's pack (ItemsAdder,
+     * Oraxen, CraftEngine, BetterHud), the root is shared and the last copy of a file there wins, and other plugins put
+     * their text shaders in overlays, which a root file never beats. Mergers list our entries after their own, and of
+     * two overlays the one listed last wins.
+     * <p>
+     * Each entry gives its range twice, as min_format/max_format and as the old "formats". A merged pack.mcmeta holds
+     * other plugins' entries too, and once any entry reaches a format below 65 (ItemsAdder's, Oraxen's and
+     * BetterHud's do) the game refuses every overlay without "formats", and with that the whole pack
+     * ({@code PackFormat.validateHolderList}): the player is left with no server pack at all. BetterHud also skips a
+     * merged pack.mcmeta whose entries have no "formats". Alone, "formats" on a range above 64 is refused as deprecated
+     * unless some entry reaches below 65, which uiengine_none does: a directory that does not exist, for a format no
+     * game that loads this pack has.
+     */
+    static String mcmeta() {
+        List<String> overlays = new ArrayList<>();
+        overlays.add("""
+                {"directory": "uiengine_none", "min_format": 64, "max_format": 64, "formats": [64, 64]}""");
+        for (Shaders.Dialect d : Shaders.Dialect.values()) {
+            overlays.add("""
+                    {"directory": "%s", "min_format": %d, "max_format": %d, "formats": [%d, %d]}"""
+                    .formatted(overlayOf(d), d.minFormat, d.maxFormat, d.minFormat, d.maxFormat));
+        }
+        return """
+                {
+                  "pack": {"description": "MC GUI", "min_format": %d, "max_format": %d},
+                  "overlays": {"entries": [%s]}
+                }
+                """.formatted(FORMAT_OLDEST, FORMAT_26_3, String.join(", ", overlays));
+    }
+
     private static byte[] build(Palette palette, Path sounds, Logger logger) throws IOException {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         try (ZipOutputStream zip = new ZipOutputStream(out)) {
             Entries e = new Entries(zip);
-            // 26.3's shaders are the pack's own; every older version's are in an overlay for its formats, which replaces
-            // each of them (a version before 26.2 also reads its text shader by another name, rendertype_text).
-            List<String> overlays = new ArrayList<>();
+            e.put("pack.mcmeta", mcmeta());
             for (Shaders.Dialect d : Shaders.Dialect.values()) {
-                if (d.overlay() != null) overlays.add("""
-                        {"directory": "%s", "min_format": %d, "max_format": %d}""".formatted(d.overlay(), d.minFormat, d.maxFormat));
-            }
-            e.put("pack.mcmeta", """
-                    {
-                      "pack": {"description": "MC GUI", "min_format": %d, "max_format": %d},
-                      "overlays": {"entries": [%s]}
+                for (String base : d.overlay() == null ? List.of("", overlayOf(d) + "/") : List.of(overlayOf(d) + "/")) {
+                    String assets = base + "assets/";
+                    String root = assets + "minecraft/shaders/core/";
+                    e.put(root + d.textShader() + ".vsh", Shaders.textVsh(d, palette));
+                    e.put(root + d.textShader() + ".fsh", Shaders.textFsh(d, palette));
+                    e.put(root + "position_tex_color.vsh", Shaders.positionTexColorVsh(d));
+                    e.put(root + "position_tex_color.fsh", Shaders.positionTexColorFsh(d));
+                    // The world round an overlay's panel, kept still: passes of the outline post effect, which a glowing
+                    // display switches on.
+                    String post = assets + "uiengine/shaders/post/";
+                    e.put(post + "overlay_take.fsh", Shaders.overlayTakeFsh(d));
+                    e.put(post + "overlay_blur.fsh", Shaders.overlayBlurFsh(d));
+                    e.put(post + "overlay_mask.fsh", Shaders.overlayMaskFsh(d));
+                    e.put(post + "overlay_compose.fsh", Shaders.overlayComposeFsh(d));
+                    e.put(post + "overlay_outline.fsh", Shaders.overlayOutlineFsh(d));
+                    // ... and again in the improved transparency effect before 26.3, which gets the signature handed on.
+                    if (d != Shaders.Dialect.V26_3) {
+                        e.put(post + "overlay_relay.fsh", Shaders.overlayRelayFsh(d));
+                        e.put(post + "overlay_relay.vsh", Shaders.overlayRelayVsh(d));
                     }
-                    """.formatted(FORMAT_OLDEST, FORMAT_26_3, String.join(", ", overlays)));
-            for (Shaders.Dialect d : Shaders.Dialect.values()) {
-                String assets = (d.overlay() == null ? "" : d.overlay() + "/") + "assets/";
-                String root = assets + "minecraft/shaders/core/";
-                e.put(root + d.textShader() + ".vsh", Shaders.textVsh(d, palette));
-                e.put(root + d.textShader() + ".fsh", Shaders.textFsh(d, palette));
-                e.put(root + "position_tex_color.vsh", Shaders.positionTexColorVsh(d));
-                e.put(root + "position_tex_color.fsh", Shaders.positionTexColorFsh(d));
-                // The world round an overlay's panel, kept still: passes of the outline post effect, which a glowing
-                // display switches on.
-                String post = assets + "uiengine/shaders/post/";
-                e.put(post + "overlay_take.fsh", Shaders.overlayTakeFsh(d));
-                e.put(post + "overlay_blur.fsh", Shaders.overlayBlurFsh(d));
-                e.put(post + "overlay_mask.fsh", Shaders.overlayMaskFsh(d));
-                e.put(post + "overlay_compose.fsh", Shaders.overlayComposeFsh(d));
-                e.put(post + "overlay_outline.fsh", Shaders.overlayOutlineFsh(d));
-                // ... and again in the improved transparency effect before 26.3, which gets the signature handed on.
-                if (d != Shaders.Dialect.V26_3) {
-                    e.put(post + "overlay_relay.fsh", Shaders.overlayRelayFsh(d));
-                    e.put(post + "overlay_relay.vsh", Shaders.overlayRelayVsh(d));
+                    // Each pass draws over only as much of the window as it writes (nothing for most frames).
+                    e.put(post + "overlay_take.vsh", Shaders.overlayTakeVsh(d));
+                    e.put(post + "overlay_blur.vsh", Shaders.overlayBlurVsh(d));
+                    e.put(post + "overlay_signed_main.vsh", Shaders.overlaySignedVsh(d, "MainSampler"));
+                    e.put(post + "overlay_signed_in.vsh", Shaders.overlaySignedVsh(d, "InSampler"));
+                    // The pointer taken out of the menu blur, so the pause menu shows only the system's cursor.
+                    e.put(post + "pointer_find.fsh", Shaders.pointerFindFsh(d));
+                    e.put(post + "pointer_grow.fsh", Shaders.pointerGrowFsh(d));
+                    e.put(post + "pointer_fill.fsh", Shaders.pointerFillFsh(d));
+                    // The two post effects every version reads the same, but for 1.21.11's outline effect, which leaves
+                    // the particles drawn after it this frame's Globals. At the root for a merger that drops overlays,
+                    // and in each overlay so that no other plugin's root copy beats them in a merged pack.
+                    e.put(assets + "minecraft/post_effect/entity_outline.json", Shaders.overlayChain(d == Shaders.Dialect.V1_21_11));
+                    e.put(assets + "minecraft/post_effect/blur.json", Shaders.menuBlurChain());
                 }
-                // Each pass draws over only as much of the window as it writes (nothing for most frames).
-                e.put(post + "overlay_take.vsh", Shaders.overlayTakeVsh(d));
-                e.put(post + "overlay_blur.vsh", Shaders.overlayBlurVsh(d));
-                e.put(post + "overlay_signed_main.vsh", Shaders.overlaySignedVsh(d, "MainSampler"));
-                e.put(post + "overlay_signed_in.vsh", Shaders.overlaySignedVsh(d, "InSampler"));
-                // The pointer taken out of the menu blur, so the pause menu shows only the system's cursor.
-                e.put(post + "pointer_find.fsh", Shaders.pointerFindFsh(d));
-                e.put(post + "pointer_grow.fsh", Shaders.pointerGrowFsh(d));
-                e.put(post + "pointer_fill.fsh", Shaders.pointerFillFsh(d));
             }
-            // The two post effects every version has read the same in each, so the overlays need no copy, but for
-            // 1.21.11's outline effect, which leaves the particles drawn after it this frame's Globals.
-            e.put("assets/minecraft/post_effect/entity_outline.json", Shaders.overlayChain(false));
-            e.put(Shaders.Dialect.V1_21_11.overlay() + "/assets/minecraft/post_effect/entity_outline.json", Shaders.overlayChain(true));
-            e.put("assets/minecraft/post_effect/blur.json", Shaders.menuBlurChain());
             // Before 26.3 clouds and the world border are drawn after the outline effect, over the still world: none
             // for an overlay's camera there (1.21.11's and 26.1's shaders for both are 26.2's). And improved
             // transparency blends translucent blocks in after it, in an effect 26.3 does not have.

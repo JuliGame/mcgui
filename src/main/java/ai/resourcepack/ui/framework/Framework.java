@@ -15,6 +15,7 @@ import ai.resourcepack.ui.framework.net.Nms;
 import ai.resourcepack.ui.framework.net.Pipeline;
 import ai.resourcepack.ui.framework.net.ServerWire;
 import ai.resourcepack.ui.framework.net.SharedCompression;
+import ai.resourcepack.ui.framework.pack.MergeCheck;
 import ai.resourcepack.ui.framework.pack.ResourcePack;
 import ai.resourcepack.ui.framework.render.Palette;
 import ai.resourcepack.ui.framework.world.Views;
@@ -122,6 +123,13 @@ public final class Framework implements UIFramework, Listener {
                     // MC GUI stopped meanwhile.
                 }
             });
+            // Merged into another plugin's pack: whether the merge kept everything, for every version, said in the
+            // console. Pack plugins zip after MC GUI starts (and on their own reload commands), so it looks again
+            // whenever their pack changes on disk.
+            if (pack.mergedElsewhere()) {
+                MergeCheck check = new MergeCheck(plugin.getDataFolder().toPath().toAbsolutePath().getParent(), pack.bytes, plugin.getLogger());
+                tasks.add(Threads.asyncTimer(plugin, check::run, 20 * 10, 20 * 30));
+            }
         } catch (Exception e) {
             plugin.getLogger().log(Level.SEVERE, "Could not build or serve the resource pack", e);
         }
@@ -264,7 +272,11 @@ public final class Framework implements UIFramework, Listener {
                 pack.send(player);
                 throw new IllegalStateException("You have not loaded the resource pack that screens need. It has been offered to you again.");
             }
-            if (pack != null && pack.mergedElsewhere()) throw new IllegalStateException("You have not loaded the resource pack that screens need.");
+            if (pack != null && pack.mergedElsewhere()) {
+                throw new IllegalStateException(pack.declined(player.getUniqueId())
+                        ? "You have not loaded the resource pack that screens need."
+                        : "Your game could not load the resource pack of this server, which screens need.");
+            }
             throw new IllegalStateException("Screens need the MC GUI resource pack, which is turned off on this server (resource-pack.mode).");
         }
         return views.open(player, content, options == null ? ViewOptions.DEFAULT : options);
@@ -333,7 +345,17 @@ public final class Framework implements UIFramework, Listener {
         if (pack == null || !ResourcePack.PACK_ID.equals(e.getID()) && !pack.mergedElsewhere()) return;
         switch (e.getStatus()) {
             case SUCCESSFULLY_LOADED -> pack.markLoaded(e.getPlayer().getUniqueId());
-            case DECLINED, FAILED_DOWNLOAD, INVALID_URL, FAILED_RELOAD -> pack.markRefused(e.getPlayer().getUniqueId());
+            case DECLINED -> pack.markRefused(e.getPlayer().getUniqueId(), true);
+            case FAILED_DOWNLOAD, INVALID_URL, FAILED_RELOAD -> {
+                pack.markRefused(e.getPlayer().getUniqueId(), false);
+                // Merged, the pack is another plugin's and its failure says nothing on the server otherwise: a merge
+                // that broke pack.mcmeta or a shader ends here, for every player.
+                if (pack.mergedElsewhere()) {
+                    plugin.getLogger().warning(e.getPlayer().getName() + "'s game could not load a resource pack this server sent ("
+                            + e.getStatus() + "), so screens will not open for them. With MC GUI merged into another plugin's pack, "
+                            + "see what MC GUI said about that pack at startup; the reason the game gives is in the player's own latest.log.");
+                }
+            }
             // Merged elsewhere, a discarded pack is usually the other plugin's being sent again, not ours going.
             case DISCARDED -> {
                 if (!pack.mergedElsewhere()) pack.forget(e.getPlayer().getUniqueId());
