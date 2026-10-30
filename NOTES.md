@@ -632,6 +632,23 @@ Reading a position, a world or a UUID is fine from anywhere. How MC GUI copes, a
   `text.fsh` (or a post chain) on one client cannot both work: whichever is
   applied last wins and the other's feature silently draws nothing. Nothing
   composes them yet.
+- **A merged pack (`external`, blank `public-url`) has to survive another plugin's pack.mcmeta** (2026-10-30).
+  The game refuses EVERY overlay without the old `"formats"` key as soon as one entry in the list reaches a
+  format below 65 (`PackFormat.validateHolderList`, "must be present in all overlays"), and with them the whole
+  server pack. ItemsAdder's, Oraxen's and BetterHud's own entries all reach below 65, so before 0.6.7 a merge into
+  Oraxen left players with no server pack at all (checked with the 1.21.11 server jar's own codec,
+  `rigs/compat/PackMerge/tools/Meta.java`), BetterHud skipped our pack.mcmeta (it parses `formats` and
+  found none) so old clients got 26.3's shaders and dropped the pack, and ItemsAdder does the first or the second.
+  Alone, `formats` above 64 is refused as deprecated. So `ResourcePack.mcmeta` gives both keys on every entry plus
+  `uiengine_none` (64, a folder that does not exist), which keeps the list in the old-key mode either way.
+  26.3's files are also in `uiengine_26_3`, and the post chains in every overlay: in a merged pack the root is
+  shared (last copy wins) and other plugins put their text shaders in overlays, which beat any root file; mergers
+  list our entries after theirs, and the last applicable overlay wins (`CompositePackResources`). CraftEngine
+  writes `max_format: 97` back as `[97, 0]`, so 26.3 (97.1) falls back to the root there, which is ours as well.
+  `MergeCheck` reads each known merger's output (ItemsAdder `output/generated.zip`, Nexo, Oraxen, CraftEngine,
+  BetterHud, RP Engine) whenever it changes and resolves every file per client version the way the game does,
+  so a broken merge is said in the console; a failed pack status in merged mode is logged too. Rig and results:
+  `rigs/compat/PackMerge/` (`tools/survive.py`, `out/`, `res/`).
 - **The pointer leaves the frame under the menu blur, and only there**
   (`Shaders.menuBlurChain`, 26.2 and 26.3). A vanilla screen frees the mouse and the
   system cursor appears, but the pointer is drawn in the level pass, before

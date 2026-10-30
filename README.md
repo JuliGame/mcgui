@@ -579,6 +579,32 @@ At 1920×1080 (median of 3 rounds):
 - **Overlay pages** (`ui:overlay`) cost about what an opaque page of the same
   size does; the world round them is a still picture.
 
+## Compatibility with pack plugins
+
+To put MC GUI's pack inside another plugin's, set `resource-pack.mode: external`
+and leave `public-url` blank. MC GUI then writes its pack to `plugins/MCGUI/pack/`
+(a folder) and `plugins/MCGUI/pack.zip` on every start, and a player who loads
+the other plugin's pack counts as having MC GUI's. Merge it in again after every
+MC GUI update. Shortly after start, and whenever that plugin rebuilds its pack,
+MC GUI reads the merged pack and says in the console whether every Minecraft
+version gets all of MC GUI's files, and what to do if not.
+
+| Plugin | How to merge | Notes |
+|---|---|---|
+| ItemsAdder | `config.yml`: add `MCGUI/pack` under `resource-pack.zip.merge_other_plugins_resourcepacks_folders`, then `/iazip` | Turn off `text_effects`, `hide_scoreboard_numbers` and `hide_scoreboard_numbers_old_clients`: they replace the same text shader. Needs MC GUI 0.6.7 or newer. |
+| Oraxen | copy `plugins/MCGUI/pack.zip` into `plugins/Oraxen/pack/uploads/`, restart | Animated glyphs (`glyphs/animations.yml`) use the text shader too and stop animating. Keep `remove_core_shaders_from_imported_packs: false`. |
+| Nexo | put `pack.zip` in `plugins/Nexo/pack/external_packs/` and rebuild Nexo's pack | Not tested (paid plugin). |
+| CraftEngine | `config.yml`: add `MCGUI/pack` under `resource-pack.merge-external-folders`, `/ce reload pack` | |
+| BetterHud | `config.yml`: add `MCGUI/pack` under `merge-other-folders` | BetterHud's HUD is drawn by the same text shader, so its HUD and MC GUI's screens cannot both work. |
+| RP Engine | copy the folder `plugins/MCGUI/pack` to `plugins/RPEngine/content/mcgui`, `/rp reload` | |
+| ModelEngine, BetterModel | merge their packs into your pack plugin beside MC GUI's as usual | They do not touch MC GUI's shaders. |
+
+Two plugins that replace the same core shader (`text`, `rendertype_text`,
+`position_tex_color`, the outline or blur post effect) cannot both work: the
+game uses one copy and the other plugin's feature draws nothing. If a page
+says "Your game could not load the resource pack of this server", the merged
+pack failed to load in that player's game; the console says why.
+
 ## For plugin developers
 
 Add `depend: [MCGUI]` to your `plugin.yml` and compile against the plugin

@@ -25,7 +25,7 @@ import java.util.zip.ZipInputStream;
 
 /**
  * Mode external with no public-url: reads the pack each known pack plugin built (ItemsAdder, Nexo, Oraxen,
- * CraftEngine, BetterHud) and says in the console whether MC GUI's pack came through the merge, for every client
+ * CraftEngine, BetterHud, RP Engine) and says in the console whether MC GUI's pack came through the merge, for every client
  * version, the way the game reads it: the pack.mcmeta overlays the game would refuse, MC GUI's files missing, from an
  * older MC GUI, or replaced by another plugin's copy. A merge that goes wrong is otherwise silent on the server, and a
  * player either gets no server pack at all or pages drawn without the shaders.
@@ -43,6 +43,7 @@ public final class MergeCheck {
         OUTPUTS.put("Oraxen", "Oraxen/pack/pack.zip");
         OUTPUTS.put("CraftEngine", "CraftEngine/generated/resource_pack.zip");
         OUTPUTS.put("BetterHud", "BetterHud/build.zip");
+        OUTPUTS.put("RPEngine", "RPEngine/output/main.zip");
     }
 
     /** Each client version's resource pack format: the overlays it applies, and which of our files it reads. */
@@ -180,6 +181,7 @@ public final class MergeCheck {
             case "Oraxen" -> "Copy plugins/MCGUI/pack.zip into plugins/Oraxen/pack/uploads/ and run /oraxen reload pack.";
             case "CraftEngine" -> "Add MCGUI/pack under resource-pack.merge-external-folders in CraftEngine's config.yml and run /ce reload pack.";
             case "BetterHud" -> "Add MCGUI/pack under merge-other-folders in BetterHud's config.yml and run /hud reload.";
+            case "RPEngine" -> "Copy the folder plugins/MCGUI/pack to plugins/RPEngine/content/mcgui and run /rp reload (again after every MC GUI update).";
             default -> "Merge plugins/MCGUI/pack into it again.";
         };
     }

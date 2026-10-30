@@ -182,8 +182,11 @@ resource-pack:
   # external: MC GUI serves nothing. Host plugins/MCGUI/pack.zip yourself and set public-url, which
   #   players are sent on join; or merge it into another plugin's pack and leave public-url blank, and
   #   a player who loads that pack counts as having MC GUI's. The pack is also unpacked into
-  #   plugins/MCGUI/pack/ for plugins that merge folders: in ItemsAdder's config.yml, add MCGUI/pack
-  #   under resource-pack.zip.merge_other_plugins_resourcepacks_folders, then run /iazip.
+  #   plugins/MCGUI/pack/ for plugins that merge folders. ItemsAdder: add MCGUI/pack under
+  #   resource-pack.zip.merge_other_plugins_resourcepacks_folders, then /iazip. CraftEngine: add it under
+  #   resource-pack.merge-external-folders. BetterHud: under merge-other-folders. Oraxen: copy pack.zip into
+  #   Oraxen/pack/uploads/. Nexo: into Nexo/pack/external_packs/. RP Engine: copy the folder to
+  #   RPEngine/content/mcgui. Merge again after every MC GUI update; the console says if a merge is wrong.
   # off: no pack. Walls show dithered vanilla map colours, and no page opens fullscreen: views need the pack.
   mode: upload
   # serve (or upload when it fails): where the built-in server listens. It only ever serves /pack.zip.
