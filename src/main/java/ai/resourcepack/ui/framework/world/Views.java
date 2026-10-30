@@ -310,6 +310,8 @@ public final class Views implements Listener {
         /** Opened while their game was loading the pack again: the tick it gives up at (0 once loaded), and whether it then takes the world. */
         int packBy;
         boolean takeLater;
+        /** Something teleported the player away without a PlayerTeleportEvent (see keepStill): closing leaves them there. */
+        boolean sentAway;
         /** A look at this view, still opening, is queued on its server thread (see progressed). */
         final java.util.concurrent.atomic.AtomicBoolean showQueued = new java.util.concurrent.atomic.AtomicBoolean();
 
@@ -1193,6 +1195,13 @@ public final class Views implements Listener {
         }
         if (v.awaitingTeleport) return;
         Location at = p.getLocation();
+        // Far from the seat, they were teleported by something MC GUI never heard of: on Folia, the /tp command and a
+        // plugin's teleportAsync move a player with no PlayerTeleportEvent (onTeleport). They get up where they were sent.
+        if (at.getWorld() != v.seat.getWorld() || at.distanceSquared(v.seat) > 4) {
+            v.sentAway = true;
+            close(p, CloseReason.INTERRUPTED);
+            return;
+        }
         if (at.getX() != v.seat.getX() || at.getY() != v.seat.getY() || at.getZ() != v.seat.getZ()) {
             debug("moved off the seat by " + at.toVector().subtract(v.seat.toVector()) + ": putting " + p.getName() + " back");
             nms.teleportKeepingRotation(p, v.seat.getX(), v.seat.getY(), v.seat.getZ());
@@ -1554,9 +1563,10 @@ public final class Views implements Listener {
         }
         // Back where they were, facing where they faced, before the frames and the overlay's signature go: a kept
         // overlay's client shows the world as it was until then, so the first live frame is from the same spot.
-        // Not when they have already gone to another world (the move closed the view): that is where they were sent.
-        if (player.isOnline() && player.getWorld() == v.wall.world) Platform.teleport(player, v.returnTo);
-        for (Entity e : v.entities()) e.remove();
+        // Not when they have already gone to another world (the move closed the view), or were sent away: that is where they were sent.
+        if (player.isOnline() && player.getWorld() == v.wall.world && !v.sentAway) Platform.teleport(player, v.returnTo);
+        // On their own thread: on Folia a player sent far away is in another region than the seat's entities now.
+        for (Entity e : v.entities()) Threads.now(plugin, e, e::remove);
         PotionEffect own = v.previousInvisibility;
         if (own != null && !own.isInfinite()) {
             // Sitting does not stop its clock.
