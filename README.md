@@ -37,6 +37,13 @@ it. See [For plugin developers](#for-plugin-developers).
   it, walls show dithered vanilla map colours. Players running ImmediatelyFast
   (its map atlas packs every map into one texture) see the same as everyone else,
   with its default settings.
+- **Client compatibility.** Checked in real clients on 26.2: vanilla, and
+  Lunar Client (with its bundled Sodium, Iris, Lithium and More Culling) draw
+  walls, fullscreen pages, hover, F5 and tinted and blurred overlays the same.
+  Lunar's **Turbo Entity Mode** (Settings, Performance) bakes still displays into
+  the world, which left the pointer stuck at the edge of an overlay; MC GUI now
+  keeps its pointer out of that. Lunar's own HUD widgets (FPS, counters) still
+  draw over a view, as chat does in vanilla.
 - **Sounds.** Every `.ogg` in `plugins/MCGUI/sounds/` goes into the pack
   as a sound named after its path: `sounds/menu/open.ogg` plays as
   `uiengine:menu/open`, from a page, `/playsound` or any plugin. Names are lower

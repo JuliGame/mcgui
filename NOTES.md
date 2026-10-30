@@ -730,6 +730,18 @@ Reading a position, a world or a UUID is fine from anywhere. How MC GUI copes, a
   1.21.11 (walls, fullscreen, overlays); 26.3 only compiled with glslang. Rig:
   `rigs/ifast/` (`trial.sh` restarts the Fabric client with the mod in or out and any of its config,
   `scene.sh` takes a wall, a fullscreen page and an overlay).
+- **Lunar Client's Turbo Entity Mode** (2026-10-30, `performance.json` `turboEntityMode`, off by default). It stops
+  drawing a still entity as an entity and bakes it into its chunk section's buffer (`LevelExtractor` mixin, by
+  `lunar$supportsTurbo`: displays, item frames, armour stands, paintings, other players, boats...). A display qualifies
+  unless its billboard is not `FIXED` or its render state's transformation is a `TransformationInterpolator`; an item
+  frame holding a map never does, so walls and a view's frames are untouched. The pointer (a `FIXED` text display) was
+  baked, so text.vsh no longer got its vertices camera-relative: on an overlay the client pointer sat stuck at the
+  window's right edge whatever the look (seen on Lunar 26.2, `rigs/compat/other-clients/res/lunar262-turbo/`).
+  `Views.keepOutOfTurbo`: the pointer spawns with an interpolation duration of 1 and, two ticks after the client has
+  it, changes its (unseen) glow colour, so the client's next render state is an interpolating one, which turbo never
+  bakes. Lunar can be run hidden without its launcher or Josh's account: `rigs/compat/other-clients/lunar.sh`
+  (launch metadata from `api.lunarclientprod.com/launcher/launch`, `-Duser.home` pointed at a folder of its own
+  so Josh's own settings are never read or written; `lunar-args.py` builds the command line the launcher would).
 - **Transparent is map colour 0** (`Canvas.transparency`): a pixel under half
   alpha is kept as YCbCr (0, 0, 0), which no RGB colour converts to
   (`Palette.isClear`), and sent as colour 0, which the client draws as
