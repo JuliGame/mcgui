@@ -122,6 +122,22 @@ public final class Shaders {
         return CLIENT_POINTER_RED << 16 | Math.min(255, cols) << 8 | Math.min(255, rows);
     }
 
+    /**
+     * The colour of the text a view puts in front of its camera to tell a player whose shaders are not this pack's that
+     * the view cannot be drawn: Iris with a shader pack draws world text (and maps) with the pack's own programs, so the
+     * picture is never placed and the text shows. Where this pack's text.vsh runs, text of exactly this colour is never
+     * drawn, so nobody else sees it.
+     */
+    public static final int NOTICE_RGB = 0xFCE04A;
+
+    /**
+     * The pointer font's alpha is stored at this many 255ths of what it is (rounded up, so a pixel that shows still
+     * does), and text.fsh scales it back for the pointer: under the 0.1 alpha cut-off every other text shader uses
+     * (Iris's with a shader pack among them), so a pointer that a shader pack draws as plain text in the world is not
+     * seen.
+     */
+    public static final int POINTER_ALPHA = 24;
+
     /** How finely {@link #turnHint} gives a turn: 64 sectors of 5.625°. */
     public static final int TURN_SECTORS = 64;
 
@@ -686,6 +702,8 @@ public final class Shaders {
                     // eye is, or a moment after it is put back) drew them where they lie: pieces of the picture, huge,
                     // round the camera.
                     if (mcbMap >= 3 && mcbSeated < 0.5) gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
+                    // A view's notice for players whose shaders replace these (Shaders.NOTICE_RGB): never drawn here.
+                    if (ivec3(round(Color.rgb * 255.0)) == ivec3(@NOTICE@)) gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
                 #ifdef IS_SEE_THROUGH
                     // See-through text (text displays with see_through, name tags' faint pass) is drawn with no depth
                     // test, so over a seated camera's view too, and an overlay keeps what lies on its panel as its own:
@@ -700,6 +718,7 @@ public final class Shaders {
                 #endif
                 }
                 """.replace("@PR@", String.valueOf(POINTER_RED)).replace("@PC@", String.valueOf(CLIENT_POINTER_RED))
+                .replace("@NOTICE@", (NOTICE_RGB >> 16) + ", " + (NOTICE_RGB >> 8 & 255) + ", " + (NOTICE_RGB & 255))
                 .replace("@SIGTILE@", SIGNATURE_TILE + ".0")
                 .replace("@SYMBOLS@", String.valueOf(Palette.SYMBOLS))
                 .replace("@SECTORS@", String.valueOf(TURN_SECTORS))
@@ -1008,6 +1027,8 @@ public final class Shaders {
                     vec4 texColor = texture(Sampler0, texCoord0).rrrr;
                 #else
                     vec4 texColor = texture(Sampler0, texCoord0);
+                    // The pointer font is stored faint (Shaders.POINTER_ALPHA), so only this shader shows it.
+                    if (mcbPointer > 0.5) texColor.a = min(1.0, texColor.a * @PALPHA@);
                 #endif
                     vec4 color = texColor * vertexColor * ColorModulator;
                     if (color.a < 0.1) {
@@ -1045,6 +1066,8 @@ public final class Shaders {
                     vec4 texColor = texture(Sampler0, texCoord0).rrrr;
                 #else
                     vec4 texColor = texture(Sampler0, texCoord0);
+                    // The pointer font is stored faint (Shaders.POINTER_ALPHA), so only this shader shows it.
+                    if (mcbPointer > 0.5) texColor.a = min(1.0, texColor.a * @PALPHA@);
                 #endif
                 #ifdef IS_SEE_THROUGH
                     vec4 color = texColor * vertexColor;
@@ -1067,7 +1090,8 @@ public final class Shaders {
                 #endif
                 }
                 """;
-        return emit(head + decoder + POINTER_CODE + mainHead + tail, d);
+        return emit(head + decoder + POINTER_CODE + mainHead
+                + tail.replace("@PALPHA@", String.format(Locale.ROOT, "%.4f", 255.0 / POINTER_ALPHA)), d);
     }
 
     // ---------------------------------------------------------------- the pointer, out of the menu blur

@@ -373,10 +373,10 @@ public final class ResourcePack implements AutoCloseable {
                 providers.add("""
                         {"type": "bitmap", "file": "uiengine:font/cursor/%s.png", "ascent": %d, "height": %d, "chars": ["\\u%04x"]}"""
                         .formatted(p.name, Pointer.ASCENT, p.height(), (int) p.glyph));
-                e.put("assets/uiengine/textures/font/cursor/" + p.name + ".png", png(p.image()));
+                e.put("assets/uiengine/textures/font/cursor/" + p.name + ".png", png(faint(p.image())));
             }
             e.put("assets/uiengine/font/pointer.json", "{\"providers\": [\n  " + String.join(",\n  ", providers) + "\n]}\n");
-            e.put("assets/uiengine/textures/font/pointer.png", png(pointerSheet()));
+            e.put("assets/uiengine/textures/font/pointer.png", png(faint(pointerSheet())));
             soundFiles(e, sounds, logger);
         }
         return out.toByteArray();
@@ -476,6 +476,22 @@ public final class ResourcePack implements AutoCloseable {
             }
         }
         return sheet;
+    }
+
+    /**
+     * A copy of a pointer glyph sheet with every alpha at {@link Shaders#POINTER_ALPHA} 255ths of itself, rounded up so
+     * the client measures each glyph as wide as before: text.fsh scales it back for the pointer, and any other text
+     * shader (a shader pack's) leaves it under its alpha cut-off.
+     */
+    static BufferedImage faint(BufferedImage image) {
+        BufferedImage out = new BufferedImage(image.getWidth(), image.getHeight(), BufferedImage.TYPE_INT_ARGB);
+        for (int y = 0; y < image.getHeight(); y++) {
+            for (int x = 0; x < image.getWidth(); x++) {
+                int argb = image.getRGB(x, y), a = argb >>> 24;
+                out.setRGB(x, y, (a * Shaders.POINTER_ALPHA + 254) / 255 << 24 | argb & 0xFFFFFF);
+            }
+        }
+        return out;
     }
 
     private static byte[] png(BufferedImage image) throws IOException {

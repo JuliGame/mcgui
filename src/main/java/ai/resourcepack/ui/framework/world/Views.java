@@ -145,6 +145,13 @@ public final class Views implements Listener {
     private static final double CLIENT_MAX_PITCH = 75;
     /** How far a client-placed view may move the player's eye up or down to find room to hold them, in blocks. */
     private static final double CLIENT_MAX_LIFT = 1.5;
+    /**
+     * How far ahead of the camera a view's notice for shaders not the pack's hangs (blocks): inside the camera's own
+     * block or the next, so even a view whose picture is in the ground has nothing between it and the eye.
+     */
+    private static final double NOTICE_DISTANCE = 0.3;
+    /** The notice's scale: a few lines about 0.45 blocks wide at that distance, some 60% of a 16:9 window at FOV 70. */
+    private static final float NOTICE_SCALE = 0.09f;
     /** How far round a held player other entities are hidden from them, in blocks: their client would push them. */
     private static final double PUSH_MARGIN = 2.0;
     /** Pixels across the screen a desktop pointer at Windows' default speed crosses in as many mouse counts: views.pointer-speed 1. */
@@ -241,6 +248,8 @@ public final class Views implements Listener {
         final LivingEntity camera;
         final Interaction target;
         final TextDisplay pointer;
+        /** Text in front of the camera that only shaders other than the pack's draw (Shaders.NOTICE_RGB); null for none. */
+        final TextDisplay notice;
         final GameMode previousMode;
         final WeatherType previousWeather;
         /** The player's own invisibility (a potion), which the view's effect replaces until they stand. */
@@ -302,8 +311,8 @@ public final class Views implements Listener {
         final java.util.concurrent.atomic.AtomicBoolean showQueued = new java.util.concurrent.atomic.AtomicBoolean();
 
         ViewImpl(Player p, ViewContent content, Canvas canvas, MapWall wall, ViewOptions options, boolean clientPointer, boolean keeps,
-                 double speed, ArmorStand vehicle, Location seat, LivingEntity camera, Interaction target, TextDisplay pointer, BlockDisplay glow,
-                 Location returnTo, Location cameraAt, LayerSet layers) {
+                 double speed, ArmorStand vehicle, Location seat, LivingEntity camera, Interaction target, TextDisplay pointer, TextDisplay notice,
+                 BlockDisplay glow, Location returnTo, Location cameraAt, LayerSet layers) {
             this.player = p.getUniqueId();
             this.content = content;
             this.canvas = canvas;
@@ -320,6 +329,7 @@ public final class Views implements Listener {
             this.camera = camera;
             this.target = target;
             this.pointer = pointer;
+            this.notice = notice;
             this.previousMode = p.getGameMode();
             this.previousWeather = p.getPlayerWeather();
             this.previousInvisibility = p.getPotionEffect(PotionEffectType.INVISIBILITY);
@@ -341,6 +351,7 @@ public final class Views implements Listener {
             if (camera != null) out.add(camera);
             if (pointer != null) out.add(pointer);
             if (glow != null) out.add(glow);
+            if (notice != null) out.add(notice);
             return out;
         }
 
@@ -521,6 +532,21 @@ public final class Views implements Listener {
             d.setPersistent(false);
             d.setVisibleByDefault(false);
         });
+        // Iris with a shader pack draws world text and maps with the pack's own programs, so this pack never places the
+        // picture and the player sees the world and a broken page: this text, a little ahead of the camera, says why. The
+        // pack's text.vsh never draws text of its colour, so nobody else sees it.
+        TextDisplay notice = settings.shadersNotice.isBlank() ? null
+                : world.spawn(cam.clone().add(cam.getDirection().multiply(NOTICE_DISTANCE)), TextDisplay.class, d -> {
+            Platform.text(d, Component.text(settings.shadersNotice).color(TextColor.color(Shaders.NOTICE_RGB)));
+            d.setBillboard(Display.Billboard.CENTER);
+            d.setBackgroundColor(org.bukkit.Color.fromARGB(0));
+            d.setShadowed(false);
+            d.setBrightness(new Display.Brightness(15, 15));
+            d.setTransformation(new Transformation(new Vector3f(0f, -NOTICE_SCALE * 0.5f, 0f), new Quaternionf(),
+                    new Vector3f(NOTICE_SCALE), new Quaternionf()));
+            d.setPersistent(false);
+            d.setVisibleByDefault(false);
+        });
         // An overlay's switch for the post effect that keeps the world round it (Shaders.overlayChain): the game runs it
         // only while a glowing entity is drawn. A display of no size is never culled (Display.updateCulling), and this
         // one, a speck at the eye, draws nothing anybody sees.
@@ -535,7 +561,8 @@ public final class Views implements Listener {
         if (vehicle != null) player.showEntity(plugin, vehicle);
         if (camera != null) player.showEntity(plugin, camera);
 
-        ViewImpl view = new ViewImpl(player, content, canvas, wall, options, clientPointer, keeps, speed, vehicle, seat, camera, target, pointer, glow, from, cam, layers);
+        ViewImpl view = new ViewImpl(player, content, canvas, wall, options, clientPointer, keeps, speed, vehicle, seat, camera, target, pointer, notice,
+                glow, from, cam, layers);
         views.put(player.getUniqueId(), view);
         if (trace != null) trace.view(view, keeps ? "overlay" : options.overlay() ? "overlay, world live round it" : "fullscreen");
         waiting.add(view);
@@ -1006,6 +1033,7 @@ public final class Views implements Listener {
         v.privateView.open(plugin, p);
         movePointer(v);
         p.showEntity(plugin, v.pointer);
+        if (v.notice != null) p.showEntity(plugin, v.notice);
         resendTurnHint(v);
         pipeline.afterClientCaughtUp(p, () -> {
             v.aligning = false;
@@ -1041,6 +1069,7 @@ public final class Views implements Listener {
             // Spawned for them where it belongs: the server's later moves of it never reach them (see Pipeline.watch).
             movePointer(v);
             p.showEntity(plugin, v.pointer);
+            if (v.notice != null) p.showEntity(plugin, v.notice);
             resendTurnHint(v);
             if (!v.clientPointer) sendPointer(v);
         }
