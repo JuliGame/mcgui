@@ -579,6 +579,21 @@ At 1920×1080 (median of 3 rounds):
 - **Overlay pages** (`ui:overlay`) cost about what an opaque page of the same
   size does; the world round them is a still picture.
 
+## Compatibility
+
+Client mods checked in a real client (Fabric, 26.2; more versions are being checked):
+
+- **Fabulously Optimized** and the common performance mods (Sodium, ImmediatelyFast, EntityCulling, MoreCulling,
+  Lithium, FerriteCore, C2ME, Krypton, BadOptimizations, ModernFix, Dynamic FPS, Distant Horizons), entity and texture
+  mods (Entity Model/Texture Features, 3D Skin Layers, Not Enough Animations, First-person Model, Enhanced Block
+  Entities), Continuity, Polytone, Puzzle, Zoomify, Freelook, AppleSkin, Mod Menu, Sound Physics, Better F3: walls,
+  fullscreen pages, overlays (tint and blur), F5 and the pause menu all work.
+- **Iris with shaders off** works. **With a shader pack on** (Complementary, BSL...) the shader pack draws maps itself:
+  walls show coloured noise and pages cannot be shown. A player who opens one sees a short note asking them to turn
+  shaders off (Iris: press K); change it with `views.shaders-notice` in `config.yml`.
+- **Minimaps** (Xaero's, JourneyMap) stay on screen over a page, like the rest of a mod's HUD. Press F1 while the page is
+  open to hide them; the page and pointer stay.
+
 ## For plugin developers
 
 Add `depend: [MCGUI]` to your `plugin.yml` and compile against the plugin

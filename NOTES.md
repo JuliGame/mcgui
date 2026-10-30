@@ -730,6 +730,29 @@ Reading a position, a world or a UUID is fine from anywhere. How MC GUI copes, a
   1.21.11 (walls, fullscreen, overlays); 26.3 only compiled with glslang. Rig:
   `rigs/ifast/` (`trial.sh` restarts the Fabric client with the mod in or out and any of its config,
   `scene.sh` takes a wall, a fullscreen page and an overlay).
+- **Fabric client mods** (2026-10-30, rig `rigs/compat/fabric/`: `fetch.py` takes each mod's newest jar from
+  Modrinth, `mkset.py` a set, `rt.sh <ver> <set> <tag>` launches it hidden and runs `run.py`, the everything-scene plus a
+  wall, fullscreen, F5 both ways, the pause menu, an overlay with changed pixels counted, tint, blur and a page in a stone
+  shaft). Fine on 26.2 next to a mod-less Fabric client: Fabulously Optimized 14.1.1 whole, and Sodium, Iris with shaders
+  off, ImmediatelyFast, EntityCulling, EMF/ETF, MoreCulling, FerriteCore, Lithium, C2ME, Krypton, BadOptimizations, EBE
+  Reloaded, Distant Horizons, Dynamic FPS, Continuity, Polytone, Puzzle, Zoomify, Freelook, Xaero's, JourneyMap,
+  AppleSkin, Mod Menu, Sound Physics, 3D Skin Layers, NEA, First-person Model and Better F3 all together. Traps:
+  - **Iris with a shader pack draws world text and maps with the pack's own programs** (`IrisPipelines`: `TEXT`,
+    `TEXT_SEE_THROUGH` and the map item go to its text program; GUI pipelines stay ours). Walls show the raw palette code,
+    a view shows the world with the HUD gone, and the pointer glyph hangs in the world as a big orange arrow (seen with
+    Complementary on 26.2). Nothing of ours can draw there, so a view degrades instead: it spawns a notice
+    (`views.shaders-notice`, `Shaders.NOTICE_RGB`) 0.3 blocks ahead of the camera, which `text.vsh` never draws, so only a
+    player whose shaders are not ours sees it; and the pointer font is stored at `POINTER_ALPHA`/255 of its alpha
+    (`ResourcePack.faint`), which `text.fsh` scales back for the pointer only, so any other text shader's 0.1 cut-off drops
+    it. Not yet seen in a client: the PC was busy. Walls get no notice (their frames are packets only).
+  - **Minimap mods draw over a view**: the pack hides only the hotbar, crosshair and vignette, and Xaero's and JourneyMap's
+    minimaps are ordinary HUD draws in the corners. The player's way out is F1 (both hide with the HUD; the page and pointer
+    are world draws and stay). Xaero also obeys `§n§o§m§i§n§i§m§a§p` / `§r§e§s§e§t§x§a§e§r§o` in a *chat* system message
+    (`ClientEvents.handleClientSystemChatReceivedEvent`, not the action bar), which would print blank chat lines and reset a
+    server's fair-play codes, so it is not used.
+  - **A hidden test client is unfocused**: Dynamic FPS (and FO's config) then draw at 1 or 30 FPS, so the rig's sets get
+    `cfg/dfps.json`; a focused player is not throttled. A minimap mod stands its own target in for the main one while it
+    draws, so a probe must read `mainRenderTarget()` on the game thread.
 - **Transparent is map colour 0** (`Canvas.transparency`): a pixel under half
   alpha is kept as YCbCr (0, 0, 0), which no RGB colour converts to
   (`Palette.isClear`), and sent as colour 0, which the client draws as
