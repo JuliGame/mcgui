@@ -62,7 +62,7 @@ public final class Settings {
         hoverLayers = Math.max(0, Math.min(512, c.getInt("views.hover-layers", 0)));
         debugPointer = c.getBoolean("views.debug-pointer", false);
         shadersNotice = c.getString("views.shaders-notice",
-                "This menu can't be shown while shaders are on. Turn them off (Iris: press K), then open it again.");
+                "This menu can't be shown while shaders are on. Turn them off (Iris: press K; OptiFine: Video Settings, Shaders, OFF), then open it again.");
         mapIdBase = c.getInt("map-id-base", 2_000_000_000);
         cpuThreads = Math.max(0, c.getInt("cpu-threads", 0));
     }
