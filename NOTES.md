@@ -681,6 +681,25 @@ Reading a position, a world or a UUID is fine from anywhere. How MC GUI copes, a
   it is the player's own eye moved at most 1/32 of a block on each. The shaders
   read that back from `Globals.CameraOffset`. That flag is what hides the HUD
   and draws the view in front of the world, for that player only.
+- **The game's screen effects follow the player, not the camera, and a flagged camera drops them** (2026-10-31).
+  `ScreenEffectRenderer` draws the inside-a-block overlay (the block's texture at a tenth of its brightness, opaque),
+  the underwater one and the fire one after the hand, over everything, when the *local player's* eye box touches a
+  view-blocking block (`getViewBlockingState`, ±0.24 round the eye), the eye is in water or the player burns,
+  whatever the camera entity is. A client-placed view and a kept overlay hold the player with their eye in air
+  (`clientEye`, `overlayEye`), but with no room to hold them a view takes the fallback: a mannequin camera and the
+  player on an armour stand 1.5 blocks behind it, which in a one-block shaft, a 1×2 tunnel or buried is inside the
+  wall. A fullscreen page needs the most room (`clientEye`: a block's middle for the eye and the whole standing box
+  clear, so three blocks of air above the floor), an overlay only its standing box clear. The stone overlay then
+  covered the page: black but for a faint 128-pixel stone pattern (fullscreen in a shaft, tunnel, water-filled
+  shaft or buried; an overlay only buried). In lava (never a held eye either) the fire covered the bottom of
+  both, and in water the underwater texture tinted them. Seen alike in vanilla 26.2 and in Fabric 1.21.11, 26.1.2
+  and 26.3 with fabric-api alone. Their pipelines (`block_screen_effect`, `fire_screen_effect`) use
+  `position_tex_color` in the hand's perspective projection, the only draws there within two blocks of the eye
+  (the End sky's box is 100 away), so `positionTexColorVsh` moves them off screen while the camera is flagged;
+  pages in the open came out the same (fullscreen pixel for pixel, an overlay's panel too: its kept world differed
+  only where mobs and clouds had moved). Powder snow is not view-blocking and its outline is a
+  256 × 256 GUI texture, already gone with the vignette; once frozen through (7 s) its damage closes the view
+  (`onDamage`) as any harm does. Rig: `rigs/compat/tight-space/` (`one.sh`, `tight.py`).
 - **F5 must leave a view alone, and does** (2026-10-26). The first press pulls
   the camera back along its look by the `camera_distance` attribute (4 blocks;
   `Camera.alignWithEntity`), off the flag: looking dead at the centre that is a

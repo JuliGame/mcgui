@@ -15,7 +15,7 @@ import java.util.regex.Pattern;
  *       colours 0-3) the world behind shows, and on a seated player's own view under the view's tint
  *       (the text pipeline blends: {@code BlendFunction.TRANSLUCENT}).</li>
  *   <li>{@code position_tex_color} hides the hotbar, hearts, crosshair and vignette, but only for a
- *       seated player.</li>
+ *       seated player, and for any flagged camera the game's in-wall, underwater and fire overlays.</li>
  *   <li>A post effect, {@code post_effect/entity_outline.json}, which the game runs whenever a glowing
  *       entity is drawn: besides the outlines, it keeps the world an overlay page's player saw when it
  *       opened and shows it, still, round the panel ({@link #overlayChain}).</li>
@@ -396,6 +396,13 @@ public final class Shaders {
                     mcbPos = (ModelViewMat * vec4(Position, 1.0)).xy;
                     mcbSize = mcb_gui_size();
                     mcbSeated = mcb_seated_now();
+                    // The game's screen effects (ScreenEffectRenderer: the inside-a-block, underwater and fire overlays) are
+                    // the only draws here in perspective within two blocks of the eye. They follow the player, not the
+                    // camera, and a view's player can be held inside a wall (Views: the seat behind a camera with no room
+                    // round it): on a flagged camera they would cover the view, so nothing of them is drawn.
+                    if (ProjMat[3][3] != 1.0 && mcb_flag_axis() >= 0 && length((ModelViewMat * vec4(Position, 1.0)).xyz) < 2.0) {
+                        gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+                    }
                 }
                 """, d);
     }
