@@ -62,6 +62,10 @@ public final class ResourcePack implements AutoCloseable {
     private final Set<UUID> loaded = ConcurrentHashMap.newKeySet();
     /** Merged elsewhere: players a pack was declined by (true) or failed for (false), with none loaded since. */
     private final Map<UUID, Boolean> refused = new ConcurrentHashMap<>();
+    /** Players whose game loaded a sibling plugin's pack after ours (see {@link #markBuried}): ours is no longer on top. */
+    private final Set<UUID> buried = ConcurrentHashMap.newKeySet();
+    /** Players ours was sent again to, to be on top again (see {@link #raise}), until it has loaded or failed. */
+    private final Set<UUID> raising = ConcurrentHashMap.newKeySet();
     /** How often a running server tells the pack host it still uses the pack, which forgets one untouched for 30 days. */
     private static final long TOUCH_HOURS = PackUploader.TOUCH_HOURS;
 
@@ -244,6 +248,11 @@ public final class ResourcePack implements AutoCloseable {
         refused.remove(player);
     }
 
+    /** Their game took ours (it is queued above every pack taken before it). */
+    public void markAccepted(UUID player) {
+        buried.remove(player);
+    }
+
     /** A pack was declined ([declined]), or failed to download or load. */
     public void markRefused(UUID player, boolean declined) {
         if (mergedElsewhere()) {
@@ -253,9 +262,51 @@ public final class ResourcePack implements AutoCloseable {
         }
     }
 
+    /** Ours was taken off their game (or replaced by itself, sent again): not loaded until it says so again. */
     public void forget(UUID player) {
         loaded.remove(player);
         refused.remove(player);
+    }
+
+    /** They left. */
+    public void left(UUID player) {
+        forget(player);
+        buried.remove(player);
+        raising.remove(player);
+    }
+
+    /**
+     * Another plugin of ResourcePack AI's (Dialog Engine's drawn dialogs) sent [player] a pack that their game took
+     * after ours (a game takes packs in the order they are sent, each above the last, and says so as it takes them).
+     * A game keeps one copy of each shader, the top pack's, and theirs replaces the text shader and
+     * {@code position_tex_color} as ours does (their plugins skip ours when they merge shaders, as a sibling), so with
+     * theirs on top no view of ours draws: a huge pointer glyph in the world, which turns with the mouse.
+     */
+    public void markBuried(UUID player) {
+        if (offers()) buried.add(player);
+    }
+
+    /**
+     * If a sibling's pack went over ours for [player], sends ours again: their game takes a pack sent again as new,
+     * on top (it reloads its resources once, from the copy it has). True while that is under way.
+     */
+    public boolean raise(Player player) {
+        UUID id = player.getUniqueId();
+        if (buried.remove(id) && url() != null) {
+            raising.add(id);
+            send(player);
+        }
+        return raising.contains(id);
+    }
+
+    /** Whether ours, sent again by {@link #raise}, is still loading for [player]. */
+    public boolean raising(UUID player) {
+        return raising.contains(player);
+    }
+
+    /** Ours, sent again by {@link #raise}, has loaded or failed: nothing more to wait for. */
+    public void raised(UUID player) {
+        raising.remove(player);
     }
 
     /** Mode external: the pack unpacked, for a plugin that merges folders. Rewritten every start. */

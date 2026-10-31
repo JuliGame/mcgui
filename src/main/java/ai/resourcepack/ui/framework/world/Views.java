@@ -174,6 +174,10 @@ public final class Views implements Listener {
     /** What each online player's mouse turns them by a count, being learned (server thread). */
     private final Map<UUID, MouseSteps> mice = new HashMap<>();
     private final EntityType mannequin;
+    /** Whether a player's game is loading MC GUI's pack again, to have it on top (ResourcePack.raise): a view waits. */
+    private java.util.function.Predicate<Player> packLoading = p -> false;
+    /** How long a view waits for that, in ticks, before it gives up. */
+    private static final int PACK_TIMEOUT = 600;
 
     public Views(Plugin plugin, Settings settings, Nms nms, Pipeline pipeline, MapSender sender, Palette palette, int firstMapId) {
         this.plugin = plugin;
@@ -191,6 +195,11 @@ public final class Views implements Listener {
         // 1.21.9+: a camera with a player's eye height (see spawnCamera).
         this.mannequin = Registry.ENTITY_TYPE.get(NamespacedKey.minecraft("mannequin"));
         sender.onProgress(this::progressed);
+    }
+
+    /** What says a player's game is loading MC GUI's pack again (see {@link #packLoading}). */
+    public void packLoading(java.util.function.Predicate<Player> loading) {
+        this.packLoading = loading;
     }
 
     public final class ViewImpl implements View {
@@ -298,6 +307,11 @@ public final class Views implements Listener {
         /** The hover layers' {@code changes()} their frames on the client last matched (see frameLayers). */
         int layersFramed;
         volatile boolean revealed, closed;
+        /** Opened while their game was loading the pack again: the tick it gives up at (0 once loaded), and whether it then takes the world. */
+        int packBy;
+        boolean takeLater;
+        /** Something teleported the player away without a PlayerTeleportEvent (see keepStill): closing leaves them there. */
+        boolean sentAway;
         /** A look at this view, still opening, is queued on its server thread (see progressed). */
         final java.util.concurrent.atomic.AtomicBoolean showQueued = new java.util.concurrent.atomic.AtomicBoolean();
 
@@ -561,7 +575,14 @@ public final class Views implements Listener {
         for (Player other : Bukkit.getOnlinePlayers()) if (other != player) Threads.now(plugin, other, () -> other.hidePlayer(plugin, player));
         // A kept overlay's client starts taking the world now, while its panel is drawn and sent, so the round trip that
         // needs is over by the time the panel is there.
-        if (keeps) take(player, view);
+        // Their game is loading the pack again, on top of another plugin's that replaced its shaders: nothing of the
+        // view can be drawn until it has, and an overlay's world is taken only then (see show).
+        if (packLoading.test(player)) {
+            view.packBy = Platform.tick() + PACK_TIMEOUT;
+            view.takeLater = keeps;
+        } else if (keeps) {
+            take(player, view);
+        }
         return view;
     }
 
@@ -879,6 +900,18 @@ public final class Views implements Listener {
      * for that, only for what the client must have drawn meanwhile (see keep).
      */
     private boolean show(Player p, ViewImpl v, int now) {
+        if (v.packBy != 0) {
+            if (packLoading.test(p)) {
+                if (now >= v.packBy) close(p, CloseReason.INTERRUPTED);
+                return false;
+            }
+            v.packBy = 0;
+            if (v.takeLater) {
+                v.takeLater = false;
+                take(p, v);
+                return false;
+            }
+        }
         if (now < v.deadline && !sender.delivered(v.player, v.wall)) return false;
         OpenTrace.Open trace = OpenTrace.of(v.player);
         if (trace != null && trace.of(v)) trace.mark(OpenTrace.Open.DELIVERED);
@@ -1162,6 +1195,13 @@ public final class Views implements Listener {
         }
         if (v.awaitingTeleport) return;
         Location at = p.getLocation();
+        // Far from the seat, they were teleported by something MC GUI never heard of: on Folia, the /tp command and a
+        // plugin's teleportAsync move a player with no PlayerTeleportEvent (onTeleport). They get up where they were sent.
+        if (at.getWorld() != v.seat.getWorld() || at.distanceSquared(v.seat) > 4) {
+            v.sentAway = true;
+            close(p, CloseReason.INTERRUPTED);
+            return;
+        }
         if (at.getX() != v.seat.getX() || at.getY() != v.seat.getY() || at.getZ() != v.seat.getZ()) {
             debug("moved off the seat by " + at.toVector().subtract(v.seat.toVector()) + ": putting " + p.getName() + " back");
             nms.teleportKeepingRotation(p, v.seat.getX(), v.seat.getY(), v.seat.getZ());
@@ -1523,9 +1563,10 @@ public final class Views implements Listener {
         }
         // Back where they were, facing where they faced, before the frames and the overlay's signature go: a kept
         // overlay's client shows the world as it was until then, so the first live frame is from the same spot.
-        // Not when they have already gone to another world (the move closed the view): that is where they were sent.
-        if (player.isOnline() && player.getWorld() == v.wall.world) Platform.teleport(player, v.returnTo);
-        for (Entity e : v.entities()) e.remove();
+        // Not when they have already gone to another world (the move closed the view), or were sent away: that is where they were sent.
+        if (player.isOnline() && player.getWorld() == v.wall.world && !v.sentAway) Platform.teleport(player, v.returnTo);
+        // On their own thread: on Folia a player sent far away is in another region than the seat's entities now.
+        for (Entity e : v.entities()) Threads.now(plugin, e, e::remove);
         PotionEffect own = v.previousInvisibility;
         if (own != null && !own.isInfinite()) {
             // Sitting does not stop its clock.

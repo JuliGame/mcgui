@@ -1,5 +1,6 @@
 package ai.resourcepack.ui.framework;
 
+import ai.resourcepack.ui.framework.platform.Bedrock;
 import ai.resourcepack.ui.framework.platform.Platform;
 import ai.resourcepack.ui.framework.api.Canvas;
 import ai.resourcepack.ui.framework.api.CloseReason;
@@ -17,6 +18,7 @@ import ai.resourcepack.ui.framework.net.ServerWire;
 import ai.resourcepack.ui.framework.net.SharedCompression;
 import ai.resourcepack.ui.framework.pack.MergeCheck;
 import ai.resourcepack.ui.framework.pack.ResourcePack;
+import ai.resourcepack.ui.framework.pack.Siblings;
 import ai.resourcepack.ui.framework.render.Palette;
 import ai.resourcepack.ui.framework.world.Views;
 import ai.resourcepack.ui.framework.world.Walls;
@@ -38,6 +40,7 @@ import java.util.ArrayList;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.logging.Level;
 
 /**
@@ -111,12 +114,14 @@ public final class Framework implements UIFramework, Listener {
         try {
             pack = new ResourcePack(settings, palette, plugin.getDataFolder().toPath(), plugin.getLogger());
             ResourcePack built = pack;
+            // So Dialog Engine does not send its pack over ours again each time ours is sent (see ResourcePack.raise).
+            Siblings.register(plugin);
             // Once the pack host has it (or this server serves it after all), the players already on are sent it.
             pack.start("MCGUI/" + plugin.getDescription().getVersion(), () -> {
                 try {
                     Threads.global(plugin, () -> {
                         for (Player p : Bukkit.getOnlinePlayers()) {
-                            if (!built.has(p.getUniqueId())) Threads.on(plugin, p, () -> built.send(p));
+                            if (!built.has(p.getUniqueId()) && !Bedrock.is(p)) Threads.on(plugin, p, () -> built.send(p));
                         }
                     });
                 } catch (IllegalStateException | IllegalArgumentException disabled) {
@@ -138,6 +143,7 @@ public final class Framework implements UIFramework, Listener {
         sender = new MapSender(wire, settings.bytesPerSecond, plugin.getLogger());
         OpenTrace.start(plugin.getLogger(), nms, wire, sender);
         views = new Views(plugin, settings, nms, pipeline, sender, palette, settings.mapIdBase);
+        views.packLoading(p -> pack != null && pack.raising(p.getUniqueId()));
         walls = new Walls(plugin, nms, settings.mapIdBase + Views.VIEW_ID_SPAN, settings.viewDistance, settings.reach, views::seated, views::hides);
         serverThread = Threads.server(plugin, nms.serverThread());
         Threads.register(this, plugin);
@@ -149,7 +155,7 @@ public final class Framework implements UIFramework, Listener {
         sender.start();
         // Players already online (a reload): hand them the pack again, and read their clicks on walls.
         for (Player p : Bukkit.getOnlinePlayers()) {
-            if (pack != null) pack.send(p);
+            if (!Bedrock.joined(p) && pack != null) pack.send(p);
             readUses(p);
         }
         UIFramework.Holder.set(this);
@@ -260,6 +266,9 @@ public final class Framework implements UIFramework, Listener {
         return walls.place(topLeft, facing, cols, rows, content);
     }
 
+    /** Why a Bedrock player gets no view: said to them, with no apostrophes (MC GUI's chat reads them as quotes). */
+    public static final String BEDROCK_REFUSAL = "Screens work in Minecraft Java Edition only: Bedrock Edition cannot load the resource pack they are drawn with.";
+
     @Override
     public View openView(Player player, ViewContent content, ViewOptions options) {
         if (Threads.folia() && !Threads.owns(player)) throw new IllegalStateException("A view is opened from " + player.getName() + "'s own thread (on Folia, their region's)");
@@ -267,6 +276,9 @@ public final class Framework implements UIFramework, Listener {
         // shaders draw it in front of the world. Without the pack there is no view: never one cut out of the world.
         // Said to the player (whoever opens a view for somebody else checks hasPack first), with no apostrophes,
         // which MC GUI's chat reads as quotes.
+        // Geyser tells the server a required pack loaded when it did not (a Bedrock game cannot load one), so a Bedrock
+        // player is refused here whatever the pack says, before anything about them changes.
+        if (Bedrock.is(player)) throw new IllegalStateException(BEDROCK_REFUSAL);
         if (!hasPack(player)) {
             if (pack != null && pack.offers()) {
                 pack.send(player);
@@ -279,6 +291,8 @@ public final class Framework implements UIFramework, Listener {
             }
             throw new IllegalStateException("Screens need the MC GUI resource pack, which is turned off on this server (resource-pack.mode).");
         }
+        // Our pack goes on top again if a sibling plugin's went over it; the view then waits for it (Views.packLoading).
+        pack.raise(player);
         return views.open(player, content, options == null ? ViewOptions.DEFAULT : options);
     }
 
@@ -289,7 +303,7 @@ public final class Framework implements UIFramework, Listener {
 
     @Override
     public boolean hasPack(Player player) {
-        return pack != null && pack.has(player.getUniqueId());
+        return pack != null && !Bedrock.is(player) && pack.has(player.getUniqueId());
     }
 
     @Override
@@ -324,7 +338,9 @@ public final class Framework implements UIFramework, Listener {
     @EventHandler
     public void onJoin(PlayerJoinEvent e) {
         sender.reset(e.getPlayer().getUniqueId());
-        if (pack != null) pack.send(e.getPlayer());
+        // A Bedrock player (Geyser) cannot load a Java pack: none is offered, and walls show them plain map colours.
+        boolean bedrock = Bedrock.joined(e.getPlayer());
+        if (pack != null && !bedrock) pack.send(e.getPlayer());
         readUses(e.getPlayer());
     }
 
@@ -335,14 +351,26 @@ public final class Framework implements UIFramework, Listener {
 
     @EventHandler
     public void onQuit(PlayerQuitEvent e) {
-        if (pack != null) pack.forget(e.getPlayer().getUniqueId());
+        if (pack != null) pack.left(e.getPlayer().getUniqueId());
+        Bedrock.left(e.getPlayer().getUniqueId());
         sender.reset(e.getPlayer().getUniqueId());
     }
 
     @EventHandler
     public void onPack(PlayerResourcePackStatusEvent e) {
+        if (pack == null) return;
+        UUID id = e.getPlayer().getUniqueId();
+        boolean ours = ResourcePack.PACK_ID.equals(e.getID());
+        // A game takes packs in the order they are sent, each above the last: a sibling's taken after ours (Dialog
+        // Engine's) is over ours, and ours sent again is over it (see ResourcePack.markBuried and raise).
+        if (e.getStatus() == PlayerResourcePackStatusEvent.Status.ACCEPTED) {
+            if (ours) pack.markAccepted(id);
+            else if (Siblings.fromSibling(plugin, e.getID())) pack.markBuried(id);
+        }
+        if (ours && e.getStatus() != PlayerResourcePackStatusEvent.Status.ACCEPTED && e.getStatus() != PlayerResourcePackStatusEvent.Status.DOWNLOADED
+                && e.getStatus() != PlayerResourcePackStatusEvent.Status.DISCARDED) pack.raised(id);
         // Merged into another plugin's pack, ours never arrives under its own id: that pack is ours too.
-        if (pack == null || !ResourcePack.PACK_ID.equals(e.getID()) && !pack.mergedElsewhere()) return;
+        if (!ours && !pack.mergedElsewhere()) return;
         switch (e.getStatus()) {
             case SUCCESSFULLY_LOADED -> pack.markLoaded(e.getPlayer().getUniqueId());
             case DECLINED -> pack.markRefused(e.getPlayer().getUniqueId(), true);
