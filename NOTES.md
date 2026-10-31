@@ -744,15 +744,31 @@ Reading a position, a world or a UUID is fine from anywhere. How MC GUI copes, a
     (`views.shaders-notice`, `Shaders.NOTICE_RGB`) 0.3 blocks ahead of the camera, which `text.vsh` never draws, so only a
     player whose shaders are not ours sees it; and the pointer font is stored at `POINTER_ALPHA`/255 of its alpha
     (`ResourcePack.faint`), which `text.fsh` scales back for the pointer only, so any other text shader's 0.1 cut-off drops
-    it. Not yet seen in a client: the PC was busy. Walls get no notice (their frames are packets only).
-  - **Minimap mods draw over a view**: the pack hides only the hotbar, crosshair and vignette, and Xaero's and JourneyMap's
-    minimaps are ordinary HUD draws in the corners. The player's way out is F1 (both hide with the HUD; the page and pointer
-    are world draws and stay). Xaero also obeys `§n§o§m§i§n§i§m§a§p` / `§r§e§s§e§t§x§a§e§r§o` in a *chat* system message
-    (`ClientEvents.handleClientSystemChatReceivedEvent`, not the action bar), which would print blank chat lines and reset a
-    server's fair-play codes, so it is not used.
+    it. Seen working on 26.2 (2026-10-31) with Complementary r5.9.3 and BSL v10.1.8: the notice shows, no arrow; a vanilla
+    client's fullscreen frames are pixel-identical to `main`'s and an overlay still changes only the pointer's 210 pixels
+    (`res/ic262fix`, `ib262`, `n262fix`). The notice stays where it was spawned, so a player who turns far loses it.
+    Walls get no notice (their frames are packets only).
+  - **Minimap mods draw over a view, so `position_tex_color` drops non-power-of-two textures while seated.** Xaero's
+    minimap is a picture-in-picture (`MinimapPipRenderer`, the game's `PictureInPictureRenderer.blitTexture`) and
+    JourneyMap draws into a window-sized target (`GuiRenderToTexture`, blitted over the whole GUI), both through
+    `GUI_TEXTURED_PREMULTIPLIED_ALPHA`, which is our shader with `Globals` bound. Atlases, the item atlas and HUD textures
+    are powers of two; such a target is the size of what it shows. Their own pipelines (`xaerolib:core/*`, JourneyMap's
+    `journeymap:core/*` fragments) bind no `Globals`, so cannot be told seated. Collateral: the game's own
+    pictures-in-picture (the inventory's player doll) while seated. Seen on 26.2 with both mods (`res/s262fix`): the map
+    pictures are gone; what each draws straight to the GUI stays (Xaero's coordinates line, JourneyMap's clock label,
+    compass letters and player icon). A minimap the exact size of a power of two would still show. Server-side switches:
+    Xaero only reads its codes from a *chat* system message (`MixinChatListener` on `addServerSystemMessage`, never
+    cancelled: blank chat lines, and `§r§e§s§e§t§x§a§e§r§o` also resets a server's fair-play codes); JourneyMap takes a
+    `journeymap:perm_req` payload from any server (byte 42, admin flag, JSON `GlobalProperties`, two flags; "Permission set
+    from external source") whose `minimapEnabled` false hides all of it, but it replaces every permission a JourneyMap
+    server sent and prints "enabled by server" if JourneyMap was not yet initialised. Not used; F1 still hides the rest.
   - **A hidden test client is unfocused**: Dynamic FPS (and FO's config) then draw at 1 or 30 FPS, so the rig's sets get
     `cfg/dfps.json`; a focused player is not throttled. A minimap mod stands its own target in for the main one while it
     draws, so a probe must read `mainRenderTarget()` on the game thread.
+  - **ImmediatelyFast with every experimental option on** (sign text buffering, no resource-pack conflict handling) is
+    fine on 26.2 (`res/ifx262`). **A fullscreen page opened in a one-block stone shaft is black with only the pointer**,
+    the stone's in-wall overlay over it, on a mod-less 26.2 client too (`res/n262fix/tight-full.png`): not a mod issue,
+    and not yet looked into. An overlay there is fine.
 - **Transparent is map colour 0** (`Canvas.transparency`): a pixel under half
   alpha is kept as YCbCr (0, 0, 0), which no RGB colour converts to
   (`Palette.isClear`), and sent as colour 0, which the client draws as

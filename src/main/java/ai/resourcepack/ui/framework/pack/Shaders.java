@@ -438,8 +438,13 @@ public final class Shaders {
                 void main() {
                     // 16x16 textures are the dimmed tiles behind menus (Esc, options): never cut.
                     if (mcbSeated > 0.5 && textureSize(Sampler0, 0) != ivec2(16, 16)) {
+                        ivec2 mcbTexSize = textureSize(Sampler0, 0);
                         // The vignette is the only standalone 256x256 texture the HUD draws.
-                        if (textureSize(Sampler0, 0) == ivec2(256, 256)) discard;
+                        if (mcbTexSize == ivec2(256, 256)) discard;
+                        // Atlases and the game's HUD textures are powers of two. A picture drawn into a target first
+                        // is the size of what it shows: a minimap mod's (Xaero's picture-in-picture, JourneyMap's
+                        // window-sized layer) and the game's own pictures-in-picture.
+                        if ((mcbTexSize.x & (mcbTexSize.x - 1)) != 0 || (mcbTexSize.y & (mcbTexSize.y - 1)) != 0) discard;
                         if (mcb_hud(mcbPos, mcbSize)) discard;
                     }
                     vec4 color = texture(Sampler0, texCoord0) * vertexColor;
