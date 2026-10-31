@@ -37,6 +37,21 @@ it. See [For plugin developers](#for-plugin-developers).
   it, walls show dithered vanilla map colours. Players running ImmediatelyFast
   (its map atlas packs every map into one texture) see the same as everyone else,
   with its default settings.
+- **Client compatibility.** Checked in real clients against vanilla on the
+  same version: Lunar Client on 1.21.11, 26.1.2 and 26.2 (with its bundled
+  Sodium, Iris, Lithium and More Culling), OptiFine (1.21.11 J9, 26.1.2 K1 pre2,
+  26.2 K2 pre5, default settings and Fast Render) and NeoForge 1.21.11 with
+  Sodium and Iris draw walls, fullscreen pages, hover, F5 and tinted and blurred
+  overlays the same. Lunar's **Turbo Entity Mode** (Settings, Performance, on by
+  default) bakes still displays into the world, which left the pointer stuck at
+  the edge of an overlay; MC GUI now keeps its pointer out of that, with Turbo
+  Block Entity Mode and Turbo Nametags on or off too. Lunar's freelook and zoom
+  leave a view as it is. Lunar's own HUD widgets (coordinates, compass, FPS,
+  potion effects) still draw over a view, as chat does in vanilla. **Shader
+  packs** (Iris's, OptiFine's own internal shaders and any OptiFine shader pack)
+  replace the shaders MC GUI draws with: walls show coloured noise and views do
+  not work, so players need shaders off. On the OptiFine 26.2 preview (K2 pre5)
+  with its internal shaders on, the world itself does not draw with the pack.
 - **Sounds.** Every `.ogg` in `plugins/MCGUI/sounds/` goes into the pack
   as a sound named after its path: `sounds/menu/open.ogg` plays as
   `uiengine:menu/open`, from a page, `/playsound` or any plugin. Names are lower

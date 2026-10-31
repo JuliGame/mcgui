@@ -543,6 +543,9 @@ public final class Views implements Listener {
             d.setBillboard(Display.Billboard.FIXED);
             d.setBrightness(new Display.Brightness(15, 15));
             d.setTeleportDuration(clientPointer ? 0 : 1);
+            // With an interpolation duration, the render state the client builds after the first change is an
+            // interpolating one, which Lunar Client's Turbo Entity Mode never bakes (see keepOutOfTurbo).
+            d.setInterpolationDuration(1);
             d.setPersistent(false);
             d.setVisibleByDefault(false);
         });
@@ -1067,6 +1070,7 @@ public final class Views implements Listener {
         movePointer(v);
         p.showEntity(plugin, v.pointer);
         if (v.notice != null) p.showEntity(plugin, v.notice);
+        keepOutOfTurbo(p, v.pointer);
         resendTurnHint(v);
         pipeline.afterClientCaughtUp(p, () -> {
             v.aligning = false;
@@ -1089,6 +1093,20 @@ public final class Views implements Listener {
         nms.send(p, nms.mapPatch(v.wall.signatureMapId(), 0, 0, 128, 128, palette.markSignature(v.wall.cols, v.wall.rows, tint, flags)));
     }
 
+    /**
+     * Lunar Client's Turbo Entity Mode bakes a static display (billboard FIXED, transformation not interpolating) into
+     * its chunk section's buffer and stops drawing it as an entity, so the text shader no longer sees the pointer's
+     * vertices where it expects them (camera-relative) and draws it stuck at the window's edge. A display whose
+     * transformation is interpolating is never baked: so once the client has the pointer (spawned with an
+     * interpolation duration), one change to its render state (the glow colour, which a display that does not glow
+     * never shows) makes the client build an interpolating one, for good.
+     */
+    private void keepOutOfTurbo(Player p, TextDisplay pointer) {
+        Threads.onLater(plugin, p, () -> {
+            if (pointer.isValid()) pointer.setGlowColorOverride(org.bukkit.Color.fromRGB(pointer.getGlowColorOverride() == null ? 0xFFFFFE : 0xFFFFFF));
+        }, 2);
+    }
+
     private void reveal(Player p, ViewImpl v) {
         // Before revealed, so turned() never reads a rotation from before the teleport below as the start.
         v.settleBy = Platform.tick() + SETTLE_TIMEOUT;
@@ -1103,6 +1121,7 @@ public final class Views implements Listener {
             movePointer(v);
             p.showEntity(plugin, v.pointer);
             if (v.notice != null) p.showEntity(plugin, v.notice);
+            keepOutOfTurbo(p, v.pointer);
             resendTurnHint(v);
             if (!v.clientPointer) sendPointer(v);
         }
