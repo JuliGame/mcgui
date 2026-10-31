@@ -741,14 +741,44 @@ Reading a position, a world or a UUID is fine from anywhere. How MC GUI copes, a
   window's right edge whatever the look. `Views.keepOutOfTurbo`: the pointer spawns with an interpolation duration of 1
   and, two ticks after the client has it, changes its (unseen) glow colour, so the client's next render state is an
   interpolating one, which turbo never bakes. Proven on Lunar 26.2 (`rigs/compat/other-clients/res/`): fresh
-  defaults with the old jar `l262-fresh-main` (pointer stuck), with the fix `l262-fresh-fix`, `l262-turbo-fix`,
-  `l262-allturbo-fix` (all three turbo options on) and `l262-off-fix` (all off): overlay world unchanged ([0, 0]) and
-  the pointer at both spots it was sent to (`pointer.py`). Lunar's default HUD mods (coordinates, direction compass,
+  defaults with the old jar `l262-fresh-main` and `l262-turbo-main` (pointer stuck), with the fix `l262-fresh-fix`,
+  `l262-turbo-fix`, `l262-allturbo-fix` (all three turbo options on) and `l262-off-fix` (all off): overlay world
+  unchanged ([0, 0]) and the pointer at both spots it was sent to (`pointer.py`). The same on Lunar 26.1.2
+  (`l2612-fresh-main` stuck, `l2612-fresh-fix` pass) and 1.21.11 (`l1211-fresh-main`, `l1211-fresh-fix`). Vanilla
+  26.2 on the fixed jar matches the old jar (`van262-fix` against `van262`: fullscreen, hover, F5 and both overlays 0%
+  of pixels apart), and vanilla 26.1.2 and 1.21.11 pass on it (`van2612-fix`, `van1211-fix`). The server pointer
+  (`views.client-pointer: false`) with Turbo on lands where it is
+  sent as in vanilla (`l262-srvptr-turbo-fix` against `van262-srvptr-fix`; that overlay's world is live round a
+  mannequin camera by design, so only the water moves). Lunar's freelook (Left Alt, held) and zoom (C, held) change
+  nothing in an overlay or a fullscreen page while both visibly work standing (`l262-keys3-fix`): they poll the key with
+  `glfwGetKey` rather than take key events, so the test agent's `hold <key>` makes `glfwGetKey` report it.
+  Lunar's default HUD mods (coordinates, direction compass,
   potion effects listing the seated player's Invisibility, toggle-sneak "[Flying]") draw over a view as chat does; the
   compass and coordinates follow the pointer's turn. The rig builds Lunar hidden, without its launcher or Josh's
   account or settings, in one command: `rigs/compat/other-clients/setup.sh lunar 26.2 26.1.2 1.21.11` (launch
   metadata from `api.lunarclientprod.com/launcher/launch`, `-Duser.home` pointed at a folder of its own), then
-  `setup.sh perf k=v...`, `run.sh lunar <ver> <tag>`; `setup.sh clean` removes everything.
+  `setup.sh perf k=v...`, `run.sh lunar <ver> <tag>`; `setup.sh clean` removes everything. Lunar 1.21.11 runs on
+  Fabric with intermediary names (`pc/names-1.21.11-fabric.properties`, from Fabric's intermediary tiny file and
+  Mojang's mappings); `run.sh` waits for the server's pack to be applied (`waitpack.py`), since a run before that
+  measures the bare client.
+- **OptiFine, NeoForge and shader packs** (2026-10-31, `rigs/compat/other-clients/res/`). OptiFine 1.21.11 J9,
+  26.1.2 K1 pre2 and 26.2 K2 pre5 with default settings and with Fast Render pass as vanilla does (`of*-def-fix`,
+  `of*-fast-fix`, old jar `of*-def-main`), and so does NeoForge 21.11.48 with Sodium 0.8.15 and Iris 1.10.8, shaders off
+  (`nf1211-noshader-fix`, `-main`). Shader packs do not work, as with Iris on Fabric: OptiFine's internal shaders (its
+  pack is named `(debug)` in `optionsshaders.txt`, not `(internal)`) keep walls and fullscreen pages but the overlay's
+  world turns with the pointer (`of2612-int0-fix`, `of1211-int0-fix`); Complementary r5.9.3 on OptiFine or Iris turns
+  walls into colour noise, shows no fullscreen page and draws the pointer as a huge arrow in the world (`of*-compl0-fix`,
+  `nf1211-compl-fix`). The shaders notice of `compat/fabric-mods` (`d574707`) shows for OptiFine and NeoForge Iris too
+  and hides that arrow (`of1211-compl0-fm`, `nf1211-compl-fm`). **Open:** on OptiFine 26.2 K2 pre5 with internal shaders
+  the server pack makes the whole world vanish, even with no view open (sky, hand and hotbar only, `of262-int0-fix`);
+  with the pack declined the world draws (`of262-int0-nopack`), and taking every glowing entity away (so the replaced
+  `entity_outline.json` never runs) does not bring it back (`of262-int0-glow`), so the core shaders are the suspects; a
+  preview build, not traced further. Rig traps: OptiFine with a shader pack draws its final picture straight to the
+  window, so the main target the agent's `snap` reads stays stale (`snap0` reads the window's back buffer just before
+  the swap, `SNAP=snap0`, and checked equal to `snap` without shaders); it also recompiles the pack after the server's
+  pack loads (`SETTLE=25`). portablemc 4.4.1 cannot install NeoForge 21.11 (KeyError `ROOT`), so `client.sh` runs the
+  official installer; NeoForge starts Java with `java.net.preferIPv6Addresses=system`, so the agent listens on
+  127.0.0.1 explicitly.
 - **Transparent is map colour 0** (`Canvas.transparency`): a pixel under half
   alpha is kept as YCbCr (0, 0, 0), which no RGB colour converts to
   (`Palette.isClear`), and sent as colour 0, which the client draws as
