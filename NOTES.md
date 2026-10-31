@@ -1337,10 +1337,12 @@ Reading a position, a world or a UUID is fine from anywhere. How MC GUI copes, a
   (`Views.packLoading`, 30 s at most). Checked in both clients (`res/de-proof.png`): pages and overlays draw after a
   drawn dialog. The cost: a drawn dialog opened after that has our `text.vsh` above its head epilogue, so its live
   player head is drawn unscaled (8x8). Dialog Engine does not send its pack again (it is already "offered"). **Fix on
-  Dialog Engine's side (2026-10-31, `fix/mcgui-sibling` in `resourcepack-ai/dialog-engine`, local only: joshdevous has
-  read access there; patches in `rigs/compat/de-fix/patches/`):** it marks its pack buried when a sibling's pack
+  Dialog Engine's side (2026-10-31, `fix/mcgui-sibling`, PR resourcepack-ai/dialog-engine#3 from the fork
+  `joshdevous/dialog-engine`):** it marks its pack buried when a sibling's pack
   is ACCEPTED after its own, and before the next drawn dialog sends its pack again under the same id and opens the
-  dialog once it has loaded (a DISCARDED for the replaced copy is ignored meanwhile). Chosen over merging our text
+  dialog once it has loaded. A pack sent again under its id draws no DISCARDED from 1.21.11 or 26.2 clients, only
+  ACCEPTED, DOWNLOADED and (for every pack, on each reload) SUCCESSFULLY_LOADED, logged by a test plugin
+  (`de-fix/packlog/`); proof on both versions in `de-fix/res/v2-1.21.11/` and `v2-26.2/` (`sheet.png`). Chosen over merging our text
   shader into its pack: the two packs also both replace `position_tex_color` and `gui`, which ShaderWatch never merges,
   so only being on top while drawing works. Both plugins now raise themselves only when their own UI opens, never on a
   pack status, so they cannot ping-pong: the client log shows exactly one reload per switch (taking the pack off first,
