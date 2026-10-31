@@ -1336,8 +1336,22 @@ Reading a position, a world or a UUID is fine from anywhere. How MC GUI copes, a
   again first (`ResourcePack.raise`; a pack sent again under the same id goes on top), the view waiting for it to load
   (`Views.packLoading`, 30 s at most). Checked in both clients (`res/de-proof.png`): pages and overlays draw after a
   drawn dialog. The cost: a drawn dialog opened after that has our `text.vsh` above its head epilogue, so its live
-  player head is drawn unscaled (8x8). Dialog Engine does not send its pack again (it is already "offered"); the real
-  fix is on its side (merge a sibling's text shader, or raise its own pack before a drawn dialog). **Folia moves a
+  player head is drawn unscaled (8x8). Dialog Engine does not send its pack again (it is already "offered"). **Fix on
+  Dialog Engine's side (2026-10-31, `fix/mcgui-sibling` in `resourcepack-ai/dialog-engine`, local only: joshdevous has
+  read access there; patches in `rigs/compat/de-fix/patches/`):** it marks its pack buried when a sibling's pack
+  is ACCEPTED after its own, and before the next drawn dialog sends its pack again under the same id and opens the
+  dialog once it has loaded (a DISCARDED for the replaced copy is ignored meanwhile). Chosen over merging our text
+  shader into its pack: the two packs also both replace `position_tex_color` and `gui`, which ShaderWatch never merges,
+  so only being on top while drawing works. Both plugins now raise themselves only when their own UI opens, never on a
+  pack status, so they cannot ping-pong: the client log shows exactly one reload per switch (taking the pack off first,
+  as `DrawnPack.resend` does, cost two). Proof, real 1.21.11: `rigs/compat/de-fix/res/fix-de-readd/sheet.png`
+  (dialog, page, overlay, dialog again with the head scaled, page again). Our workaround stays unchanged: with older
+  Dialog Engines it is what makes pages draw after a dialog. **"Blank shelf icons" after a dialog were the PC rig, not
+  Dialog Engine:** `server-plugins/pc/mksrv.py` copied only the pages' `.html`/`.css`, and MC GUI copies its examples
+  (with `pages/market/*.png`) only into a pages folder it creates, so every picture failed to load ("Could not load
+  image" ×60 in each `pc-*` log), before any dialog too, and the same with Dialog Engine removed
+  (`de-fix/res/ctl-noDE-htmlonly/`). Fixed in `server-plugins/pc/mksrv.py` (copies the whole pages tree; lane copy in
+  `rigs/compat/de-fix/pc/`, shots with icons in `de-fix/res/fix-de-assets/`). **Folia moves a
   player with no PlayerTeleportEvent** for `/tp` (`TeleportUtils.teleport` → `Entity.teleportAsync`), so `onTeleport`
   never closed the view and `keepStill` put them back on the seat; `keepStill` now closes a view whose player is more
   than 2 blocks from the seat or in another world, and `close` leaves them there (`ViewImpl.sentAway`). GrimAC's
