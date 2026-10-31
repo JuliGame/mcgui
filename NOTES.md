@@ -861,11 +861,24 @@ Reading a position, a world or a UUID is fine from anywhere. How MC GUI copes, a
   world turns with the pointer (`of2612-int0-fix`, `of1211-int0-fix`); Complementary r5.9.3 on OptiFine or Iris turns
   walls into colour noise, shows no fullscreen page and draws the pointer as a huge arrow in the world (`of*-compl0-fix`,
   `nf1211-compl-fix`). The shaders notice of `compat/fabric-mods` (`d574707`) shows for OptiFine and NeoForge Iris too
-  and hides that arrow (`of1211-compl0-fm`, `nf1211-compl-fm`). **Open:** on OptiFine 26.2 K2 pre5 with internal shaders
-  the server pack makes the whole world vanish, even with no view open (sky, hand and hotbar only, `of262-int0-fix`);
-  with the pack declined the world draws (`of262-int0-nopack`), and taking every glowing entity away (so the replaced
-  `entity_outline.json` never runs) does not bring it back (`of262-int0-glow`), so the core shaders are the suspects; a
-  preview build, not traced further. Rig traps: OptiFine with a shader pack draws its final picture straight to the
+  and hides that arrow (`of1211-compl0-fm`, `nf1211-compl-fm`). **OptiFine 26.2 K2 pre5 with shaders on (internal
+  shaders at least) often draws no world on the first server joined after the game starts, and MC GUI has nothing to do
+  with it** (2026-10-31, `rigs/compat/of262/`, `res/` there). The F3 lines show nothing passing culling (`C:
+  0/6936`, `E: 0/11`, against `C: 97/6936` when it works), so only sky, clouds, hand and HUD draw, or the title screen's
+  last picture stays behind the hotbar. 18 of 39 first joins on 26.2 did it, whenever the join came (during the startup
+  load or 25 s after it). It happens on a plain Paper 26.2 with no MC GUI and no pack (`x262van-2`..`-4`:
+  3 of 4) and with MC GUI's pack declined (`t262-5`, `u262-3`); with the pack loaded it draws as often as not
+  (`x262mg-3`, `-4` drew, `x262mg-1`, `-2` did not). It stays through resource reloads (`b262a`: every variant of a
+  bisection of the pack, vanilla only included) and F3+A (`u262-3`, `-5`), and goes as soon as the player leaves and
+  joins again: 18 of 18 second joins drew the world (the `rejoin` steps of `x262*`, `w262-*`, `v262*`). 26.1.2 K1 pre2
+  (5 of 5, `t2612-*`) and 1.21.11 J9 (3 of 3, `t1211-*`) never did
+  it. The sweep's "the pack makes the world vanish" was this: its `nopack` run happened to draw, the pack and glow runs
+  happened not to (`of262-int0-fix`, `-nopack`, `-glow`). With the world drawn, 26.2's internal shaders treat MC GUI as
+  26.1.2's do (walls and fullscreen right, the overlay's world turns: `of262-int0-now`, `cmp-of262-int0-now.png`). No
+  workaround on our side: it is the client's first level, before any packet of ours matters; a rejoin is the player's
+  fix. Rig: `trials.sh` (one client start per trial, F3 stats in each `res.json`), `packbisect.py` (local pack variants
+  through the agent's `select`), agent commands `select`, `stats`, `leave`, `allchanged` (26.2: `levelExtractor`).
+  Rig traps: OptiFine with a shader pack draws its final picture straight to the
   window, so the main target the agent's `snap` reads stays stale (`snap0` reads the window's back buffer just before
   the swap, `SNAP=snap0`, and checked equal to `snap` without shaders); it also recompiles the pack after the server's
   pack loads (`SETTLE=25`). portablemc 4.4.1 cannot install NeoForge 21.11 (KeyError `ROOT`), so `client.sh` runs the

@@ -51,7 +51,10 @@ it. See [For plugin developers](#for-plugin-developers).
   packs** (Iris's, OptiFine's own internal shaders and any OptiFine shader pack)
   replace the shaders MC GUI draws with: walls show coloured noise and views do
   not work, so players need shaders off. On the OptiFine 26.2 preview (K2 pre5)
-  with its internal shaders on, the world itself does not draw with the pack.
+  with its internal shaders on, the world often does not draw on the first server joined
+  after starting the game, on any server and with or without MC GUI's pack;
+  leaving and joining again brings it back. OptiFine 26.1.2 and 1.21.11 do not
+  do this.
 - **Sounds.** Every `.ogg` in `plugins/MCGUI/sounds/` goes into the pack
   as a sound named after its path: `sounds/menu/open.ogg` plays as
   `uiengine:menu/open`, from a page, `/playsound` or any plugin. Names are lower
