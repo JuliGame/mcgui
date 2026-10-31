@@ -730,18 +730,25 @@ Reading a position, a world or a UUID is fine from anywhere. How MC GUI copes, a
   1.21.11 (walls, fullscreen, overlays); 26.3 only compiled with glslang. Rig:
   `rigs/ifast/` (`trial.sh` restarts the Fabric client with the mod in or out and any of its config,
   `scene.sh` takes a wall, a fullscreen page and an overlay).
-- **Lunar Client's Turbo Entity Mode** (2026-10-30, `performance.json` `turboEntityMode`, off by default). It stops
+- **Lunar Client's Turbo Entity Mode** (2026-10-30/31, `performance.json` `turboEntityMode`, **on by default**: the
+  setting is built with default `true`, and Turbo Block Entity Mode and Turbo Nametags (`fastNametags`) are too; a
+  fresh Lunar 26.2 writes no `performance.json` until something is changed). It stops
   drawing a still entity as an entity and bakes it into its chunk section's buffer (`LevelExtractor` mixin, by
   `lunar$supportsTurbo`: displays, item frames, armour stands, paintings, other players, boats...). A display qualifies
   unless its billboard is not `FIXED` or its render state's transformation is a `TransformationInterpolator`; an item
   frame holding a map never does, so walls and a view's frames are untouched. The pointer (a `FIXED` text display) was
   baked, so text.vsh no longer got its vertices camera-relative: on an overlay the client pointer sat stuck at the
-  window's right edge whatever the look (seen on Lunar 26.2, `rigs/compat/other-clients/res/lunar262-turbo/`).
-  `Views.keepOutOfTurbo`: the pointer spawns with an interpolation duration of 1 and, two ticks after the client has
-  it, changes its (unseen) glow colour, so the client's next render state is an interpolating one, which turbo never
-  bakes. Lunar can be run hidden without its launcher or Josh's account: `rigs/compat/other-clients/lunar.sh`
-  (launch metadata from `api.lunarclientprod.com/launcher/launch`, `-Duser.home` pointed at a folder of its own
-  so Josh's own settings are never read or written; `lunar-args.py` builds the command line the launcher would).
+  window's right edge whatever the look. `Views.keepOutOfTurbo`: the pointer spawns with an interpolation duration of 1
+  and, two ticks after the client has it, changes its (unseen) glow colour, so the client's next render state is an
+  interpolating one, which turbo never bakes. Proven on Lunar 26.2 (`rigs/compat/other-clients/res/`): fresh
+  defaults with the old jar `l262-fresh-main` (pointer stuck), with the fix `l262-fresh-fix`, `l262-turbo-fix`,
+  `l262-allturbo-fix` (all three turbo options on) and `l262-off-fix` (all off): overlay world unchanged ([0, 0]) and
+  the pointer at both spots it was sent to (`pointer.py`). Lunar's default HUD mods (coordinates, direction compass,
+  potion effects listing the seated player's Invisibility, toggle-sneak "[Flying]") draw over a view as chat does; the
+  compass and coordinates follow the pointer's turn. The rig builds Lunar hidden, without its launcher or Josh's
+  account or settings, in one command: `rigs/compat/other-clients/setup.sh lunar 26.2 26.1.2 1.21.11` (launch
+  metadata from `api.lunarclientprod.com/launcher/launch`, `-Duser.home` pointed at a folder of its own), then
+  `setup.sh perf k=v...`, `run.sh lunar <ver> <tag>`; `setup.sh clean` removes everything.
 - **Transparent is map colour 0** (`Canvas.transparency`): a pixel under half
   alpha is kept as YCbCr (0, 0, 0), which no RGB colour converts to
   (`Palette.isClear`), and sent as colour 0, which the client draws as
