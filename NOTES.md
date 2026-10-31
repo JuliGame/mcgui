@@ -766,6 +766,62 @@ Reading a position, a world or a UUID is fine from anywhere. How MC GUI copes, a
   1.21.11 (walls, fullscreen, overlays); 26.3 only compiled with glslang. Rig:
   `rigs/ifast/` (`trial.sh` restarts the Fabric client with the mod in or out and any of its config,
   `scene.sh` takes a wall, a fullscreen page and an overlay).
+- **Fabric client mods** (2026-10-30, rig `rigs/compat/fabric/`: `fetch.py` takes each mod's newest jar from
+  Modrinth, `mkset.py` a set, `rt.sh <ver> <set> <tag>` launches it hidden and runs `run.py`, the everything-scene plus a
+  wall, fullscreen, F5 both ways, the pause menu, an overlay with changed pixels counted, tint, blur and a page in a stone
+  shaft). Fine on 26.2 next to a mod-less Fabric client: Fabulously Optimized 14.1.1 whole, and Sodium, Iris with shaders
+  off, ImmediatelyFast, EntityCulling, EMF/ETF, MoreCulling, FerriteCore, Lithium, C2ME, Krypton, BadOptimizations, EBE
+  Reloaded, Distant Horizons, Dynamic FPS, Continuity, Polytone, Puzzle, Zoomify, Freelook, Xaero's, JourneyMap,
+  AppleSkin, Mod Menu, Sound Physics, 3D Skin Layers, NEA, First-person Model and Better F3 all together. Re-run
+  2026-10-31 (`res/fo12111-paper`, `fo12111-via`, `s12111`, `n12111`, `fo2612`, `fo263`, `s263`): FO 12.3.0 on
+  1.21.11 (Paper and through ViaVersion 5.12.2 on Paper 26.2), FO 13.6.0 on 26.1.2, FO 15.0.0-beta.2 on 26.3, and the
+  all-mods set on 1.21.11 and 26.3 behave as on 26.2 (overlay 210/208 changed pixels, 723/606 on 26.3 only from
+  JourneyMap's mob icons turning with the player). Zoomify, OK Zoomer, Logical Zoom: holding zoom changes no pixel of a
+  page or overlay; Freelook (held) and Perspective (toggled) turn their own camera, so the pointer stops or drifts and
+  nothing under it reacts until released (`res/cam262`). Traps:
+  - **Iris with a shader pack draws world text and maps with the pack's own programs** (`IrisPipelines`: `TEXT`,
+    `TEXT_SEE_THROUGH` and the map item go to its text program; GUI pipelines stay ours). Walls show the raw palette code,
+    a view shows the world with the HUD gone, and the pointer glyph hangs in the world as a big orange arrow (seen with
+    Complementary on 26.2). Nothing of ours can draw there, so a view degrades instead: it spawns a notice
+    (`views.shaders-notice`, `Shaders.NOTICE_RGB`) 0.3 blocks ahead of the camera, which `text.vsh` never draws, so only a
+    player whose shaders are not ours sees it; and the pointer font is stored at `POINTER_ALPHA`/255 of its alpha
+    (`ResourcePack.faint`), which `text.fsh` scales back for the pointer only, so any other text shader's 0.1 cut-off drops
+    it. Seen working on 26.2 (2026-10-31) with Complementary r5.9.3 and BSL v10.1.8: the notice shows, no arrow; a vanilla
+    client's fullscreen frames are pixel-identical to `main`'s and an overlay still changes only the pointer's 210 pixels
+    (`res/ic262fix`, `ib262`, `n262fix`). FabricMods2's run (`ic262fix/full-moved`) showed the notice left behind after a
+    turn; later runs of the same jar (`res/nt2-fix3`, 45° turns and run.py's own turn) found it staying centred, for an
+    unexplained reason. A version that re-sends it ahead of the look on every rotation (followNotice, notice pinned in
+    `Pipeline.watch`) worked (`res/nt-dbg`) but was not landed, as the failing case could not be shown again.
+    Walls get no notice (their frames are packets only).
+  - **Minimap mods draw over a view, so `position_tex_color` drops non-power-of-two textures while seated.** Xaero's
+    minimap is a picture-in-picture (`MinimapPipRenderer`, the game's `PictureInPictureRenderer.blitTexture`) and
+    JourneyMap draws into a window-sized target (`GuiRenderToTexture`, blitted over the whole GUI), both through
+    `GUI_TEXTURED_PREMULTIPLIED_ALPHA`, which is our shader with `Globals` bound. Atlases, the item atlas and HUD textures
+    are powers of two; such a target is the size of what it shows. Their own pipelines (`xaerolib:core/*`, JourneyMap's
+    `journeymap:core/*` fragments) bind no `Globals`, so cannot be told seated. Collateral: the game's own
+    pictures-in-picture (the inventory's player doll) while seated. Seen on 26.2 with both mods (`res/s262fix`): the map
+    pictures are gone; what each draws straight to the GUI stays (Xaero's coordinates line, JourneyMap's clock label,
+    compass letters and mob icons). A minimap the exact size of a power of two would still show. Server-side switches:
+    Xaero only reads its codes from a *chat* system message (`MixinChatListener` on `addServerSystemMessage`, never
+    cancelled: blank chat lines, and `§r§e§s§e§t§x§a§e§r§o` also resets a server's fair-play codes); JourneyMap takes a
+    `journeymap:perm_req` payload from any server (byte 42, admin flag, JSON `GlobalProperties`, two flags; "Permission set
+    from external source") whose `minimapEnabled` false hides all of it, but it replaces every permission a JourneyMap
+    server sent and prints "enabled by server" if JourneyMap was not yet initialised. Not used; F1 still hides the rest.
+  - **A hidden test client is unfocused**: Dynamic FPS (and FO's config) then draw at 1 or 30 FPS, so the rig's sets get
+    `cfg/dfps.json`; a focused player is not throttled. A minimap mod stands its own target in for the main one while it
+    draws, so a probe must read `mainRenderTarget()` on the game thread.
+  - **ImmediatelyFast with every experimental option on** (sign text buffering, no resource-pack conflict handling) is
+    fine on 26.2 (`res/ifx262`). **A fullscreen page opened in a one-block stone shaft is black with only the pointer**,
+    the stone's in-wall overlay over it, on a mod-less 26.2 client too (`res/n262fix/tight-full.png`): not a mod issue,
+    and not yet looked into. An overlay there is fine.
+  - **Map Atlases 8.0.0 / Moonlight 4.2.0 (26.1.2) cannot play on Paper**: Moonlight's `MapItemDataPacketMixin` swaps the
+    map packet's codec for one that also reads two optional lists, a dimension and a centre, which only a Moonlight server
+    writes, so the first map packet disconnects ("Failed to decode packet 'clientbound/minecraft:map_item_data'",
+    `res/s2612`); in a fresh world the server pack fails first ("Missing registry moonlight:soft_fluid"). Not ours.
+  - **A server owner's yellow pieces did not reproduce** (2026-10-31, `spin.py`/`dyan.py`, res `dy-paper-*`, `dy-via-*`,
+    `dy-via33-*`): FO 12.3.0 on 1.21.11, hover layers 0, Paper 1.21.11 and ViaVersion on 26.2, frames every 100 and 33
+    ms through chat, an open, a close and three quick open/closes, on 0.6.5 and on this branch: no yellow outside the
+    panel and the player's hand on either. His pieces need something else in his setup (another plugin's pack).
 - **Transparent is map colour 0** (`Canvas.transparency`): a pixel under half
   alpha is kept as YCbCr (0, 0, 0), which no RGB colour converts to
   (`Palette.isClear`), and sent as colour 0, which the client draws as

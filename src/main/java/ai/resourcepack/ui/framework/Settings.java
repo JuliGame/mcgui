@@ -35,6 +35,12 @@ public final class Settings {
     public final int hoverLayers;
     /** Log each click's resolved spot and each pointer correction ({@code [pointer]} lines), for testing. */
     public final boolean debugPointer;
+    /**
+     * What a view shows a player whose shaders draw world text instead of the pack's (Iris with a shader pack), in front of
+     * their camera, where the pack's shaders never draw it ({@link ai.resourcepack.ui.framework.pack.Shaders#NOTICE_RGB}).
+     * Empty: none.
+     */
+    public final String shadersNotice;
     public final int mapIdBase;
     /** Threads for all CPU-heavy work (0: the cores minus one); see {@link ai.resourcepack.ui.framework.api.Cpu}. */
     public final int cpuThreads;
@@ -55,6 +61,8 @@ public final class Settings {
         clientPointer = c.getBoolean("views.client-pointer", true);
         hoverLayers = Math.max(0, Math.min(512, c.getInt("views.hover-layers", 0)));
         debugPointer = c.getBoolean("views.debug-pointer", false);
+        shadersNotice = c.getString("views.shaders-notice",
+                "This menu can't be shown while shaders are on. Turn them off (Iris: press K), then open it again.");
         mapIdBase = c.getInt("map-id-base", 2_000_000_000);
         cpuThreads = Math.max(0, c.getInt("cpu-threads", 0));
     }

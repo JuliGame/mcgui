@@ -581,6 +581,8 @@ At 1920×1080 (median of 3 rounds):
 
 ## Compatibility
 
+### Server plugins
+
 Server plugins checked with MC GUI 0.6.6 on Paper, Spigot and Folia 1.21.11 and 26.2 (2026-10-30): a page opened
 fullscreen and as an overlay, the mouse moved, clicks and scrolls, closed by sneaking and from the console, a teleport and
 a quit while seated, then the player checked (game mode, position, invisibility, items, seen by others).
@@ -640,6 +642,29 @@ Two plugins that replace the same core shader (`text`, `rendertype_text`,
 game uses one copy and the other plugin's feature draws nothing. If a page
 says "Your game could not load the resource pack of this server", the merged
 pack failed to load in that player's game; the console says why.
+
+### Client mods
+
+Client mods checked in a real client (Fabric; 1.21.11, 26.1.2, 26.2 and 26.3, on Paper and, for 1.21.11, also through
+ViaVersion):
+
+- **Fabulously Optimized** (12.3.0 on 1.21.11, 13.6.0 on 26.1.2, 14.1.1 on 26.2, 15.0.0-beta.2 on 26.3) and the common
+  performance mods (Sodium, ImmediatelyFast, EntityCulling, MoreCulling, Lithium, FerriteCore, C2ME, Krypton,
+  BadOptimizations, ModernFix, Dynamic FPS, Distant Horizons), entity and texture mods (Entity Model/Texture
+  Features, 3D Skin Layers, Not Enough Animations, First-person Model, Enhanced Block Entities), Continuity, Polytone,
+  Puzzle, AppleSkin, Mod Menu, Sound Physics, Better F3, and ImmediatelyFast's experimental options: walls, fullscreen
+  pages, overlays (tint and blur), F5 and the pause menu all work.
+- **Zoom and camera mods** (Zoomify, OK Zoomer, Logical Zoom, Freelook, Perspective): pages and overlays are unaffected,
+  and zooming does not zoom them. While Freelook's key is held or Perspective's camera is on, turning moves their camera
+  instead of the player, so the pointer does not move or points at nothing; let go of the key (or turn Perspective off).
+- **Iris with shaders off** works. **With a shader pack on** (checked with Complementary and BSL) the shader pack draws
+  maps itself: walls show coloured noise and pages cannot be shown. A player who opens one sees a short note asking them
+  to turn shaders off (Iris: press K); change it with `views.shaders-notice` in `config.yml`.
+- **Minimaps** (Xaero's, JourneyMap): the map itself is hidden while a page is open. A few small things they draw
+  directly (Xaero's coordinates, JourneyMap's clock, compass letters and mob icons) can stay; press F1 to hide those too.
+- **Map Atlases** (26.1.2, with the Moonlight library it needs) disconnects from a Paper server: Moonlight reads extra
+  data in every map packet that only a server running Moonlight sends ("Failed to decode packet map_item_data"), and in
+  a fresh world the server's resource pack fails to load. Nothing MC GUI can change; players need to remove it.
 
 ## For plugin developers
 

@@ -157,6 +157,9 @@ views:
   hover-layers: 0
   # Log where each click on a client-drawn pointer lands, and every correction, as [pointer] lines. For testing.
   debug-pointer: false
+  # Shown in front of a player at a view whose shaders replace the game's own (Iris with a shader pack on), which
+  # cannot draw MC GUI's pages: nobody else ever sees it. Plain text. Empty: none.
+  shaders-notice: "This menu can't be shown while shaders are on. Turn them off (Iris: press K), then open it again."
 
 walls:
   # A wall screen's page is laid out this many CSS pixels per map tall, unless the page says
