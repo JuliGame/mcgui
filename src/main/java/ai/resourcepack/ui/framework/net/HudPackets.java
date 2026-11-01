@@ -56,6 +56,11 @@ final class HudPackets {
     private final MethodHandle chatOverlay;         // #overlay
     private final MethodHandle componentString;     // Component#getString
     final Object emptyBar;                          // an action bar of no text, which clears the one showing
+    private final MethodHandle newChat;             // new ClientboundSystemChatPacket(Component, boolean overlay)
+    private final Class<?> encoderClass;            // PacketEncoder: where a connection's protocol is
+    private final java.lang.reflect.Field protocolInfo;
+    private final MethodHandle protocolId, protocolCodec, encode, decode;
+    private final Object play;                      // ConnectionProtocol.PLAY
 
     HudPackets() throws ReflectiveOperationException {
         String game = "net.minecraft.network.protocol.game.";
@@ -109,6 +114,17 @@ final class HudPackets {
         } catch (Throwable t) {
             throw new ReflectiveOperationException("Cannot make an empty action bar", t);
         }
+        String net = "net.minecraft.network.";
+        encoderClass = Reflect.cls(net + "PacketEncoder");
+        protocolInfo = Reflect.field(encoderClass, "protocolInfo");
+        protocolInfo.setAccessible(true);
+        Class<?> info = Reflect.cls(net + "ProtocolInfo");
+        protocolId = L.unreflect(Reflect.method(info, "id"));
+        protocolCodec = L.unreflect(Reflect.method(info, "codec"));
+        play = Reflect.field(Reflect.cls(net + "ConnectionProtocol"), "PLAY").get(null);
+        encode = L.unreflect(Reflect.method(Reflect.cls(net + "codec.StreamEncoder"), "encode", Object.class, Object.class));
+        decode = L.unreflect(Reflect.method(Reflect.cls(net + "codec.StreamDecoder"), "decode", Object.class));
+        newChat = Reflect.constructor(L, chatPacket, MethodType.methodType(void.class, component, boolean.class));
     }
 
     /** A constant of [type], an enum the game does not make public. */
@@ -245,6 +261,77 @@ final class HudPackets {
             return null;
         } catch (Throwable t) {
             throw rethrow(t);
+        }
+    }
+
+    // ------------------------------------------------------------------ finished packets
+
+    /**
+     * What a connection's game protocol says about the HUD packets' ids, for one protocol (every connection of a version
+     * shares its {@code ProtocolInfo}).
+     */
+    private record Raw(Object info, Object codec, int display, int boss, int action, int chat) {}
+
+    private volatile Raw raw;
+
+    /**
+     * What [buf] says, if it is a finished packet (a leading id, then the body) that draws the sidebar, a boss bar or an
+     * action bar: a plugin that encodes its own packets (PacketEvents' {@code sendPacket}) writes these into the pipeline
+     * in place of packet objects. Decoded with the connection's own codec, so the HUD handler treats it as the packet it
+     * is; null for anything else, for a connection ViaVersion translates (the bytes are the client's version's then) and
+     * for bytes that do not decode to exactly one packet.
+     */
+    Object decodeRaw(io.netty.channel.Channel channel, io.netty.buffer.ByteBuf buf) {
+        int at = buf.readerIndex(), end = buf.writerIndex(), id = 0, shift = 0;
+        for (int i = 0; i < 5; i++) {
+            if (at >= end) return null;
+            byte b = buf.getByte(at++);
+            id |= (b & 0x7F) << shift;
+            if ((b & 0x80) == 0) break;
+            shift += 7;
+        }
+        io.netty.channel.ChannelPipeline pipeline = channel.pipeline();
+        Object encoder = pipeline.get("encoder");
+        if (encoder == null || encoder.getClass() != encoderClass) return null;
+        try {
+            Object info = protocolInfo.get(encoder);
+            if (protocolId.invoke(info) != play) return null;
+            Raw r = raw;
+            if (r == null || r.info != info) raw = r = rawFor(info);
+            if (id != r.display && id != r.boss && id != r.action && id != r.chat) return null;
+            Object via = pipeline.get("via-encoder");
+            if (via != null && ViaVersionState.stand(via) != ViaVersionState.Stand.PASSES) return null;
+            io.netty.buffer.ByteBuf body = buf.duplicate();
+            Object packet = decode.invoke(r.codec, body);
+            return body.isReadable() ? null : packet;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    private Raw rawFor(Object info) throws Throwable {
+        Object codec = protocolCodec.invoke(info);
+        Object slot = slots[0], objective = null;
+        Object empty = Reflect.method(Reflect.cls("net.minecraft.network.chat.Component"), "empty").invoke(null);
+        return new Raw(info, codec, idOf(codec, newDisplay.invoke(slot, objective)), idOf(codec, newBossRemove.invoke(UUID.randomUUID())),
+                idOf(codec, emptyBar), idOf(codec, newChat.invoke(empty, true)));
+    }
+
+    /** The id [codec] writes in front of [packet]. */
+    private int idOf(Object codec, Object packet) throws Throwable {
+        io.netty.buffer.ByteBuf out = io.netty.buffer.Unpooled.buffer();
+        try {
+            encode.invoke(codec, out, packet);
+            int id = 0, shift = 0;
+            for (int i = 0; i < 5; i++) {
+                byte b = out.readByte();
+                id |= (b & 0x7F) << shift;
+                if ((b & 0x80) == 0) break;
+                shift += 7;
+            }
+            return id;
+        } finally {
+            out.release();
         }
     }
 

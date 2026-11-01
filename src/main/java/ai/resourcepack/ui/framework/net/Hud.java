@@ -2,6 +2,8 @@ package ai.resourcepack.ui.framework.net;
 
 import ai.resourcepack.ui.framework.Settings;
 import io.netty.channel.ChannelHandlerContext;
+import io.netty.buffer.ByteBuf;
+import io.netty.util.ReferenceCountUtil;
 import io.netty.channel.ChannelOutboundHandlerAdapter;
 import io.netty.channel.ChannelPromise;
 
@@ -77,7 +79,14 @@ final class Hud extends ChannelOutboundHandlerAdapter implements SharedCompressi
     @Override
     public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
         try {
-            if (watch(msg)) {
+            // A finished packet (PacketEvents' sendPacket writes bytes, not a packet object) is read as the packet it is.
+            Object seen = msg;
+            if (msg instanceof ByteBuf bytes) {
+                Object decoded = packets.decodeRaw(ctx.channel(), bytes);
+                if (decoded != null) seen = decoded;
+            }
+            if (watch(seen)) {
+                if (seen != msg) ReferenceCountUtil.release(msg);
                 promise.trySuccess();
                 return;
             }

@@ -201,6 +201,41 @@ class HudTest {
         assertEquals(List.of(), sent(), "nothing is replayed: an action bar is gone in three seconds anyway");
     }
 
+    /** What a plugin that encodes its own packets (PacketEvents' sendPacket) writes: the id and body, not a packet object. */
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static io.netty.buffer.ByteBuf finished(Object packet) {
+        io.netty.buffer.ByteBuf out = io.netty.buffer.Unpooled.buffer();
+        ((net.minecraft.network.codec.StreamCodec) PaperNet.GAME.codec()).encode(out, packet);
+        return out;
+    }
+
+    @Test
+    void finishedPacketsAreReadAsThePacketsTheyAre() throws Exception {
+        EmbeddedChannel ch = PaperNet.server(256, null);
+        ch.pipeline().addBefore("packet_handler", "uiengine_hud", hud = new Hud(null, packets, ALL, player, Logger.getAnonymousLogger(), Map.of(), Map.of()));
+        ServerBossEvent event = bar("raw bar");
+        ch.writeOutbound(finished(ClientboundBossEventPacket.createAddPacket(event)), finished(new ClientboundSetActionBarTextPacket(Component.literal("raw"))));
+        assertEquals(2, ch.outboundMessages().size(), "bytes of a boss bar and an action bar go on while no page is up");
+        ch.releaseOutbound();
+
+        hud.hide();
+        ch.runPendingTasks();
+        int clearing = ch.outboundMessages().size();
+        assertEquals(2, clearing, "a boss bar sent as bytes was known, and is removed, with the empty action bar");
+        ch.releaseOutbound();
+
+        event.setProgress(0.5f);
+        ch.writeOutbound(finished(ClientboundBossEventPacket.createUpdateProgressPacket(event)), finished(new ClientboundSetActionBarTextPacket(Component.literal("raw again"))),
+                finished(new ClientboundSystemChatPacket(Component.literal("overlay"), true)), finished(new ClientboundSystemChatPacket(Component.literal("chat"), false)));
+        assertEquals(1, ch.outboundMessages().size(), "at a page the bar's update and both action bars are dropped, chat is not");
+        ch.releaseOutbound();
+
+        hud.show();
+        ch.runPendingTasks();
+        assertEquals(2, ch.outboundMessages().size(), "closing sends the bar again, with its latest progress");
+        ch.releaseOutbound();
+    }
+
     @Test
     void whatIsOffStaysOn() {
         hud = hud(new Settings.Hidden(false, true, false));
