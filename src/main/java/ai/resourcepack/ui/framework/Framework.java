@@ -120,9 +120,6 @@ public final class Framework implements UIFramework, Listener {
             ResourcePack built = pack;
             // So Dialog Engine does not send its pack over ours again each time ours is sent (see ResourcePack.raise).
             Siblings.register(plugin);
-            // Which of a sibling's packs bury ours, read from the packs themselves (only while ours is sent by us: merged,
-            // ours is never buried).
-            if (pack.offers()) siblingShaders = new SiblingShaders(pack.bytes, plugin.getLogger());
             // Once the pack host has it (or this server serves it after all), the players already on are sent it.
             pack.start("MCGUI/" + plugin.getDescription().getVersion(), () -> {
                 try {
@@ -135,6 +132,9 @@ public final class Framework implements UIFramework, Listener {
                     // MC GUI stopped meanwhile.
                 }
             });
+            // Which of a sibling's packs bury ours, read from the packs themselves (only while ours is sent by us: merged,
+            // ours is never buried).
+            if (pack.offers()) siblingShaders = new SiblingShaders(pack.bytes, plugin.getLogger());
             // Merged into another plugin's pack: whether the merge kept everything, for every version, said in the
             // console. Pack plugins zip after MC GUI starts (and on their own reload commands), so it looks again
             // whenever their pack changes on disk.
