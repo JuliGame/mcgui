@@ -628,10 +628,16 @@ a quit while seated, then the player checked (game mode, position, invisibility,
   saying so (since this release; before, with `resource-pack.required: true`, Geyser told the server the pack had loaded
   and they were sat in a view they could not see). Walls show them plain map colours.
 - **Dialog Engine:** a drawn dialog sends Dialog Engine's own pack, which replaces the shaders MC GUI's pages are drawn
-  with, and before this release no page drew for that player until they rejoined. Now MC GUI sends its pack again before
-  the next page opens (one short resource reload, once), and pages draw. A drawn dialog opened after that shows the
-  player's head in it as a small 8x8 face, since Dialog Engine's pack is then below MC GUI's; the rest of the dialog is
-  unchanged. Plain YAML dialogs are not affected at all.
+  with, and before this release no page drew for that player until they rejoined. Now, when MC GUI sends its own pack
+  (any `resource-pack.mode` but `external` with a blank `public-url`), it sends it again before the next page opens (a
+  short resource reload), and pages draw. Merged into another plugin's pack, MC GUI's pack cannot be sent again this way.
+  - **Dialog Engine 0.6.8 and newer** also sends its pack again before each drawn dialog, so each switch between a
+    dialog and a page costs one reload, and the player's head in a dialog draws normally.
+  - **Older Dialog Engines:** a drawn dialog opened after a page shows the player's head as a small 8x8 face, since
+    Dialog Engine's pack is then below MC GUI's; the rest of the dialog is unchanged.
+
+  A page whose button opens a drawn dialog closes as the dialog's pack arrives, and the dialog shows. Plain YAML
+  dialogs are not affected at all.
 - **Every other plugin that teleports a player** (Essentials, /rtp, warps) closes their page first, and they arrive where
   they were sent.
 
