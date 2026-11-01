@@ -597,6 +597,8 @@ public final class Views implements Listener {
         player.setGameMode(GameMode.ADVENTURE);
         // An empty hotbar until they get up, or scrolling would pop up the held item's name.
         pipeline.conceal(player, true);
+        // The sidebar, boss bars and action bar of other plugins, whatever pack's shaders are in use (Pipeline.hideHud).
+        pipeline.hideHud(player, true);
         // Behind a kept overlay the world is a still picture: no particles over it (Pipeline.hideParticles).
         if (keeps) pipeline.hideParticles(player, true);
         pipeline.watch(player, new Pipeline.Mouse() {
@@ -1690,6 +1692,7 @@ public final class Views implements Listener {
         player.getPersistentDataContainer().remove(seatKey);
         for (Player other : Bukkit.getOnlinePlayers()) Threads.now(plugin, other, () -> other.showPlayer(plugin, player));
         pipeline.conceal(player, false);
+        pipeline.hideHud(player, false);
         pipeline.hideParticles(player, false);
         release(player);
     }

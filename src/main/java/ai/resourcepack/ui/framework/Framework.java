@@ -147,7 +147,7 @@ public final class Framework implements UIFramework, Listener {
         } catch (Exception e) {
             plugin.getLogger().log(Level.SEVERE, "Could not build or serve the resource pack", e);
         }
-        pipeline = new Pipeline(nms, plugin.getLogger());
+        pipeline = new Pipeline(nms, plugin.getLogger(), settings.hideHud);
         wire = new ServerWire(nms, pipeline, settings.sharedCompression ? SharedCompression.create(ServerWire.packets(nms), plugin.getLogger()) : null);
         sender = new MapSender(wire, settings.bytesPerSecond, plugin.getLogger());
         OpenTrace.start(plugin.getLogger(), nms, wire, sender);
@@ -165,6 +165,7 @@ public final class Framework implements UIFramework, Listener {
         // Players already online (a reload): hand them the pack again, and read their clicks on walls.
         for (Player p : Bukkit.getOnlinePlayers()) {
             watchPacks(p);
+            pipeline.trackHud(p);
             if (!Bedrock.joined(p) && pack != null) pack.send(p);
             readUses(p);
         }
@@ -365,6 +366,8 @@ public final class Framework implements UIFramework, Listener {
     @EventHandler(priority = EventPriority.LOWEST)
     public void onJoinFirst(PlayerJoinEvent e) {
         watchPacks(e.getPlayer());
+        // First of all join handlers: whatever another plugin sends a player after this is seen, to be hidden at a page.
+        pipeline.trackHud(e.getPlayer());
     }
 
     private void watchPacks(Player player) {

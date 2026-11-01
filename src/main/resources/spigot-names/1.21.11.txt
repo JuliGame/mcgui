@@ -1,5 +1,6 @@
 # MC GUI's names for a Spigot server older than 26.1. Made by tools/SpigotNames.java, from Mojang's
 # mappings (subject to their licence: a part of them, for the members MC GUI reaches) and Spigot's.
+C	net.minecraft.ChatFormatting	net.minecraft.EnumChatFormat
 C	net.minecraft.CrashReport	net.minecraft.CrashReport
 C	net.minecraft.CrashReportCategory	net.minecraft.CrashReportSystemDetails
 C	net.minecraft.SharedConstants	net.minecraft.SharedConstants
@@ -15,6 +16,7 @@ C	net.minecraft.core.Direction$Axis	net.minecraft.core.EnumDirection$EnumAxis
 C	net.minecraft.core.GlobalPos	net.minecraft.core.GlobalPos
 C	net.minecraft.core.Holder	net.minecraft.core.Holder
 C	net.minecraft.core.Holder$Reference	net.minecraft.core.Holder$c
+C	net.minecraft.core.HolderOwner	net.minecraft.core.HolderOwner
 C	net.minecraft.core.HolderSet	net.minecraft.core.HolderSet
 C	net.minecraft.core.Position	net.minecraft.core.IPosition
 C	net.minecraft.core.Registry	net.minecraft.core.IRegistry
@@ -29,6 +31,7 @@ C	net.minecraft.core.component.DataComponents	net.minecraft.core.component.DataC
 C	net.minecraft.core.component.TypedDataComponent	net.minecraft.core.component.TypedDataComponent
 C	net.minecraft.core.particles.ParticleOptions	net.minecraft.core.particles.ParticleParam
 C	net.minecraft.nbt.CompoundTag	net.minecraft.nbt.NBTTagCompound
+C	net.minecraft.nbt.Tag	net.minecraft.nbt.NBTBase
 C	net.minecraft.network.BandwidthDebugMonitor	net.minecraft.network.BandwidthDebugMonitor
 C	net.minecraft.network.ClientboundPacketListener	net.minecraft.network.ClientboundPacketListener
 C	net.minecraft.network.CompressionEncoder	net.minecraft.network.PacketCompressor
@@ -58,6 +61,7 @@ C	net.minecraft.network.chat.SignedMessageChain$DecodeException	net.minecraft.ne
 C	net.minecraft.network.chat.Style	net.minecraft.network.chat.ChatModifier
 C	net.minecraft.network.chat.contents.data.DataSource	net.minecraft.network.chat.contents.data.DataSource
 C	net.minecraft.network.chat.contents.objects.ObjectInfo	net.minecraft.network.chat.contents.objects.ObjectInfo
+C	net.minecraft.network.chat.numbers.NumberFormat	net.minecraft.network.chat.numbers.NumberFormat
 C	net.minecraft.network.codec.StreamCodec	net.minecraft.network.codec.StreamCodec
 C	net.minecraft.network.codec.StreamDecoder	net.minecraft.network.codec.StreamDecoder
 C	net.minecraft.network.codec.StreamEncoder	net.minecraft.network.codec.StreamEncoder
@@ -80,6 +84,10 @@ C	net.minecraft.network.protocol.common.ServerboundResourcePackPacket	net.minecr
 C	net.minecraft.network.protocol.cookie.ServerboundCookieResponsePacket	net.minecraft.network.protocol.cookie.ServerboundCookieResponsePacket
 C	net.minecraft.network.protocol.game.ClientGamePacketListener	net.minecraft.network.protocol.game.PacketListenerPlayOut
 C	net.minecraft.network.protocol.game.ClientboundAddEntityPacket	net.minecraft.network.protocol.game.PacketPlayOutSpawnEntity
+C	net.minecraft.network.protocol.game.ClientboundBossEventPacket	net.minecraft.network.protocol.game.PacketPlayOutBoss
+C	net.minecraft.network.protocol.game.ClientboundBossEventPacket$Handler	net.minecraft.network.protocol.game.PacketPlayOutBoss$b
+C	net.minecraft.network.protocol.game.ClientboundBossEventPacket$Operation	net.minecraft.network.protocol.game.PacketPlayOutBoss$Action
+C	net.minecraft.network.protocol.game.ClientboundBossEventPacket$OperationType	net.minecraft.network.protocol.game.PacketPlayOutBoss$d
 C	net.minecraft.network.protocol.game.ClientboundBundlePacket	net.minecraft.network.protocol.game.ClientboundBundlePacket
 C	net.minecraft.network.protocol.game.ClientboundContainerSetContentPacket	net.minecraft.network.protocol.game.PacketPlayOutWindowItems
 C	net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket	net.minecraft.network.protocol.game.PacketPlayOutSetSlot
@@ -93,10 +101,16 @@ C	net.minecraft.network.protocol.game.ClientboundMoveEntityPacket	net.minecraft.
 C	net.minecraft.network.protocol.game.ClientboundPlayerAbilitiesPacket	net.minecraft.network.protocol.game.PacketPlayOutAbilities
 C	net.minecraft.network.protocol.game.ClientboundPlayerRotationPacket	net.minecraft.network.protocol.game.ClientboundPlayerRotationPacket
 C	net.minecraft.network.protocol.game.ClientboundRemoveEntitiesPacket	net.minecraft.network.protocol.game.PacketPlayOutEntityDestroy
+C	net.minecraft.network.protocol.game.ClientboundSetActionBarTextPacket	net.minecraft.network.protocol.game.ClientboundSetActionBarTextPacket
 C	net.minecraft.network.protocol.game.ClientboundSetCameraPacket	net.minecraft.network.protocol.game.PacketPlayOutCamera
+C	net.minecraft.network.protocol.game.ClientboundSetDisplayObjectivePacket	net.minecraft.network.protocol.game.PacketPlayOutScoreboardDisplayObjective
 C	net.minecraft.network.protocol.game.ClientboundSetEntityDataPacket	net.minecraft.network.protocol.game.PacketPlayOutEntityMetadata
+C	net.minecraft.network.protocol.game.ClientboundSetObjectivePacket	net.minecraft.network.protocol.game.PacketPlayOutScoreboardObjective
 C	net.minecraft.network.protocol.game.ClientboundSetPlayerInventoryPacket	net.minecraft.network.protocol.game.ClientboundSetPlayerInventoryPacket
+C	net.minecraft.network.protocol.game.ClientboundSystemChatPacket	net.minecraft.network.protocol.game.ClientboundSystemChatPacket
 C	net.minecraft.network.protocol.game.ClientboundTeleportEntityPacket	net.minecraft.network.protocol.game.PacketPlayOutEntityTeleport
+C	net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket	net.minecraft.network.protocol.game.PacketPlayOutUpdateAttributes
+C	net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket$AttributeSnapshot	net.minecraft.network.protocol.game.PacketPlayOutUpdateAttributes$AttributeSnapshot
 C	net.minecraft.network.protocol.game.ServerGamePacketListener	net.minecraft.network.protocol.game.PacketListenerPlayIn
 C	net.minecraft.network.protocol.game.ServerboundAcceptTeleportationPacket	net.minecraft.network.protocol.game.PacketPlayInTeleportAccept
 C	net.minecraft.network.protocol.game.ServerboundBlockEntityTagQueryPacket	net.minecraft.network.protocol.game.PacketPlayInTileNBTQuery
@@ -199,6 +213,9 @@ C	net.minecraft.util.debug.DebugValueSource$Registration	net.minecraft.util.debu
 C	net.minecraft.util.debugchart.LocalSampleLogger	net.minecraft.util.debugchart.LocalSampleLogger
 C	net.minecraft.util.profiling.ProfileResults	net.minecraft.util.profiling.MethodProfilerResults
 C	net.minecraft.util.random.WeightedList	net.minecraft.util.random.WeightedList
+C	net.minecraft.world.BossEvent	net.minecraft.world.BossBattle
+C	net.minecraft.world.BossEvent$BossBarColor	net.minecraft.world.BossBattle$BarColor
+C	net.minecraft.world.BossEvent$BossBarOverlay	net.minecraft.world.BossBattle$BarStyle
 C	net.minecraft.world.Container	net.minecraft.world.IInventory
 C	net.minecraft.world.Difficulty	net.minecraft.world.EnumDifficulty
 C	net.minecraft.world.InteractionHand	net.minecraft.world.EnumHand
@@ -216,11 +233,13 @@ C	net.minecraft.world.entity.Entity$RemovalReason	net.minecraft.world.entity.Ent
 C	net.minecraft.world.entity.EntityAttachments	net.minecraft.world.entity.EntityAttachments
 C	net.minecraft.world.entity.EntityDimensions	net.minecraft.world.entity.EntitySize
 C	net.minecraft.world.entity.EntityProcessor	net.minecraft.world.entity.EntityProcessor
+C	net.minecraft.world.entity.EntityReference	net.minecraft.world.entity.EntityReference
 C	net.minecraft.world.entity.EntitySpawnReason	net.minecraft.world.entity.EntitySpawnReason
 C	net.minecraft.world.entity.EntityType	net.minecraft.world.entity.EntityTypes
 C	net.minecraft.world.entity.EntityType$Builder	net.minecraft.world.entity.EntityTypes$Builder
 C	net.minecraft.world.entity.EquipmentSlot	net.minecraft.world.entity.EnumItemSlot
 C	net.minecraft.world.entity.EquipmentSlotGroup	net.minecraft.world.entity.EquipmentSlotGroup
+C	net.minecraft.world.entity.HumanoidArm	net.minecraft.world.entity.EnumMainHand
 C	net.minecraft.world.entity.InsideBlockEffectApplier$StepBasedCollector	net.minecraft.world.entity.InsideBlockEffectApplier$a
 C	net.minecraft.world.entity.Leashable	net.minecraft.world.entity.Leashable
 C	net.minecraft.world.entity.LightningBolt	net.minecraft.world.entity.EntityLightning
@@ -231,7 +250,11 @@ C	net.minecraft.world.entity.Pose	net.minecraft.world.entity.EntityPose
 C	net.minecraft.world.entity.PositionMoveRotation	net.minecraft.world.entity.PositionMoveRotation
 C	net.minecraft.world.entity.Relative	net.minecraft.world.entity.Relative
 C	net.minecraft.world.entity.SlotAccess	net.minecraft.world.entity.SlotAccess
+C	net.minecraft.world.entity.ai.attributes.Attribute	net.minecraft.world.entity.ai.attributes.AttributeBase
+C	net.minecraft.world.entity.ai.attributes.AttributeInstance	net.minecraft.world.entity.ai.attributes.AttributeModifiable
+C	net.minecraft.world.entity.ai.attributes.AttributeMap	net.minecraft.world.entity.ai.attributes.AttributeMapBase
 C	net.minecraft.world.entity.ai.attributes.AttributeModifier	net.minecraft.world.entity.ai.attributes.AttributeModifier
+C	net.minecraft.world.entity.ai.attributes.Attributes	net.minecraft.world.entity.ai.attributes.GenericAttributes
 C	net.minecraft.world.entity.animal.equine.AbstractHorse	net.minecraft.world.entity.animal.equine.EntityHorseAbstract
 C	net.minecraft.world.entity.animal.nautilus.AbstractNautilus	net.minecraft.world.entity.animal.nautilus.AbstractNautilus
 C	net.minecraft.world.entity.animal.parrot.Parrot$Variant	net.minecraft.world.entity.animal.parrot.EntityParrot$Variant
@@ -270,9 +293,12 @@ C	net.minecraft.world.item.component.TypedEntityData	net.minecraft.world.item.co
 C	net.minecraft.world.item.context.UseOnContext	net.minecraft.world.item.context.ItemActionContext
 C	net.minecraft.world.item.crafting.RecipeHolder	net.minecraft.world.item.crafting.RecipeHolder
 C	net.minecraft.world.item.enchantment.ItemEnchantments$Mutable	net.minecraft.world.item.enchantment.ItemEnchantments$a
+C	net.minecraft.world.item.equipment.Equippable	net.minecraft.world.item.equipment.Equippable
 C	net.minecraft.world.item.trading.MerchantOffers	net.minecraft.world.item.trading.MerchantRecipeList
 C	net.minecraft.world.level.BlockGetter	net.minecraft.world.level.IBlockAccess
 C	net.minecraft.world.level.ChunkPos	net.minecraft.world.level.ChunkCoordIntPair
+C	net.minecraft.world.level.ClipContext$Block	net.minecraft.world.level.RayTrace$BlockCollisionOption
+C	net.minecraft.world.level.ClipContext$Fluid	net.minecraft.world.level.RayTrace$FluidCollisionOption
 C	net.minecraft.world.level.Explosion	net.minecraft.world.level.Explosion
 C	net.minecraft.world.level.ExplosionDamageCalculator	net.minecraft.world.level.ExplosionDamageCalculator
 C	net.minecraft.world.level.GameType	net.minecraft.world.level.EnumGamemode
@@ -318,13 +344,24 @@ C	net.minecraft.world.level.storage.ValueInput	net.minecraft.world.level.storage
 C	net.minecraft.world.level.storage.ValueInput$ValueInputList	net.minecraft.world.level.storage.ValueInput$b
 C	net.minecraft.world.level.storage.ValueOutput	net.minecraft.world.level.storage.ValueOutput
 C	net.minecraft.world.level.storage.WorldData	net.minecraft.world.level.storage.SaveData
+C	net.minecraft.world.level.storage.loot.LootParams$Builder	net.minecraft.world.level.storage.loot.LootParams$a
 C	net.minecraft.world.phys.AABB	net.minecraft.world.phys.AxisAlignedBB
 C	net.minecraft.world.phys.Vec2	net.minecraft.world.phys.Vec2F
 C	net.minecraft.world.phys.Vec3	net.minecraft.world.phys.Vec3D
+C	net.minecraft.world.scores.DisplaySlot	net.minecraft.world.scores.DisplaySlot
+C	net.minecraft.world.scores.Objective	net.minecraft.world.scores.ScoreboardObjective
+C	net.minecraft.world.scores.Objective$Packed	net.minecraft.world.scores.ScoreboardObjective$a
+C	net.minecraft.world.scores.PlayerScores	net.minecraft.world.scores.PlayerScores
+C	net.minecraft.world.scores.PlayerTeam	net.minecraft.world.scores.ScoreboardTeam
+C	net.minecraft.world.scores.PlayerTeam$Packed	net.minecraft.world.scores.ScoreboardTeam$a
+C	net.minecraft.world.scores.Score	net.minecraft.world.scores.ScoreboardScore
 C	net.minecraft.world.scores.ScoreAccess	net.minecraft.world.scores.ScoreAccess
 C	net.minecraft.world.scores.ScoreHolder	net.minecraft.world.scores.ScoreHolder
+C	net.minecraft.world.scores.Scoreboard	net.minecraft.world.scores.Scoreboard
+C	net.minecraft.world.scores.Scoreboard$PackedScore	net.minecraft.world.scores.Scoreboard$a
 C	net.minecraft.world.scores.Team	net.minecraft.world.scores.ScoreboardTeamBase
 C	net.minecraft.world.scores.criteria.ObjectiveCriteria	net.minecraft.world.scores.criteria.IScoreboardCriteria
+C	net.minecraft.world.scores.criteria.ObjectiveCriteria$RenderType	net.minecraft.world.scores.criteria.IScoreboardCriteria$EnumScoreboardHealthDisplay
 F	net.minecraft.SharedConstants	SNAPSHOT	a
 F	net.minecraft.SharedConstants	WORLD_VERSION	b
 F	net.minecraft.SharedConstants	SERIES	c
@@ -457,6 +494,21 @@ M	net.minecraft.SharedConstants	tryDetectVersion		a
 M	net.minecraft.SharedConstants	getCurrentVersion		b
 M	net.minecraft.SharedConstants	getProtocolVersion		c
 M	net.minecraft.SharedConstants	debugVoidTerrain	net.minecraft.world.level.ChunkPos	a
+M	net.minecraft.core.Holder	value		a
+M	net.minecraft.core.Holder	isBound		b
+M	net.minecraft.core.Holder	is	net.minecraft.resources.Identifier	a
+M	net.minecraft.core.Holder	is	net.minecraft.resources.ResourceKey	a
+M	net.minecraft.core.Holder	is	java.util.function.Predicate	a
+M	net.minecraft.core.Holder	is	net.minecraft.tags.TagKey	a
+M	net.minecraft.core.Holder	is	net.minecraft.core.Holder	a
+M	net.minecraft.core.Holder	tags		c
+M	net.minecraft.core.Holder	unwrap		d
+M	net.minecraft.core.Holder	unwrapKey		e
+M	net.minecraft.core.Holder	kind		f
+M	net.minecraft.core.Holder	canSerializeIn	net.minecraft.core.HolderOwner	a
+M	net.minecraft.core.Holder	getRegisteredName		g
+M	net.minecraft.core.Holder	direct	java.lang.Object	a
+M	net.minecraft.core.Holder	lambda$getRegisteredName$0	net.minecraft.resources.ResourceKey	b
 F	net.minecraft.core.component.DataComponentType	CODEC	a
 F	net.minecraft.core.component.DataComponentType	STREAM_CODEC	b
 F	net.minecraft.core.component.DataComponentType	PERSISTENT_CODEC	c
@@ -894,6 +946,40 @@ M	net.minecraft.network.protocol.game.ClientboundAddEntityPacket	getYRot		l
 M	net.minecraft.network.protocol.game.ClientboundAddEntityPacket	getYHeadRot		m
 M	net.minecraft.network.protocol.game.ClientboundAddEntityPacket	getData		n
 M	net.minecraft.network.protocol.game.ClientboundAddEntityPacket	handle	net.minecraft.network.PacketListener	a
+F	net.minecraft.network.protocol.game.ClientboundBossEventPacket	STREAM_CODEC	a
+F	net.minecraft.network.protocol.game.ClientboundBossEventPacket	FLAG_DARKEN	b
+F	net.minecraft.network.protocol.game.ClientboundBossEventPacket	FLAG_MUSIC	c
+F	net.minecraft.network.protocol.game.ClientboundBossEventPacket	FLAG_FOG	d
+F	net.minecraft.network.protocol.game.ClientboundBossEventPacket	id	e
+F	net.minecraft.network.protocol.game.ClientboundBossEventPacket	operation	f
+F	net.minecraft.network.protocol.game.ClientboundBossEventPacket	REMOVE_OPERATION	g
+M	net.minecraft.network.protocol.game.ClientboundBossEventPacket	createAddPacket	net.minecraft.world.BossEvent	a
+M	net.minecraft.network.protocol.game.ClientboundBossEventPacket	createRemovePacket	java.util.UUID	a
+M	net.minecraft.network.protocol.game.ClientboundBossEventPacket	createUpdateProgressPacket	net.minecraft.world.BossEvent	b
+M	net.minecraft.network.protocol.game.ClientboundBossEventPacket	createUpdateNamePacket	net.minecraft.world.BossEvent	c
+M	net.minecraft.network.protocol.game.ClientboundBossEventPacket	createUpdateStylePacket	net.minecraft.world.BossEvent	d
+M	net.minecraft.network.protocol.game.ClientboundBossEventPacket	createUpdatePropertiesPacket	net.minecraft.world.BossEvent	e
+M	net.minecraft.network.protocol.game.ClientboundBossEventPacket	write	net.minecraft.network.RegistryFriendlyByteBuf	a
+M	net.minecraft.network.protocol.game.ClientboundBossEventPacket	encodeProperties	boolean,boolean,boolean	a
+M	net.minecraft.network.protocol.game.ClientboundBossEventPacket	type		a
+M	net.minecraft.network.protocol.game.ClientboundBossEventPacket	handle	net.minecraft.network.protocol.game.ClientGamePacketListener	a
+M	net.minecraft.network.protocol.game.ClientboundBossEventPacket	dispatch	net.minecraft.network.protocol.game.ClientboundBossEventPacket$Handler	a
+M	net.minecraft.network.protocol.game.ClientboundBossEventPacket	handle	net.minecraft.network.PacketListener	a
+M	net.minecraft.network.protocol.game.ClientboundBossEventPacket$Operation	getType		a
+M	net.minecraft.network.protocol.game.ClientboundBossEventPacket$Operation	dispatch	java.util.UUID,net.minecraft.network.protocol.game.ClientboundBossEventPacket$Handler	a
+M	net.minecraft.network.protocol.game.ClientboundBossEventPacket$Operation	write	net.minecraft.network.RegistryFriendlyByteBuf	a
+F	net.minecraft.network.protocol.game.ClientboundBossEventPacket$OperationType	ADD	a
+F	net.minecraft.network.protocol.game.ClientboundBossEventPacket$OperationType	REMOVE	b
+F	net.minecraft.network.protocol.game.ClientboundBossEventPacket$OperationType	UPDATE_PROGRESS	c
+F	net.minecraft.network.protocol.game.ClientboundBossEventPacket$OperationType	UPDATE_NAME	d
+F	net.minecraft.network.protocol.game.ClientboundBossEventPacket$OperationType	UPDATE_STYLE	e
+F	net.minecraft.network.protocol.game.ClientboundBossEventPacket$OperationType	UPDATE_PROPERTIES	f
+F	net.minecraft.network.protocol.game.ClientboundBossEventPacket$OperationType	reader	g
+F	net.minecraft.network.protocol.game.ClientboundBossEventPacket$OperationType	$VALUES	h
+M	net.minecraft.network.protocol.game.ClientboundBossEventPacket$OperationType	values		values
+M	net.minecraft.network.protocol.game.ClientboundBossEventPacket$OperationType	valueOf	java.lang.String	valueOf
+M	net.minecraft.network.protocol.game.ClientboundBossEventPacket$OperationType	lambda$static$0	net.minecraft.network.RegistryFriendlyByteBuf	a
+M	net.minecraft.network.protocol.game.ClientboundBossEventPacket$OperationType	$values		a
 M	net.minecraft.network.protocol.game.ClientboundBundlePacket	type		a
 M	net.minecraft.network.protocol.game.ClientboundBundlePacket	handle	net.minecraft.network.protocol.game.ClientGamePacketListener	a
 M	net.minecraft.network.protocol.game.ClientboundBundlePacket	handle	net.minecraft.network.PacketListener	a
@@ -925,6 +1011,15 @@ M	net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket	getSlot	
 M	net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket	getItem		f
 M	net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket	getStateId		g
 M	net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket	handle	net.minecraft.network.PacketListener	a
+F	net.minecraft.network.protocol.game.ClientboundEntityEventPacket	STREAM_CODEC	a
+F	net.minecraft.network.protocol.game.ClientboundEntityEventPacket	entityId	b
+F	net.minecraft.network.protocol.game.ClientboundEntityEventPacket	eventId	c
+M	net.minecraft.network.protocol.game.ClientboundEntityEventPacket	write	net.minecraft.network.FriendlyByteBuf	a
+M	net.minecraft.network.protocol.game.ClientboundEntityEventPacket	type		a
+M	net.minecraft.network.protocol.game.ClientboundEntityEventPacket	handle	net.minecraft.network.protocol.game.ClientGamePacketListener	a
+M	net.minecraft.network.protocol.game.ClientboundEntityEventPacket	getEntity	net.minecraft.world.level.Level	a
+M	net.minecraft.network.protocol.game.ClientboundEntityEventPacket	getEventId		b
+M	net.minecraft.network.protocol.game.ClientboundEntityEventPacket	handle	net.minecraft.network.PacketListener	a
 F	net.minecraft.network.protocol.game.ClientboundEntityPositionSyncPacket	id	b
 F	net.minecraft.network.protocol.game.ClientboundEntityPositionSyncPacket	values	c
 F	net.minecraft.network.protocol.game.ClientboundEntityPositionSyncPacket	onGround	d
@@ -939,6 +1034,46 @@ M	net.minecraft.network.protocol.game.ClientboundEntityPositionSyncPacket	id		b
 M	net.minecraft.network.protocol.game.ClientboundEntityPositionSyncPacket	values		e
 M	net.minecraft.network.protocol.game.ClientboundEntityPositionSyncPacket	onGround		f
 M	net.minecraft.network.protocol.game.ClientboundEntityPositionSyncPacket	handle	net.minecraft.network.PacketListener	a
+F	net.minecraft.network.protocol.game.ClientboundLevelEventPacket	STREAM_CODEC	a
+F	net.minecraft.network.protocol.game.ClientboundLevelEventPacket	type	b
+F	net.minecraft.network.protocol.game.ClientboundLevelEventPacket	pos	c
+F	net.minecraft.network.protocol.game.ClientboundLevelEventPacket	data	d
+F	net.minecraft.network.protocol.game.ClientboundLevelEventPacket	globalEvent	e
+M	net.minecraft.network.protocol.game.ClientboundLevelEventPacket	write	net.minecraft.network.FriendlyByteBuf	a
+M	net.minecraft.network.protocol.game.ClientboundLevelEventPacket	type		a
+M	net.minecraft.network.protocol.game.ClientboundLevelEventPacket	handle	net.minecraft.network.protocol.game.ClientGamePacketListener	a
+M	net.minecraft.network.protocol.game.ClientboundLevelEventPacket	isGlobalEvent		b
+M	net.minecraft.network.protocol.game.ClientboundLevelEventPacket	getType		e
+M	net.minecraft.network.protocol.game.ClientboundLevelEventPacket	getData		f
+M	net.minecraft.network.protocol.game.ClientboundLevelEventPacket	getPos		g
+M	net.minecraft.network.protocol.game.ClientboundLevelEventPacket	handle	net.minecraft.network.PacketListener	a
+F	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	STREAM_CODEC	a
+F	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	x	b
+F	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	y	c
+F	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	z	d
+F	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	xDist	e
+F	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	yDist	f
+F	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	zDist	g
+F	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	maxSpeed	h
+F	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	count	i
+F	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	overrideLimiter	j
+F	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	alwaysShow	k
+F	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	particle	l
+M	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	write	net.minecraft.network.RegistryFriendlyByteBuf	a
+M	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	type		a
+M	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	handle	net.minecraft.network.protocol.game.ClientGamePacketListener	a
+M	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	isOverrideLimiter		b
+M	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	alwaysShow		e
+M	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	getX		f
+M	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	getY		g
+M	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	getZ		h
+M	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	getXDist		i
+M	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	getYDist		j
+M	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	getZDist		k
+M	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	getMaxSpeed		l
+M	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	getCount		m
+M	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	getParticle		n
+M	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	handle	net.minecraft.network.PacketListener	a
 F	net.minecraft.network.protocol.game.ClientboundMapItemDataPacket	mapId	b
 F	net.minecraft.network.protocol.game.ClientboundMapItemDataPacket	scale	c
 F	net.minecraft.network.protocol.game.ClientboundMapItemDataPacket	locked	d
@@ -1023,6 +1158,15 @@ M	net.minecraft.network.protocol.game.ClientboundRemoveEntitiesPacket	type		a
 M	net.minecraft.network.protocol.game.ClientboundRemoveEntitiesPacket	handle	net.minecraft.network.protocol.game.ClientGamePacketListener	a
 M	net.minecraft.network.protocol.game.ClientboundRemoveEntitiesPacket	getEntityIds		b
 M	net.minecraft.network.protocol.game.ClientboundRemoveEntitiesPacket	handle	net.minecraft.network.PacketListener	a
+F	net.minecraft.network.protocol.game.ClientboundSetActionBarTextPacket	text	b
+F	net.minecraft.network.protocol.game.ClientboundSetActionBarTextPacket	STREAM_CODEC	a
+M	net.minecraft.network.protocol.game.ClientboundSetActionBarTextPacket	type		a
+M	net.minecraft.network.protocol.game.ClientboundSetActionBarTextPacket	handle	net.minecraft.network.protocol.game.ClientGamePacketListener	a
+M	net.minecraft.network.protocol.game.ClientboundSetActionBarTextPacket	toString		toString
+M	net.minecraft.network.protocol.game.ClientboundSetActionBarTextPacket	hashCode		hashCode
+M	net.minecraft.network.protocol.game.ClientboundSetActionBarTextPacket	equals	java.lang.Object	equals
+M	net.minecraft.network.protocol.game.ClientboundSetActionBarTextPacket	text		b
+M	net.minecraft.network.protocol.game.ClientboundSetActionBarTextPacket	handle	net.minecraft.network.PacketListener	a
 F	net.minecraft.network.protocol.game.ClientboundSetCameraPacket	STREAM_CODEC	a
 F	net.minecraft.network.protocol.game.ClientboundSetCameraPacket	cameraId	b
 M	net.minecraft.network.protocol.game.ClientboundSetCameraPacket	write	net.minecraft.network.FriendlyByteBuf	a
@@ -1030,6 +1174,15 @@ M	net.minecraft.network.protocol.game.ClientboundSetCameraPacket	type		a
 M	net.minecraft.network.protocol.game.ClientboundSetCameraPacket	handle	net.minecraft.network.protocol.game.ClientGamePacketListener	a
 M	net.minecraft.network.protocol.game.ClientboundSetCameraPacket	getEntity	net.minecraft.world.level.Level	a
 M	net.minecraft.network.protocol.game.ClientboundSetCameraPacket	handle	net.minecraft.network.PacketListener	a
+F	net.minecraft.network.protocol.game.ClientboundSetDisplayObjectivePacket	STREAM_CODEC	a
+F	net.minecraft.network.protocol.game.ClientboundSetDisplayObjectivePacket	slot	b
+F	net.minecraft.network.protocol.game.ClientboundSetDisplayObjectivePacket	objectiveName	c
+M	net.minecraft.network.protocol.game.ClientboundSetDisplayObjectivePacket	write	net.minecraft.network.FriendlyByteBuf	a
+M	net.minecraft.network.protocol.game.ClientboundSetDisplayObjectivePacket	type		a
+M	net.minecraft.network.protocol.game.ClientboundSetDisplayObjectivePacket	handle	net.minecraft.network.protocol.game.ClientGamePacketListener	a
+M	net.minecraft.network.protocol.game.ClientboundSetDisplayObjectivePacket	getSlot		b
+M	net.minecraft.network.protocol.game.ClientboundSetDisplayObjectivePacket	getObjectiveName		e
+M	net.minecraft.network.protocol.game.ClientboundSetDisplayObjectivePacket	handle	net.minecraft.network.PacketListener	a
 F	net.minecraft.network.protocol.game.ClientboundSetEntityDataPacket	id	c
 F	net.minecraft.network.protocol.game.ClientboundSetEntityDataPacket	packedItems	d
 F	net.minecraft.network.protocol.game.ClientboundSetEntityDataPacket	STREAM_CODEC	a
@@ -1045,6 +1198,24 @@ M	net.minecraft.network.protocol.game.ClientboundSetEntityDataPacket	equals	java
 M	net.minecraft.network.protocol.game.ClientboundSetEntityDataPacket	id		b
 M	net.minecraft.network.protocol.game.ClientboundSetEntityDataPacket	packedItems		e
 M	net.minecraft.network.protocol.game.ClientboundSetEntityDataPacket	handle	net.minecraft.network.PacketListener	a
+F	net.minecraft.network.protocol.game.ClientboundSetObjectivePacket	STREAM_CODEC	a
+F	net.minecraft.network.protocol.game.ClientboundSetObjectivePacket	METHOD_ADD	b
+F	net.minecraft.network.protocol.game.ClientboundSetObjectivePacket	METHOD_REMOVE	c
+F	net.minecraft.network.protocol.game.ClientboundSetObjectivePacket	METHOD_CHANGE	d
+F	net.minecraft.network.protocol.game.ClientboundSetObjectivePacket	objectiveName	e
+F	net.minecraft.network.protocol.game.ClientboundSetObjectivePacket	displayName	f
+F	net.minecraft.network.protocol.game.ClientboundSetObjectivePacket	renderType	g
+F	net.minecraft.network.protocol.game.ClientboundSetObjectivePacket	numberFormat	h
+F	net.minecraft.network.protocol.game.ClientboundSetObjectivePacket	method	i
+M	net.minecraft.network.protocol.game.ClientboundSetObjectivePacket	write	net.minecraft.network.RegistryFriendlyByteBuf	a
+M	net.minecraft.network.protocol.game.ClientboundSetObjectivePacket	type		a
+M	net.minecraft.network.protocol.game.ClientboundSetObjectivePacket	handle	net.minecraft.network.protocol.game.ClientGamePacketListener	a
+M	net.minecraft.network.protocol.game.ClientboundSetObjectivePacket	getObjectiveName		b
+M	net.minecraft.network.protocol.game.ClientboundSetObjectivePacket	getDisplayName		e
+M	net.minecraft.network.protocol.game.ClientboundSetObjectivePacket	getMethod		f
+M	net.minecraft.network.protocol.game.ClientboundSetObjectivePacket	getRenderType		g
+M	net.minecraft.network.protocol.game.ClientboundSetObjectivePacket	getNumberFormat		h
+M	net.minecraft.network.protocol.game.ClientboundSetObjectivePacket	handle	net.minecraft.network.PacketListener	a
 F	net.minecraft.network.protocol.game.ClientboundSetPlayerInventoryPacket	slot	b
 F	net.minecraft.network.protocol.game.ClientboundSetPlayerInventoryPacket	contents	c
 F	net.minecraft.network.protocol.game.ClientboundSetPlayerInventoryPacket	STREAM_CODEC	a
@@ -1056,6 +1227,18 @@ M	net.minecraft.network.protocol.game.ClientboundSetPlayerInventoryPacket	equals
 M	net.minecraft.network.protocol.game.ClientboundSetPlayerInventoryPacket	slot		b
 M	net.minecraft.network.protocol.game.ClientboundSetPlayerInventoryPacket	contents		e
 M	net.minecraft.network.protocol.game.ClientboundSetPlayerInventoryPacket	handle	net.minecraft.network.PacketListener	a
+F	net.minecraft.network.protocol.game.ClientboundSystemChatPacket	content	b
+F	net.minecraft.network.protocol.game.ClientboundSystemChatPacket	overlay	c
+F	net.minecraft.network.protocol.game.ClientboundSystemChatPacket	STREAM_CODEC	a
+M	net.minecraft.network.protocol.game.ClientboundSystemChatPacket	type		a
+M	net.minecraft.network.protocol.game.ClientboundSystemChatPacket	handle	net.minecraft.network.protocol.game.ClientGamePacketListener	a
+M	net.minecraft.network.protocol.game.ClientboundSystemChatPacket	isSkippable		c
+M	net.minecraft.network.protocol.game.ClientboundSystemChatPacket	toString		toString
+M	net.minecraft.network.protocol.game.ClientboundSystemChatPacket	hashCode		hashCode
+M	net.minecraft.network.protocol.game.ClientboundSystemChatPacket	equals	java.lang.Object	equals
+M	net.minecraft.network.protocol.game.ClientboundSystemChatPacket	content		b
+M	net.minecraft.network.protocol.game.ClientboundSystemChatPacket	overlay		e
+M	net.minecraft.network.protocol.game.ClientboundSystemChatPacket	handle	net.minecraft.network.PacketListener	a
 F	net.minecraft.network.protocol.game.ClientboundTeleportEntityPacket	id	b
 F	net.minecraft.network.protocol.game.ClientboundTeleportEntityPacket	change	c
 F	net.minecraft.network.protocol.game.ClientboundTeleportEntityPacket	relatives	d
@@ -1072,6 +1255,25 @@ M	net.minecraft.network.protocol.game.ClientboundTeleportEntityPacket	change		e
 M	net.minecraft.network.protocol.game.ClientboundTeleportEntityPacket	relatives		f
 M	net.minecraft.network.protocol.game.ClientboundTeleportEntityPacket	onGround		g
 M	net.minecraft.network.protocol.game.ClientboundTeleportEntityPacket	handle	net.minecraft.network.PacketListener	a
+F	net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket	STREAM_CODEC	a
+F	net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket	entityId	b
+F	net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket	attributes	c
+M	net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket	type		a
+M	net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket	handle	net.minecraft.network.protocol.game.ClientGamePacketListener	a
+M	net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket	getEntityId		b
+M	net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket	getValues		e
+M	net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket	handle	net.minecraft.network.PacketListener	a
+F	net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket$AttributeSnapshot	attribute	c
+F	net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket$AttributeSnapshot	base	d
+F	net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket$AttributeSnapshot	modifiers	e
+F	net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket$AttributeSnapshot	MODIFIER_STREAM_CODEC	a
+F	net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket$AttributeSnapshot	STREAM_CODEC	b
+M	net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket$AttributeSnapshot	toString		toString
+M	net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket$AttributeSnapshot	hashCode		hashCode
+M	net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket$AttributeSnapshot	equals	java.lang.Object	equals
+M	net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket$AttributeSnapshot	attribute		a
+M	net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket$AttributeSnapshot	base		b
+M	net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket$AttributeSnapshot	modifiers		c
 F	net.minecraft.network.protocol.game.ServerboundAcceptTeleportationPacket	STREAM_CODEC	a
 F	net.minecraft.network.protocol.game.ServerboundAcceptTeleportationPacket	id	b
 M	net.minecraft.network.protocol.game.ServerboundAcceptTeleportationPacket	write	net.minecraft.network.FriendlyByteBuf	a
@@ -2054,6 +2256,29 @@ M	net.minecraft.server.network.ServerGamePacketListenerImpl	lambda$handleEditBoo
 M	net.minecraft.server.network.ServerGamePacketListenerImpl	lambda$handleTestInstanceBlockAction$2	net.minecraft.resources.ResourceKey	a
 M	net.minecraft.server.network.ServerGamePacketListenerImpl	lambda$handleCustomCommandSuggestions$1	net.minecraft.network.protocol.game.ServerboundCommandSuggestionPacket,com.mojang.brigadier.suggestion.Suggestions	a
 M	net.minecraft.server.network.ServerGamePacketListenerImpl	lambda$filterTextPacket$0	java.lang.Object	a
+F	net.minecraft.world.BossEvent	id	h
+F	net.minecraft.world.BossEvent	name	a
+F	net.minecraft.world.BossEvent	progress	b
+F	net.minecraft.world.BossEvent	color	c
+F	net.minecraft.world.BossEvent	overlay	d
+F	net.minecraft.world.BossEvent	darkenScreen	e
+F	net.minecraft.world.BossEvent	playBossMusic	f
+F	net.minecraft.world.BossEvent	createWorldFog	g
+M	net.minecraft.world.BossEvent	getId		i
+M	net.minecraft.world.BossEvent	getName		j
+M	net.minecraft.world.BossEvent	setName	net.minecraft.network.chat.Component	a
+M	net.minecraft.world.BossEvent	getProgress		k
+M	net.minecraft.world.BossEvent	setProgress	float	a
+M	net.minecraft.world.BossEvent	getColor		l
+M	net.minecraft.world.BossEvent	setColor	net.minecraft.world.BossEvent$BossBarColor	a
+M	net.minecraft.world.BossEvent	getOverlay		m
+M	net.minecraft.world.BossEvent	setOverlay	net.minecraft.world.BossEvent$BossBarOverlay	a
+M	net.minecraft.world.BossEvent	shouldDarkenScreen		n
+M	net.minecraft.world.BossEvent	setDarkenScreen	boolean	a
+M	net.minecraft.world.BossEvent	shouldPlayBossMusic		o
+M	net.minecraft.world.BossEvent	setPlayBossMusic	boolean	b
+M	net.minecraft.world.BossEvent	setCreateWorldFog	boolean	c
+M	net.minecraft.world.BossEvent	shouldCreateWorldFog		p
 F	net.minecraft.world.InteractionHand	MAIN_HAND	a
 F	net.minecraft.world.InteractionHand	OFF_HAND	b
 F	net.minecraft.world.InteractionHand	$VALUES	c
@@ -3029,6 +3254,501 @@ M	net.minecraft.world.entity.EntityType	lambda$static$3		K
 M	net.minecraft.world.entity.EntityType	lambda$static$2		L
 M	net.minecraft.world.entity.EntityType	lambda$static$1		M
 M	net.minecraft.world.entity.EntityType	lambda$static$0		N
+F	net.minecraft.world.entity.LivingEntity	LOGGER	a
+F	net.minecraft.world.entity.LivingEntity	TAG_ACTIVE_EFFECTS	b
+F	net.minecraft.world.entity.LivingEntity	TAG_ATTRIBUTES	u
+F	net.minecraft.world.entity.LivingEntity	TAG_SLEEPING_POS	aN
+F	net.minecraft.world.entity.LivingEntity	TAG_EQUIPMENT	aO
+F	net.minecraft.world.entity.LivingEntity	TAG_BRAIN	aP
+F	net.minecraft.world.entity.LivingEntity	TAG_FALL_FLYING	aQ
+F	net.minecraft.world.entity.LivingEntity	TAG_HURT_TIME	aR
+F	net.minecraft.world.entity.LivingEntity	TAG_DEATH_TIME	aS
+F	net.minecraft.world.entity.LivingEntity	TAG_HURT_BY_TIMESTAMP	aT
+F	net.minecraft.world.entity.LivingEntity	TAG_HEALTH	aU
+F	net.minecraft.world.entity.LivingEntity	SPEED_MODIFIER_POWDER_SNOW_ID	c
+F	net.minecraft.world.entity.LivingEntity	SPRINTING_MODIFIER_ID	d
+F	net.minecraft.world.entity.LivingEntity	SPEED_MODIFIER_SPRINTING	e
+F	net.minecraft.world.entity.LivingEntity	EQUIPMENT_SLOT_OFFSET	aV
+F	net.minecraft.world.entity.LivingEntity	ARMOR_SLOT_OFFSET	aW
+F	net.minecraft.world.entity.LivingEntity	BODY_ARMOR_OFFSET	aX
+F	net.minecraft.world.entity.LivingEntity	SADDLE_OFFSET	aY
+F	net.minecraft.world.entity.LivingEntity	PLAYER_HURT_EXPERIENCE_TIME	aZ
+F	net.minecraft.world.entity.LivingEntity	DAMAGE_SOURCE_TIMEOUT	r
+F	net.minecraft.world.entity.LivingEntity	MIN_MOVEMENT_DISTANCE	ba
+F	net.minecraft.world.entity.LivingEntity	DEFAULT_BASE_GRAVITY	bb
+F	net.minecraft.world.entity.LivingEntity	DEATH_DURATION	bc
+F	net.minecraft.world.entity.LivingEntity	INPUT_FRICTION	bd
+F	net.minecraft.world.entity.LivingEntity	TICKS_PER_ELYTRA_FREE_FALL_EVENT	s
+F	net.minecraft.world.entity.LivingEntity	FREE_FALL_EVENTS_PER_ELYTRA_BREAK	t
+F	net.minecraft.world.entity.LivingEntity	BASE_JUMP_POWER	be
+F	net.minecraft.world.entity.LivingEntity	DEFAULT_KNOCKBACK	bf
+F	net.minecraft.world.entity.LivingEntity	INVULNERABLE_DURATION	bg
+F	net.minecraft.world.entity.LivingEntity	MAX_LINE_OF_SIGHT_TEST_RANGE	cc
+F	net.minecraft.world.entity.LivingEntity	LIVING_ENTITY_FLAG_IS_USING	bh
+F	net.minecraft.world.entity.LivingEntity	LIVING_ENTITY_FLAG_OFF_HAND	bi
+F	net.minecraft.world.entity.LivingEntity	LIVING_ENTITY_FLAG_SPIN_ATTACK	bj
+F	net.minecraft.world.entity.LivingEntity	DATA_LIVING_ENTITY_FLAGS	bk
+F	net.minecraft.world.entity.LivingEntity	DATA_HEALTH_ID	cd
+F	net.minecraft.world.entity.LivingEntity	DATA_EFFECT_PARTICLES	ce
+F	net.minecraft.world.entity.LivingEntity	DATA_EFFECT_AMBIENCE_ID	cf
+F	net.minecraft.world.entity.LivingEntity	DATA_ARROW_COUNT_ID	cg
+F	net.minecraft.world.entity.LivingEntity	DATA_STINGER_COUNT_ID	ch
+F	net.minecraft.world.entity.LivingEntity	SLEEPING_POS_ID	ci
+F	net.minecraft.world.entity.LivingEntity	PARTICLE_FREQUENCY_WHEN_INVISIBLE	cj
+F	net.minecraft.world.entity.LivingEntity	SLEEPING_DIMENSIONS	bl
+F	net.minecraft.world.entity.LivingEntity	EXTRA_RENDER_CULLING_SIZE_WITH_BIG_HAT	bm
+F	net.minecraft.world.entity.LivingEntity	DEFAULT_BABY_SCALE	bn
+F	net.minecraft.world.entity.LivingEntity	WATER_FLOAT_IMPULSE	ck
+F	net.minecraft.world.entity.LivingEntity	PLAYER_NOT_WEARING_DISGUISE_ITEM	bo
+F	net.minecraft.world.entity.LivingEntity	EMPTY_BRAIN	cl
+F	net.minecraft.world.entity.LivingEntity	attributes	cm
+F	net.minecraft.world.entity.LivingEntity	combatTracker	cn
+F	net.minecraft.world.entity.LivingEntity	activeEffects	co
+F	net.minecraft.world.entity.LivingEntity	lastEquipmentItems	cp
+F	net.minecraft.world.entity.LivingEntity	swinging	bp
+F	net.minecraft.world.entity.LivingEntity	discardFriction	cq
+F	net.minecraft.world.entity.LivingEntity	swingingArm	bq
+F	net.minecraft.world.entity.LivingEntity	swingTime	br
+F	net.minecraft.world.entity.LivingEntity	removeArrowTime	bs
+F	net.minecraft.world.entity.LivingEntity	removeStingerTime	bt
+F	net.minecraft.world.entity.LivingEntity	hurtTime	bu
+F	net.minecraft.world.entity.LivingEntity	hurtDuration	bv
+F	net.minecraft.world.entity.LivingEntity	deathTime	bw
+F	net.minecraft.world.entity.LivingEntity	oAttackAnim	bx
+F	net.minecraft.world.entity.LivingEntity	attackAnim	by
+F	net.minecraft.world.entity.LivingEntity	attackStrengthTicker	bz
+F	net.minecraft.world.entity.LivingEntity	itemSwapTicker	bA
+F	net.minecraft.world.entity.LivingEntity	walkAnimation	bB
+F	net.minecraft.world.entity.LivingEntity	yBodyRot	bC
+F	net.minecraft.world.entity.LivingEntity	yBodyRotO	bD
+F	net.minecraft.world.entity.LivingEntity	yHeadRot	bE
+F	net.minecraft.world.entity.LivingEntity	yHeadRotO	bF
+F	net.minecraft.world.entity.LivingEntity	elytraAnimationState	bG
+F	net.minecraft.world.entity.LivingEntity	lastHurtByPlayer	bH
+F	net.minecraft.world.entity.LivingEntity	lastHurtByPlayerMemoryTime	bI
+F	net.minecraft.world.entity.LivingEntity	dead	bJ
+F	net.minecraft.world.entity.LivingEntity	noActionTime	bK
+F	net.minecraft.world.entity.LivingEntity	lastHurt	bL
+F	net.minecraft.world.entity.LivingEntity	jumping	bM
+F	net.minecraft.world.entity.LivingEntity	xxa	bN
+F	net.minecraft.world.entity.LivingEntity	yya	bO
+F	net.minecraft.world.entity.LivingEntity	zza	bP
+F	net.minecraft.world.entity.LivingEntity	interpolation	bQ
+F	net.minecraft.world.entity.LivingEntity	lerpYHeadRot	bR
+F	net.minecraft.world.entity.LivingEntity	lerpHeadSteps	bS
+F	net.minecraft.world.entity.LivingEntity	effectsDirty	cr
+F	net.minecraft.world.entity.LivingEntity	lastHurtByMob	cs
+F	net.minecraft.world.entity.LivingEntity	lastHurtByMobTimestamp	ct
+F	net.minecraft.world.entity.LivingEntity	lastHurtMob	cu
+F	net.minecraft.world.entity.LivingEntity	lastHurtMobTimestamp	cv
+F	net.minecraft.world.entity.LivingEntity	speed	cw
+F	net.minecraft.world.entity.LivingEntity	noJumpDelay	cx
+F	net.minecraft.world.entity.LivingEntity	absorptionAmount	cy
+F	net.minecraft.world.entity.LivingEntity	useItem	bT
+F	net.minecraft.world.entity.LivingEntity	useItemRemaining	bU
+F	net.minecraft.world.entity.LivingEntity	fallFlyTicks	bV
+F	net.minecraft.world.entity.LivingEntity	lastKineticHitFeedbackTime	cz
+F	net.minecraft.world.entity.LivingEntity	lastPos	cA
+F	net.minecraft.world.entity.LivingEntity	lastClimbablePos	cB
+F	net.minecraft.world.entity.LivingEntity	lastDamageSource	cC
+F	net.minecraft.world.entity.LivingEntity	lastDamageStamp	cD
+F	net.minecraft.world.entity.LivingEntity	autoSpinAttackTicks	bW
+F	net.minecraft.world.entity.LivingEntity	autoSpinAttackDmg	bX
+F	net.minecraft.world.entity.LivingEntity	autoSpinAttackItemStack	bY
+F	net.minecraft.world.entity.LivingEntity	recentKineticEnemies	bZ
+F	net.minecraft.world.entity.LivingEntity	swimAmount	cE
+F	net.minecraft.world.entity.LivingEntity	swimAmountO	cF
+F	net.minecraft.world.entity.LivingEntity	brain	ca
+F	net.minecraft.world.entity.LivingEntity	skipDropExperience	cG
+F	net.minecraft.world.entity.LivingEntity	activeLocationDependentEnchantments	cH
+F	net.minecraft.world.entity.LivingEntity	equipment	cb
+F	net.minecraft.world.entity.LivingEntity	locatorBarIcon	cI
+M	net.minecraft.world.entity.LivingEntity	asLivingEntity		et
+M	net.minecraft.world.entity.LivingEntity	createEquipment		eu
+M	net.minecraft.world.entity.LivingEntity	getBrain		ev
+M	net.minecraft.world.entity.LivingEntity	brainProvider		ew
+M	net.minecraft.world.entity.LivingEntity	makeBrain	com.mojang.serialization.Dynamic	a
+M	net.minecraft.world.entity.LivingEntity	kill	net.minecraft.server.level.ServerLevel	c
+M	net.minecraft.world.entity.LivingEntity	canAttackType	net.minecraft.world.entity.EntityType	a
+M	net.minecraft.world.entity.LivingEntity	defineSynchedData	net.minecraft.network.syncher.SynchedEntityData$Builder	a
+M	net.minecraft.world.entity.LivingEntity	createLivingAttributes		ex
+M	net.minecraft.world.entity.LivingEntity	checkFallDamage	double,boolean,net.minecraft.world.level.block.state.BlockState,net.minecraft.core.BlockPos	a
+M	net.minecraft.world.entity.LivingEntity	canBreatheUnderwater		ey
+M	net.minecraft.world.entity.LivingEntity	getSwimAmount	float	b
+M	net.minecraft.world.entity.LivingEntity	hasLandedInLiquid		ez
+M	net.minecraft.world.entity.LivingEntity	baseTick		aJ
+M	net.minecraft.world.entity.LivingEntity	shouldTakeDrowningDamage		eA
+M	net.minecraft.world.entity.LivingEntity	getBlockSpeedFactor		bi
+M	net.minecraft.world.entity.LivingEntity	getLuck		eB
+M	net.minecraft.world.entity.LivingEntity	removeFrost		eC
+M	net.minecraft.world.entity.LivingEntity	tryAddFrost		eD
+M	net.minecraft.world.entity.LivingEntity	onChangedBlock	net.minecraft.server.level.ServerLevel,net.minecraft.core.BlockPos	b
+M	net.minecraft.world.entity.LivingEntity	isBaby		e_
+M	net.minecraft.world.entity.LivingEntity	getAgeScale		eE
+M	net.minecraft.world.entity.LivingEntity	getScale		eF
+M	net.minecraft.world.entity.LivingEntity	sanitizeScale	float	c
+M	net.minecraft.world.entity.LivingEntity	isAffectedByFluids		eG
+M	net.minecraft.world.entity.LivingEntity	tickDeath		eH
+M	net.minecraft.world.entity.LivingEntity	shouldDropExperience		eI
+M	net.minecraft.world.entity.LivingEntity	shouldDropLoot	net.minecraft.server.level.ServerLevel	e
+M	net.minecraft.world.entity.LivingEntity	decreaseAirSupply	int	l
+M	net.minecraft.world.entity.LivingEntity	increaseAirSupply	int	m
+M	net.minecraft.world.entity.LivingEntity	getExperienceReward	net.minecraft.server.level.ServerLevel,net.minecraft.world.entity.Entity	a
+M	net.minecraft.world.entity.LivingEntity	getBaseExperienceReward	net.minecraft.server.level.ServerLevel	f
+M	net.minecraft.world.entity.LivingEntity	isAlwaysExperienceDropper		eJ
+M	net.minecraft.world.entity.LivingEntity	getLastHurtByMob		eK
+M	net.minecraft.world.entity.LivingEntity	getLastHurtByPlayer		eL
+M	net.minecraft.world.entity.LivingEntity	getLastAttacker		f_
+M	net.minecraft.world.entity.LivingEntity	getLastHurtByMobTimestamp		eM
+M	net.minecraft.world.entity.LivingEntity	setLastHurtByPlayer	net.minecraft.world.entity.player.Player,int	a
+M	net.minecraft.world.entity.LivingEntity	setLastHurtByPlayer	java.util.UUID,int	a
+M	net.minecraft.world.entity.LivingEntity	setLastHurtByPlayer	net.minecraft.world.entity.EntityReference,int	a
+M	net.minecraft.world.entity.LivingEntity	setLastHurtByMob	net.minecraft.world.entity.LivingEntity	a
+M	net.minecraft.world.entity.LivingEntity	getLastHurtMob		eN
+M	net.minecraft.world.entity.LivingEntity	getLastHurtMobTimestamp		eO
+M	net.minecraft.world.entity.LivingEntity	setLastHurtMob	net.minecraft.world.entity.Entity	C
+M	net.minecraft.world.entity.LivingEntity	getNoActionTime		eP
+M	net.minecraft.world.entity.LivingEntity	setNoActionTime	int	n
+M	net.minecraft.world.entity.LivingEntity	shouldDiscardFriction		eQ
+M	net.minecraft.world.entity.LivingEntity	setDiscardFriction	boolean	r
+M	net.minecraft.world.entity.LivingEntity	doesEmitEquipEvent	net.minecraft.world.entity.EquipmentSlot	b
+M	net.minecraft.world.entity.LivingEntity	onEquipItem	net.minecraft.world.entity.EquipmentSlot,net.minecraft.world.item.ItemStack,net.minecraft.world.item.ItemStack	a
+M	net.minecraft.world.entity.LivingEntity	getEquipSound	net.minecraft.world.entity.EquipmentSlot,net.minecraft.world.item.ItemStack,net.minecraft.world.item.equipment.Equippable	a
+M	net.minecraft.world.entity.LivingEntity	remove	net.minecraft.world.entity.Entity$RemovalReason	a
+M	net.minecraft.world.entity.LivingEntity	onRemoval	net.minecraft.world.entity.Entity$RemovalReason	b
+M	net.minecraft.world.entity.LivingEntity	triggerOnDeathMobEffects	net.minecraft.server.level.ServerLevel,net.minecraft.world.entity.Entity$RemovalReason	a
+M	net.minecraft.world.entity.LivingEntity	addAdditionalSaveData	net.minecraft.world.level.storage.ValueOutput	a
+M	net.minecraft.world.entity.LivingEntity	drop	net.minecraft.world.item.ItemStack,boolean,boolean	a
+M	net.minecraft.world.entity.LivingEntity	readAdditionalSaveData	net.minecraft.world.level.storage.ValueInput	a
+M	net.minecraft.world.entity.LivingEntity	updateDataBeforeSync		aI
+M	net.minecraft.world.entity.LivingEntity	tickEffects		eR
+M	net.minecraft.world.entity.LivingEntity	updateDirtyEffects		k
+M	net.minecraft.world.entity.LivingEntity	updateInvisibilityStatus		M
+M	net.minecraft.world.entity.LivingEntity	updateSynchronizedMobEffectParticles		p
+M	net.minecraft.world.entity.LivingEntity	updateGlowingStatus		D
+M	net.minecraft.world.entity.LivingEntity	getVisibilityPercent	net.minecraft.world.entity.Entity	D
+M	net.minecraft.world.entity.LivingEntity	canAttack	net.minecraft.world.entity.LivingEntity	c
+M	net.minecraft.world.entity.LivingEntity	canBeSeenAsEnemy		eS
+M	net.minecraft.world.entity.LivingEntity	canBeSeenByAnyone		eT
+M	net.minecraft.world.entity.LivingEntity	areAllEffectsAmbient	java.util.Collection	d
+M	net.minecraft.world.entity.LivingEntity	removeEffectParticles		eU
+M	net.minecraft.world.entity.LivingEntity	removeAllEffects		eV
+M	net.minecraft.world.entity.LivingEntity	getActiveEffects		eW
+M	net.minecraft.world.entity.LivingEntity	getActiveEffectsMap		eX
+M	net.minecraft.world.entity.LivingEntity	hasEffect	net.minecraft.core.Holder	d
+M	net.minecraft.world.entity.LivingEntity	getEffect	net.minecraft.core.Holder	e
+M	net.minecraft.world.entity.LivingEntity	getEffectBlendFactor	net.minecraft.core.Holder,float	a
+M	net.minecraft.world.entity.LivingEntity	addEffect	net.minecraft.world.effect.MobEffectInstance	a
+M	net.minecraft.world.entity.LivingEntity	addEffect	net.minecraft.world.effect.MobEffectInstance,net.minecraft.world.entity.Entity	b
+M	net.minecraft.world.entity.LivingEntity	canBeAffected	net.minecraft.world.effect.MobEffectInstance	b
+M	net.minecraft.world.entity.LivingEntity	forceAddEffect	net.minecraft.world.effect.MobEffectInstance,net.minecraft.world.entity.Entity	c
+M	net.minecraft.world.entity.LivingEntity	isInvertedHealAndHarm		eY
+M	net.minecraft.world.entity.LivingEntity	removeEffectNoUpdate	net.minecraft.core.Holder	f
+M	net.minecraft.world.entity.LivingEntity	removeEffect	net.minecraft.core.Holder	g
+M	net.minecraft.world.entity.LivingEntity	onEffectAdded	net.minecraft.world.effect.MobEffectInstance,net.minecraft.world.entity.Entity	a
+M	net.minecraft.world.entity.LivingEntity	sendEffectToPassengers	net.minecraft.world.effect.MobEffectInstance	c
+M	net.minecraft.world.entity.LivingEntity	onEffectUpdated	net.minecraft.world.effect.MobEffectInstance,boolean,net.minecraft.world.entity.Entity	a
+M	net.minecraft.world.entity.LivingEntity	onEffectsRemoved	java.util.Collection	c
+M	net.minecraft.world.entity.LivingEntity	refreshDirtyAttributes		E
+M	net.minecraft.world.entity.LivingEntity	onAttributeUpdated	net.minecraft.core.Holder	a
+M	net.minecraft.world.entity.LivingEntity	heal	float	d
+M	net.minecraft.world.entity.LivingEntity	getHealth		eZ
+M	net.minecraft.world.entity.LivingEntity	setHealth	float	x
+M	net.minecraft.world.entity.LivingEntity	isDeadOrDying		fa
+M	net.minecraft.world.entity.LivingEntity	hurtServer	net.minecraft.server.level.ServerLevel,net.minecraft.world.damagesource.DamageSource,float	a
+M	net.minecraft.world.entity.LivingEntity	applyItemBlocking	net.minecraft.server.level.ServerLevel,net.minecraft.world.damagesource.DamageSource,float	b
+M	net.minecraft.world.entity.LivingEntity	playSecondaryHurtSound	net.minecraft.world.damagesource.DamageSource	i
+M	net.minecraft.world.entity.LivingEntity	resolveMobResponsibleForDamage	net.minecraft.world.damagesource.DamageSource	e
+M	net.minecraft.world.entity.LivingEntity	resolvePlayerResponsibleForDamage	net.minecraft.world.damagesource.DamageSource	f
+M	net.minecraft.world.entity.LivingEntity	blockUsingItem	net.minecraft.server.level.ServerLevel,net.minecraft.world.entity.LivingEntity	a
+M	net.minecraft.world.entity.LivingEntity	blockedByItem	net.minecraft.world.entity.LivingEntity	d
+M	net.minecraft.world.entity.LivingEntity	checkTotemDeathProtection	net.minecraft.world.damagesource.DamageSource	j
+M	net.minecraft.world.entity.LivingEntity	getLastDamageSource		fb
+M	net.minecraft.world.entity.LivingEntity	playHurtSound	net.minecraft.world.damagesource.DamageSource	g
+M	net.minecraft.world.entity.LivingEntity	makeSound	net.minecraft.sounds.SoundEvent	b
+M	net.minecraft.world.entity.LivingEntity	breakItem	net.minecraft.world.item.ItemStack	g
+M	net.minecraft.world.entity.LivingEntity	die	net.minecraft.world.damagesource.DamageSource	a
+M	net.minecraft.world.entity.LivingEntity	createWitherRose	net.minecraft.world.entity.LivingEntity	e
+M	net.minecraft.world.entity.LivingEntity	dropAllDeathLoot	net.minecraft.server.level.ServerLevel,net.minecraft.world.damagesource.DamageSource	b
+M	net.minecraft.world.entity.LivingEntity	dropEquipment	net.minecraft.server.level.ServerLevel	g
+M	net.minecraft.world.entity.LivingEntity	dropExperience	net.minecraft.server.level.ServerLevel,net.minecraft.world.entity.Entity	b
+M	net.minecraft.world.entity.LivingEntity	dropCustomDeathLoot	net.minecraft.server.level.ServerLevel,net.minecraft.world.damagesource.DamageSource,boolean	a
+M	net.minecraft.world.entity.LivingEntity	getLootTableSeed		fc
+M	net.minecraft.world.entity.LivingEntity	getKnockback	net.minecraft.world.entity.Entity,net.minecraft.world.damagesource.DamageSource	b
+M	net.minecraft.world.entity.LivingEntity	dropFromLootTable	net.minecraft.server.level.ServerLevel,net.minecraft.world.damagesource.DamageSource,boolean	b
+M	net.minecraft.world.entity.LivingEntity	dropFromLootTable	net.minecraft.server.level.ServerLevel,net.minecraft.world.damagesource.DamageSource,boolean,net.minecraft.resources.ResourceKey	a
+M	net.minecraft.world.entity.LivingEntity	dropFromLootTable	net.minecraft.server.level.ServerLevel,net.minecraft.world.damagesource.DamageSource,boolean,net.minecraft.resources.ResourceKey,java.util.function.Consumer	a
+M	net.minecraft.world.entity.LivingEntity	dropFromEntityInteractLootTable	net.minecraft.server.level.ServerLevel,net.minecraft.resources.ResourceKey,net.minecraft.world.entity.Entity,net.minecraft.world.item.ItemStack,java.util.function.BiConsumer	a
+M	net.minecraft.world.entity.LivingEntity	dropFromGiftLootTable	net.minecraft.server.level.ServerLevel,net.minecraft.resources.ResourceKey,java.util.function.BiConsumer	a
+M	net.minecraft.world.entity.LivingEntity	dropFromShearingLootTable	net.minecraft.server.level.ServerLevel,net.minecraft.resources.ResourceKey,net.minecraft.world.item.ItemStack,java.util.function.BiConsumer	a
+M	net.minecraft.world.entity.LivingEntity	dropFromLootTable	net.minecraft.server.level.ServerLevel,net.minecraft.resources.ResourceKey,java.util.function.Function,java.util.function.BiConsumer	a
+M	net.minecraft.world.entity.LivingEntity	knockback	double,double,double	o
+M	net.minecraft.world.entity.LivingEntity	indicateDamage	double,double	a
+M	net.minecraft.world.entity.LivingEntity	getHurtSound	net.minecraft.world.damagesource.DamageSource	h
+M	net.minecraft.world.entity.LivingEntity	getDeathSound		fd
+M	net.minecraft.world.entity.LivingEntity	getFallDamageSound	int	q
+M	net.minecraft.world.entity.LivingEntity	skipDropExperience		fe
+M	net.minecraft.world.entity.LivingEntity	wasExperienceConsumed		ff
+M	net.minecraft.world.entity.LivingEntity	getHurtDir		fg
+M	net.minecraft.world.entity.LivingEntity	getHitbox		fh
+M	net.minecraft.world.entity.LivingEntity	activeLocationDependentEnchantments	net.minecraft.world.entity.EquipmentSlot	c
+M	net.minecraft.world.entity.LivingEntity	lungeForwardMaybe		fi
+M	net.minecraft.world.entity.LivingEntity	getFallSounds		fj
+M	net.minecraft.world.entity.LivingEntity	getLastClimbablePos		fk
+M	net.minecraft.world.entity.LivingEntity	onClimbable		fl
+M	net.minecraft.world.entity.LivingEntity	trapdoorUsableAsLadder	net.minecraft.core.BlockPos,net.minecraft.world.level.block.state.BlockState	c
+M	net.minecraft.world.entity.LivingEntity	isAlive		cb
+M	net.minecraft.world.entity.LivingEntity	isLookingAtMe	net.minecraft.world.entity.LivingEntity,double,boolean,boolean,double[]	a
+M	net.minecraft.world.entity.LivingEntity	getMaxFallDistance		cW
+M	net.minecraft.world.entity.LivingEntity	getComfortableFallDistance	float	y
+M	net.minecraft.world.entity.LivingEntity	causeFallDamage	double,float,net.minecraft.world.damagesource.DamageSource	a
+M	net.minecraft.world.entity.LivingEntity	calculateFallDamage	double,float	a
+M	net.minecraft.world.entity.LivingEntity	calculateFallPower	double	i
+M	net.minecraft.world.entity.LivingEntity	playBlockFallSound		fm
+M	net.minecraft.world.entity.LivingEntity	animateHurt	float	q
+M	net.minecraft.world.entity.LivingEntity	getArmorValue		fn
+M	net.minecraft.world.entity.LivingEntity	hurtArmor	net.minecraft.world.damagesource.DamageSource,float	c
+M	net.minecraft.world.entity.LivingEntity	hurtHelmet	net.minecraft.world.damagesource.DamageSource,float	d
+M	net.minecraft.world.entity.LivingEntity	doHurtEquipment	net.minecraft.world.damagesource.DamageSource,float,net.minecraft.world.entity.EquipmentSlot[]	a
+M	net.minecraft.world.entity.LivingEntity	getDamageAfterArmorAbsorb	net.minecraft.world.damagesource.DamageSource,float	e
+M	net.minecraft.world.entity.LivingEntity	getDamageAfterMagicAbsorb	net.minecraft.world.damagesource.DamageSource,float	f
+M	net.minecraft.world.entity.LivingEntity	actuallyHurt	net.minecraft.server.level.ServerLevel,net.minecraft.world.damagesource.DamageSource,float	c
+M	net.minecraft.world.entity.LivingEntity	getCombatTracker		fo
+M	net.minecraft.world.entity.LivingEntity	getKillCredit		fp
+M	net.minecraft.world.entity.LivingEntity	getMaxHealth		fq
+M	net.minecraft.world.entity.LivingEntity	getMaxAbsorption		fr
+M	net.minecraft.world.entity.LivingEntity	getArrowCount		fs
+M	net.minecraft.world.entity.LivingEntity	setArrowCount	int	o
+M	net.minecraft.world.entity.LivingEntity	getStingerCount		ft
+M	net.minecraft.world.entity.LivingEntity	setStingerCount	int	p
+M	net.minecraft.world.entity.LivingEntity	getCurrentSwingDuration		F
+M	net.minecraft.world.entity.LivingEntity	swing	net.minecraft.world.InteractionHand	a
+M	net.minecraft.world.entity.LivingEntity	swing	net.minecraft.world.InteractionHand,boolean	a
+M	net.minecraft.world.entity.LivingEntity	handleDamageEvent	net.minecraft.world.damagesource.DamageSource	c
+M	net.minecraft.world.entity.LivingEntity	handleEntityEvent	byte	b
+M	net.minecraft.world.entity.LivingEntity	getTicksSinceLastKineticHitFeedback	float	z
+M	net.minecraft.world.entity.LivingEntity	makePoofParticles		fu
+M	net.minecraft.world.entity.LivingEntity	makeDrownParticles		G
+M	net.minecraft.world.entity.LivingEntity	onKineticHit		H
+M	net.minecraft.world.entity.LivingEntity	swapHandItems		I
+M	net.minecraft.world.entity.LivingEntity	onBelowWorld		aU
+M	net.minecraft.world.entity.LivingEntity	updateSwingTime		fv
+M	net.minecraft.world.entity.LivingEntity	getAttribute	net.minecraft.core.Holder	h
+M	net.minecraft.world.entity.LivingEntity	getAttributeValue	net.minecraft.core.Holder	i
+M	net.minecraft.world.entity.LivingEntity	getAttributeBaseValue	net.minecraft.core.Holder	j
+M	net.minecraft.world.entity.LivingEntity	getAttributes		fw
+M	net.minecraft.world.entity.LivingEntity	getMainHandItem		fx
+M	net.minecraft.world.entity.LivingEntity	getOffhandItem		fy
+M	net.minecraft.world.entity.LivingEntity	getItemHeldByArm	net.minecraft.world.entity.HumanoidArm	b
+M	net.minecraft.world.entity.LivingEntity	getWeaponItem		eq
+M	net.minecraft.world.entity.LivingEntity	entityAttackRange		fz
+M	net.minecraft.world.entity.LivingEntity	getActiveItem		fA
+M	net.minecraft.world.entity.LivingEntity	isHolding	net.minecraft.world.item.Item	b
+M	net.minecraft.world.entity.LivingEntity	isHolding	java.util.function.Predicate	b
+M	net.minecraft.world.entity.LivingEntity	getItemInHand	net.minecraft.world.InteractionHand	b
+M	net.minecraft.world.entity.LivingEntity	setItemInHand	net.minecraft.world.InteractionHand,net.minecraft.world.item.ItemStack	a
+M	net.minecraft.world.entity.LivingEntity	hasItemInSlot	net.minecraft.world.entity.EquipmentSlot	d
+M	net.minecraft.world.entity.LivingEntity	canUseSlot	net.minecraft.world.entity.EquipmentSlot	e
+M	net.minecraft.world.entity.LivingEntity	getItemBySlot	net.minecraft.world.entity.EquipmentSlot	a
+M	net.minecraft.world.entity.LivingEntity	setItemSlot	net.minecraft.world.entity.EquipmentSlot,net.minecraft.world.item.ItemStack	a
+M	net.minecraft.world.entity.LivingEntity	getArmorCoverPercentage		fB
+M	net.minecraft.world.entity.LivingEntity	setSprinting	boolean	i
+M	net.minecraft.world.entity.LivingEntity	getSoundVolume		fC
+M	net.minecraft.world.entity.LivingEntity	getVoicePitch		fD
+M	net.minecraft.world.entity.LivingEntity	isImmobile		fE
+M	net.minecraft.world.entity.LivingEntity	push	net.minecraft.world.entity.Entity	h
+M	net.minecraft.world.entity.LivingEntity	dismountVehicle	net.minecraft.world.entity.Entity	H
+M	net.minecraft.world.entity.LivingEntity	shouldShowName		de
+M	net.minecraft.world.entity.LivingEntity	getJumpPower		fF
+M	net.minecraft.world.entity.LivingEntity	getJumpPower	float	A
+M	net.minecraft.world.entity.LivingEntity	getJumpBoostPower		fG
+M	net.minecraft.world.entity.LivingEntity	jumpFromGround		u
+M	net.minecraft.world.entity.LivingEntity	goDownInWater		fH
+M	net.minecraft.world.entity.LivingEntity	jumpInLiquid	net.minecraft.tags.TagKey	c
+M	net.minecraft.world.entity.LivingEntity	getWaterSlowDown		fI
+M	net.minecraft.world.entity.LivingEntity	canStandOnFluid	net.minecraft.world.level.material.FluidState	a
+M	net.minecraft.world.entity.LivingEntity	getDefaultGravity		bs
+M	net.minecraft.world.entity.LivingEntity	getEffectiveGravity		fJ
+M	net.minecraft.world.entity.LivingEntity	travel	net.minecraft.world.phys.Vec3	m
+M	net.minecraft.world.entity.LivingEntity	shouldTravelInFluid	net.minecraft.world.level.material.FluidState	b
+M	net.minecraft.world.entity.LivingEntity	travelFlying	net.minecraft.world.phys.Vec3,float	a
+M	net.minecraft.world.entity.LivingEntity	travelFlying	net.minecraft.world.phys.Vec3,float,float,float	a
+M	net.minecraft.world.entity.LivingEntity	travelInAir	net.minecraft.world.phys.Vec3	a
+M	net.minecraft.world.entity.LivingEntity	travelInFluid	net.minecraft.world.phys.Vec3	o
+M	net.minecraft.world.entity.LivingEntity	travelInWater	net.minecraft.world.phys.Vec3,double,boolean,double	a
+M	net.minecraft.world.entity.LivingEntity	travelInLava	net.minecraft.world.phys.Vec3,double,boolean,double	b
+M	net.minecraft.world.entity.LivingEntity	jumpOutOfFluid	double	j
+M	net.minecraft.world.entity.LivingEntity	floatInWaterWhileRidden		J
+M	net.minecraft.world.entity.LivingEntity	travelFallFlying	net.minecraft.world.phys.Vec3	p
+M	net.minecraft.world.entity.LivingEntity	stopFallFlying		fK
+M	net.minecraft.world.entity.LivingEntity	updateFallFlyingMovement	net.minecraft.world.phys.Vec3	q
+M	net.minecraft.world.entity.LivingEntity	handleFallFlyingCollisions	double,double	c
+M	net.minecraft.world.entity.LivingEntity	travelRidden	net.minecraft.world.entity.player.Player,net.minecraft.world.phys.Vec3	c
+M	net.minecraft.world.entity.LivingEntity	tickRidden	net.minecraft.world.entity.player.Player,net.minecraft.world.phys.Vec3	a
+M	net.minecraft.world.entity.LivingEntity	getRiddenInput	net.minecraft.world.entity.player.Player,net.minecraft.world.phys.Vec3	b
+M	net.minecraft.world.entity.LivingEntity	getRiddenSpeed	net.minecraft.world.entity.player.Player	f
+M	net.minecraft.world.entity.LivingEntity	calculateEntityAnimation	boolean	s
+M	net.minecraft.world.entity.LivingEntity	updateWalkAnimation	float	B
+M	net.minecraft.world.entity.LivingEntity	handleRelativeFrictionAndCalculateMovement	net.minecraft.world.phys.Vec3,float	b
+M	net.minecraft.world.entity.LivingEntity	getFluidFallingAdjustedMovement	double,boolean,net.minecraft.world.phys.Vec3	a
+M	net.minecraft.world.entity.LivingEntity	handleOnClimbable	net.minecraft.world.phys.Vec3	r
+M	net.minecraft.world.entity.LivingEntity	getFrictionInfluencedSpeed	float	I
+M	net.minecraft.world.entity.LivingEntity	getFlyingSpeed		fL
+M	net.minecraft.world.entity.LivingEntity	getSpeed		fM
+M	net.minecraft.world.entity.LivingEntity	setSpeed	float	C
+M	net.minecraft.world.entity.LivingEntity	doHurtTarget	net.minecraft.server.level.ServerLevel,net.minecraft.world.entity.Entity	c
+M	net.minecraft.world.entity.LivingEntity	causeExtraKnockback	net.minecraft.world.entity.Entity,float,net.minecraft.world.phys.Vec3	a
+M	net.minecraft.world.entity.LivingEntity	playAttackSound		fN
+M	net.minecraft.world.entity.LivingEntity	tick		g
+M	net.minecraft.world.entity.LivingEntity	wasRecentlyStabbed	net.minecraft.world.entity.Entity,int	b
+M	net.minecraft.world.entity.LivingEntity	rememberStabbedEntity	net.minecraft.world.entity.Entity	E
+M	net.minecraft.world.entity.LivingEntity	stabbedEntities	java.util.function.Predicate	c
+M	net.minecraft.world.entity.LivingEntity	stabAttack	net.minecraft.world.entity.EquipmentSlot,net.minecraft.world.entity.Entity,float,boolean,boolean,boolean	a
+M	net.minecraft.world.entity.LivingEntity	onAttack		fO
+M	net.minecraft.world.entity.LivingEntity	detectEquipmentUpdates		K
+M	net.minecraft.world.entity.LivingEntity	collectEquipmentChanges		L
+M	net.minecraft.world.entity.LivingEntity	equipmentHasChanged	net.minecraft.world.item.ItemStack,net.minecraft.world.item.ItemStack	a
+M	net.minecraft.world.entity.LivingEntity	handleHandSwap	java.util.Map	a
+M	net.minecraft.world.entity.LivingEntity	handleEquipmentChanges	java.util.Map	b
+M	net.minecraft.world.entity.LivingEntity	tickHeadTurn	float	D
+M	net.minecraft.world.entity.LivingEntity	getMaxHeadRotationRelativeToBody		fP
+M	net.minecraft.world.entity.LivingEntity	aiStep		d_
+M	net.minecraft.world.entity.LivingEntity	applyInput		fQ
+M	net.minecraft.world.entity.LivingEntity	isSensitiveToWater		fR
+M	net.minecraft.world.entity.LivingEntity	isJumping		fS
+M	net.minecraft.world.entity.LivingEntity	updateFallFlying		fT
+M	net.minecraft.world.entity.LivingEntity	canGlide		fU
+M	net.minecraft.world.entity.LivingEntity	serverAiStep		fV
+M	net.minecraft.world.entity.LivingEntity	pushEntities		q
+M	net.minecraft.world.entity.LivingEntity	checkAutoSpinAttack	net.minecraft.world.phys.AABB,net.minecraft.world.phys.AABB	a
+M	net.minecraft.world.entity.LivingEntity	doPush	net.minecraft.world.entity.Entity	F
+M	net.minecraft.world.entity.LivingEntity	doAutoAttackOnTouch	net.minecraft.world.entity.LivingEntity	f
+M	net.minecraft.world.entity.LivingEntity	isAutoSpinAttack		fW
+M	net.minecraft.world.entity.LivingEntity	stopRiding		cf
+M	net.minecraft.world.entity.LivingEntity	rideTick		t
+M	net.minecraft.world.entity.LivingEntity	getInterpolation		l_
+M	net.minecraft.world.entity.LivingEntity	lerpHeadTo	float,int	a
+M	net.minecraft.world.entity.LivingEntity	setJumping	boolean	t
+M	net.minecraft.world.entity.LivingEntity	onItemPickup	net.minecraft.world.entity.item.ItemEntity	a
+M	net.minecraft.world.entity.LivingEntity	take	net.minecraft.world.entity.Entity,int	a
+M	net.minecraft.world.entity.LivingEntity	hasLineOfSight	net.minecraft.world.entity.Entity	G
+M	net.minecraft.world.entity.LivingEntity	hasLineOfSight	net.minecraft.world.entity.Entity,net.minecraft.world.level.ClipContext$Block,net.minecraft.world.level.ClipContext$Fluid,double	a
+M	net.minecraft.world.entity.LivingEntity	getViewYRot	float	j
+M	net.minecraft.world.entity.LivingEntity	getAttackAnim	float	E
+M	net.minecraft.world.entity.LivingEntity	isPickable		bX
+M	net.minecraft.world.entity.LivingEntity	isPushable		bY
+M	net.minecraft.world.entity.LivingEntity	getYHeadRot		cS
+M	net.minecraft.world.entity.LivingEntity	setYHeadRot	float	r
+M	net.minecraft.world.entity.LivingEntity	setYBodyRot	float	s
+M	net.minecraft.world.entity.LivingEntity	getRelativePortalPosition	net.minecraft.core.Direction$Axis,net.minecraft.util.BlockUtil$FoundRectangle	a
+M	net.minecraft.world.entity.LivingEntity	resetForwardDirectionOfRelativePortalPosition	net.minecraft.world.phys.Vec3	n
+M	net.minecraft.world.entity.LivingEntity	getAbsorptionAmount		fX
+M	net.minecraft.world.entity.LivingEntity	setAbsorptionAmount	float	F
+M	net.minecraft.world.entity.LivingEntity	internalSetAbsorptionAmount	float	G
+M	net.minecraft.world.entity.LivingEntity	onEnterCombat		g_
+M	net.minecraft.world.entity.LivingEntity	onLeaveCombat		P_
+M	net.minecraft.world.entity.LivingEntity	updateEffectVisibility		fY
+M	net.minecraft.world.entity.LivingEntity	getMainArm		at
+M	net.minecraft.world.entity.LivingEntity	isUsingItem		fZ
+M	net.minecraft.world.entity.LivingEntity	getUsedItemHand		ga
+M	net.minecraft.world.entity.LivingEntity	updatingUsingItem		N
+M	net.minecraft.world.entity.LivingEntity	createItemStackToDrop	net.minecraft.world.item.ItemStack,boolean,boolean	b
+M	net.minecraft.world.entity.LivingEntity	updateUsingItem	net.minecraft.world.item.ItemStack	a_
+M	net.minecraft.world.entity.LivingEntity	updateSwimAmount		P
+M	net.minecraft.world.entity.LivingEntity	setLivingEntityFlag	int,boolean	c
+M	net.minecraft.world.entity.LivingEntity	startUsingItem	net.minecraft.world.InteractionHand	c
+M	net.minecraft.world.entity.LivingEntity	onSyncedDataUpdated	net.minecraft.network.syncher.EntityDataAccessor	a
+M	net.minecraft.world.entity.LivingEntity	lookAt	net.minecraft.commands.arguments.EntityAnchorArgument$Anchor,net.minecraft.world.phys.Vec3	a
+M	net.minecraft.world.entity.LivingEntity	getPreciseBodyRotation	float	t
+M	net.minecraft.world.entity.LivingEntity	spawnItemParticles	net.minecraft.world.item.ItemStack,int	b
+M	net.minecraft.world.entity.LivingEntity	completeUsingItem		Q_
+M	net.minecraft.world.entity.LivingEntity	handleExtraItemsCreatedOnUse	net.minecraft.world.item.ItemStack	b
+M	net.minecraft.world.entity.LivingEntity	getUseItem		gb
+M	net.minecraft.world.entity.LivingEntity	getUseItemRemainingTicks		gc
+M	net.minecraft.world.entity.LivingEntity	getTicksUsingItem		gd
+M	net.minecraft.world.entity.LivingEntity	getTicksUsingItem	float	H
+M	net.minecraft.world.entity.LivingEntity	releaseUsingItem		ge
+M	net.minecraft.world.entity.LivingEntity	stopUsingItem		gf
+M	net.minecraft.world.entity.LivingEntity	isBlocking		gg
+M	net.minecraft.world.entity.LivingEntity	getItemBlockingWith		gh
+M	net.minecraft.world.entity.LivingEntity	isSuppressingSlidingDownLadder		gi
+M	net.minecraft.world.entity.LivingEntity	isFallFlying		gj
+M	net.minecraft.world.entity.LivingEntity	isVisuallySwimming		cC
+M	net.minecraft.world.entity.LivingEntity	getFallFlyingTicks		gk
+M	net.minecraft.world.entity.LivingEntity	randomTeleport	double,double,double,boolean	b
+M	net.minecraft.world.entity.LivingEntity	isAffectedByPotions		gl
+M	net.minecraft.world.entity.LivingEntity	attackable		gm
+M	net.minecraft.world.entity.LivingEntity	setRecordPlayingNearby	net.minecraft.core.BlockPos,boolean	a
+M	net.minecraft.world.entity.LivingEntity	canPickUpLoot		gn
+M	net.minecraft.world.entity.LivingEntity	getDimensions	net.minecraft.world.entity.Pose	a
+M	net.minecraft.world.entity.LivingEntity	getDefaultDimensions	net.minecraft.world.entity.Pose	b
+M	net.minecraft.world.entity.LivingEntity	getDismountPoses		go
+M	net.minecraft.world.entity.LivingEntity	getLocalBoundsForPose	net.minecraft.world.entity.Pose	f
+M	net.minecraft.world.entity.LivingEntity	wouldNotSuffocateAtTargetPose	net.minecraft.world.entity.Pose	g
+M	net.minecraft.world.entity.LivingEntity	canUsePortal	boolean	o
+M	net.minecraft.world.entity.LivingEntity	getSleepingPos		gp
+M	net.minecraft.world.entity.LivingEntity	setSleepingPos	net.minecraft.core.BlockPos	g
+M	net.minecraft.world.entity.LivingEntity	clearSleepingPos		gq
+M	net.minecraft.world.entity.LivingEntity	isSleeping		gr
+M	net.minecraft.world.entity.LivingEntity	startSleeping	net.minecraft.core.BlockPos	b
+M	net.minecraft.world.entity.LivingEntity	setPosToBed	net.minecraft.core.BlockPos	a
+M	net.minecraft.world.entity.LivingEntity	checkBedExists		Q
+M	net.minecraft.world.entity.LivingEntity	stopSleeping		gs
+M	net.minecraft.world.entity.LivingEntity	getBedOrientation		gt
+M	net.minecraft.world.entity.LivingEntity	isInWall		cc
+M	net.minecraft.world.entity.LivingEntity	getProjectile	net.minecraft.world.item.ItemStack	d
+M	net.minecraft.world.entity.LivingEntity	entityEventForEquipmentBreak	net.minecraft.world.entity.EquipmentSlot	g
+M	net.minecraft.world.entity.LivingEntity	onEquippedItemBroken	net.minecraft.world.item.Item,net.minecraft.world.entity.EquipmentSlot	a
+M	net.minecraft.world.entity.LivingEntity	stopLocationBasedEffects	net.minecraft.world.item.ItemStack,net.minecraft.world.entity.EquipmentSlot,net.minecraft.world.entity.ai.attributes.AttributeMap	a
+M	net.minecraft.world.entity.LivingEntity	canEquipWithDispenser	net.minecraft.world.item.ItemStack	e
+M	net.minecraft.world.entity.LivingEntity	canDispenserEquipIntoSlot	net.minecraft.world.entity.EquipmentSlot	f
+M	net.minecraft.world.entity.LivingEntity	getEquipmentSlotForItem	net.minecraft.world.item.ItemStack	f
+M	net.minecraft.world.entity.LivingEntity	isEquippableInSlot	net.minecraft.world.item.ItemStack,net.minecraft.world.entity.EquipmentSlot	a
+M	net.minecraft.world.entity.LivingEntity	createEquipmentSlotAccess	net.minecraft.world.entity.LivingEntity,net.minecraft.world.entity.EquipmentSlot	a
+M	net.minecraft.world.entity.LivingEntity	getEquipmentSlot	int	r
+M	net.minecraft.world.entity.LivingEntity	getSlot	int	a_
+M	net.minecraft.world.entity.LivingEntity	canFreeze		ea
+M	net.minecraft.world.entity.LivingEntity	isCurrentlyGlowing		cF
+M	net.minecraft.world.entity.LivingEntity	getVisualRotationYInDegrees		ed
+M	net.minecraft.world.entity.LivingEntity	recreateFromPacket	net.minecraft.network.protocol.game.ClientboundAddEntityPacket	a
+M	net.minecraft.world.entity.LivingEntity	getSecondsToDisableBlocking		gu
+M	net.minecraft.world.entity.LivingEntity	maxUpStep		eg
+M	net.minecraft.world.entity.LivingEntity	getPassengerRidingPosition	net.minecraft.world.entity.Entity	n
+M	net.minecraft.world.entity.LivingEntity	lerpHeadRotationStep	int,double	a
+M	net.minecraft.world.entity.LivingEntity	igniteForTicks	int	g
+M	net.minecraft.world.entity.LivingEntity	hasInfiniteMaterials		gv
+M	net.minecraft.world.entity.LivingEntity	isInvulnerableTo	net.minecraft.server.level.ServerLevel,net.minecraft.world.damagesource.DamageSource	a
+M	net.minecraft.world.entity.LivingEntity	canGlideUsing	net.minecraft.world.item.ItemStack,net.minecraft.world.entity.EquipmentSlot	b
+M	net.minecraft.world.entity.LivingEntity	getLastHurtByPlayerMemoryTime		gw
+M	net.minecraft.world.entity.LivingEntity	isTransmittingWaypoint		gx
+M	net.minecraft.world.entity.LivingEntity	makeWaypointConnectionWith	net.minecraft.server.level.ServerPlayer	f
+M	net.minecraft.world.entity.LivingEntity	waypointIcon		gy
+M	net.minecraft.world.entity.LivingEntity	lambda$createEquipmentSlotAccess$25	net.minecraft.world.entity.LivingEntity,net.minecraft.world.entity.EquipmentSlot,net.minecraft.world.item.ItemStack	a
+M	net.minecraft.world.entity.LivingEntity	lambda$stopLocationBasedEffects$24	net.minecraft.world.entity.ai.attributes.AttributeMap,net.minecraft.core.Holder,net.minecraft.world.entity.ai.attributes.AttributeModifier	a
+M	net.minecraft.world.entity.LivingEntity	lambda$stopSleeping$23	net.minecraft.core.BlockPos	c
+M	net.minecraft.world.entity.LivingEntity	lambda$stopSleeping$22	net.minecraft.core.BlockPos	h
+M	net.minecraft.world.entity.LivingEntity	lambda$checkBedExists$21	net.minecraft.core.BlockPos	i
+M	net.minecraft.world.entity.LivingEntity	lambda$updateFallFlying$20	net.minecraft.world.entity.EquipmentSlot	h
+M	net.minecraft.world.entity.LivingEntity	lambda$handleEquipmentChanges$19	java.util.List,net.minecraft.world.entity.EquipmentSlot,net.minecraft.world.item.ItemStack	a
+M	net.minecraft.world.entity.LivingEntity	lambda$collectEquipmentChanges$18	net.minecraft.core.Holder,net.minecraft.world.entity.ai.attributes.AttributeModifier	a
+M	net.minecraft.world.entity.LivingEntity	lambda$stabAttack$17		R
+M	net.minecraft.world.entity.LivingEntity	lambda$dismountVehicle$16	double,net.minecraft.world.phys.Vec3	a
+M	net.minecraft.world.entity.LivingEntity	lambda$isHolding$15	net.minecraft.world.item.Item,net.minecraft.world.item.ItemStack	a
+M	net.minecraft.world.entity.LivingEntity	lambda$activeLocationDependentEnchantments$14	net.minecraft.world.entity.EquipmentSlot	i
+M	net.minecraft.world.entity.LivingEntity	lambda$dropFromLootTable$13	java.util.function.BiConsumer,net.minecraft.server.level.ServerLevel,net.minecraft.world.item.ItemStack	a
+M	net.minecraft.world.entity.LivingEntity	lambda$dropFromShearingLootTable$12	net.minecraft.world.item.ItemStack,net.minecraft.world.level.storage.loot.LootParams$Builder	a
+M	net.minecraft.world.entity.LivingEntity	lambda$dropFromGiftLootTable$11	net.minecraft.world.level.storage.loot.LootParams$Builder	a
+M	net.minecraft.world.entity.LivingEntity	lambda$dropFromEntityInteractLootTable$10	net.minecraft.world.entity.Entity,net.minecraft.world.item.ItemStack,net.minecraft.world.level.storage.loot.LootParams$Builder	a
+M	net.minecraft.world.entity.LivingEntity	lambda$dropFromLootTable$9	net.minecraft.server.level.ServerLevel,net.minecraft.world.item.ItemStack	b
+M	net.minecraft.world.entity.LivingEntity	lambda$tickEffects$8	net.minecraft.world.effect.MobEffectInstance	d
+M	net.minecraft.world.entity.LivingEntity	lambda$readAdditionalSaveData$7	com.mojang.serialization.Dynamic	b
+M	net.minecraft.world.entity.LivingEntity	lambda$readAdditionalSaveData$6	net.minecraft.core.BlockPos	j
+M	net.minecraft.world.entity.LivingEntity	lambda$readAdditionalSaveData$5	java.lang.String	d
+M	net.minecraft.world.entity.LivingEntity	lambda$addAdditionalSaveData$4	net.minecraft.world.level.storage.ValueOutput,com.mojang.serialization.Dynamic	a
+M	net.minecraft.world.entity.LivingEntity	lambda$addAdditionalSaveData$3	net.minecraft.nbt.Tag	a
+M	net.minecraft.world.entity.LivingEntity	lambda$addAdditionalSaveData$2	net.minecraft.world.level.storage.ValueOutput,net.minecraft.core.BlockPos	a
+M	net.minecraft.world.entity.LivingEntity	lambda$new$1	net.minecraft.world.entity.EquipmentSlot	j
+M	net.minecraft.world.entity.LivingEntity	lambda$static$0	net.minecraft.world.entity.LivingEntity	g
 F	net.minecraft.world.entity.PositionMoveRotation	position	b
 F	net.minecraft.world.entity.PositionMoveRotation	deltaMovement	c
 F	net.minecraft.world.entity.PositionMoveRotation	yRot	d
@@ -3072,6 +3792,74 @@ M	net.minecraft.world.entity.Relative	isSet	int	b
 M	net.minecraft.world.entity.Relative	unpack	int	a
 M	net.minecraft.world.entity.Relative	pack	java.util.Set	a
 M	net.minecraft.world.entity.Relative	$values		b
+F	net.minecraft.world.entity.ai.attributes.AttributeMap	attributes	a
+F	net.minecraft.world.entity.ai.attributes.AttributeMap	attributesToSync	b
+F	net.minecraft.world.entity.ai.attributes.AttributeMap	attributesToUpdate	c
+F	net.minecraft.world.entity.ai.attributes.AttributeMap	supplier	d
+M	net.minecraft.world.entity.ai.attributes.AttributeMap	onAttributeModified	net.minecraft.world.entity.ai.attributes.AttributeInstance	a
+M	net.minecraft.world.entity.ai.attributes.AttributeMap	getAttributesToSync		a
+M	net.minecraft.world.entity.ai.attributes.AttributeMap	getAttributesToUpdate		b
+M	net.minecraft.world.entity.ai.attributes.AttributeMap	getSyncableAttributes		c
+M	net.minecraft.world.entity.ai.attributes.AttributeMap	getInstance	net.minecraft.core.Holder	a
+M	net.minecraft.world.entity.ai.attributes.AttributeMap	hasAttribute	net.minecraft.core.Holder	b
+M	net.minecraft.world.entity.ai.attributes.AttributeMap	hasModifier	net.minecraft.core.Holder,net.minecraft.resources.Identifier	a
+M	net.minecraft.world.entity.ai.attributes.AttributeMap	getValue	net.minecraft.core.Holder	c
+M	net.minecraft.world.entity.ai.attributes.AttributeMap	getBaseValue	net.minecraft.core.Holder	d
+M	net.minecraft.world.entity.ai.attributes.AttributeMap	getModifierValue	net.minecraft.core.Holder,net.minecraft.resources.Identifier	b
+M	net.minecraft.world.entity.ai.attributes.AttributeMap	addTransientAttributeModifiers	com.google.common.collect.Multimap	a
+M	net.minecraft.world.entity.ai.attributes.AttributeMap	removeAttributeModifiers	com.google.common.collect.Multimap	b
+M	net.minecraft.world.entity.ai.attributes.AttributeMap	assignAllValues	net.minecraft.world.entity.ai.attributes.AttributeMap	a
+M	net.minecraft.world.entity.ai.attributes.AttributeMap	assignBaseValues	net.minecraft.world.entity.ai.attributes.AttributeMap	b
+M	net.minecraft.world.entity.ai.attributes.AttributeMap	assignPermanentModifiers	net.minecraft.world.entity.ai.attributes.AttributeMap	c
+M	net.minecraft.world.entity.ai.attributes.AttributeMap	resetBaseValue	net.minecraft.core.Holder	e
+M	net.minecraft.world.entity.ai.attributes.AttributeMap	pack		d
+M	net.minecraft.world.entity.ai.attributes.AttributeMap	apply	java.util.List	a
+M	net.minecraft.world.entity.ai.attributes.AttributeMap	lambda$assignPermanentModifiers$7	net.minecraft.world.entity.ai.attributes.AttributeInstance	b
+M	net.minecraft.world.entity.ai.attributes.AttributeMap	lambda$assignBaseValues$6	net.minecraft.world.entity.ai.attributes.AttributeInstance	c
+M	net.minecraft.world.entity.ai.attributes.AttributeMap	lambda$assignAllValues$5	net.minecraft.world.entity.ai.attributes.AttributeInstance	d
+M	net.minecraft.world.entity.ai.attributes.AttributeMap	lambda$removeAttributeModifiers$4	net.minecraft.core.Holder,java.util.Collection	a
+M	net.minecraft.world.entity.ai.attributes.AttributeMap	lambda$removeAttributeModifiers$3	net.minecraft.world.entity.ai.attributes.AttributeInstance,net.minecraft.world.entity.ai.attributes.AttributeModifier	a
+M	net.minecraft.world.entity.ai.attributes.AttributeMap	lambda$addTransientAttributeModifiers$2	net.minecraft.core.Holder,net.minecraft.world.entity.ai.attributes.AttributeModifier	a
+M	net.minecraft.world.entity.ai.attributes.AttributeMap	lambda$getInstance$1	net.minecraft.core.Holder	f
+M	net.minecraft.world.entity.ai.attributes.AttributeMap	lambda$getSyncableAttributes$0	net.minecraft.world.entity.ai.attributes.AttributeInstance	e
+F	net.minecraft.world.entity.ai.attributes.Attributes	DEFAULT_ATTACK_SPEED	a
+F	net.minecraft.world.entity.ai.attributes.Attributes	ARMOR	b
+F	net.minecraft.world.entity.ai.attributes.Attributes	ARMOR_TOUGHNESS	c
+F	net.minecraft.world.entity.ai.attributes.Attributes	ATTACK_DAMAGE	d
+F	net.minecraft.world.entity.ai.attributes.Attributes	ATTACK_KNOCKBACK	e
+F	net.minecraft.world.entity.ai.attributes.Attributes	ATTACK_SPEED	f
+F	net.minecraft.world.entity.ai.attributes.Attributes	BLOCK_BREAK_SPEED	g
+F	net.minecraft.world.entity.ai.attributes.Attributes	BLOCK_INTERACTION_RANGE	h
+F	net.minecraft.world.entity.ai.attributes.Attributes	BURNING_TIME	i
+F	net.minecraft.world.entity.ai.attributes.Attributes	CAMERA_DISTANCE	j
+F	net.minecraft.world.entity.ai.attributes.Attributes	EXPLOSION_KNOCKBACK_RESISTANCE	k
+F	net.minecraft.world.entity.ai.attributes.Attributes	ENTITY_INTERACTION_RANGE	l
+F	net.minecraft.world.entity.ai.attributes.Attributes	FALL_DAMAGE_MULTIPLIER	m
+F	net.minecraft.world.entity.ai.attributes.Attributes	FLYING_SPEED	n
+F	net.minecraft.world.entity.ai.attributes.Attributes	FOLLOW_RANGE	o
+F	net.minecraft.world.entity.ai.attributes.Attributes	GRAVITY	p
+F	net.minecraft.world.entity.ai.attributes.Attributes	JUMP_STRENGTH	q
+F	net.minecraft.world.entity.ai.attributes.Attributes	KNOCKBACK_RESISTANCE	r
+F	net.minecraft.world.entity.ai.attributes.Attributes	LUCK	s
+F	net.minecraft.world.entity.ai.attributes.Attributes	MAX_ABSORPTION	t
+F	net.minecraft.world.entity.ai.attributes.Attributes	MAX_HEALTH	u
+F	net.minecraft.world.entity.ai.attributes.Attributes	MINING_EFFICIENCY	v
+F	net.minecraft.world.entity.ai.attributes.Attributes	MOVEMENT_EFFICIENCY	w
+F	net.minecraft.world.entity.ai.attributes.Attributes	MOVEMENT_SPEED	x
+F	net.minecraft.world.entity.ai.attributes.Attributes	OXYGEN_BONUS	y
+F	net.minecraft.world.entity.ai.attributes.Attributes	SAFE_FALL_DISTANCE	z
+F	net.minecraft.world.entity.ai.attributes.Attributes	SCALE	A
+F	net.minecraft.world.entity.ai.attributes.Attributes	SNEAKING_SPEED	B
+F	net.minecraft.world.entity.ai.attributes.Attributes	SPAWN_REINFORCEMENTS_CHANCE	C
+F	net.minecraft.world.entity.ai.attributes.Attributes	STEP_HEIGHT	D
+F	net.minecraft.world.entity.ai.attributes.Attributes	SUBMERGED_MINING_SPEED	E
+F	net.minecraft.world.entity.ai.attributes.Attributes	SWEEPING_DAMAGE_RATIO	F
+F	net.minecraft.world.entity.ai.attributes.Attributes	TEMPT_RANGE	G
+F	net.minecraft.world.entity.ai.attributes.Attributes	WATER_MOVEMENT_EFFICIENCY	H
+F	net.minecraft.world.entity.ai.attributes.Attributes	WAYPOINT_TRANSMIT_RANGE	I
+F	net.minecraft.world.entity.ai.attributes.Attributes	WAYPOINT_RECEIVE_RANGE	J
+M	net.minecraft.world.entity.ai.attributes.Attributes	register	java.lang.String,net.minecraft.world.entity.ai.attributes.Attribute	a
+M	net.minecraft.world.entity.ai.attributes.Attributes	bootstrap	net.minecraft.core.Registry	a
 F	net.minecraft.world.entity.decoration.ItemFrame	DATA_ITEM	c
 F	net.minecraft.world.entity.decoration.ItemFrame	DATA_ROTATION	d
 F	net.minecraft.world.entity.decoration.ItemFrame	NUM_ROTATIONS	b
@@ -5721,663 +6509,116 @@ M	net.minecraft.world.phys.Vec3	isFinite		n
 M	net.minecraft.world.phys.Vec3	lambda$static$2	net.minecraft.world.phys.Vec3	k
 M	net.minecraft.world.phys.Vec3	lambda$static$1	java.util.List	a
 M	net.minecraft.world.phys.Vec3	lambda$static$0	java.util.List	b
-C	net.minecraft.core.HolderOwner	net.minecraft.core.HolderOwner
-C	net.minecraft.nbt.Tag	net.minecraft.nbt.NBTBase
-C	net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket	net.minecraft.network.protocol.game.PacketPlayOutUpdateAttributes
-C	net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket$AttributeSnapshot	net.minecraft.network.protocol.game.PacketPlayOutUpdateAttributes$AttributeSnapshot
-C	net.minecraft.world.entity.EntityReference	net.minecraft.world.entity.EntityReference
-C	net.minecraft.world.entity.HumanoidArm	net.minecraft.world.entity.EnumMainHand
-C	net.minecraft.world.entity.ai.attributes.Attribute	net.minecraft.world.entity.ai.attributes.AttributeBase
-C	net.minecraft.world.entity.ai.attributes.AttributeInstance	net.minecraft.world.entity.ai.attributes.AttributeModifiable
-C	net.minecraft.world.entity.ai.attributes.AttributeMap	net.minecraft.world.entity.ai.attributes.AttributeMapBase
-C	net.minecraft.world.entity.ai.attributes.Attributes	net.minecraft.world.entity.ai.attributes.GenericAttributes
-C	net.minecraft.world.item.equipment.Equippable	net.minecraft.world.item.equipment.Equippable
-C	net.minecraft.world.level.ClipContext$Block	net.minecraft.world.level.RayTrace$BlockCollisionOption
-C	net.minecraft.world.level.ClipContext$Fluid	net.minecraft.world.level.RayTrace$FluidCollisionOption
-C	net.minecraft.world.level.storage.loot.LootParams$Builder	net.minecraft.world.level.storage.loot.LootParams$a
-M	net.minecraft.core.Holder	value		a
-M	net.minecraft.core.Holder	isBound		b
-M	net.minecraft.core.Holder	is	net.minecraft.resources.Identifier	a
-M	net.minecraft.core.Holder	is	net.minecraft.resources.ResourceKey	a
-M	net.minecraft.core.Holder	is	java.util.function.Predicate	a
-M	net.minecraft.core.Holder	is	net.minecraft.tags.TagKey	a
-M	net.minecraft.core.Holder	is	net.minecraft.core.Holder	a
-M	net.minecraft.core.Holder	tags		c
-M	net.minecraft.core.Holder	unwrap		d
-M	net.minecraft.core.Holder	unwrapKey		e
-M	net.minecraft.core.Holder	kind		f
-M	net.minecraft.core.Holder	canSerializeIn	net.minecraft.core.HolderOwner	a
-M	net.minecraft.core.Holder	getRegisteredName		g
-M	net.minecraft.core.Holder	direct	java.lang.Object	a
-M	net.minecraft.core.Holder	lambda$getRegisteredName$0	net.minecraft.resources.ResourceKey	b
-F	net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket	STREAM_CODEC	a
-F	net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket	entityId	b
-F	net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket	attributes	c
-M	net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket	type		a
-M	net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket	handle	net.minecraft.network.protocol.game.ClientGamePacketListener	a
-M	net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket	getEntityId		b
-M	net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket	getValues		e
-M	net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket	handle	net.minecraft.network.PacketListener	a
-F	net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket$AttributeSnapshot	attribute	c
-F	net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket$AttributeSnapshot	base	d
-F	net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket$AttributeSnapshot	modifiers	e
-F	net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket$AttributeSnapshot	MODIFIER_STREAM_CODEC	a
-F	net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket$AttributeSnapshot	STREAM_CODEC	b
-M	net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket$AttributeSnapshot	toString		toString
-M	net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket$AttributeSnapshot	hashCode		hashCode
-M	net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket$AttributeSnapshot	equals	java.lang.Object	equals
-M	net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket$AttributeSnapshot	attribute		a
-M	net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket$AttributeSnapshot	base		b
-M	net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket$AttributeSnapshot	modifiers		c
-F	net.minecraft.world.entity.LivingEntity	LOGGER	a
-F	net.minecraft.world.entity.LivingEntity	TAG_ACTIVE_EFFECTS	b
-F	net.minecraft.world.entity.LivingEntity	TAG_ATTRIBUTES	u
-F	net.minecraft.world.entity.LivingEntity	TAG_SLEEPING_POS	aN
-F	net.minecraft.world.entity.LivingEntity	TAG_EQUIPMENT	aO
-F	net.minecraft.world.entity.LivingEntity	TAG_BRAIN	aP
-F	net.minecraft.world.entity.LivingEntity	TAG_FALL_FLYING	aQ
-F	net.minecraft.world.entity.LivingEntity	TAG_HURT_TIME	aR
-F	net.minecraft.world.entity.LivingEntity	TAG_DEATH_TIME	aS
-F	net.minecraft.world.entity.LivingEntity	TAG_HURT_BY_TIMESTAMP	aT
-F	net.minecraft.world.entity.LivingEntity	TAG_HEALTH	aU
-F	net.minecraft.world.entity.LivingEntity	SPEED_MODIFIER_POWDER_SNOW_ID	c
-F	net.minecraft.world.entity.LivingEntity	SPRINTING_MODIFIER_ID	d
-F	net.minecraft.world.entity.LivingEntity	SPEED_MODIFIER_SPRINTING	e
-F	net.minecraft.world.entity.LivingEntity	EQUIPMENT_SLOT_OFFSET	aV
-F	net.minecraft.world.entity.LivingEntity	ARMOR_SLOT_OFFSET	aW
-F	net.minecraft.world.entity.LivingEntity	BODY_ARMOR_OFFSET	aX
-F	net.minecraft.world.entity.LivingEntity	SADDLE_OFFSET	aY
-F	net.minecraft.world.entity.LivingEntity	PLAYER_HURT_EXPERIENCE_TIME	aZ
-F	net.minecraft.world.entity.LivingEntity	DAMAGE_SOURCE_TIMEOUT	r
-F	net.minecraft.world.entity.LivingEntity	MIN_MOVEMENT_DISTANCE	ba
-F	net.minecraft.world.entity.LivingEntity	DEFAULT_BASE_GRAVITY	bb
-F	net.minecraft.world.entity.LivingEntity	DEATH_DURATION	bc
-F	net.minecraft.world.entity.LivingEntity	INPUT_FRICTION	bd
-F	net.minecraft.world.entity.LivingEntity	TICKS_PER_ELYTRA_FREE_FALL_EVENT	s
-F	net.minecraft.world.entity.LivingEntity	FREE_FALL_EVENTS_PER_ELYTRA_BREAK	t
-F	net.minecraft.world.entity.LivingEntity	BASE_JUMP_POWER	be
-F	net.minecraft.world.entity.LivingEntity	DEFAULT_KNOCKBACK	bf
-F	net.minecraft.world.entity.LivingEntity	INVULNERABLE_DURATION	bg
-F	net.minecraft.world.entity.LivingEntity	MAX_LINE_OF_SIGHT_TEST_RANGE	cc
-F	net.minecraft.world.entity.LivingEntity	LIVING_ENTITY_FLAG_IS_USING	bh
-F	net.minecraft.world.entity.LivingEntity	LIVING_ENTITY_FLAG_OFF_HAND	bi
-F	net.minecraft.world.entity.LivingEntity	LIVING_ENTITY_FLAG_SPIN_ATTACK	bj
-F	net.minecraft.world.entity.LivingEntity	DATA_LIVING_ENTITY_FLAGS	bk
-F	net.minecraft.world.entity.LivingEntity	DATA_HEALTH_ID	cd
-F	net.minecraft.world.entity.LivingEntity	DATA_EFFECT_PARTICLES	ce
-F	net.minecraft.world.entity.LivingEntity	DATA_EFFECT_AMBIENCE_ID	cf
-F	net.minecraft.world.entity.LivingEntity	DATA_ARROW_COUNT_ID	cg
-F	net.minecraft.world.entity.LivingEntity	DATA_STINGER_COUNT_ID	ch
-F	net.minecraft.world.entity.LivingEntity	SLEEPING_POS_ID	ci
-F	net.minecraft.world.entity.LivingEntity	PARTICLE_FREQUENCY_WHEN_INVISIBLE	cj
-F	net.minecraft.world.entity.LivingEntity	SLEEPING_DIMENSIONS	bl
-F	net.minecraft.world.entity.LivingEntity	EXTRA_RENDER_CULLING_SIZE_WITH_BIG_HAT	bm
-F	net.minecraft.world.entity.LivingEntity	DEFAULT_BABY_SCALE	bn
-F	net.minecraft.world.entity.LivingEntity	WATER_FLOAT_IMPULSE	ck
-F	net.minecraft.world.entity.LivingEntity	PLAYER_NOT_WEARING_DISGUISE_ITEM	bo
-F	net.minecraft.world.entity.LivingEntity	EMPTY_BRAIN	cl
-F	net.minecraft.world.entity.LivingEntity	attributes	cm
-F	net.minecraft.world.entity.LivingEntity	combatTracker	cn
-F	net.minecraft.world.entity.LivingEntity	activeEffects	co
-F	net.minecraft.world.entity.LivingEntity	lastEquipmentItems	cp
-F	net.minecraft.world.entity.LivingEntity	swinging	bp
-F	net.minecraft.world.entity.LivingEntity	discardFriction	cq
-F	net.minecraft.world.entity.LivingEntity	swingingArm	bq
-F	net.minecraft.world.entity.LivingEntity	swingTime	br
-F	net.minecraft.world.entity.LivingEntity	removeArrowTime	bs
-F	net.minecraft.world.entity.LivingEntity	removeStingerTime	bt
-F	net.minecraft.world.entity.LivingEntity	hurtTime	bu
-F	net.minecraft.world.entity.LivingEntity	hurtDuration	bv
-F	net.minecraft.world.entity.LivingEntity	deathTime	bw
-F	net.minecraft.world.entity.LivingEntity	oAttackAnim	bx
-F	net.minecraft.world.entity.LivingEntity	attackAnim	by
-F	net.minecraft.world.entity.LivingEntity	attackStrengthTicker	bz
-F	net.minecraft.world.entity.LivingEntity	itemSwapTicker	bA
-F	net.minecraft.world.entity.LivingEntity	walkAnimation	bB
-F	net.minecraft.world.entity.LivingEntity	yBodyRot	bC
-F	net.minecraft.world.entity.LivingEntity	yBodyRotO	bD
-F	net.minecraft.world.entity.LivingEntity	yHeadRot	bE
-F	net.minecraft.world.entity.LivingEntity	yHeadRotO	bF
-F	net.minecraft.world.entity.LivingEntity	elytraAnimationState	bG
-F	net.minecraft.world.entity.LivingEntity	lastHurtByPlayer	bH
-F	net.minecraft.world.entity.LivingEntity	lastHurtByPlayerMemoryTime	bI
-F	net.minecraft.world.entity.LivingEntity	dead	bJ
-F	net.minecraft.world.entity.LivingEntity	noActionTime	bK
-F	net.minecraft.world.entity.LivingEntity	lastHurt	bL
-F	net.minecraft.world.entity.LivingEntity	jumping	bM
-F	net.minecraft.world.entity.LivingEntity	xxa	bN
-F	net.minecraft.world.entity.LivingEntity	yya	bO
-F	net.minecraft.world.entity.LivingEntity	zza	bP
-F	net.minecraft.world.entity.LivingEntity	interpolation	bQ
-F	net.minecraft.world.entity.LivingEntity	lerpYHeadRot	bR
-F	net.minecraft.world.entity.LivingEntity	lerpHeadSteps	bS
-F	net.minecraft.world.entity.LivingEntity	effectsDirty	cr
-F	net.minecraft.world.entity.LivingEntity	lastHurtByMob	cs
-F	net.minecraft.world.entity.LivingEntity	lastHurtByMobTimestamp	ct
-F	net.minecraft.world.entity.LivingEntity	lastHurtMob	cu
-F	net.minecraft.world.entity.LivingEntity	lastHurtMobTimestamp	cv
-F	net.minecraft.world.entity.LivingEntity	speed	cw
-F	net.minecraft.world.entity.LivingEntity	noJumpDelay	cx
-F	net.minecraft.world.entity.LivingEntity	absorptionAmount	cy
-F	net.minecraft.world.entity.LivingEntity	useItem	bT
-F	net.minecraft.world.entity.LivingEntity	useItemRemaining	bU
-F	net.minecraft.world.entity.LivingEntity	fallFlyTicks	bV
-F	net.minecraft.world.entity.LivingEntity	lastKineticHitFeedbackTime	cz
-F	net.minecraft.world.entity.LivingEntity	lastPos	cA
-F	net.minecraft.world.entity.LivingEntity	lastClimbablePos	cB
-F	net.minecraft.world.entity.LivingEntity	lastDamageSource	cC
-F	net.minecraft.world.entity.LivingEntity	lastDamageStamp	cD
-F	net.minecraft.world.entity.LivingEntity	autoSpinAttackTicks	bW
-F	net.minecraft.world.entity.LivingEntity	autoSpinAttackDmg	bX
-F	net.minecraft.world.entity.LivingEntity	autoSpinAttackItemStack	bY
-F	net.minecraft.world.entity.LivingEntity	recentKineticEnemies	bZ
-F	net.minecraft.world.entity.LivingEntity	swimAmount	cE
-F	net.minecraft.world.entity.LivingEntity	swimAmountO	cF
-F	net.minecraft.world.entity.LivingEntity	brain	ca
-F	net.minecraft.world.entity.LivingEntity	skipDropExperience	cG
-F	net.minecraft.world.entity.LivingEntity	activeLocationDependentEnchantments	cH
-F	net.minecraft.world.entity.LivingEntity	equipment	cb
-F	net.minecraft.world.entity.LivingEntity	locatorBarIcon	cI
-M	net.minecraft.world.entity.LivingEntity	asLivingEntity		et
-M	net.minecraft.world.entity.LivingEntity	createEquipment		eu
-M	net.minecraft.world.entity.LivingEntity	getBrain		ev
-M	net.minecraft.world.entity.LivingEntity	brainProvider		ew
-M	net.minecraft.world.entity.LivingEntity	makeBrain	com.mojang.serialization.Dynamic	a
-M	net.minecraft.world.entity.LivingEntity	kill	net.minecraft.server.level.ServerLevel	c
-M	net.minecraft.world.entity.LivingEntity	canAttackType	net.minecraft.world.entity.EntityType	a
-M	net.minecraft.world.entity.LivingEntity	defineSynchedData	net.minecraft.network.syncher.SynchedEntityData$Builder	a
-M	net.minecraft.world.entity.LivingEntity	createLivingAttributes		ex
-M	net.minecraft.world.entity.LivingEntity	checkFallDamage	double,boolean,net.minecraft.world.level.block.state.BlockState,net.minecraft.core.BlockPos	a
-M	net.minecraft.world.entity.LivingEntity	canBreatheUnderwater		ey
-M	net.minecraft.world.entity.LivingEntity	getSwimAmount	float	b
-M	net.minecraft.world.entity.LivingEntity	hasLandedInLiquid		ez
-M	net.minecraft.world.entity.LivingEntity	baseTick		aJ
-M	net.minecraft.world.entity.LivingEntity	shouldTakeDrowningDamage		eA
-M	net.minecraft.world.entity.LivingEntity	getBlockSpeedFactor		bi
-M	net.minecraft.world.entity.LivingEntity	getLuck		eB
-M	net.minecraft.world.entity.LivingEntity	removeFrost		eC
-M	net.minecraft.world.entity.LivingEntity	tryAddFrost		eD
-M	net.minecraft.world.entity.LivingEntity	onChangedBlock	net.minecraft.server.level.ServerLevel,net.minecraft.core.BlockPos	b
-M	net.minecraft.world.entity.LivingEntity	isBaby		e_
-M	net.minecraft.world.entity.LivingEntity	getAgeScale		eE
-M	net.minecraft.world.entity.LivingEntity	getScale		eF
-M	net.minecraft.world.entity.LivingEntity	sanitizeScale	float	c
-M	net.minecraft.world.entity.LivingEntity	isAffectedByFluids		eG
-M	net.minecraft.world.entity.LivingEntity	tickDeath		eH
-M	net.minecraft.world.entity.LivingEntity	shouldDropExperience		eI
-M	net.minecraft.world.entity.LivingEntity	shouldDropLoot	net.minecraft.server.level.ServerLevel	e
-M	net.minecraft.world.entity.LivingEntity	decreaseAirSupply	int	l
-M	net.minecraft.world.entity.LivingEntity	increaseAirSupply	int	m
-M	net.minecraft.world.entity.LivingEntity	getExperienceReward	net.minecraft.server.level.ServerLevel,net.minecraft.world.entity.Entity	a
-M	net.minecraft.world.entity.LivingEntity	getBaseExperienceReward	net.minecraft.server.level.ServerLevel	f
-M	net.minecraft.world.entity.LivingEntity	isAlwaysExperienceDropper		eJ
-M	net.minecraft.world.entity.LivingEntity	getLastHurtByMob		eK
-M	net.minecraft.world.entity.LivingEntity	getLastHurtByPlayer		eL
-M	net.minecraft.world.entity.LivingEntity	getLastAttacker		f_
-M	net.minecraft.world.entity.LivingEntity	getLastHurtByMobTimestamp		eM
-M	net.minecraft.world.entity.LivingEntity	setLastHurtByPlayer	net.minecraft.world.entity.player.Player,int	a
-M	net.minecraft.world.entity.LivingEntity	setLastHurtByPlayer	java.util.UUID,int	a
-M	net.minecraft.world.entity.LivingEntity	setLastHurtByPlayer	net.minecraft.world.entity.EntityReference,int	a
-M	net.minecraft.world.entity.LivingEntity	setLastHurtByMob	net.minecraft.world.entity.LivingEntity	a
-M	net.minecraft.world.entity.LivingEntity	getLastHurtMob		eN
-M	net.minecraft.world.entity.LivingEntity	getLastHurtMobTimestamp		eO
-M	net.minecraft.world.entity.LivingEntity	setLastHurtMob	net.minecraft.world.entity.Entity	C
-M	net.minecraft.world.entity.LivingEntity	getNoActionTime		eP
-M	net.minecraft.world.entity.LivingEntity	setNoActionTime	int	n
-M	net.minecraft.world.entity.LivingEntity	shouldDiscardFriction		eQ
-M	net.minecraft.world.entity.LivingEntity	setDiscardFriction	boolean	r
-M	net.minecraft.world.entity.LivingEntity	doesEmitEquipEvent	net.minecraft.world.entity.EquipmentSlot	b
-M	net.minecraft.world.entity.LivingEntity	onEquipItem	net.minecraft.world.entity.EquipmentSlot,net.minecraft.world.item.ItemStack,net.minecraft.world.item.ItemStack	a
-M	net.minecraft.world.entity.LivingEntity	getEquipSound	net.minecraft.world.entity.EquipmentSlot,net.minecraft.world.item.ItemStack,net.minecraft.world.item.equipment.Equippable	a
-M	net.minecraft.world.entity.LivingEntity	remove	net.minecraft.world.entity.Entity$RemovalReason	a
-M	net.minecraft.world.entity.LivingEntity	onRemoval	net.minecraft.world.entity.Entity$RemovalReason	b
-M	net.minecraft.world.entity.LivingEntity	triggerOnDeathMobEffects	net.minecraft.server.level.ServerLevel,net.minecraft.world.entity.Entity$RemovalReason	a
-M	net.minecraft.world.entity.LivingEntity	addAdditionalSaveData	net.minecraft.world.level.storage.ValueOutput	a
-M	net.minecraft.world.entity.LivingEntity	drop	net.minecraft.world.item.ItemStack,boolean,boolean	a
-M	net.minecraft.world.entity.LivingEntity	readAdditionalSaveData	net.minecraft.world.level.storage.ValueInput	a
-M	net.minecraft.world.entity.LivingEntity	updateDataBeforeSync		aI
-M	net.minecraft.world.entity.LivingEntity	tickEffects		eR
-M	net.minecraft.world.entity.LivingEntity	updateDirtyEffects		k
-M	net.minecraft.world.entity.LivingEntity	updateInvisibilityStatus		M
-M	net.minecraft.world.entity.LivingEntity	updateSynchronizedMobEffectParticles		p
-M	net.minecraft.world.entity.LivingEntity	updateGlowingStatus		D
-M	net.minecraft.world.entity.LivingEntity	getVisibilityPercent	net.minecraft.world.entity.Entity	D
-M	net.minecraft.world.entity.LivingEntity	canAttack	net.minecraft.world.entity.LivingEntity	c
-M	net.minecraft.world.entity.LivingEntity	canBeSeenAsEnemy		eS
-M	net.minecraft.world.entity.LivingEntity	canBeSeenByAnyone		eT
-M	net.minecraft.world.entity.LivingEntity	areAllEffectsAmbient	java.util.Collection	d
-M	net.minecraft.world.entity.LivingEntity	removeEffectParticles		eU
-M	net.minecraft.world.entity.LivingEntity	removeAllEffects		eV
-M	net.minecraft.world.entity.LivingEntity	getActiveEffects		eW
-M	net.minecraft.world.entity.LivingEntity	getActiveEffectsMap		eX
-M	net.minecraft.world.entity.LivingEntity	hasEffect	net.minecraft.core.Holder	d
-M	net.minecraft.world.entity.LivingEntity	getEffect	net.minecraft.core.Holder	e
-M	net.minecraft.world.entity.LivingEntity	getEffectBlendFactor	net.minecraft.core.Holder,float	a
-M	net.minecraft.world.entity.LivingEntity	addEffect	net.minecraft.world.effect.MobEffectInstance	a
-M	net.minecraft.world.entity.LivingEntity	addEffect	net.minecraft.world.effect.MobEffectInstance,net.minecraft.world.entity.Entity	b
-M	net.minecraft.world.entity.LivingEntity	canBeAffected	net.minecraft.world.effect.MobEffectInstance	b
-M	net.minecraft.world.entity.LivingEntity	forceAddEffect	net.minecraft.world.effect.MobEffectInstance,net.minecraft.world.entity.Entity	c
-M	net.minecraft.world.entity.LivingEntity	isInvertedHealAndHarm		eY
-M	net.minecraft.world.entity.LivingEntity	removeEffectNoUpdate	net.minecraft.core.Holder	f
-M	net.minecraft.world.entity.LivingEntity	removeEffect	net.minecraft.core.Holder	g
-M	net.minecraft.world.entity.LivingEntity	onEffectAdded	net.minecraft.world.effect.MobEffectInstance,net.minecraft.world.entity.Entity	a
-M	net.minecraft.world.entity.LivingEntity	sendEffectToPassengers	net.minecraft.world.effect.MobEffectInstance	c
-M	net.minecraft.world.entity.LivingEntity	onEffectUpdated	net.minecraft.world.effect.MobEffectInstance,boolean,net.minecraft.world.entity.Entity	a
-M	net.minecraft.world.entity.LivingEntity	onEffectsRemoved	java.util.Collection	c
-M	net.minecraft.world.entity.LivingEntity	refreshDirtyAttributes		E
-M	net.minecraft.world.entity.LivingEntity	onAttributeUpdated	net.minecraft.core.Holder	a
-M	net.minecraft.world.entity.LivingEntity	heal	float	d
-M	net.minecraft.world.entity.LivingEntity	getHealth		eZ
-M	net.minecraft.world.entity.LivingEntity	setHealth	float	x
-M	net.minecraft.world.entity.LivingEntity	isDeadOrDying		fa
-M	net.minecraft.world.entity.LivingEntity	hurtServer	net.minecraft.server.level.ServerLevel,net.minecraft.world.damagesource.DamageSource,float	a
-M	net.minecraft.world.entity.LivingEntity	applyItemBlocking	net.minecraft.server.level.ServerLevel,net.minecraft.world.damagesource.DamageSource,float	b
-M	net.minecraft.world.entity.LivingEntity	playSecondaryHurtSound	net.minecraft.world.damagesource.DamageSource	i
-M	net.minecraft.world.entity.LivingEntity	resolveMobResponsibleForDamage	net.minecraft.world.damagesource.DamageSource	e
-M	net.minecraft.world.entity.LivingEntity	resolvePlayerResponsibleForDamage	net.minecraft.world.damagesource.DamageSource	f
-M	net.minecraft.world.entity.LivingEntity	blockUsingItem	net.minecraft.server.level.ServerLevel,net.minecraft.world.entity.LivingEntity	a
-M	net.minecraft.world.entity.LivingEntity	blockedByItem	net.minecraft.world.entity.LivingEntity	d
-M	net.minecraft.world.entity.LivingEntity	checkTotemDeathProtection	net.minecraft.world.damagesource.DamageSource	j
-M	net.minecraft.world.entity.LivingEntity	getLastDamageSource		fb
-M	net.minecraft.world.entity.LivingEntity	playHurtSound	net.minecraft.world.damagesource.DamageSource	g
-M	net.minecraft.world.entity.LivingEntity	makeSound	net.minecraft.sounds.SoundEvent	b
-M	net.minecraft.world.entity.LivingEntity	breakItem	net.minecraft.world.item.ItemStack	g
-M	net.minecraft.world.entity.LivingEntity	die	net.minecraft.world.damagesource.DamageSource	a
-M	net.minecraft.world.entity.LivingEntity	createWitherRose	net.minecraft.world.entity.LivingEntity	e
-M	net.minecraft.world.entity.LivingEntity	dropAllDeathLoot	net.minecraft.server.level.ServerLevel,net.minecraft.world.damagesource.DamageSource	b
-M	net.minecraft.world.entity.LivingEntity	dropEquipment	net.minecraft.server.level.ServerLevel	g
-M	net.minecraft.world.entity.LivingEntity	dropExperience	net.minecraft.server.level.ServerLevel,net.minecraft.world.entity.Entity	b
-M	net.minecraft.world.entity.LivingEntity	dropCustomDeathLoot	net.minecraft.server.level.ServerLevel,net.minecraft.world.damagesource.DamageSource,boolean	a
-M	net.minecraft.world.entity.LivingEntity	getLootTableSeed		fc
-M	net.minecraft.world.entity.LivingEntity	getKnockback	net.minecraft.world.entity.Entity,net.minecraft.world.damagesource.DamageSource	b
-M	net.minecraft.world.entity.LivingEntity	dropFromLootTable	net.minecraft.server.level.ServerLevel,net.minecraft.world.damagesource.DamageSource,boolean	b
-M	net.minecraft.world.entity.LivingEntity	dropFromLootTable	net.minecraft.server.level.ServerLevel,net.minecraft.world.damagesource.DamageSource,boolean,net.minecraft.resources.ResourceKey	a
-M	net.minecraft.world.entity.LivingEntity	dropFromLootTable	net.minecraft.server.level.ServerLevel,net.minecraft.world.damagesource.DamageSource,boolean,net.minecraft.resources.ResourceKey,java.util.function.Consumer	a
-M	net.minecraft.world.entity.LivingEntity	dropFromEntityInteractLootTable	net.minecraft.server.level.ServerLevel,net.minecraft.resources.ResourceKey,net.minecraft.world.entity.Entity,net.minecraft.world.item.ItemStack,java.util.function.BiConsumer	a
-M	net.minecraft.world.entity.LivingEntity	dropFromGiftLootTable	net.minecraft.server.level.ServerLevel,net.minecraft.resources.ResourceKey,java.util.function.BiConsumer	a
-M	net.minecraft.world.entity.LivingEntity	dropFromShearingLootTable	net.minecraft.server.level.ServerLevel,net.minecraft.resources.ResourceKey,net.minecraft.world.item.ItemStack,java.util.function.BiConsumer	a
-M	net.minecraft.world.entity.LivingEntity	dropFromLootTable	net.minecraft.server.level.ServerLevel,net.minecraft.resources.ResourceKey,java.util.function.Function,java.util.function.BiConsumer	a
-M	net.minecraft.world.entity.LivingEntity	knockback	double,double,double	o
-M	net.minecraft.world.entity.LivingEntity	indicateDamage	double,double	a
-M	net.minecraft.world.entity.LivingEntity	getHurtSound	net.minecraft.world.damagesource.DamageSource	h
-M	net.minecraft.world.entity.LivingEntity	getDeathSound		fd
-M	net.minecraft.world.entity.LivingEntity	getFallDamageSound	int	q
-M	net.minecraft.world.entity.LivingEntity	skipDropExperience		fe
-M	net.minecraft.world.entity.LivingEntity	wasExperienceConsumed		ff
-M	net.minecraft.world.entity.LivingEntity	getHurtDir		fg
-M	net.minecraft.world.entity.LivingEntity	getHitbox		fh
-M	net.minecraft.world.entity.LivingEntity	activeLocationDependentEnchantments	net.minecraft.world.entity.EquipmentSlot	c
-M	net.minecraft.world.entity.LivingEntity	lungeForwardMaybe		fi
-M	net.minecraft.world.entity.LivingEntity	getFallSounds		fj
-M	net.minecraft.world.entity.LivingEntity	getLastClimbablePos		fk
-M	net.minecraft.world.entity.LivingEntity	onClimbable		fl
-M	net.minecraft.world.entity.LivingEntity	trapdoorUsableAsLadder	net.minecraft.core.BlockPos,net.minecraft.world.level.block.state.BlockState	c
-M	net.minecraft.world.entity.LivingEntity	isAlive		cb
-M	net.minecraft.world.entity.LivingEntity	isLookingAtMe	net.minecraft.world.entity.LivingEntity,double,boolean,boolean,double[]	a
-M	net.minecraft.world.entity.LivingEntity	getMaxFallDistance		cW
-M	net.minecraft.world.entity.LivingEntity	getComfortableFallDistance	float	y
-M	net.minecraft.world.entity.LivingEntity	causeFallDamage	double,float,net.minecraft.world.damagesource.DamageSource	a
-M	net.minecraft.world.entity.LivingEntity	calculateFallDamage	double,float	a
-M	net.minecraft.world.entity.LivingEntity	calculateFallPower	double	i
-M	net.minecraft.world.entity.LivingEntity	playBlockFallSound		fm
-M	net.minecraft.world.entity.LivingEntity	animateHurt	float	q
-M	net.minecraft.world.entity.LivingEntity	getArmorValue		fn
-M	net.minecraft.world.entity.LivingEntity	hurtArmor	net.minecraft.world.damagesource.DamageSource,float	c
-M	net.minecraft.world.entity.LivingEntity	hurtHelmet	net.minecraft.world.damagesource.DamageSource,float	d
-M	net.minecraft.world.entity.LivingEntity	doHurtEquipment	net.minecraft.world.damagesource.DamageSource,float,net.minecraft.world.entity.EquipmentSlot[]	a
-M	net.minecraft.world.entity.LivingEntity	getDamageAfterArmorAbsorb	net.minecraft.world.damagesource.DamageSource,float	e
-M	net.minecraft.world.entity.LivingEntity	getDamageAfterMagicAbsorb	net.minecraft.world.damagesource.DamageSource,float	f
-M	net.minecraft.world.entity.LivingEntity	actuallyHurt	net.minecraft.server.level.ServerLevel,net.minecraft.world.damagesource.DamageSource,float	c
-M	net.minecraft.world.entity.LivingEntity	getCombatTracker		fo
-M	net.minecraft.world.entity.LivingEntity	getKillCredit		fp
-M	net.minecraft.world.entity.LivingEntity	getMaxHealth		fq
-M	net.minecraft.world.entity.LivingEntity	getMaxAbsorption		fr
-M	net.minecraft.world.entity.LivingEntity	getArrowCount		fs
-M	net.minecraft.world.entity.LivingEntity	setArrowCount	int	o
-M	net.minecraft.world.entity.LivingEntity	getStingerCount		ft
-M	net.minecraft.world.entity.LivingEntity	setStingerCount	int	p
-M	net.minecraft.world.entity.LivingEntity	getCurrentSwingDuration		F
-M	net.minecraft.world.entity.LivingEntity	swing	net.minecraft.world.InteractionHand	a
-M	net.minecraft.world.entity.LivingEntity	swing	net.minecraft.world.InteractionHand,boolean	a
-M	net.minecraft.world.entity.LivingEntity	handleDamageEvent	net.minecraft.world.damagesource.DamageSource	c
-M	net.minecraft.world.entity.LivingEntity	handleEntityEvent	byte	b
-M	net.minecraft.world.entity.LivingEntity	getTicksSinceLastKineticHitFeedback	float	z
-M	net.minecraft.world.entity.LivingEntity	makePoofParticles		fu
-M	net.minecraft.world.entity.LivingEntity	makeDrownParticles		G
-M	net.minecraft.world.entity.LivingEntity	onKineticHit		H
-M	net.minecraft.world.entity.LivingEntity	swapHandItems		I
-M	net.minecraft.world.entity.LivingEntity	onBelowWorld		aU
-M	net.minecraft.world.entity.LivingEntity	updateSwingTime		fv
-M	net.minecraft.world.entity.LivingEntity	getAttribute	net.minecraft.core.Holder	h
-M	net.minecraft.world.entity.LivingEntity	getAttributeValue	net.minecraft.core.Holder	i
-M	net.minecraft.world.entity.LivingEntity	getAttributeBaseValue	net.minecraft.core.Holder	j
-M	net.minecraft.world.entity.LivingEntity	getAttributes		fw
-M	net.minecraft.world.entity.LivingEntity	getMainHandItem		fx
-M	net.minecraft.world.entity.LivingEntity	getOffhandItem		fy
-M	net.minecraft.world.entity.LivingEntity	getItemHeldByArm	net.minecraft.world.entity.HumanoidArm	b
-M	net.minecraft.world.entity.LivingEntity	getWeaponItem		eq
-M	net.minecraft.world.entity.LivingEntity	entityAttackRange		fz
-M	net.minecraft.world.entity.LivingEntity	getActiveItem		fA
-M	net.minecraft.world.entity.LivingEntity	isHolding	net.minecraft.world.item.Item	b
-M	net.minecraft.world.entity.LivingEntity	isHolding	java.util.function.Predicate	b
-M	net.minecraft.world.entity.LivingEntity	getItemInHand	net.minecraft.world.InteractionHand	b
-M	net.minecraft.world.entity.LivingEntity	setItemInHand	net.minecraft.world.InteractionHand,net.minecraft.world.item.ItemStack	a
-M	net.minecraft.world.entity.LivingEntity	hasItemInSlot	net.minecraft.world.entity.EquipmentSlot	d
-M	net.minecraft.world.entity.LivingEntity	canUseSlot	net.minecraft.world.entity.EquipmentSlot	e
-M	net.minecraft.world.entity.LivingEntity	getItemBySlot	net.minecraft.world.entity.EquipmentSlot	a
-M	net.minecraft.world.entity.LivingEntity	setItemSlot	net.minecraft.world.entity.EquipmentSlot,net.minecraft.world.item.ItemStack	a
-M	net.minecraft.world.entity.LivingEntity	getArmorCoverPercentage		fB
-M	net.minecraft.world.entity.LivingEntity	setSprinting	boolean	i
-M	net.minecraft.world.entity.LivingEntity	getSoundVolume		fC
-M	net.minecraft.world.entity.LivingEntity	getVoicePitch		fD
-M	net.minecraft.world.entity.LivingEntity	isImmobile		fE
-M	net.minecraft.world.entity.LivingEntity	push	net.minecraft.world.entity.Entity	h
-M	net.minecraft.world.entity.LivingEntity	dismountVehicle	net.minecraft.world.entity.Entity	H
-M	net.minecraft.world.entity.LivingEntity	shouldShowName		de
-M	net.minecraft.world.entity.LivingEntity	getJumpPower		fF
-M	net.minecraft.world.entity.LivingEntity	getJumpPower	float	A
-M	net.minecraft.world.entity.LivingEntity	getJumpBoostPower		fG
-M	net.minecraft.world.entity.LivingEntity	jumpFromGround		u
-M	net.minecraft.world.entity.LivingEntity	goDownInWater		fH
-M	net.minecraft.world.entity.LivingEntity	jumpInLiquid	net.minecraft.tags.TagKey	c
-M	net.minecraft.world.entity.LivingEntity	getWaterSlowDown		fI
-M	net.minecraft.world.entity.LivingEntity	canStandOnFluid	net.minecraft.world.level.material.FluidState	a
-M	net.minecraft.world.entity.LivingEntity	getDefaultGravity		bs
-M	net.minecraft.world.entity.LivingEntity	getEffectiveGravity		fJ
-M	net.minecraft.world.entity.LivingEntity	travel	net.minecraft.world.phys.Vec3	m
-M	net.minecraft.world.entity.LivingEntity	shouldTravelInFluid	net.minecraft.world.level.material.FluidState	b
-M	net.minecraft.world.entity.LivingEntity	travelFlying	net.minecraft.world.phys.Vec3,float	a
-M	net.minecraft.world.entity.LivingEntity	travelFlying	net.minecraft.world.phys.Vec3,float,float,float	a
-M	net.minecraft.world.entity.LivingEntity	travelInAir	net.minecraft.world.phys.Vec3	a
-M	net.minecraft.world.entity.LivingEntity	travelInFluid	net.minecraft.world.phys.Vec3	o
-M	net.minecraft.world.entity.LivingEntity	travelInWater	net.minecraft.world.phys.Vec3,double,boolean,double	a
-M	net.minecraft.world.entity.LivingEntity	travelInLava	net.minecraft.world.phys.Vec3,double,boolean,double	b
-M	net.minecraft.world.entity.LivingEntity	jumpOutOfFluid	double	j
-M	net.minecraft.world.entity.LivingEntity	floatInWaterWhileRidden		J
-M	net.minecraft.world.entity.LivingEntity	travelFallFlying	net.minecraft.world.phys.Vec3	p
-M	net.minecraft.world.entity.LivingEntity	stopFallFlying		fK
-M	net.minecraft.world.entity.LivingEntity	updateFallFlyingMovement	net.minecraft.world.phys.Vec3	q
-M	net.minecraft.world.entity.LivingEntity	handleFallFlyingCollisions	double,double	c
-M	net.minecraft.world.entity.LivingEntity	travelRidden	net.minecraft.world.entity.player.Player,net.minecraft.world.phys.Vec3	c
-M	net.minecraft.world.entity.LivingEntity	tickRidden	net.minecraft.world.entity.player.Player,net.minecraft.world.phys.Vec3	a
-M	net.minecraft.world.entity.LivingEntity	getRiddenInput	net.minecraft.world.entity.player.Player,net.minecraft.world.phys.Vec3	b
-M	net.minecraft.world.entity.LivingEntity	getRiddenSpeed	net.minecraft.world.entity.player.Player	f
-M	net.minecraft.world.entity.LivingEntity	calculateEntityAnimation	boolean	s
-M	net.minecraft.world.entity.LivingEntity	updateWalkAnimation	float	B
-M	net.minecraft.world.entity.LivingEntity	handleRelativeFrictionAndCalculateMovement	net.minecraft.world.phys.Vec3,float	b
-M	net.minecraft.world.entity.LivingEntity	getFluidFallingAdjustedMovement	double,boolean,net.minecraft.world.phys.Vec3	a
-M	net.minecraft.world.entity.LivingEntity	handleOnClimbable	net.minecraft.world.phys.Vec3	r
-M	net.minecraft.world.entity.LivingEntity	getFrictionInfluencedSpeed	float	I
-M	net.minecraft.world.entity.LivingEntity	getFlyingSpeed		fL
-M	net.minecraft.world.entity.LivingEntity	getSpeed		fM
-M	net.minecraft.world.entity.LivingEntity	setSpeed	float	C
-M	net.minecraft.world.entity.LivingEntity	doHurtTarget	net.minecraft.server.level.ServerLevel,net.minecraft.world.entity.Entity	c
-M	net.minecraft.world.entity.LivingEntity	causeExtraKnockback	net.minecraft.world.entity.Entity,float,net.minecraft.world.phys.Vec3	a
-M	net.minecraft.world.entity.LivingEntity	playAttackSound		fN
-M	net.minecraft.world.entity.LivingEntity	tick		g
-M	net.minecraft.world.entity.LivingEntity	wasRecentlyStabbed	net.minecraft.world.entity.Entity,int	b
-M	net.minecraft.world.entity.LivingEntity	rememberStabbedEntity	net.minecraft.world.entity.Entity	E
-M	net.minecraft.world.entity.LivingEntity	stabbedEntities	java.util.function.Predicate	c
-M	net.minecraft.world.entity.LivingEntity	stabAttack	net.minecraft.world.entity.EquipmentSlot,net.minecraft.world.entity.Entity,float,boolean,boolean,boolean	a
-M	net.minecraft.world.entity.LivingEntity	onAttack		fO
-M	net.minecraft.world.entity.LivingEntity	detectEquipmentUpdates		K
-M	net.minecraft.world.entity.LivingEntity	collectEquipmentChanges		L
-M	net.minecraft.world.entity.LivingEntity	equipmentHasChanged	net.minecraft.world.item.ItemStack,net.minecraft.world.item.ItemStack	a
-M	net.minecraft.world.entity.LivingEntity	handleHandSwap	java.util.Map	a
-M	net.minecraft.world.entity.LivingEntity	handleEquipmentChanges	java.util.Map	b
-M	net.minecraft.world.entity.LivingEntity	tickHeadTurn	float	D
-M	net.minecraft.world.entity.LivingEntity	getMaxHeadRotationRelativeToBody		fP
-M	net.minecraft.world.entity.LivingEntity	aiStep		d_
-M	net.minecraft.world.entity.LivingEntity	applyInput		fQ
-M	net.minecraft.world.entity.LivingEntity	isSensitiveToWater		fR
-M	net.minecraft.world.entity.LivingEntity	isJumping		fS
-M	net.minecraft.world.entity.LivingEntity	updateFallFlying		fT
-M	net.minecraft.world.entity.LivingEntity	canGlide		fU
-M	net.minecraft.world.entity.LivingEntity	serverAiStep		fV
-M	net.minecraft.world.entity.LivingEntity	pushEntities		q
-M	net.minecraft.world.entity.LivingEntity	checkAutoSpinAttack	net.minecraft.world.phys.AABB,net.minecraft.world.phys.AABB	a
-M	net.minecraft.world.entity.LivingEntity	doPush	net.minecraft.world.entity.Entity	F
-M	net.minecraft.world.entity.LivingEntity	doAutoAttackOnTouch	net.minecraft.world.entity.LivingEntity	f
-M	net.minecraft.world.entity.LivingEntity	isAutoSpinAttack		fW
-M	net.minecraft.world.entity.LivingEntity	stopRiding		cf
-M	net.minecraft.world.entity.LivingEntity	rideTick		t
-M	net.minecraft.world.entity.LivingEntity	getInterpolation		l_
-M	net.minecraft.world.entity.LivingEntity	lerpHeadTo	float,int	a
-M	net.minecraft.world.entity.LivingEntity	setJumping	boolean	t
-M	net.minecraft.world.entity.LivingEntity	onItemPickup	net.minecraft.world.entity.item.ItemEntity	a
-M	net.minecraft.world.entity.LivingEntity	take	net.minecraft.world.entity.Entity,int	a
-M	net.minecraft.world.entity.LivingEntity	hasLineOfSight	net.minecraft.world.entity.Entity	G
-M	net.minecraft.world.entity.LivingEntity	hasLineOfSight	net.minecraft.world.entity.Entity,net.minecraft.world.level.ClipContext$Block,net.minecraft.world.level.ClipContext$Fluid,double	a
-M	net.minecraft.world.entity.LivingEntity	getViewYRot	float	j
-M	net.minecraft.world.entity.LivingEntity	getAttackAnim	float	E
-M	net.minecraft.world.entity.LivingEntity	isPickable		bX
-M	net.minecraft.world.entity.LivingEntity	isPushable		bY
-M	net.minecraft.world.entity.LivingEntity	getYHeadRot		cS
-M	net.minecraft.world.entity.LivingEntity	setYHeadRot	float	r
-M	net.minecraft.world.entity.LivingEntity	setYBodyRot	float	s
-M	net.minecraft.world.entity.LivingEntity	getRelativePortalPosition	net.minecraft.core.Direction$Axis,net.minecraft.util.BlockUtil$FoundRectangle	a
-M	net.minecraft.world.entity.LivingEntity	resetForwardDirectionOfRelativePortalPosition	net.minecraft.world.phys.Vec3	n
-M	net.minecraft.world.entity.LivingEntity	getAbsorptionAmount		fX
-M	net.minecraft.world.entity.LivingEntity	setAbsorptionAmount	float	F
-M	net.minecraft.world.entity.LivingEntity	internalSetAbsorptionAmount	float	G
-M	net.minecraft.world.entity.LivingEntity	onEnterCombat		g_
-M	net.minecraft.world.entity.LivingEntity	onLeaveCombat		P_
-M	net.minecraft.world.entity.LivingEntity	updateEffectVisibility		fY
-M	net.minecraft.world.entity.LivingEntity	getMainArm		at
-M	net.minecraft.world.entity.LivingEntity	isUsingItem		fZ
-M	net.minecraft.world.entity.LivingEntity	getUsedItemHand		ga
-M	net.minecraft.world.entity.LivingEntity	updatingUsingItem		N
-M	net.minecraft.world.entity.LivingEntity	createItemStackToDrop	net.minecraft.world.item.ItemStack,boolean,boolean	b
-M	net.minecraft.world.entity.LivingEntity	updateUsingItem	net.minecraft.world.item.ItemStack	a_
-M	net.minecraft.world.entity.LivingEntity	updateSwimAmount		P
-M	net.minecraft.world.entity.LivingEntity	setLivingEntityFlag	int,boolean	c
-M	net.minecraft.world.entity.LivingEntity	startUsingItem	net.minecraft.world.InteractionHand	c
-M	net.minecraft.world.entity.LivingEntity	onSyncedDataUpdated	net.minecraft.network.syncher.EntityDataAccessor	a
-M	net.minecraft.world.entity.LivingEntity	lookAt	net.minecraft.commands.arguments.EntityAnchorArgument$Anchor,net.minecraft.world.phys.Vec3	a
-M	net.minecraft.world.entity.LivingEntity	getPreciseBodyRotation	float	t
-M	net.minecraft.world.entity.LivingEntity	spawnItemParticles	net.minecraft.world.item.ItemStack,int	b
-M	net.minecraft.world.entity.LivingEntity	completeUsingItem		Q_
-M	net.minecraft.world.entity.LivingEntity	handleExtraItemsCreatedOnUse	net.minecraft.world.item.ItemStack	b
-M	net.minecraft.world.entity.LivingEntity	getUseItem		gb
-M	net.minecraft.world.entity.LivingEntity	getUseItemRemainingTicks		gc
-M	net.minecraft.world.entity.LivingEntity	getTicksUsingItem		gd
-M	net.minecraft.world.entity.LivingEntity	getTicksUsingItem	float	H
-M	net.minecraft.world.entity.LivingEntity	releaseUsingItem		ge
-M	net.minecraft.world.entity.LivingEntity	stopUsingItem		gf
-M	net.minecraft.world.entity.LivingEntity	isBlocking		gg
-M	net.minecraft.world.entity.LivingEntity	getItemBlockingWith		gh
-M	net.minecraft.world.entity.LivingEntity	isSuppressingSlidingDownLadder		gi
-M	net.minecraft.world.entity.LivingEntity	isFallFlying		gj
-M	net.minecraft.world.entity.LivingEntity	isVisuallySwimming		cC
-M	net.minecraft.world.entity.LivingEntity	getFallFlyingTicks		gk
-M	net.minecraft.world.entity.LivingEntity	randomTeleport	double,double,double,boolean	b
-M	net.minecraft.world.entity.LivingEntity	isAffectedByPotions		gl
-M	net.minecraft.world.entity.LivingEntity	attackable		gm
-M	net.minecraft.world.entity.LivingEntity	setRecordPlayingNearby	net.minecraft.core.BlockPos,boolean	a
-M	net.minecraft.world.entity.LivingEntity	canPickUpLoot		gn
-M	net.minecraft.world.entity.LivingEntity	getDimensions	net.minecraft.world.entity.Pose	a
-M	net.minecraft.world.entity.LivingEntity	getDefaultDimensions	net.minecraft.world.entity.Pose	b
-M	net.minecraft.world.entity.LivingEntity	getDismountPoses		go
-M	net.minecraft.world.entity.LivingEntity	getLocalBoundsForPose	net.minecraft.world.entity.Pose	f
-M	net.minecraft.world.entity.LivingEntity	wouldNotSuffocateAtTargetPose	net.minecraft.world.entity.Pose	g
-M	net.minecraft.world.entity.LivingEntity	canUsePortal	boolean	o
-M	net.minecraft.world.entity.LivingEntity	getSleepingPos		gp
-M	net.minecraft.world.entity.LivingEntity	setSleepingPos	net.minecraft.core.BlockPos	g
-M	net.minecraft.world.entity.LivingEntity	clearSleepingPos		gq
-M	net.minecraft.world.entity.LivingEntity	isSleeping		gr
-M	net.minecraft.world.entity.LivingEntity	startSleeping	net.minecraft.core.BlockPos	b
-M	net.minecraft.world.entity.LivingEntity	setPosToBed	net.minecraft.core.BlockPos	a
-M	net.minecraft.world.entity.LivingEntity	checkBedExists		Q
-M	net.minecraft.world.entity.LivingEntity	stopSleeping		gs
-M	net.minecraft.world.entity.LivingEntity	getBedOrientation		gt
-M	net.minecraft.world.entity.LivingEntity	isInWall		cc
-M	net.minecraft.world.entity.LivingEntity	getProjectile	net.minecraft.world.item.ItemStack	d
-M	net.minecraft.world.entity.LivingEntity	entityEventForEquipmentBreak	net.minecraft.world.entity.EquipmentSlot	g
-M	net.minecraft.world.entity.LivingEntity	onEquippedItemBroken	net.minecraft.world.item.Item,net.minecraft.world.entity.EquipmentSlot	a
-M	net.minecraft.world.entity.LivingEntity	stopLocationBasedEffects	net.minecraft.world.item.ItemStack,net.minecraft.world.entity.EquipmentSlot,net.minecraft.world.entity.ai.attributes.AttributeMap	a
-M	net.minecraft.world.entity.LivingEntity	canEquipWithDispenser	net.minecraft.world.item.ItemStack	e
-M	net.minecraft.world.entity.LivingEntity	canDispenserEquipIntoSlot	net.minecraft.world.entity.EquipmentSlot	f
-M	net.minecraft.world.entity.LivingEntity	getEquipmentSlotForItem	net.minecraft.world.item.ItemStack	f
-M	net.minecraft.world.entity.LivingEntity	isEquippableInSlot	net.minecraft.world.item.ItemStack,net.minecraft.world.entity.EquipmentSlot	a
-M	net.minecraft.world.entity.LivingEntity	createEquipmentSlotAccess	net.minecraft.world.entity.LivingEntity,net.minecraft.world.entity.EquipmentSlot	a
-M	net.minecraft.world.entity.LivingEntity	getEquipmentSlot	int	r
-M	net.minecraft.world.entity.LivingEntity	getSlot	int	a_
-M	net.minecraft.world.entity.LivingEntity	canFreeze		ea
-M	net.minecraft.world.entity.LivingEntity	isCurrentlyGlowing		cF
-M	net.minecraft.world.entity.LivingEntity	getVisualRotationYInDegrees		ed
-M	net.minecraft.world.entity.LivingEntity	recreateFromPacket	net.minecraft.network.protocol.game.ClientboundAddEntityPacket	a
-M	net.minecraft.world.entity.LivingEntity	getSecondsToDisableBlocking		gu
-M	net.minecraft.world.entity.LivingEntity	maxUpStep		eg
-M	net.minecraft.world.entity.LivingEntity	getPassengerRidingPosition	net.minecraft.world.entity.Entity	n
-M	net.minecraft.world.entity.LivingEntity	lerpHeadRotationStep	int,double	a
-M	net.minecraft.world.entity.LivingEntity	igniteForTicks	int	g
-M	net.minecraft.world.entity.LivingEntity	hasInfiniteMaterials		gv
-M	net.minecraft.world.entity.LivingEntity	isInvulnerableTo	net.minecraft.server.level.ServerLevel,net.minecraft.world.damagesource.DamageSource	a
-M	net.minecraft.world.entity.LivingEntity	canGlideUsing	net.minecraft.world.item.ItemStack,net.minecraft.world.entity.EquipmentSlot	b
-M	net.minecraft.world.entity.LivingEntity	getLastHurtByPlayerMemoryTime		gw
-M	net.minecraft.world.entity.LivingEntity	isTransmittingWaypoint		gx
-M	net.minecraft.world.entity.LivingEntity	makeWaypointConnectionWith	net.minecraft.server.level.ServerPlayer	f
-M	net.minecraft.world.entity.LivingEntity	waypointIcon		gy
-M	net.minecraft.world.entity.LivingEntity	lambda$createEquipmentSlotAccess$25	net.minecraft.world.entity.LivingEntity,net.minecraft.world.entity.EquipmentSlot,net.minecraft.world.item.ItemStack	a
-M	net.minecraft.world.entity.LivingEntity	lambda$stopLocationBasedEffects$24	net.minecraft.world.entity.ai.attributes.AttributeMap,net.minecraft.core.Holder,net.minecraft.world.entity.ai.attributes.AttributeModifier	a
-M	net.minecraft.world.entity.LivingEntity	lambda$stopSleeping$23	net.minecraft.core.BlockPos	c
-M	net.minecraft.world.entity.LivingEntity	lambda$stopSleeping$22	net.minecraft.core.BlockPos	h
-M	net.minecraft.world.entity.LivingEntity	lambda$checkBedExists$21	net.minecraft.core.BlockPos	i
-M	net.minecraft.world.entity.LivingEntity	lambda$updateFallFlying$20	net.minecraft.world.entity.EquipmentSlot	h
-M	net.minecraft.world.entity.LivingEntity	lambda$handleEquipmentChanges$19	java.util.List,net.minecraft.world.entity.EquipmentSlot,net.minecraft.world.item.ItemStack	a
-M	net.minecraft.world.entity.LivingEntity	lambda$collectEquipmentChanges$18	net.minecraft.core.Holder,net.minecraft.world.entity.ai.attributes.AttributeModifier	a
-M	net.minecraft.world.entity.LivingEntity	lambda$stabAttack$17		R
-M	net.minecraft.world.entity.LivingEntity	lambda$dismountVehicle$16	double,net.minecraft.world.phys.Vec3	a
-M	net.minecraft.world.entity.LivingEntity	lambda$isHolding$15	net.minecraft.world.item.Item,net.minecraft.world.item.ItemStack	a
-M	net.minecraft.world.entity.LivingEntity	lambda$activeLocationDependentEnchantments$14	net.minecraft.world.entity.EquipmentSlot	i
-M	net.minecraft.world.entity.LivingEntity	lambda$dropFromLootTable$13	java.util.function.BiConsumer,net.minecraft.server.level.ServerLevel,net.minecraft.world.item.ItemStack	a
-M	net.minecraft.world.entity.LivingEntity	lambda$dropFromShearingLootTable$12	net.minecraft.world.item.ItemStack,net.minecraft.world.level.storage.loot.LootParams$Builder	a
-M	net.minecraft.world.entity.LivingEntity	lambda$dropFromGiftLootTable$11	net.minecraft.world.level.storage.loot.LootParams$Builder	a
-M	net.minecraft.world.entity.LivingEntity	lambda$dropFromEntityInteractLootTable$10	net.minecraft.world.entity.Entity,net.minecraft.world.item.ItemStack,net.minecraft.world.level.storage.loot.LootParams$Builder	a
-M	net.minecraft.world.entity.LivingEntity	lambda$dropFromLootTable$9	net.minecraft.server.level.ServerLevel,net.minecraft.world.item.ItemStack	b
-M	net.minecraft.world.entity.LivingEntity	lambda$tickEffects$8	net.minecraft.world.effect.MobEffectInstance	d
-M	net.minecraft.world.entity.LivingEntity	lambda$readAdditionalSaveData$7	com.mojang.serialization.Dynamic	b
-M	net.minecraft.world.entity.LivingEntity	lambda$readAdditionalSaveData$6	net.minecraft.core.BlockPos	j
-M	net.minecraft.world.entity.LivingEntity	lambda$readAdditionalSaveData$5	java.lang.String	d
-M	net.minecraft.world.entity.LivingEntity	lambda$addAdditionalSaveData$4	net.minecraft.world.level.storage.ValueOutput,com.mojang.serialization.Dynamic	a
-M	net.minecraft.world.entity.LivingEntity	lambda$addAdditionalSaveData$3	net.minecraft.nbt.Tag	a
-M	net.minecraft.world.entity.LivingEntity	lambda$addAdditionalSaveData$2	net.minecraft.world.level.storage.ValueOutput,net.minecraft.core.BlockPos	a
-M	net.minecraft.world.entity.LivingEntity	lambda$new$1	net.minecraft.world.entity.EquipmentSlot	j
-M	net.minecraft.world.entity.LivingEntity	lambda$static$0	net.minecraft.world.entity.LivingEntity	g
-F	net.minecraft.world.entity.ai.attributes.AttributeMap	attributes	a
-F	net.minecraft.world.entity.ai.attributes.AttributeMap	attributesToSync	b
-F	net.minecraft.world.entity.ai.attributes.AttributeMap	attributesToUpdate	c
-F	net.minecraft.world.entity.ai.attributes.AttributeMap	supplier	d
-M	net.minecraft.world.entity.ai.attributes.AttributeMap	onAttributeModified	net.minecraft.world.entity.ai.attributes.AttributeInstance	a
-M	net.minecraft.world.entity.ai.attributes.AttributeMap	getAttributesToSync		a
-M	net.minecraft.world.entity.ai.attributes.AttributeMap	getAttributesToUpdate		b
-M	net.minecraft.world.entity.ai.attributes.AttributeMap	getSyncableAttributes		c
-M	net.minecraft.world.entity.ai.attributes.AttributeMap	getInstance	net.minecraft.core.Holder	a
-M	net.minecraft.world.entity.ai.attributes.AttributeMap	hasAttribute	net.minecraft.core.Holder	b
-M	net.minecraft.world.entity.ai.attributes.AttributeMap	hasModifier	net.minecraft.core.Holder,net.minecraft.resources.Identifier	a
-M	net.minecraft.world.entity.ai.attributes.AttributeMap	getValue	net.minecraft.core.Holder	c
-M	net.minecraft.world.entity.ai.attributes.AttributeMap	getBaseValue	net.minecraft.core.Holder	d
-M	net.minecraft.world.entity.ai.attributes.AttributeMap	getModifierValue	net.minecraft.core.Holder,net.minecraft.resources.Identifier	b
-M	net.minecraft.world.entity.ai.attributes.AttributeMap	addTransientAttributeModifiers	com.google.common.collect.Multimap	a
-M	net.minecraft.world.entity.ai.attributes.AttributeMap	removeAttributeModifiers	com.google.common.collect.Multimap	b
-M	net.minecraft.world.entity.ai.attributes.AttributeMap	assignAllValues	net.minecraft.world.entity.ai.attributes.AttributeMap	a
-M	net.minecraft.world.entity.ai.attributes.AttributeMap	assignBaseValues	net.minecraft.world.entity.ai.attributes.AttributeMap	b
-M	net.minecraft.world.entity.ai.attributes.AttributeMap	assignPermanentModifiers	net.minecraft.world.entity.ai.attributes.AttributeMap	c
-M	net.minecraft.world.entity.ai.attributes.AttributeMap	resetBaseValue	net.minecraft.core.Holder	e
-M	net.minecraft.world.entity.ai.attributes.AttributeMap	pack		d
-M	net.minecraft.world.entity.ai.attributes.AttributeMap	apply	java.util.List	a
-M	net.minecraft.world.entity.ai.attributes.AttributeMap	lambda$assignPermanentModifiers$7	net.minecraft.world.entity.ai.attributes.AttributeInstance	b
-M	net.minecraft.world.entity.ai.attributes.AttributeMap	lambda$assignBaseValues$6	net.minecraft.world.entity.ai.attributes.AttributeInstance	c
-M	net.minecraft.world.entity.ai.attributes.AttributeMap	lambda$assignAllValues$5	net.minecraft.world.entity.ai.attributes.AttributeInstance	d
-M	net.minecraft.world.entity.ai.attributes.AttributeMap	lambda$removeAttributeModifiers$4	net.minecraft.core.Holder,java.util.Collection	a
-M	net.minecraft.world.entity.ai.attributes.AttributeMap	lambda$removeAttributeModifiers$3	net.minecraft.world.entity.ai.attributes.AttributeInstance,net.minecraft.world.entity.ai.attributes.AttributeModifier	a
-M	net.minecraft.world.entity.ai.attributes.AttributeMap	lambda$addTransientAttributeModifiers$2	net.minecraft.core.Holder,net.minecraft.world.entity.ai.attributes.AttributeModifier	a
-M	net.minecraft.world.entity.ai.attributes.AttributeMap	lambda$getInstance$1	net.minecraft.core.Holder	f
-M	net.minecraft.world.entity.ai.attributes.AttributeMap	lambda$getSyncableAttributes$0	net.minecraft.world.entity.ai.attributes.AttributeInstance	e
-F	net.minecraft.world.entity.ai.attributes.Attributes	DEFAULT_ATTACK_SPEED	a
-F	net.minecraft.world.entity.ai.attributes.Attributes	ARMOR	b
-F	net.minecraft.world.entity.ai.attributes.Attributes	ARMOR_TOUGHNESS	c
-F	net.minecraft.world.entity.ai.attributes.Attributes	ATTACK_DAMAGE	d
-F	net.minecraft.world.entity.ai.attributes.Attributes	ATTACK_KNOCKBACK	e
-F	net.minecraft.world.entity.ai.attributes.Attributes	ATTACK_SPEED	f
-F	net.minecraft.world.entity.ai.attributes.Attributes	BLOCK_BREAK_SPEED	g
-F	net.minecraft.world.entity.ai.attributes.Attributes	BLOCK_INTERACTION_RANGE	h
-F	net.minecraft.world.entity.ai.attributes.Attributes	BURNING_TIME	i
-F	net.minecraft.world.entity.ai.attributes.Attributes	CAMERA_DISTANCE	j
-F	net.minecraft.world.entity.ai.attributes.Attributes	EXPLOSION_KNOCKBACK_RESISTANCE	k
-F	net.minecraft.world.entity.ai.attributes.Attributes	ENTITY_INTERACTION_RANGE	l
-F	net.minecraft.world.entity.ai.attributes.Attributes	FALL_DAMAGE_MULTIPLIER	m
-F	net.minecraft.world.entity.ai.attributes.Attributes	FLYING_SPEED	n
-F	net.minecraft.world.entity.ai.attributes.Attributes	FOLLOW_RANGE	o
-F	net.minecraft.world.entity.ai.attributes.Attributes	GRAVITY	p
-F	net.minecraft.world.entity.ai.attributes.Attributes	JUMP_STRENGTH	q
-F	net.minecraft.world.entity.ai.attributes.Attributes	KNOCKBACK_RESISTANCE	r
-F	net.minecraft.world.entity.ai.attributes.Attributes	LUCK	s
-F	net.minecraft.world.entity.ai.attributes.Attributes	MAX_ABSORPTION	t
-F	net.minecraft.world.entity.ai.attributes.Attributes	MAX_HEALTH	u
-F	net.minecraft.world.entity.ai.attributes.Attributes	MINING_EFFICIENCY	v
-F	net.minecraft.world.entity.ai.attributes.Attributes	MOVEMENT_EFFICIENCY	w
-F	net.minecraft.world.entity.ai.attributes.Attributes	MOVEMENT_SPEED	x
-F	net.minecraft.world.entity.ai.attributes.Attributes	OXYGEN_BONUS	y
-F	net.minecraft.world.entity.ai.attributes.Attributes	SAFE_FALL_DISTANCE	z
-F	net.minecraft.world.entity.ai.attributes.Attributes	SCALE	A
-F	net.minecraft.world.entity.ai.attributes.Attributes	SNEAKING_SPEED	B
-F	net.minecraft.world.entity.ai.attributes.Attributes	SPAWN_REINFORCEMENTS_CHANCE	C
-F	net.minecraft.world.entity.ai.attributes.Attributes	STEP_HEIGHT	D
-F	net.minecraft.world.entity.ai.attributes.Attributes	SUBMERGED_MINING_SPEED	E
-F	net.minecraft.world.entity.ai.attributes.Attributes	SWEEPING_DAMAGE_RATIO	F
-F	net.minecraft.world.entity.ai.attributes.Attributes	TEMPT_RANGE	G
-F	net.minecraft.world.entity.ai.attributes.Attributes	WATER_MOVEMENT_EFFICIENCY	H
-F	net.minecraft.world.entity.ai.attributes.Attributes	WAYPOINT_TRANSMIT_RANGE	I
-F	net.minecraft.world.entity.ai.attributes.Attributes	WAYPOINT_RECEIVE_RANGE	J
-M	net.minecraft.world.entity.ai.attributes.Attributes	register	java.lang.String,net.minecraft.world.entity.ai.attributes.Attribute	a
-M	net.minecraft.world.entity.ai.attributes.Attributes	bootstrap	net.minecraft.core.Registry	a
-F	net.minecraft.network.protocol.game.ClientboundEntityEventPacket	STREAM_CODEC	a
-F	net.minecraft.network.protocol.game.ClientboundEntityEventPacket	entityId	b
-F	net.minecraft.network.protocol.game.ClientboundEntityEventPacket	eventId	c
-M	net.minecraft.network.protocol.game.ClientboundEntityEventPacket	write	net.minecraft.network.FriendlyByteBuf	a
-M	net.minecraft.network.protocol.game.ClientboundEntityEventPacket	type		a
-M	net.minecraft.network.protocol.game.ClientboundEntityEventPacket	handle	net.minecraft.network.protocol.game.ClientGamePacketListener	a
-M	net.minecraft.network.protocol.game.ClientboundEntityEventPacket	getEntity	net.minecraft.world.level.Level	a
-M	net.minecraft.network.protocol.game.ClientboundEntityEventPacket	getEventId		b
-M	net.minecraft.network.protocol.game.ClientboundEntityEventPacket	handle	net.minecraft.network.PacketListener	a
-F	net.minecraft.network.protocol.game.ClientboundLevelEventPacket	STREAM_CODEC	a
-F	net.minecraft.network.protocol.game.ClientboundLevelEventPacket	type	b
-F	net.minecraft.network.protocol.game.ClientboundLevelEventPacket	pos	c
-F	net.minecraft.network.protocol.game.ClientboundLevelEventPacket	data	d
-F	net.minecraft.network.protocol.game.ClientboundLevelEventPacket	globalEvent	e
-M	net.minecraft.network.protocol.game.ClientboundLevelEventPacket	write	net.minecraft.network.FriendlyByteBuf	a
-M	net.minecraft.network.protocol.game.ClientboundLevelEventPacket	type		a
-M	net.minecraft.network.protocol.game.ClientboundLevelEventPacket	handle	net.minecraft.network.protocol.game.ClientGamePacketListener	a
-M	net.minecraft.network.protocol.game.ClientboundLevelEventPacket	isGlobalEvent		b
-M	net.minecraft.network.protocol.game.ClientboundLevelEventPacket	getType		e
-M	net.minecraft.network.protocol.game.ClientboundLevelEventPacket	getData		f
-M	net.minecraft.network.protocol.game.ClientboundLevelEventPacket	getPos		g
-M	net.minecraft.network.protocol.game.ClientboundLevelEventPacket	handle	net.minecraft.network.PacketListener	a
-F	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	STREAM_CODEC	a
-F	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	x	b
-F	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	y	c
-F	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	z	d
-F	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	xDist	e
-F	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	yDist	f
-F	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	zDist	g
-F	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	maxSpeed	h
-F	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	count	i
-F	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	overrideLimiter	j
-F	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	alwaysShow	k
-F	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	particle	l
-M	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	write	net.minecraft.network.RegistryFriendlyByteBuf	a
-M	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	type		a
-M	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	handle	net.minecraft.network.protocol.game.ClientGamePacketListener	a
-M	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	isOverrideLimiter		b
-M	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	alwaysShow		e
-M	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	getX		f
-M	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	getY		g
-M	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	getZ		h
-M	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	getXDist		i
-M	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	getYDist		j
-M	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	getZDist		k
-M	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	getMaxSpeed		l
-M	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	getCount		m
-M	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	getParticle		n
-M	net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket	handle	net.minecraft.network.PacketListener	a
+F	net.minecraft.world.scores.DisplaySlot	LIST	a
+F	net.minecraft.world.scores.DisplaySlot	SIDEBAR	b
+F	net.minecraft.world.scores.DisplaySlot	BELOW_NAME	c
+F	net.minecraft.world.scores.DisplaySlot	TEAM_BLACK	d
+F	net.minecraft.world.scores.DisplaySlot	TEAM_DARK_BLUE	e
+F	net.minecraft.world.scores.DisplaySlot	TEAM_DARK_GREEN	f
+F	net.minecraft.world.scores.DisplaySlot	TEAM_DARK_AQUA	g
+F	net.minecraft.world.scores.DisplaySlot	TEAM_DARK_RED	h
+F	net.minecraft.world.scores.DisplaySlot	TEAM_DARK_PURPLE	i
+F	net.minecraft.world.scores.DisplaySlot	TEAM_GOLD	j
+F	net.minecraft.world.scores.DisplaySlot	TEAM_GRAY	k
+F	net.minecraft.world.scores.DisplaySlot	TEAM_DARK_GRAY	l
+F	net.minecraft.world.scores.DisplaySlot	TEAM_BLUE	m
+F	net.minecraft.world.scores.DisplaySlot	TEAM_GREEN	n
+F	net.minecraft.world.scores.DisplaySlot	TEAM_AQUA	o
+F	net.minecraft.world.scores.DisplaySlot	TEAM_RED	p
+F	net.minecraft.world.scores.DisplaySlot	TEAM_LIGHT_PURPLE	q
+F	net.minecraft.world.scores.DisplaySlot	TEAM_YELLOW	r
+F	net.minecraft.world.scores.DisplaySlot	TEAM_WHITE	s
+F	net.minecraft.world.scores.DisplaySlot	CODEC	t
+F	net.minecraft.world.scores.DisplaySlot	BY_ID	u
+F	net.minecraft.world.scores.DisplaySlot	id	v
+F	net.minecraft.world.scores.DisplaySlot	name	w
+F	net.minecraft.world.scores.DisplaySlot	$VALUES	x
+M	net.minecraft.world.scores.DisplaySlot	values		values
+M	net.minecraft.world.scores.DisplaySlot	valueOf	java.lang.String	valueOf
+M	net.minecraft.world.scores.DisplaySlot	id		a
+M	net.minecraft.world.scores.DisplaySlot	getSerializedName		c
+M	net.minecraft.world.scores.DisplaySlot	teamColorToSlot	net.minecraft.ChatFormatting	a
+M	net.minecraft.world.scores.DisplaySlot	$values		b
+F	net.minecraft.world.scores.Objective	scoreboard	a
+F	net.minecraft.world.scores.Objective	name	b
+F	net.minecraft.world.scores.Objective	criteria	c
+F	net.minecraft.world.scores.Objective	displayName	d
+F	net.minecraft.world.scores.Objective	formattedDisplayName	e
+F	net.minecraft.world.scores.Objective	renderType	f
+F	net.minecraft.world.scores.Objective	displayAutoUpdate	g
+F	net.minecraft.world.scores.Objective	numberFormat	h
+M	net.minecraft.world.scores.Objective	pack		a
+M	net.minecraft.world.scores.Objective	getScoreboard		b
+M	net.minecraft.world.scores.Objective	getName		c
+M	net.minecraft.world.scores.Objective	getCriteria		d
+M	net.minecraft.world.scores.Objective	getDisplayName		e
+M	net.minecraft.world.scores.Objective	displayAutoUpdate		f
+M	net.minecraft.world.scores.Objective	numberFormat		g
+M	net.minecraft.world.scores.Objective	numberFormatOrDefault	net.minecraft.network.chat.numbers.NumberFormat	a
+M	net.minecraft.world.scores.Objective	createFormattedDisplayName		j
+M	net.minecraft.world.scores.Objective	getFormattedDisplayName		h
+M	net.minecraft.world.scores.Objective	setDisplayName	net.minecraft.network.chat.Component	a
+M	net.minecraft.world.scores.Objective	getRenderType		i
+M	net.minecraft.world.scores.Objective	setRenderType	net.minecraft.world.scores.criteria.ObjectiveCriteria$RenderType	a
+M	net.minecraft.world.scores.Objective	setDisplayAutoUpdate	boolean	a
+M	net.minecraft.world.scores.Objective	setNumberFormat	net.minecraft.network.chat.numbers.NumberFormat	b
+M	net.minecraft.world.scores.Objective	lambda$createFormattedDisplayName$0	net.minecraft.network.chat.Style	a
+F	net.minecraft.world.scores.Scoreboard	HIDDEN_SCORE_PREFIX	a
+F	net.minecraft.world.scores.Scoreboard	LOGGER	b
+F	net.minecraft.world.scores.Scoreboard	objectivesByName	c
+F	net.minecraft.world.scores.Scoreboard	objectivesByCriteria	d
+F	net.minecraft.world.scores.Scoreboard	playerScores	e
+F	net.minecraft.world.scores.Scoreboard	displayObjectives	f
+F	net.minecraft.world.scores.Scoreboard	teamsByName	g
+F	net.minecraft.world.scores.Scoreboard	teamsByPlayer	h
+M	net.minecraft.world.scores.Scoreboard	getObjective	java.lang.String	a
+M	net.minecraft.world.scores.Scoreboard	addObjective	java.lang.String,net.minecraft.world.scores.criteria.ObjectiveCriteria,net.minecraft.network.chat.Component,net.minecraft.world.scores.criteria.ObjectiveCriteria$RenderType,boolean,net.minecraft.network.chat.numbers.NumberFormat	a
+M	net.minecraft.world.scores.Scoreboard	forAllObjectives	net.minecraft.world.scores.criteria.ObjectiveCriteria,net.minecraft.world.scores.ScoreHolder,java.util.function.Consumer	a
+M	net.minecraft.world.scores.Scoreboard	getOrCreatePlayerInfo	java.lang.String	f
+M	net.minecraft.world.scores.Scoreboard	getOrCreatePlayerScore	net.minecraft.world.scores.ScoreHolder,net.minecraft.world.scores.Objective	c
+M	net.minecraft.world.scores.Scoreboard	getOrCreatePlayerScore	net.minecraft.world.scores.ScoreHolder,net.minecraft.world.scores.Objective,boolean	a
+M	net.minecraft.world.scores.Scoreboard	getPlayerScoreInfo	net.minecraft.world.scores.ScoreHolder,net.minecraft.world.scores.Objective	d
+M	net.minecraft.world.scores.Scoreboard	listPlayerScores	net.minecraft.world.scores.Objective	i
+M	net.minecraft.world.scores.Scoreboard	getObjectives		b
+M	net.minecraft.world.scores.Scoreboard	getObjectiveNames		c
+M	net.minecraft.world.scores.Scoreboard	getTrackedPlayers		d
+M	net.minecraft.world.scores.Scoreboard	resetAllPlayerScores	net.minecraft.world.scores.ScoreHolder	b
+M	net.minecraft.world.scores.Scoreboard	resetSinglePlayerScore	net.minecraft.world.scores.ScoreHolder,net.minecraft.world.scores.Objective	e
+M	net.minecraft.world.scores.Scoreboard	listPlayerScores	net.minecraft.world.scores.ScoreHolder	c
+M	net.minecraft.world.scores.Scoreboard	removeObjective	net.minecraft.world.scores.Objective	j
+M	net.minecraft.world.scores.Scoreboard	setDisplayObjective	net.minecraft.world.scores.DisplaySlot,net.minecraft.world.scores.Objective	a
+M	net.minecraft.world.scores.Scoreboard	getDisplayObjective	net.minecraft.world.scores.DisplaySlot	a
+M	net.minecraft.world.scores.Scoreboard	getPlayerTeam	java.lang.String	b
+M	net.minecraft.world.scores.Scoreboard	addPlayerTeam	java.lang.String	c
+M	net.minecraft.world.scores.Scoreboard	removePlayerTeam	net.minecraft.world.scores.PlayerTeam	d
+M	net.minecraft.world.scores.Scoreboard	addPlayerToTeam	java.lang.String,net.minecraft.world.scores.PlayerTeam	a
+M	net.minecraft.world.scores.Scoreboard	removePlayerFromTeam	java.lang.String	d
+M	net.minecraft.world.scores.Scoreboard	removePlayerFromTeam	java.lang.String,net.minecraft.world.scores.PlayerTeam	b
+M	net.minecraft.world.scores.Scoreboard	getTeamNames		e
+M	net.minecraft.world.scores.Scoreboard	getPlayerTeams		f
+M	net.minecraft.world.scores.Scoreboard	getPlayersTeam	java.lang.String	e
+M	net.minecraft.world.scores.Scoreboard	onObjectiveAdded	net.minecraft.world.scores.Objective	a
+M	net.minecraft.world.scores.Scoreboard	onObjectiveChanged	net.minecraft.world.scores.Objective	b
+M	net.minecraft.world.scores.Scoreboard	onObjectiveRemoved	net.minecraft.world.scores.Objective	c
+M	net.minecraft.world.scores.Scoreboard	onScoreChanged	net.minecraft.world.scores.ScoreHolder,net.minecraft.world.scores.Objective,net.minecraft.world.scores.Score	a
+M	net.minecraft.world.scores.Scoreboard	onScoreLockChanged	net.minecraft.world.scores.ScoreHolder,net.minecraft.world.scores.Objective	a
+M	net.minecraft.world.scores.Scoreboard	onPlayerRemoved	net.minecraft.world.scores.ScoreHolder	a
+M	net.minecraft.world.scores.Scoreboard	onPlayerScoreRemoved	net.minecraft.world.scores.ScoreHolder,net.minecraft.world.scores.Objective	b
+M	net.minecraft.world.scores.Scoreboard	onTeamAdded	net.minecraft.world.scores.PlayerTeam	a
+M	net.minecraft.world.scores.Scoreboard	onTeamChanged	net.minecraft.world.scores.PlayerTeam	b
+M	net.minecraft.world.scores.Scoreboard	onTeamRemoved	net.minecraft.world.scores.PlayerTeam	c
+M	net.minecraft.world.scores.Scoreboard	entityRemoved	net.minecraft.world.entity.Entity	a
+M	net.minecraft.world.scores.Scoreboard	packPlayerScores		g
+M	net.minecraft.world.scores.Scoreboard	loadPlayerScore	net.minecraft.world.scores.Scoreboard$PackedScore	a
+M	net.minecraft.world.scores.Scoreboard	packPlayerTeams		h
+M	net.minecraft.world.scores.Scoreboard	loadPlayerTeam	net.minecraft.world.scores.PlayerTeam$Packed	a
+M	net.minecraft.world.scores.Scoreboard	packObjectives		i
+M	net.minecraft.world.scores.Scoreboard	loadObjective	net.minecraft.world.scores.Objective$Packed	a
+M	net.minecraft.world.scores.Scoreboard	packDisplaySlots		j
+M	net.minecraft.world.scores.Scoreboard	lambda$packPlayerScores$6	java.util.Map$Entry	a
+M	net.minecraft.world.scores.Scoreboard	lambda$packPlayerScores$5	java.lang.String,java.util.Map$Entry	a
+M	net.minecraft.world.scores.Scoreboard	lambda$listPlayerScores$4	net.minecraft.world.scores.Objective,java.util.List,java.lang.String,net.minecraft.world.scores.PlayerScores	a
+M	net.minecraft.world.scores.Scoreboard	lambda$getOrCreatePlayerScore$3	org.apache.commons.lang3.mutable.MutableBoolean,net.minecraft.world.scores.Score	a
+M	net.minecraft.world.scores.Scoreboard	lambda$getOrCreatePlayerInfo$2	java.lang.String	g
+M	net.minecraft.world.scores.Scoreboard	lambda$forAllObjectives$1	java.util.function.Consumer,net.minecraft.world.scores.ScoreHolder,net.minecraft.world.scores.Objective	a
+M	net.minecraft.world.scores.Scoreboard	lambda$addObjective$0	java.lang.Object	a

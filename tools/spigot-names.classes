@@ -76,3 +76,14 @@ net.minecraft.core.Holder
 net.minecraft.world.entity.ai.attributes.Attributes
 net.minecraft.world.entity.LivingEntity
 net.minecraft.world.entity.ai.attributes.AttributeMap
+net.minecraft.network.protocol.game.ClientboundSetDisplayObjectivePacket
+net.minecraft.network.protocol.game.ClientboundSetObjectivePacket
+net.minecraft.network.protocol.game.ClientboundBossEventPacket
+net.minecraft.network.protocol.game.ClientboundBossEventPacket$Operation
+net.minecraft.network.protocol.game.ClientboundSetActionBarTextPacket
+net.minecraft.network.protocol.game.ClientboundSystemChatPacket
+net.minecraft.world.scores.DisplaySlot
+net.minecraft.world.scores.Scoreboard
+net.minecraft.world.scores.Objective
+net.minecraft.world.BossEvent
+net.minecraft.network.protocol.game.ClientboundBossEventPacket$OperationType

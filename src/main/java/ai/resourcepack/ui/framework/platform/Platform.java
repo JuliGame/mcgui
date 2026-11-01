@@ -157,7 +157,9 @@ public final class Platform {
         else to.sendMessage(LEGACY.serialize(message));
     }
 
+    /** Shown even while a page hides the action bar ({@link ai.resourcepack.ui.framework.net.Pipeline#hideHud}): it is MC GUI's own. */
     public static void actionBar(Player player, Component message) {
+        ai.resourcepack.ui.framework.net.OwnBars.expect(player.getUniqueId(), plain(message));
         player.spigot().sendMessage(ChatMessageType.ACTION_BAR, bungee(message));
     }
 

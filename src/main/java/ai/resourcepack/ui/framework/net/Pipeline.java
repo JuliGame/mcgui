@@ -1,5 +1,6 @@
 package ai.resourcepack.ui.framework.net;
 
+import ai.resourcepack.ui.framework.Settings;
 import ai.resourcepack.ui.framework.world.MapWall;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelDuplexHandler;
@@ -56,6 +57,7 @@ public final class Pipeline {
     private final Map<UUID, Held> held = new ConcurrentHashMap<>();
     /** Players behind a kept overlay, who are sent nothing that only makes particles (see {@link #hideParticles}). */
     private final Set<UUID> particlesHidden = ConcurrentHashMap.newKeySet();
+    private static final String HUD = "uiengine_hud";
 
     /** A held player's entity id, and the walking speed their client was last told (what their movement speed is told against). */
     private static final class Held {
@@ -67,11 +69,17 @@ public final class Pipeline {
         }
     }
 
+    /** Which parts of the HUD are hidden at a page (the config's views.hide-hud). */
+    private final Settings.Hidden hidden;
+    /** Each connection's HUD watcher, once it is in (see {@link #trackHud}). */
+    private final Map<UUID, Hud> huds = new ConcurrentHashMap<>();
+
     private final Logger log;
 
-    public Pipeline(Nms nms, Logger log) {
+    public Pipeline(Nms nms, Logger log, Settings.Hidden hidden) {
         this.nms = nms;
         this.log = log;
+        this.hidden = hidden;
     }
 
     /** A seated player's mouse. Every method runs on the netty thread, as the packet arrives. */
@@ -159,6 +167,42 @@ public final class Pipeline {
     public void hideParticles(Player player, boolean on) {
         if (on) particlesHidden.add(player.getUniqueId());
         else particlesHidden.remove(player.getUniqueId());
+    }
+
+    /**
+     * Put in [player]'s connection what watches the sidebar, boss bars and action bar the server sends them, from now on:
+     * what a page covers is taken off with {@link #hideHud} and put back as it was sent last. At join, before any other
+     * plugin's join handler sends them one; what the server itself sent before that (a scoreboard's sidebar, a command's
+     * boss bars) is read from the server. Nothing is put in when the config hides none.
+     */
+    public void trackHud(Player player) {
+        if (!hidden.any() || huds.containsKey(player.getUniqueId())) return;
+        Channel channel = nms.channel(player);
+        if (channel == null) return;
+        UUID id = player.getUniqueId();
+        Map<Object, Object> sidebars = hidden.scoreboard() ? nms.hud.sidebars(player) : Map.of();
+        Map<UUID, Object> bars = hidden.bossBars() ? nms.hud.bars(player) : Map.of();
+        try {
+            channel.eventLoop().execute(() -> {
+                ChannelPipeline p = channel.pipeline();
+                if (ours(p.get(HUD)) && huds.containsKey(id)) return;
+                Hud hud = new Hud(this, nms.hud, hidden, id, log, sidebars, bars);
+                if (install(p, HUD, hud)) huds.put(id, hud);
+            });
+        } catch (RejectedExecutionException e) {
+            // The event loop is shutting down with the server.
+        }
+    }
+
+    /**
+     * While [on], [player] is sent none of the sidebar, boss bars or action bar the config hides ({@code views.hide-hud}): the
+     * client is told to drop what it shows, and what the server sends meanwhile is kept and not passed on; off, what was kept
+     * is sent, so they see what they would have. MC GUI's own action bar messages ({@link OwnBars}) are still shown. Needs
+     * {@link #trackHud}; for a player it was never done for, nothing happens.
+     */
+    public void hideHud(Player player, boolean on) {
+        Hud hud = huds.get(player.getUniqueId());
+        if (hud != null) hud.run(on ? hud::hide : hud::show);
     }
 
     /**
@@ -311,6 +355,8 @@ public final class Pipeline {
         concealed.remove(player);
         held.remove(player);
         particlesHidden.remove(player);
+        huds.remove(player);
+        OwnBars.forget(player);
         unwatch(player);
         filters.remove(player);
         // A ping the player never answered would otherwise keep its view, canvas and all, for good.
@@ -328,6 +374,7 @@ public final class Pipeline {
         if (handler instanceof FrameMaps m) return m.owner() == this;
         if (handler instanceof Uses u) return u.owner() == this;
         if (handler instanceof Pushes s) return s.owner() == this;
+        if (handler instanceof Hud h) return h.owner() == this;
         return handler instanceof Pongs g && g.owner() == this;
     }
 
@@ -358,7 +405,12 @@ public final class Pipeline {
             try {
                 channel.eventLoop().execute(() -> {
                     ChannelPipeline p = channel.pipeline();
-                    for (String name : List.of(FILTER, PONGS, FRAMES, USES, PUSHES)) if (ours(p.get(name))) p.remove(name);
+                    for (String name : List.of(FILTER, PONGS, FRAMES, USES, PUSHES, HUD)) {
+                        if (!ours(p.get(name))) continue;
+                        // A page still open (the plugin is stopping with it up) gets its sidebar and bars back.
+                        if (p.get(name) instanceof Hud hud) hud.show();
+                        p.remove(name);
+                    }
                 });
             } catch (RejectedExecutionException e) {
                 // The event loop is shutting down with the server, and the channel with it.
@@ -370,6 +422,7 @@ public final class Pipeline {
         pinned.clear();
         concealed.clear();
         particlesHidden.clear();
+        huds.clear();
         held.clear();
     }
 

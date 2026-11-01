@@ -160,6 +160,19 @@ views:
   # Shown in front of a player at a view whose shaders replace the game's own (Iris with a shader pack on), which
   # cannot draw MC GUI's pages: nobody else ever sees it. Plain text. Empty: none.
   shaders-notice: "This menu can't be shown while shaders are on. Turn them off (Iris: press K; OptiFine: Video Settings, Shaders, OFF), then open it again."
+  # What the server takes off a player's screen while they have a page open, so that it is gone whichever resource
+  # pack's shaders are in use. The pack hides the HUD on its own when MC GUI's shaders are the ones the client uses; a pack
+  # that replaces them (Dialog Engine's drawn dialogs merged into another plugin's pack, for one) leaves the sidebar, boss bars
+  # and action bar showing over the page. This is done with packets in the player's own connection and for them alone: the
+  # client is told to drop each one when the page opens, what the server sends meanwhile is kept and not passed on, and when the
+  # page closes (any way) they get what the server last sent, as it is by then. It does not use the scoreboard API, so it works
+  # with any plugin that draws them (TAB, boss bar plugins, anything sending packets). MC GUI's own messages still show. Read
+  # when the server starts. Each is on by default: with MC GUI's shaders in use the player sees no difference, and where they are
+  # not it is the fix; turn one off if you want a plugin's scoreboard, bar or action bar to stay on screen at pages.
+  hide-hud:
+    scoreboard: true
+    boss-bars: true
+    action-bar: true
 
 walls:
   # A wall screen's page is laid out this many CSS pixels per map tall, unless the page says

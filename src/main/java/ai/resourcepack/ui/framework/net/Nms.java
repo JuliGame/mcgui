@@ -69,6 +69,9 @@ public final class Nms {
     final Field containerMenu;                     // Player#containerMenu
     final Field menuContainerId, menuSlots;
 
+    /** What draws the sidebar, boss bars and action bar (see Pipeline#hideHud). */
+    final HudPackets hud;
+
     // A seated player's mouse, read off the wire, and the pointer moves sent straight back.
     private final Class<?> movePacket;             // ServerboundMovePlayerPacket
     private final Field moveYRot, moveXRot, moveHasRot;
@@ -385,6 +388,7 @@ public final class Nms {
         entityEventId = L.unreflect(Reflect.method(entityEventPacket, "getEventId"));
         levelEventPacket = Reflect.cls(game + "ClientboundLevelEventPacket");
         levelEventType = L.unreflect(Reflect.method(levelEventPacket, "getType"));
+        hud = new HudPackets();
     }
 
     /**
