@@ -188,6 +188,38 @@ chat, the inventory and other containers, and the pause menu with the blur at
 open, so nothing can hide the pointer for them.
 Mouse clicks go to the screen, not the page, while it is open.
 
+## The sidebar, boss bars and action bar
+
+With MC GUI's resource pack in use, the player's game hides the HUD while a page is open. A pack that replaces MC GUI's
+shaders (Dialog Engine's drawn dialogs merged into another plugin's pack, for one) takes that away, and the sidebar
+scoreboard, boss bars and action bar other plugins draw then show over the page. So the server hides them as well, with
+packets in that player's own connection and for them alone, whichever pack wins:
+
+```yaml
+views:
+  hide-hud:
+    scoreboard: true
+    boss-bars: true
+    action-bar: true
+```
+
+When a page opens, their client is told to drop the sidebar and each boss bar, and an empty action bar is sent. What the
+server sends them meanwhile (TAB's lines, a boss bar's progress, a plugin's action bar every second) is kept and not
+sent. When the page closes, however it closes, they get each sidebar and boss bar as the server last had it, and the next
+action bar shows as usual. Scores and teams are left alone, since they draw nothing without a sidebar. It works with
+anything that draws them, as it reads packets and not the scoreboard API, so it does not fight TAB or any other
+scoreboard plugin.
+
+All three are on by default: with MC GUI's shaders in use nobody sees a difference, and where they are not it is the fix.
+Turn one off to keep that plugin's sidebar, bar or action bar on screen at pages. MC GUI's own action bar messages (a
+page that cannot be found) still show. The tab list and the text under names are not touched. These are read when the
+server starts.
+
+It hides only these three, and only what the server sends through the player's connection. A HUD that a plugin draws
+some other way (glyphs in a resource pack, a title or subtitle, the tab list, the text under names) stays. A HUD plugin
+that shows its HUD in a boss bar or the action bar loses it at pages, which is usually what you want; turn the part off
+if it is not.
+
 ## Custom cursors
 
 The pointer is an arrow, a hand over anything clickable, a text caret or
@@ -640,6 +672,9 @@ a quit while seated, then the player checked (game mode, position, invisibility,
   dialogs are not affected at all.
 - **Every other plugin that teleports a player** (Essentials, /rtp, warps) closes their page first, and they arrive where
   they were sent.
+- **Another plugin's pack replacing MC GUI's shaders** (Dialog Engine's drawn dialogs merged in, for one) stops the pack
+  hiding the HUD at a page, and the sidebar, boss bars and action bar then show over it. `views.hide-hud` (on by
+  default) hides them from the server side whichever pack wins: see "The sidebar, boss bars and action bar".
 
 ### Pack plugins
 
