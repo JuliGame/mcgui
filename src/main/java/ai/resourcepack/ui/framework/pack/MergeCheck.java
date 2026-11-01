@@ -53,11 +53,15 @@ public final class MergeCheck {
     private static final int LAST_OLD_FORMAT = 64;
 
     private final Path plugins;
+    /** {@link #OUTPUTS} of the pack plugins this server has. */
+    private final Map<String, String> outputs = new LinkedHashMap<>();
     private final Map<String, byte[]> ours;
     private final JsonArray ourOverlays;
     private final Logger logger;
     private final Map<Path, String> seen = new HashMap<>();
     private final Map<Path, String> said = new HashMap<>();
+    /** Packs that could not be read, with the stamp they had: one still being written is read again at the next look. */
+    private final Map<Path, String> unreadable = new HashMap<>();
 
     private static final String CLASH = "another plugin's copy is used instead of MC GUI's";
     private static final String CLASH_ADVICE = "Two plugins that replace the same core shader cannot both work in one pack: the "
@@ -66,8 +70,10 @@ public final class MergeCheck {
     private static final String IA_TEXT_SHADER = " In ItemsAdder these are text_effects, hide_scoreboard_numbers and "
             + "hide_scoreboard_numbers_old_clients in its config.yml; run /iazip after.";
 
-    public MergeCheck(Path plugins, byte[] ourZip, Logger logger) throws IOException {
+    /** [installed] says whether this server has a pack plugin, by its name: only theirs are read. */
+    public MergeCheck(Path plugins, byte[] ourZip, Logger logger, java.util.function.Predicate<String> installed) throws IOException {
         this.plugins = plugins;
+        for (Map.Entry<String, String> e : OUTPUTS.entrySet()) if (installed.test(e.getKey())) outputs.put(e.getKey(), e.getValue());
         this.ours = unzip(new ZipInputStream(new ByteArrayInputStream(ourZip)));
         this.ourOverlays = overlays(meta(ours));
         this.logger = logger;
@@ -75,7 +81,7 @@ public final class MergeCheck {
 
     /** Looks at every merged pack that changed since the last look, and logs what is new. Off the server thread. */
     public synchronized void run() {
-        for (Map.Entry<String, String> e : OUTPUTS.entrySet()) {
+        for (Map.Entry<String, String> e : outputs.entrySet()) {
             Path zip = plugins.resolve(e.getValue());
             String stamp;
             try {
@@ -84,14 +90,18 @@ public final class MergeCheck {
                 stamp = null;
             }
             if (stamp == null || stamp.equals(seen.get(zip))) continue;
-            seen.put(zip, stamp);
             String where = "plugins/" + e.getValue();
             List<String> problems;
             try (ZipFile z = new ZipFile(zip.toFile())) {
                 problems = check(z);
+                unreadable.remove(zip);
             } catch (IOException | RuntimeException ex) {
+                // Read while its plugin was still writing it ("zip END header not found"), most likely: said only if
+                // the same file fails again at the next look.
+                if (!stamp.equals(unreadable.put(zip, stamp))) continue;
                 problems = List.of("it could not be read (" + ex.getMessage() + ")");
             }
+            seen.put(zip, stamp);
             String report = String.join("\n", problems);
             if (report.equals(said.get(zip))) continue;
             said.put(zip, report);

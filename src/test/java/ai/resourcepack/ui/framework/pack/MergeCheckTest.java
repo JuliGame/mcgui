@@ -74,4 +74,56 @@ class MergeCheckTest {
         }
         for (var e : o) assertFalse(MergeCheck.applies(e.getAsJsonObject(), new int[]{74, 0}) && !e.getAsJsonObject().get("directory").getAsString().equals("uiengine_none"));
     }
+
+    /** A MergeCheck over [plugins], with a pack of ours that is only its pack.mcmeta, whose log lines go to [said]. */
+    private static MergeCheck check(java.nio.file.Path plugins, java.util.function.Predicate<String> installed, java.util.List<java.util.logging.LogRecord> said) throws java.io.IOException {
+        java.io.ByteArrayOutputStream zip = new java.io.ByteArrayOutputStream();
+        try (java.util.zip.ZipOutputStream out = new java.util.zip.ZipOutputStream(zip)) {
+            out.putNextEntry(new java.util.zip.ZipEntry("pack.mcmeta"));
+            out.write(ResourcePack.mcmeta().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            out.closeEntry();
+        }
+        java.util.logging.Logger logger = java.util.logging.Logger.getAnonymousLogger();
+        logger.setUseParentHandlers(false);
+        logger.addHandler(new java.util.logging.Handler() {
+            @Override public void publish(java.util.logging.LogRecord r) { said.add(r); }
+            @Override public void flush() {}
+            @Override public void close() {}
+        });
+        return new MergeCheck(plugins, zip.toByteArray(), logger, installed);
+    }
+
+    @Test
+    void aPackPluginThisServerDoesNotHaveIsNotRead(@org.junit.jupiter.api.io.TempDir java.nio.file.Path plugins) throws Exception {
+        // Oraxen's pack left on disk after a move to Nexo.
+        java.nio.file.Path zip = plugins.resolve(MergeCheck.OUTPUTS.get("Oraxen"));
+        java.nio.file.Files.createDirectories(zip.getParent());
+        java.nio.file.Files.write(zip, new byte[]{1, 2, 3});
+        java.util.List<java.util.logging.LogRecord> said = new java.util.ArrayList<>();
+        MergeCheck nexoOnly = check(plugins, name -> name.equals("Nexo"), said);
+        nexoOnly.run();
+        nexoOnly.run();
+        assertTrue(said.isEmpty(), () -> said.get(0).getMessage());
+        MergeCheck withOraxen = check(plugins, name -> name.equals("Oraxen"), said);
+        withOraxen.run();
+        withOraxen.run();
+        assertFalse(said.isEmpty());
+    }
+
+    @Test
+    void aPackThatCannotBeReadIsSaidOnlyWhenTheSameFileFailsTwice(@org.junit.jupiter.api.io.TempDir java.nio.file.Path plugins) throws Exception {
+        java.nio.file.Path zip = plugins.resolve(MergeCheck.OUTPUTS.get("Nexo"));
+        java.nio.file.Files.createDirectories(zip.getParent());
+        java.nio.file.Files.write(zip, new byte[]{1, 2, 3});
+        java.util.List<java.util.logging.LogRecord> said = new java.util.ArrayList<>();
+        MergeCheck check = check(plugins, name -> true, said);
+        check.run();
+        assertTrue(said.isEmpty(), "a pack still being written is not a broken merge");
+        check.run();
+        assertEquals(1, said.size());
+        assertEquals(java.util.logging.Level.WARNING, said.get(0).getLevel());
+        assertTrue(said.get(0).getMessage().contains("could not be read"), said.get(0).getMessage());
+        check.run();
+        assertEquals(1, said.size(), "said once");
+    }
 }

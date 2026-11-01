@@ -132,7 +132,9 @@ public final class Framework implements UIFramework, Listener {
             // console. Pack plugins zip after MC GUI starts (and on their own reload commands), so it looks again
             // whenever their pack changes on disk.
             if (pack.mergedElsewhere()) {
-                MergeCheck check = new MergeCheck(plugin.getDataFolder().toPath().toAbsolutePath().getParent(), pack.bytes, plugin.getLogger());
+                // Only the pack plugins this server has: another's zip left on disk (Oraxen's after a move to Nexo) is nobody's.
+                MergeCheck check = new MergeCheck(plugin.getDataFolder().toPath().toAbsolutePath().getParent(), pack.bytes, plugin.getLogger(),
+                        name -> Bukkit.getPluginManager().getPlugin(name) != null);
                 tasks.add(Threads.asyncTimer(plugin, check::run, 20 * 10, 20 * 30));
             }
         } catch (Exception e) {
