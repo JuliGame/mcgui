@@ -551,10 +551,11 @@ public final class Views implements Listener {
         });
         // Iris with a shader pack draws world text and maps with the pack's own programs, so this pack never places the
         // picture and the player sees the world and a broken page: this text, a little ahead of the camera, says why. The
-        // pack's text.vsh never draws text of its colour, so nobody else sees it.
+        // pack's text.vsh never draws text of its colour and opacity, so nobody else sees it.
         TextDisplay notice = settings.shadersNotice.isBlank() ? null
                 : world.spawn(cam.clone().add(cam.getDirection().multiply(NOTICE_DISTANCE)), TextDisplay.class, d -> {
             Platform.text(d, Component.text(settings.shadersNotice).color(TextColor.color(Shaders.NOTICE_RGB)));
+            d.setTextOpacity((byte) Shaders.NOTICE_ALPHA);
             d.setBillboard(Display.Billboard.CENTER);
             d.setBackgroundColor(org.bukkit.Color.fromARGB(0));
             d.setShadowed(false);

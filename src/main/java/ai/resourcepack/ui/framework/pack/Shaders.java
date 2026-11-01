@@ -125,10 +125,16 @@ public final class Shaders {
     /**
      * The colour of the text a view puts in front of its camera to tell a player whose shaders are not this pack's that
      * the view cannot be drawn: Iris with a shader pack draws world text (and maps) with the pack's own programs, so the
-     * picture is never placed and the text shows. Where this pack's text.vsh runs, text of exactly this colour is never
-     * drawn, so nobody else sees it.
+     * picture is never placed and the text shows. Where this pack's text.vsh runs, text of exactly this colour and
+     * {@link #NOTICE_ALPHA} is never drawn, so nobody else sees it.
      */
     public static final int NOTICE_RGB = 0xFCE04A;
+
+    /**
+     * The notice's text opacity, its second mark: text of {@link #NOTICE_RGB} that is opaque (a hologram, a name, a step
+     * of a gradient) is drawn as ever. 254 of 255 looks opaque where the notice does show.
+     */
+    public static final int NOTICE_ALPHA = 254;
 
     /**
      * The pointer font's alpha is stored at this many 255ths of what it is (rounded up, so a pixel that shows still
@@ -714,8 +720,8 @@ public final class Shaders {
                     // eye is, or a moment after it is put back) drew them where they lie: pieces of the picture, huge,
                     // round the camera.
                     if (mcbMap >= 3 && mcbSeated < 0.5) gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
-                    // A view's notice for players whose shaders replace these (Shaders.NOTICE_RGB): never drawn here.
-                    if (ivec3(round(Color.rgb * 255.0)) == ivec3(@NOTICE@)) gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
+                    // A view's notice for players whose shaders replace these (Shaders.NOTICE_RGB, NOTICE_ALPHA): never drawn here.
+                    if (ivec4(round(Color * 255.0)) == ivec4(@NOTICE@)) gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
                 #ifdef IS_SEE_THROUGH
                     // See-through text (text displays with see_through, name tags' faint pass) is drawn with no depth
                     // test, so over a seated camera's view too, and an overlay keeps what lies on its panel as its own:
@@ -730,7 +736,7 @@ public final class Shaders {
                 #endif
                 }
                 """.replace("@PR@", String.valueOf(POINTER_RED)).replace("@PC@", String.valueOf(CLIENT_POINTER_RED))
-                .replace("@NOTICE@", (NOTICE_RGB >> 16) + ", " + (NOTICE_RGB >> 8 & 255) + ", " + (NOTICE_RGB & 255))
+                .replace("@NOTICE@", (NOTICE_RGB >> 16) + ", " + (NOTICE_RGB >> 8 & 255) + ", " + (NOTICE_RGB & 255) + ", " + NOTICE_ALPHA)
                 .replace("@SIGTILE@", SIGNATURE_TILE + ".0")
                 .replace("@SYMBOLS@", String.valueOf(Palette.SYMBOLS))
                 .replace("@SECTORS@", String.valueOf(TURN_SECTORS))
