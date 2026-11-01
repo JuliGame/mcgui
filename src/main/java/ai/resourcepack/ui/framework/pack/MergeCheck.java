@@ -68,7 +68,13 @@ public final class MergeCheck {
             + "game uses one copy, and what the other plugin draws with it stops working. Turn off the other plugin's feature "
             + "that replaces it (the overlay named is the plugin's), or that plugin's feature and MC GUI's screens cannot share a server.";
     private static final String IA_TEXT_SHADER = " In ItemsAdder these are text_effects, hide_scoreboard_numbers and "
-            + "hide_scoreboard_numbers_old_clients in its config.yml; run /iazip after.";
+            + "hide_scoreboard_numbers_old_clients in its config.yml (all three off); run /iazip after.";
+    /** Dialog Engine's drawn-dialog pack ships its own position_tex_color (and, per client version, text shaders) in overlays named like this. */
+    private static final String DIALOG_OVERLAY = "rpai_dialog_";
+    private static final String DIALOG = "Dialog Engine's drawn-dialog pack is merged in (its overlays " + DIALOG_OVERLAY + "*)";
+    private static final String DIALOG_ADVICE = "Dialog Engine sends its own pack, so take its folder (DialogEngine/drawn-pack) out of "
+            + "the merge list of that plugin and rebuild its pack: two packs merged into one cannot both be on top, and Dialog Engine's "
+            + "copy of position_tex_color replaces MC GUI's.";
 
     /** [installed] says whether this server has a pack plugin, by its name: only theirs are read. */
     public MergeCheck(Path plugins, byte[] ourZip, Logger logger, java.util.function.Predicate<String> installed) throws IOException {
@@ -108,10 +114,14 @@ public final class MergeCheck {
             if (problems.isEmpty()) {
                 logger.info(e.getKey() + "'s pack (" + where + ") has MC GUI's pack merged in right for every version.");
             } else {
-                boolean clash = false;
-                for (String p : problems) clash |= p.contains(CLASH);
+                boolean clash = false, dialog = false;
+                for (String p : problems) {
+                    clash |= p.contains(CLASH);
+                    dialog |= p.startsWith(DIALOG);
+                }
                 logger.warning(e.getKey() + "'s pack (" + where + ") does not have MC GUI's pack merged in right, so screens "
                         + "will not work for players it is sent to:\n  - " + String.join("\n  - ", problems) + "\n  "
+                        + (dialog ? DIALOG_ADVICE + " " : "")
                         + (clash ? CLASH_ADVICE + (e.getKey().equals("ItemsAdder") ? IA_TEXT_SHADER : "") : advice(e.getKey())));
             }
         }
@@ -139,6 +149,12 @@ public final class MergeCheck {
         String invalid = invalidOverlays(overlays);
         if (invalid != null) {
             problems.add("its pack.mcmeta has an overlay entry the game refuses (" + invalid + "), and the game then refuses the whole pack");
+        }
+        for (JsonElement m : overlays) {
+            if (m.getAsJsonObject().get("directory").getAsString().startsWith(DIALOG_OVERLAY)) {
+                problems.add(DIALOG);
+                break;
+            }
         }
         TreeSet<String> missingEntries = new TreeSet<>();
         for (JsonElement o : ourOverlays) {
@@ -185,8 +201,9 @@ public final class MergeCheck {
 
     private static String advice(String plugin) {
         return switch (plugin) {
-            case "ItemsAdder" -> "Add MCGUI/pack under resource-pack.zip.merge_other_plugins_resourcepacks_folders in ItemsAdder's config.yml, "
-                    + "turn off ItemsAdder's features that replace the text shader if another plugin's copy is named, then run /iazip.";
+            case "ItemsAdder" -> "Add MCGUI/pack under resource-pack.zip.merge_other_plugins_resourcepacks_folders in ItemsAdder's config.yml "
+                    + "(leave DialogEngine/drawn-pack out of it: Dialog Engine sends its own pack), turn off text_effects, "
+                    + "hide_scoreboard_numbers and hide_scoreboard_numbers_old_clients, then run /iazip.";
             case "Nexo" -> "Copy plugins/MCGUI/pack.zip into plugins/Nexo/pack/external_packs/ and run /nexo reload pack.";
             case "Oraxen" -> "Copy plugins/MCGUI/pack.zip into plugins/Oraxen/pack/uploads/ and run /oraxen reload pack.";
             case "CraftEngine" -> "Add MCGUI/pack under resource-pack.merge-external-folders in CraftEngine's config.yml and run /ce reload pack.";

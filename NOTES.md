@@ -653,6 +653,21 @@ Reading a position, a world or a UUID is fine from anywhere. How MC GUI copes, a
   read while its plugin was still writing it ("zip END header not found") warned falsely. Rig and results:
   `rigs/compat/PackMerge/` (`tools/survive.py`, `out/`, `res/`); the two fixes against `38b14f4`:
   `rigs/compat/rv/res/merge-fix.console.log` and `merge-base.console.log` (`rv/rv.py 1.21.11 merge`).
+  **ItemsAdder with Dialog Engine merged in (a server owner, 2026-11-01, `rigs/compat/ia-report/`: his `generated.zip` and
+  `config.yml`; `pz.py` reads the zip, since `protect-file-from-unzip` garbles every local header and `unzip` and Python's
+  `zipfile` refuse it, though the game reads the central directory fine).** His output had none of our text shaders
+  (`rendertype_text.*`, `rendertype_text_*see_through.vsh`, `text.vsh`/`text.fsh`: 16 files, every other file of ours
+  byte-identical) and ItemsAdder's own text vertex shader in `ia_overlay_*` (colour-keyed effects; vanilla otherwise,
+  but it still carried the scoreboard-number hiding), plus Dialog Engine's `rpai_dialog_*` overlays after ours, whose
+  `position_tex_color` won. The 0.6.7 advice did not name the Dialog Engine folder. What fixed his server: `DialogEngine/drawn-pack`
+  out of `merge_other_plugins_resourcepacks_folders`, `MCGUI/pack` kept, `text_effects`, `hide_scoreboard_numbers` and
+  `hide_scoreboard_numbers_old_clients` off, `/iazip`, after which MergeCheck said the merge was right and screens drew
+  (Josh's report, not run here). Which of those removed the text shaders in his old zip is **inferred, not proven**: no
+  ItemsAdder jar here, and its docs and issues (PluginBugs/Issues-ItemsAdder#4393, #4230) only say that two packs
+  cannot both replace one shader and that text effects or emotes must be off to edit them by hand. His zip may also
+  have been built before the options were changed. `compress-shader-files` and `protect-file-from-unzip` are not
+  involved: our files that survived are byte-identical. `MergeCheck` now names Dialog Engine's folder whenever a merged
+  pack has `rpai_dialog_*` overlays (`MergeCheckTest.aMergedDialogEnginePackIsToldToComeOut`).
 - **The pointer leaves the frame under the menu blur, and only there**
   (`Shaders.menuBlurChain`, 26.2 and 26.3). A vanilla screen frees the mouse and the
   system cursor appears, but the pointer is drawn in the level pass, before

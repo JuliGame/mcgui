@@ -126,4 +126,25 @@ class MergeCheckTest {
         check.run();
         assertEquals(1, said.size(), "said once");
     }
+
+    @Test
+    void aMergedDialogEnginePackIsToldToComeOut(@org.junit.jupiter.api.io.TempDir java.nio.file.Path plugins) throws Exception {
+        // ItemsAdder's output with MC GUI's overlays and Dialog Engine's drawn-dialog overlay in one pack.mcmeta.
+        JsonObject meta = JsonParser.parseString(ResourcePack.mcmeta()).getAsJsonObject();
+        meta.getAsJsonObject("overlays").getAsJsonArray("entries").add(JsonParser.parseString(
+                "{\"directory\":\"rpai_dialog_v75\",\"min_format\":75,\"max_format\":88,\"formats\":{\"min_inclusive\":75,\"max_inclusive\":88}}"));
+        java.nio.file.Path zip = plugins.resolve(MergeCheck.OUTPUTS.get("ItemsAdder"));
+        java.nio.file.Files.createDirectories(zip.getParent());
+        try (java.util.zip.ZipOutputStream out = new java.util.zip.ZipOutputStream(java.nio.file.Files.newOutputStream(zip))) {
+            out.putNextEntry(new java.util.zip.ZipEntry("pack.mcmeta"));
+            out.write(meta.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            out.closeEntry();
+        }
+        java.util.List<java.util.logging.LogRecord> said = new java.util.ArrayList<>();
+        check(plugins, name -> name.equals("ItemsAdder"), said).run();
+        assertEquals(1, said.size());
+        String message = said.get(0).getMessage();
+        assertTrue(message.contains("rpai_dialog_*"), message);
+        assertTrue(message.contains("DialogEngine/drawn-pack"), message);
+    }
 }

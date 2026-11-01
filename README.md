@@ -653,7 +653,7 @@ version gets all of MC GUI's files, and what to do if not.
 
 | Plugin | How to merge | Notes |
 |---|---|---|
-| ItemsAdder | `config.yml`: add `MCGUI/pack` under `resource-pack.zip.merge_other_plugins_resourcepacks_folders`, then `/iazip` | Turn off `text_effects`, `hide_scoreboard_numbers` and `hide_scoreboard_numbers_old_clients`: they replace the same text shader. Needs MC GUI 0.6.7 or newer. |
+| ItemsAdder | `config.yml`: add `MCGUI/pack` under `resource-pack.zip.merge_other_plugins_resourcepacks_folders`, then `/iazip` | Do not list `DialogEngine/drawn-pack` there: Dialog Engine sends its own pack, and merged into the same pack its `position_tex_color` replaces MC GUI's. Turn off `text_effects`, `hide_scoreboard_numbers` and `hide_scoreboard_numbers_old_clients`: they replace the same text shader. Run `/iazip` again after any change and read what MC GUI says in the console. Needs MC GUI 0.6.7 or newer. |
 | Oraxen | copy `plugins/MCGUI/pack.zip` into `plugins/Oraxen/pack/uploads/`, restart | Animated glyphs (`glyphs/animations.yml`) use the text shader too and stop animating. Keep `remove_core_shaders_from_imported_packs: false`. |
 | Nexo | put `pack.zip` in `plugins/Nexo/pack/external_packs/` and rebuild Nexo's pack | Not tested (paid plugin). |
 | CraftEngine | `config.yml`: add `MCGUI/pack` under `resource-pack.merge-external-folders`, `/ce reload pack` | |
