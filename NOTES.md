@@ -752,32 +752,59 @@ Reading a position, a world or a UUID is fine from anywhere. How MC GUI copes, a
     using it is refused ("class is not public"), which disabled the plugin at start before the rig caught it. The classes are
     in `tools/spigot-names.classes`, and `spigot-names/1.21.11.txt` was written again from them. The committed table had been
     left behind by earlier additions to that list (it lacked the attribute and `Holder` classes `Nms` looks up), so a Spigot
-    1.21.11 server would not have started on those; [INFERENCE]: there is no Spigot 1.21.11 server jar here to start.
+    1.21.11 server would not have started on those. Now run on Spigot 1.21.11, 26.1.2 and 26.2 (below).
   - **MC GUI's own action bar messages still show** (`Platform.actionBar` tells `OwnBars` the plain text first; the handler lets
     one packet with that text by, whichever of the two packets Paper or Spigot makes of it, 5 s at most). A page that cannot be
     found or drawn is told to the player this way while they look at a page, so hiding those would hide the reason. Another
     plugin's action bar with the same text in that window would pass once: harmless.
   - **What it cannot hide:** a HUD a pack draws itself from the player's own game state; the tab list and the text under
-    names (`LIST`, `BELOW_NAME`); chat; titles and subtitles; and anything a plugin writes to the connection from a context
-    nearer the wire than this handler (the handler sits before `packet_handler`, so `connection.send` and a write from the
-    pipeline's tail pass it; a library that writes raw packets past the game's encoder would not: [INFERENCE], none of the
-    plugins tried does). A boss bar or sidebar the player was sent before MC GUI enabled (a reload) is read from the server
-    only if it is the player's Bukkit scoreboard's or a keyed boss bar.
-  - **Proof** (rig `rigs/compat/hide-hud/`: `rig.js <ver> <paper|folia> <all|tab|off|partial|reload> <tag>`, the
-    `HudProbe` plugin in `probe/` makes Bukkit scoreboards, Bukkit, keyed and Adventure bars and repeating action bars of both
-    kinds from the console; two mineflayer bots get the same of each, Alice opens pages and Bob never does, and a model of
-    what each client draws is compared at every step; `batch*.sh`, results in `res/`). Paper 1.21.11 (32 checks) and 26.2
-    through ViaVersion and ViaBackwards (33): all three gone at a page and Bob's untouched, every update at a page leaves
-    them gone, and after each of sneak, `mcgui close`, a teleport, a quit and a plugin reload the client has the latest
-    state (edited sidebar title and lines, bars' latest titles and progress, a bar added and a bar removed meanwhile, a
-    removed sidebar and bar staying away); the vanilla main-scoreboard sidebar and a `/bossbar` bar sent before the join
-    handler are hidden and come back; MC GUI's own action bar shows at a page. TAB's own scoreboard, including TAB reloading
-    (everything sent again) at a page: 13 checks each on 1.21.11 and 26.2. `hide-hud` all false: nothing changes at a
-    page and no clearing packet is sent (4 each); `boss-bars: false` alone: only that stays (4). Folia 1.21.11 and 26.2
-    (28 each): Folia has no scoreboards and no `/bossbar`, so bars and action bars only. `HudTest` (`paperTest`, 26.2
-    classes, `-PpaperServer=.../cache-26.2`) checks the handler on the game's own packets. `bukkit:reload confirm` is the
-    reload to type: plain `reload` is the datapack one. Traps: the rig's server JVM was OOM-killed twice when other chats
-    filled `atlas.slice` (memory in `psi`/`dmesg`, not a bug), and `-Xmx900M -XX:+UseSerialGC` keeps it small.
+    names (`LIST`, `BELOW_NAME`); chat; titles and subtitles; and anything written to the connection from a context nearer
+    the wire than this handler (it sits before `packet_handler`). The game's own send, `connection.send`, a write from the
+    pipeline's tail and **ProtocolLib's `sendServerPacket` all pass it and are hidden** (a boss bar and an action bar sent
+    through ProtocolLib: gone at a page, back with the latest progress after, 12 of 14 checks on 1.21.11 and 26.2; the
+    other two are the PacketEvents ones). **PacketEvents' own `sendPacket` is not caught, measured** (2.14.0, 1.21.11 and
+    26.2): it writes already-encoded bytes (the handler sees a `ByteBuf`, not a packet), so a boss bar sent that way stays on
+    screen at a page and its action bars show; the rig's `libs` scenario shows it (`res/p1211-libs2.jsonl`). Catching those
+    would mean reading packet ids and bodies off the buffer in every dialect, so it is not done. A boss bar or sidebar the
+    player was sent before MC GUI enabled (a reload) is read from the server only if it is the player's Bukkit
+    scoreboard's or a keyed boss bar.
+  - **Proof** (rig `rigs/compat/hide-hud/`: `rig.js <ver> <paper|folia|spigot> <scenario> <tag>`, run through
+    `go.sh`; env `BOTVER` for an older client through ViaVersion, `PLUS` for extra plugins, `PORT`; the `HudProbe` plugin in
+    `probe/` makes Bukkit scoreboards, Bukkit, keyed and Adventure bars and repeating action bars of both kinds from the
+    console and runs on Spigot, Paper and Folia; `HudProbeLibs` in `probelibs/` sends through ProtocolLib and PacketEvents;
+    two mineflayer bots get the same of each, Alice opens pages and Bob never does, and a model of what each client draws
+    is compared at every step; results in `res/`). Scenarios: `all` (every element, every close path: sneak, `mcgui close`,
+    teleport, quit and rejoin, a plugin reload), `tab`, `off`, `partial`, `actions` (both kinds of action bar), `link` (MC
+    GUI's own "There is no page called" reaches the player through a real click), `team` (a team-coloured sidebar), `libs`,
+    `reload2` (a page opened after the plugin started again), `shutdown`, `packfail` (MC GUI's pack sent again fails; a
+    sibling pack arrives with a page up), `crowd` (six players, three at pages closed three ways at once), `pc` (a real
+    client). Results, checks passing out of checks run, all with the control client unchanged: `all` on Paper 1.21.11 (32),
+    26.1.2 (32), 26.2 (33, through Via), 26.3 (32); on Spigot 1.21.11 (32), 26.1.2 (32), 26.2 (32); Folia 1.21.11, 26.2,
+    26.1.2 and 26.3 (28 each: Folia has no scoreboards and no `/bossbar`, so bars and action bars only); Paper 1.21.11
+    with a 1.21.8 client through ViaVersion and ViaBackwards (32). TAB with its scoreboard and boss bar, TAB reloading at a
+    page: 13 checks on Paper 1.21.11, Paper 26.2 and Spigot 1.21.11. `actions` 10 on Paper 1.21.11, 26.2 and Folia, 5 on Spigot
+    1.21.11 and 26.2 (no Adventure there). `link` 3, `team` 5, `reload2` 5, `crowd` 9, `shutdown` 3 (the server stopped with a page up: no
+    error or stack trace in the log) on Paper and Spigot, Folia `crowd` 9 and `shutdown` 3, and `packfail` 6 on
+    Paper 26.2, Spigot 1.21.11 and Folia 1.21.11. A pack that fails to load while a page waits for it closes the page
+    before it opens, so nothing was hidden; a sibling pack that buries ours with a page open closes it and the screen comes
+    back. `hide-hud` all false: nothing changes at a page and no clearing packet is sent (4 each); `boss-bars: false`
+    alone: only that stays (4). **Real clients** (hidden, on Josh's PC, through reverse tunnels to the rig's server; lane
+    `pc/`, `res/pc262-pc/`, `res/pc1211-pc/`): a 26.2 client on Paper 26.2 and a 1.21.11 client on Paper 1.21.11 each showed the sidebar, three boss bars and the action
+    bar before, only the page at it, and all of them again after, with the boss bar's latest progress and the sidebar's
+    edited title and extra line, the action bar resuming; no client error other than the offline account's Mojang 401s.
+    With MC GUI's own shaders in use the client hides the HUD itself, so a screenshot cannot tell the server's hiding from
+    the shader's; what it proves is that the client takes the clearing and replayed packets without complaint and shows the
+    right state after. `HudTest` (`paperTest`, `-PpaperServer=.../cache-26.2` or `cache-1.21.11`; 8 tests, passing on both)
+    checks the handler on the game's own packets, and `SharedCompressionTest.theHudWatcherLeavesItOn` that a pipeline with
+    the handler still gets shared compression (pre-existing: `uiengine_pack_pushes` refuses it on its own, as the console
+    says at start, so on a rig the handler's effect was never visible there). Cost: the handler adds about 26 ns to a
+    packet that is not one of its kinds, in a loop on an embedded channel (93 ns bare, 119 ns with it; a hop of any
+    handler costs that), nothing next to a tick's worth of packets. `bukkit:reload confirm` is the reload to type: plain
+    `reload` is the datapack one. Traps: the rig's server JVM was OOM-killed twice when other chats filled `atlas.slice`
+    (memory in `psi`/`dmesg`, not a bug), and `-Xmx900M -XX:+UseSerialGC` keeps it small; `schtasks /tr` takes 261 characters
+    at most, which cut the client's names file off ("properti") in a lane with a longer folder name, so `launch.ps1` picks
+    it itself; ending the rig's `ssh -R` tunnel can leave its `sshd -z` child on the PC holding the lane's ports (find it with
+    `netstat -ano`, `taskkill` it); a PacketEvents boss bar needs `setFlags(EnumSet.noneOf(Flag.class))` or its encoder throws on a null.
 - **F5 must leave a view alone, and does** (2026-10-26). The first press pulls
   the camera back along its look by the `camera_distance` attribute (4 blocks;
   `Camera.alignWithEntity`), off the flag: looking dead at the centre that is a

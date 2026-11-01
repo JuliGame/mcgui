@@ -216,7 +216,9 @@ page that cannot be found) still show. The tab list and the text under names are
 server starts.
 
 It hides only these three, and only what the server sends through the player's connection. A HUD that a plugin draws
-some other way (glyphs in a resource pack, a title or subtitle, the tab list, the text under names) stays. A HUD plugin
+some other way (glyphs in a resource pack, a title or subtitle, the tab list, the text under names) stays, and so do boss
+bars and action bars that a plugin sends with PacketEvents' own `sendPacket`, which writes already-encoded bytes past
+where MC GUI looks (ProtocolLib's and the game's own sends are hidden). A HUD plugin
 that shows its HUD in a boss bar or the action bar loses it at pages, which is usually what you want; turn the part off
 if it is not.
 

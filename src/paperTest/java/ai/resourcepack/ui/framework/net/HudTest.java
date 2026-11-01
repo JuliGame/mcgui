@@ -64,8 +64,16 @@ class HudTest {
         return out;
     }
 
-    private static ServerBossEvent bar(String name) {
-        return new ServerBossEvent(UUID.randomUUID(), Component.literal(name), BossEvent.BossBarColor.PINK, BossEvent.BossBarOverlay.PROGRESS);
+    /** A boss bar: 26.2 gives each an id of its own at construction, 1.21.11 makes one. */
+    private static ServerBossEvent bar(String name) throws ReflectiveOperationException {
+        Component title = Component.literal(name);
+        try {
+            return ServerBossEvent.class.getConstructor(Component.class, BossEvent.BossBarColor.class, BossEvent.BossBarOverlay.class)
+                    .newInstance(title, BossEvent.BossBarColor.PINK, BossEvent.BossBarOverlay.PROGRESS);
+        } catch (NoSuchMethodException newer) {
+            return ServerBossEvent.class.getConstructor(UUID.class, Component.class, BossEvent.BossBarColor.class, BossEvent.BossBarOverlay.class)
+                    .newInstance(UUID.randomUUID(), title, BossEvent.BossBarColor.PINK, BossEvent.BossBarOverlay.PROGRESS);
+        }
     }
 
     @Test
@@ -139,7 +147,7 @@ class HudTest {
     }
 
     @Test
-    void bossBarsAreRemovedAtAPageAndComeBackAsTheyAreNow() {
+    void bossBarsAreRemovedAtAPageAndComeBackAsTheyAreNow() throws ReflectiveOperationException {
         ServerBossEvent kept = bar("kept"), removed = bar("removed"), added = bar("added");
         channel.writeOutbound(ClientboundBossEventPacket.createAddPacket(kept), ClientboundBossEventPacket.createAddPacket(removed));
         sent();
