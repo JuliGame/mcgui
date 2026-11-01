@@ -647,8 +647,12 @@ Reading a position, a world or a UUID is fine from anywhere. How MC GUI copes, a
   writes `max_format: 97` back as `[97, 0]`, so 26.3 (97.1) falls back to the root there, which is ours as well.
   `MergeCheck` reads each known merger's output (ItemsAdder `output/generated.zip`, Nexo, Oraxen, CraftEngine,
   BetterHud, RP Engine) whenever it changes and resolves every file per client version the way the game does,
-  so a broken merge is said in the console; a failed pack status in merged mode is logged too. Rig and results:
-  `rigs/compat/PackMerge/` (`tools/survive.py`, `out/`, `res/`).
+  so a broken merge is said in the console; a failed pack status in merged mode is logged too. Only the outputs of
+  pack plugins the server has are read (an Oraxen zip left behind after a move to Nexo warned on every start), and a
+  zip that cannot be read is said only when the same file (modified time and size) fails at the next look too: one
+  read while its plugin was still writing it ("zip END header not found") warned falsely. Rig and results:
+  `rigs/compat/PackMerge/` (`tools/survive.py`, `out/`, `res/`); the two fixes against `38b14f4`:
+  `rigs/compat/rv/res/merge-fix.console.log` and `merge-base.console.log` (`rv/rv.py 1.21.11 merge`).
 - **The pointer leaves the frame under the menu blur, and only there**
   (`Shaders.menuBlurChain`, 26.2 and 26.3). A vanilla screen frees the mouse and the
   system cursor appears, but the pointer is drawn in the level pass, before
@@ -783,7 +787,9 @@ Reading a position, a world or a UUID is fine from anywhere. How MC GUI copes, a
     `TEXT_SEE_THROUGH` and the map item go to its text program; GUI pipelines stay ours). Walls show the raw palette code,
     a view shows the world with the HUD gone, and the pointer glyph hangs in the world as a big orange arrow (seen with
     Complementary on 26.2). Nothing of ours can draw there, so a view degrades instead: it spawns a notice
-    (`views.shaders-notice`, `Shaders.NOTICE_RGB`) 0.3 blocks ahead of the camera, which `text.vsh` never draws, so only a
+    (`views.shaders-notice`, `Shaders.NOTICE_RGB` at text opacity `NOTICE_ALPHA` 254) 0.3 blocks ahead of the camera,
+    which `text.vsh` never draws (both marks: ordinary text in that colour, opaque, is drawn as ever; real 1.21.11,
+    `rigs/compat/rv/res/pc-fix/t1-text-displays.png` against `pc-base/`), so only a
     player whose shaders are not ours sees it; and the pointer font is stored at `POINTER_ALPHA`/255 of its alpha
     (`ResourcePack.faint`), which `text.fsh` scales back for the pointer only, so any other text shader's 0.1 cut-off drops
     it. Seen working on 26.2 (2026-10-31) with Complementary r5.9.3 and BSL v10.1.8: the notice shows, no arrow; a vanilla
@@ -1347,7 +1353,21 @@ Reading a position, a world or a UUID is fine from anywhere. How MC GUI copes, a
   (a `Predicate<UUID>` service from an `ai.resourcepack.` class). So `pack/Siblings` registers ours as one,
   `Framework.onPack` marks ours buried when a sibling's pack is ACCEPTED after ours, and `Framework.openView` sends ours
   again first (`ResourcePack.raise`; a pack sent again under the same id goes on top), the view waiting for it to load
-  (`Views.packLoading`, 30 s at most). Checked in both clients (`res/de-proof.png`): pages and overlays draw after a
+  (`Views.packLoading`, 30 s at most). Only a sibling pack that carries any of our `assets/minecraft/` files (root or
+  overlay) buries ours (`pack/SiblingShaders`, state in `pack/OnTop`): RP Engine registers every pack it sends as a
+  sibling, and those usually replace none of our shaders, so each `/rp reload` cost the next page a reload. The library
+  `SiblingPacks` only answers "is this id mine", and it is shared, so the packs say it themselves: every pack push is
+  seen on its way out (`Pipeline.packPushes`, a handler put in at join before other join handlers), and the first time
+  a sibling's is taken, it is fetched from the link the client got and its file names read; verdicts are kept by hash,
+  and a pack whose push was not seen or cannot be fetched counts as burying ours. A sibling pack that does bury ours,
+  taken while a page is open, closes the page (CLOSED): that is a page whose button opened a drawn dialog, and sending
+  ours again would break the dialog the player asked for. The wait ends at the timeout (`OnTop.raising` expires with
+  it, or every later page waited 30 s and closed for a client that never answered); when it ends, a view whose pack
+  failed or was declined closes with the same message `openView` gives, and one whose player was sent more than 2
+  blocks away (Folia's `/tp`, no event) closes and leaves them there. Bot proof against `38b14f4` (Paper 1.21.11,
+  Folia 26.2, a stand-in sibling `rv/sib`): `rigs/compat/rv/res/{paper,folia}-{fix,base}.jsonl`; real
+  1.21.11 with Dialog Engine 0.6.8, a drawn dialog opened over a page: `rv/res/pc-fix/` (`d1`, `d2`) and `pc-base/`.
+  Checked in both clients (`res/de-proof.png`): pages and overlays draw after a
   drawn dialog. The cost: a drawn dialog opened after that has our `text.vsh` above its head epilogue, so its live
   player head is drawn unscaled (8x8). Dialog Engine does not send its pack again (it is already "offered"). **Fix on
   Dialog Engine's side (2026-10-31, `fix/mcgui-sibling`, PR resourcepack-ai/dialog-engine#3 from the fork
