@@ -18,6 +18,7 @@ import ai.resourcepack.ui.framework.net.ServerWire;
 import ai.resourcepack.ui.framework.net.SharedCompression;
 import ai.resourcepack.ui.framework.pack.MergeCheck;
 import ai.resourcepack.ui.framework.pack.ResourcePack;
+import ai.resourcepack.ui.framework.pack.SiblingShaders;
 import ai.resourcepack.ui.framework.pack.Siblings;
 import ai.resourcepack.ui.framework.render.Palette;
 import ai.resourcepack.ui.framework.world.Views;
@@ -27,6 +28,7 @@ import org.bukkit.Location;
 import org.bukkit.block.BlockFace;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.HandlerList;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
@@ -55,6 +57,8 @@ public final class Framework implements UIFramework, Listener {
     private Nms nms;
     private Palette palette;
     private ResourcePack pack;
+    /** Which sibling packs replace our shaders; null unless ours is sent by MC GUI. */
+    private SiblingShaders siblingShaders;
     private MapSender sender;
     private ServerWire wire;
     private Pipeline pipeline;
@@ -116,6 +120,9 @@ public final class Framework implements UIFramework, Listener {
             ResourcePack built = pack;
             // So Dialog Engine does not send its pack over ours again each time ours is sent (see ResourcePack.raise).
             Siblings.register(plugin);
+            // Which of a sibling's packs bury ours, read from the packs themselves (only while ours is sent by us: merged,
+            // ours is never buried).
+            if (pack.offers()) siblingShaders = new SiblingShaders(pack.bytes, plugin.getLogger());
             // Once the pack host has it (or this server serves it after all), the players already on are sent it.
             pack.start("MCGUI/" + plugin.getDescription().getVersion(), () -> {
                 try {
@@ -145,7 +152,7 @@ public final class Framework implements UIFramework, Listener {
         sender = new MapSender(wire, settings.bytesPerSecond, plugin.getLogger());
         OpenTrace.start(plugin.getLogger(), nms, wire, sender);
         views = new Views(plugin, settings, nms, pipeline, sender, palette, settings.mapIdBase);
-        views.packLoading(p -> pack != null && pack.raising(p.getUniqueId()));
+        views.packLoading(p -> pack != null && pack.raising(p.getUniqueId()), this::packLost);
         walls = new Walls(plugin, nms, settings.mapIdBase + Views.VIEW_ID_SPAN, settings.viewDistance, settings.reach, views::seated, views::hides);
         serverThread = Threads.server(plugin, nms.serverThread());
         Threads.register(this, plugin);
@@ -157,6 +164,7 @@ public final class Framework implements UIFramework, Listener {
         sender.start();
         // Players already online (a reload): hand them the pack again, and read their clicks on walls.
         for (Player p : Bukkit.getOnlinePlayers()) {
+            watchPacks(p);
             if (!Bedrock.joined(p) && pack != null) pack.send(p);
             readUses(p);
         }
@@ -179,6 +187,8 @@ public final class Framework implements UIFramework, Listener {
         if (sender != null) step("stop sending map pictures", sender::close);
         if (wire != null) step("let go of the map compressor", wire::close);
         if (pack != null) step("stop serving the resource pack", pack::close);
+        if (siblingShaders != null) step("stop reading sibling packs", siblingShaders::close);
+        siblingShaders = null;
         Cpu.shutdown();
         HandlerList.unregisterAll(this);
         if (walls != null) HandlerList.unregisterAll(walls);
@@ -270,6 +280,10 @@ public final class Framework implements UIFramework, Listener {
 
     /** Why a Bedrock player gets no view: said to them, with no apostrophes (MC GUI's chat reads them as quotes). */
     public static final String BEDROCK_REFUSAL = "Screens work in Minecraft Java Edition only: Bedrock Edition cannot load the resource pack they are drawn with.";
+    /** Why a player who declined the pack gets no view. */
+    private static final String PACK_DECLINED = "You have not loaded the resource pack that screens need.";
+    /** Why a player whose game failed to load the pack gets no view. */
+    private static final String PACK_FAILED = "Your game could not load the resource pack of this server, which screens need.";
 
     @Override
     public View openView(Player player, ViewContent content, ViewOptions options) {
@@ -287,15 +301,22 @@ public final class Framework implements UIFramework, Listener {
                 throw new IllegalStateException("You have not loaded the resource pack that screens need. It has been offered to you again.");
             }
             if (pack != null && pack.mergedElsewhere()) {
-                throw new IllegalStateException(pack.declined(player.getUniqueId())
-                        ? "You have not loaded the resource pack that screens need."
-                        : "Your game could not load the resource pack of this server, which screens need.");
+                throw new IllegalStateException(pack.declined(player.getUniqueId()) ? PACK_DECLINED : PACK_FAILED);
             }
             throw new IllegalStateException("Screens need the MC GUI resource pack, which is turned off on this server (resource-pack.mode).");
         }
         // Our pack goes on top again if a sibling plugin's went over it; the view then waits for it (Views.packLoading).
         pack.raise(player);
         return views.open(player, content, options == null ? ViewOptions.DEFAULT : options);
+    }
+
+    /**
+     * Why [player]'s view, which waited for ours sent again (ResourcePack.raise), cannot be drawn now that the wait is
+     * over: their game declined it or failed to load it. Null if it can.
+     */
+    private String packLost(Player player) {
+        if (hasPack(player)) return null;
+        return pack != null && pack.declined(player.getUniqueId()) ? PACK_DECLINED : PACK_FAILED;
     }
 
     @Override
@@ -337,6 +358,22 @@ public final class Framework implements UIFramework, Listener {
 
     // ---------------------------------------------------------------- the pack
 
+    /**
+     * Every pack sent to the player is seen on its way out (SiblingShaders): first of all join handlers, before any
+     * other plugin's can send one.
+     */
+    @EventHandler(priority = EventPriority.LOWEST)
+    public void onJoinFirst(PlayerJoinEvent e) {
+        watchPacks(e.getPlayer());
+    }
+
+    private void watchPacks(Player player) {
+        SiblingShaders seen = siblingShaders;
+        if (seen == null) return;
+        UUID id = player.getUniqueId();
+        pipeline.packPushes(player, push -> seen.pushed(id, push.id(), push.url(), push.hash()));
+    }
+
     @EventHandler
     public void onJoin(PlayerJoinEvent e) {
         sender.reset(e.getPlayer().getUniqueId());
@@ -354,6 +391,7 @@ public final class Framework implements UIFramework, Listener {
     @EventHandler
     public void onQuit(PlayerQuitEvent e) {
         if (pack != null) pack.left(e.getPlayer().getUniqueId());
+        if (siblingShaders != null) siblingShaders.left(e.getPlayer().getUniqueId());
         Bedrock.left(e.getPlayer().getUniqueId());
         sender.reset(e.getPlayer().getUniqueId());
     }
@@ -364,13 +402,12 @@ public final class Framework implements UIFramework, Listener {
         UUID id = e.getPlayer().getUniqueId();
         boolean ours = ResourcePack.PACK_ID.equals(e.getID());
         // A game takes packs in the order they are sent, each above the last: a sibling's taken after ours (Dialog
-        // Engine's) is over ours, and ours sent again is over it (see ResourcePack.markBuried and raise).
+        // Engine's) is over ours if it replaces any of our files, and ours sent again is over it (see
+        // ResourcePack.markBuried and raise).
         if (e.getStatus() == PlayerResourcePackStatusEvent.Status.ACCEPTED) {
             if (ours) pack.markAccepted(id);
-            else if (Siblings.fromSibling(plugin, e.getID())) pack.markBuried(id);
+            else if (pack.offers() && Siblings.fromSibling(plugin, e.getID())) siblingAccepted(e.getPlayer(), e.getID());
         }
-        if (ours && e.getStatus() != PlayerResourcePackStatusEvent.Status.ACCEPTED && e.getStatus() != PlayerResourcePackStatusEvent.Status.DOWNLOADED
-                && e.getStatus() != PlayerResourcePackStatusEvent.Status.DISCARDED) pack.raised(id);
         // Merged into another plugin's pack, ours never arrives under its own id: that pack is ours too.
         if (!ours && !pack.mergedElsewhere()) return;
         switch (e.getStatus()) {
@@ -392,7 +429,48 @@ public final class Framework implements UIFramework, Listener {
             }
             default -> {}
         }
+        // Ours, sent again, ended (loaded or not): after the above, so a view that waited for it sees whether it has the pack.
+        if (ours && e.getStatus() != PlayerResourcePackStatusEvent.Status.ACCEPTED && e.getStatus() != PlayerResourcePackStatusEvent.Status.DOWNLOADED
+                && e.getStatus() != PlayerResourcePackStatusEvent.Status.DISCARDED) pack.raised(id);
         // Their maps change meaning: send everything again in the right encoding.
         sender.reset(e.getPlayer().getUniqueId());
+    }
+
+    /**
+     * A sibling's pack went over ours for [player]: ours counts as buried until that pack turns out to replace none of
+     * our files (SiblingShaders). A view open meanwhile is closed once it does replace them (or that cannot be told),
+     * as it would draw nothing of the page: this is a page whose button opened a Dialog Engine drawn dialog, which
+     * then shows. Sending ours again instead would keep the page and break the dialog the player asked for.
+     */
+    private void siblingAccepted(Player player, UUID sibling) {
+        UUID id = player.getUniqueId();
+        SiblingShaders seen = siblingShaders;
+        String by = seen == null ? "id:" + sibling : seen.key(id, sibling);
+        pack.markBuried(id, by);
+        if (seen == null) {
+            buriedUnder(player, by, true);
+            return;
+        }
+        java.util.concurrent.CompletableFuture<Boolean> replaces = seen.replaces(id, sibling);
+        if (replaces.isDone()) {
+            buriedUnder(player, by, replaces.join());
+            return;
+        }
+        replaces.thenAccept(r -> {
+            try {
+                Threads.on(plugin, player, () -> buriedUnder(player, by, r));
+            } catch (IllegalStateException | IllegalArgumentException gone) {
+                // MC GUI stopped, or the player left, meanwhile.
+            }
+        });
+    }
+
+    /** Whether the sibling pack [by], over [player]'s ours, [replaces] any of our files (see siblingAccepted). */
+    private void buriedUnder(Player player, String by, boolean replaces) {
+        if (!replaces) {
+            pack.harmless(by);
+        } else if (player.isOnline() && pack.buriedBy(player.getUniqueId(), by) && views.viewOf(player) != null) {
+            views.close(player, CloseReason.CLOSED);
+        }
     }
 }

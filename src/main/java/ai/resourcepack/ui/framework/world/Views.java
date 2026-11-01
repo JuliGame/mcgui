@@ -21,6 +21,7 @@ import ai.resourcepack.ui.framework.pack.ResourcePack;
 import ai.resourcepack.ui.framework.pack.Shaders;
 import ai.resourcepack.ui.framework.render.Palette;
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextColor;
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
@@ -183,7 +184,9 @@ public final class Views implements Listener {
     private final EntityType mannequin;
     /** Whether a player's game is loading MC GUI's pack again, to have it on top (ResourcePack.raise): a view waits. */
     private java.util.function.Predicate<Player> packLoading = p -> false;
-    /** How long a view waits for that, in ticks, before it gives up. */
+    /** Once that is over, why the player cannot see a view (their game declined or failed the pack), or null. */
+    private java.util.function.Function<Player, String> packLost = p -> null;
+    /** How long a view waits for that, in ticks, before it gives up: as long as ResourcePack waits for the pack. */
     private static final int PACK_TIMEOUT = 600;
 
     public Views(Plugin plugin, Settings settings, Nms nms, Pipeline pipeline, MapSender sender, Palette palette, int firstMapId) {
@@ -204,9 +207,13 @@ public final class Views implements Listener {
         sender.onProgress(this::progressed);
     }
 
-    /** What says a player's game is loading MC GUI's pack again (see {@link #packLoading}). */
-    public void packLoading(java.util.function.Predicate<Player> loading) {
+    /**
+     * What says a player's game is loading MC GUI's pack again (see {@link #packLoading}), and once it is not, why they
+     * cannot see a view, if they cannot ({@link #packLost}).
+     */
+    public void packLoading(java.util.function.Predicate<Player> loading, java.util.function.Function<Player, String> lost) {
         this.packLoading = loading;
+        this.packLost = lost;
     }
 
     public final class ViewImpl implements View {
@@ -932,11 +939,27 @@ public final class Views implements Listener {
      */
     private boolean show(Player p, ViewImpl v, int now) {
         if (v.packBy != 0) {
-            if (packLoading.test(p)) {
-                if (now >= v.packBy) close(p, CloseReason.INTERRUPTED);
+            // Given up at the timeout first: ResourcePack stops waiting for ours sent again at the same tick.
+            if (now >= v.packBy) {
+                close(p, CloseReason.INTERRUPTED);
                 return false;
             }
+            if (packLoading.test(p)) return false;
             v.packBy = 0;
+            // Their game declined ours sent again, or failed to load it: the view could not be drawn.
+            String lost = packLost.apply(p);
+            if (lost != null) {
+                close(p, CloseReason.INTERRUPTED);
+                Platform.send(p, Component.text(lost, NamedTextColor.RED));
+                return false;
+            }
+            // Sent away while it waited (up to 30 s), with no PlayerTeleportEvent (Folia, see keepStill): they stay where
+            // they were sent, not seated again by take or reveal.
+            if (farFrom(p.getLocation(), v.returnTo)) {
+                v.sentAway = true;
+                close(p, CloseReason.INTERRUPTED);
+                return false;
+            }
             if (v.takeLater) {
                 v.takeLater = false;
                 take(p, v);
@@ -1246,7 +1269,7 @@ public final class Views implements Listener {
         Location at = p.getLocation();
         // Far from the seat, they were teleported by something MC GUI never heard of: on Folia, the /tp command and a
         // plugin's teleportAsync move a player with no PlayerTeleportEvent (onTeleport). They get up where they were sent.
-        if (at.getWorld() != v.seat.getWorld() || at.distanceSquared(v.seat) > 4) {
+        if (farFrom(at, v.seat)) {
             v.sentAway = true;
             close(p, CloseReason.INTERRUPTED);
             return;
@@ -1255,6 +1278,11 @@ public final class Views implements Listener {
             debug("moved off the seat by " + at.toVector().subtract(v.seat.toVector()) + ": putting " + p.getName() + " back");
             nms.teleportKeepingRotation(p, v.seat.getX(), v.seat.getY(), v.seat.getZ());
         }
+    }
+
+    /** Whether [at] is more than 2 blocks from [from], or in another world: the player was sent away. */
+    private static boolean farFrom(Location at, Location from) {
+        return at.getWorld() != from.getWorld() || at.distanceSquared(from) > 4;
     }
 
     /**

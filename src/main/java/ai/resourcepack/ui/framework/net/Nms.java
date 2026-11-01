@@ -92,6 +92,10 @@ public final class Nms {
     private final Set<Object> dropActions;         // DROP_ITEM and DROP_ALL_ITEMS
     /** What the client sends at the end of each of its ticks, after that tick's clicks and rotation. */
     private final Class<?> tickEndPacket;          // ServerboundClientTickEndPacket
+    // A resource pack sent to a client, seen on its way out (pack/SiblingShaders). Looked up leniently: without it,
+    // every sibling's pack counts as replacing ours.
+    private final Class<?> pushPacket;             // ClientboundResourcePackPushPacket
+    private final MethodHandle pushId, pushUrl, pushHash;
     // A held player: flying, as far as their client knows, at a speed of nothing (see heldAbilities).
     private final Class<?> abilitiesPacket;        // ClientboundPlayerAbilitiesPacket
     private final MethodHandle abilitiesInvulnerable, abilitiesInstabuild;
@@ -332,6 +336,20 @@ public final class Nms {
         actionOfPacket = actionOf;
         dropActions = drops;
         tickEndPacket = Reflect.cls(game + "ServerboundClientTickEndPacket");
+        Class<?> push = null;
+        MethodHandle pushIdOf = null, pushUrlOf = null, pushHashOf = null;
+        try {
+            push = Reflect.cls("net.minecraft.network.protocol.common.ClientboundResourcePackPushPacket");
+            pushIdOf = L.unreflect(Reflect.method(push, "id"));
+            pushUrlOf = L.unreflect(Reflect.method(push, "url"));
+            pushHashOf = L.unreflect(Reflect.method(push, "hash"));
+        } catch (ReflectiveOperationException ignored) {
+            push = null;
+        }
+        pushPacket = push;
+        pushId = pushIdOf;
+        pushUrl = pushUrlOf;
+        pushHash = pushHashOf;
         abilitiesPacket = Reflect.cls(game + "ClientboundPlayerAbilitiesPacket");
         abilitiesInvulnerable = L.unreflect(Reflect.method(abilitiesPacket, "isInvulnerable"));
         abilitiesInstabuild = L.unreflect(Reflect.method(abilitiesPacket, "canInstabuild"));
@@ -759,6 +777,19 @@ public final class Nms {
     /** Whether [msg] is the client saying one of its ticks has ended (sent after that tick's clicks and rotation). */
     public boolean isTickEnd(Object msg) {
         return tickEndPacket.isInstance(msg);
+    }
+
+    /** A resource pack sent to a client: its id, link and sha1 (hex, possibly empty). */
+    public record PackPush(java.util.UUID id, String url, String hash) {}
+
+    /** [msg] as a resource pack sent to the client, or null if it is none (or this server's is not known). */
+    public PackPush packPush(Object msg) {
+        if (pushPacket == null || !pushPacket.isInstance(msg)) return null;
+        try {
+            return new PackPush((java.util.UUID) pushId.invoke(msg), (String) pushUrl.invoke(msg), (String) pushHash.invoke(msg));
+        } catch (Throwable t) {
+            throw rethrow(t);
+        }
     }
 
     /**

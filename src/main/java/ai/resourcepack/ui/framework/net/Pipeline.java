@@ -35,6 +35,7 @@ public final class Pipeline {
     private static final String FILTER = "uiengine_conceal";
     private static final String FRAMES = "uiengine_frames";
     private static final String USES = "uiengine_uses";
+    private static final String PUSHES = "uiengine_pack_pushes";
     /** HandlerNames.DECODER: packets, decoded, come out of it. */
     private static final String DECODER = "decoder";
     /** The player's own 36 slots, which every container other than the inventory itself ends with. */
@@ -265,6 +266,47 @@ public final class Pipeline {
         }
     }
 
+    /**
+     * Hand every resource pack sent to [player] (by any plugin) to [pushed] as it goes out, on the netty thread: which
+     * pack a sibling's id stands for, for pack/SiblingShaders. Put in at join, before any other plugin's join handler
+     * can send one (each change to the pipeline runs on its event loop, ahead of what is written after it).
+     */
+    public void packPushes(Player player, java.util.function.Consumer<Nms.PackPush> pushed) {
+        Channel channel = nms.channel(player);
+        if (channel == null) return;
+        try {
+            channel.eventLoop().execute(() -> {
+                ChannelPipeline p = channel.pipeline();
+                if (!ours(p.get(PUSHES))) install(p, PUSHES, new Pushes(pushed));
+            });
+        } catch (RejectedExecutionException e) {
+            // The event loop is shutting down with the server.
+        }
+    }
+
+    private final class Pushes extends ChannelOutboundHandlerAdapter {
+        private final java.util.function.Consumer<Nms.PackPush> pushed;
+
+        Pushes(java.util.function.Consumer<Nms.PackPush> pushed) {
+            this.pushed = pushed;
+        }
+
+        @Override
+        public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
+            try {
+                Nms.PackPush push = nms.packPush(msg);
+                if (push != null) pushed.accept(push);
+            } catch (RuntimeException e) {
+                log.log(Level.WARNING, "Could not read a resource pack sent to a player", e);
+            }
+            ctx.write(msg, promise);
+        }
+
+        Pipeline owner() {
+            return Pipeline.this;
+        }
+    }
+
     public void forget(UUID player) {
         concealed.remove(player);
         held.remove(player);
@@ -285,6 +327,7 @@ public final class Pipeline {
         if (handler instanceof Filter f) return f.owner() == this;
         if (handler instanceof FrameMaps m) return m.owner() == this;
         if (handler instanceof Uses u) return u.owner() == this;
+        if (handler instanceof Pushes s) return s.owner() == this;
         return handler instanceof Pongs g && g.owner() == this;
     }
 
@@ -315,7 +358,7 @@ public final class Pipeline {
             try {
                 channel.eventLoop().execute(() -> {
                     ChannelPipeline p = channel.pipeline();
-                    for (String name : List.of(FILTER, PONGS, FRAMES, USES)) if (ours(p.get(name))) p.remove(name);
+                    for (String name : List.of(FILTER, PONGS, FRAMES, USES, PUSHES)) if (ours(p.get(name))) p.remove(name);
                 });
             } catch (RejectedExecutionException e) {
                 // The event loop is shutting down with the server, and the channel with it.
