@@ -795,8 +795,9 @@ Reading a position, a world or a UUID is fine from anywhere. How MC GUI copes, a
     before it opens, so nothing was hidden; a sibling pack that buries ours with a page open closes it and the screen comes
     back. `hide-hud` all false: nothing changes at a page and no clearing packet is sent (4 each); `boss-bars: false`
     alone: only that stays (4). `libs` (the `HudProbeLibs` plugin sends a boss bar, its update and an action bar through
-    ProtocolLib and through PacketEvents): 14 of 14 on Paper 1.21.11; on Spigot 1.21.11 the PacketEvents half and the action
-    bar through ProtocolLib pass (the probe cannot build ProtocolLib's boss bar there, its NMS names are Spigot's); on 26.x the
+    ProtocolLib and through PacketEvents): 14 of 14 on Paper 1.21.11; on Spigot 1.21.11 too (14 of 14, the probe using Spigot's own names for ProtocolLib's boss bar); `pesidebar` (a sidebar made
+    of PacketEvents packets alone: objective, score, display) 7 of 7 on Paper and Folia 1.21.11, which is the only sidebar
+    Folia can have; on 26.x the
     bot is a ViaVersion client, which PacketEvents' raw bytes are left alone for (above), so the PacketEvents half fails
     there by design. **Spigot 26.3** (BuildTools `--rev 26.3`, kept in `rigs/compat/hide-hud/jars/`): `all` 32,
     `actions` 5, `crowd` 9. **Shared compression** (`sharedcomp`, `PACKMODE=external` so that no handler of ours that watches
@@ -805,9 +806,11 @@ Reading a position, a world or a UUID is fine from anywhere. How MC GUI copes, a
     (`serve`/`upload`, the default) `uiengine_pack_pushes` refuses it, as on `main`. **Many players** (`many`, 20 bots with
     the three parts, ten at pages in turn for three rounds, then everybody leaves, Paper 1.21.11 and 26.2): every page's
     player ends as the ones who never opened, nobody else's screen changed, and a full-collection class histogram after
-    they leave holds no `Hud` (only the one `HudPackets`). Tick time with ten of 20 at pages was within the machine's noise of
-    hide-hud off (avg 9.4 ms against 7.1 over 10 s, 11.9 against 11.3 over a minute, other chats share the box), the cost
-    that can be told is the handler's 26 ns a packet. **Real clients** (hidden, on Josh's PC, through reverse tunnels to the rig's server; lane
+    they leave holds no `Hud` (only the one `HudPackets`). Tick time (`tick`, 30 players with the three parts, half at pages, eight
+    samples of `mspt` each, three runs apiece, Paper 1.21.11): median of the average 8.7, 14.4 and 8.5 ms with hide-hud on,
+    12.8, 9.3 and 9.3 off; the best sample 8.2, 10.2, 8.1 against 9.5, 8.8, 8.9. Other chats share the box, so the runs differ
+    more from each other than on from off: no cost can be told at that scale, and the one that can be is the handler's 26 ns
+    a packet. **Real clients** (hidden, on Josh's PC, through reverse tunnels to the rig's server; lane
     `pc/`, `res/pc262-pc/`, `res/pc1211-pc/`): a 26.2 client on Paper 26.2 and a 1.21.11 client on Paper 1.21.11 each showed the sidebar, three boss bars and the action
     bar before, only the page at it, and all of them again after, with the boss bar's latest progress and the sidebar's
     edited title and extra line, the action bar resuming; no client error other than the offline account's Mojang 401s.
