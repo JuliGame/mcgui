@@ -278,8 +278,9 @@ final class HudPackets {
      * What [buf] says, if it is a finished packet (a leading id, then the body) that draws the sidebar, a boss bar or an
      * action bar: a plugin that encodes its own packets (PacketEvents' {@code sendPacket}) writes these into the pipeline
      * in place of packet objects. Decoded with the connection's own codec, so the HUD handler treats it as the packet it
-     * is; null for anything else, for a connection ViaVersion translates (the bytes are the client's version's then) and
-     * for bytes that do not decode to exactly one packet.
+     * is; null for anything else and for bytes that do not decode to exactly one packet. The bytes are in the server's
+     * protocol whichever version the client is (PacketEvents encodes for the server and ViaVersion translates after this
+     * handler, measured with a 1.21.8 client on 1.21.11), so the connection's own codec reads them.
      */
     Object decodeRaw(io.netty.channel.Channel channel, io.netty.buffer.ByteBuf buf) {
         int at = buf.readerIndex(), end = buf.writerIndex(), id = 0, shift = 0;
@@ -299,8 +300,6 @@ final class HudPackets {
             Raw r = raw;
             if (r == null || r.info != info) raw = r = rawFor(info);
             if (id != r.display && id != r.boss && id != r.action && id != r.chat) return null;
-            Object via = pipeline.get("via-encoder");
-            if (via != null && ViaVersionState.stand(via) != ViaVersionState.Stand.PASSES) return null;
             io.netty.buffer.ByteBuf body = buf.duplicate();
             Object packet = decode.invoke(r.codec, body);
             return body.isReadable() ? null : packet;

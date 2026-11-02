@@ -763,13 +763,13 @@ Reading a position, a world or a UUID is fine from anywhere. How MC GUI copes, a
     through. `Hud.write` reads the leading id against the ids the connection's own protocol gives the four packets (worked out
     once per `ProtocolInfo` by encoding a sample of each), decodes a match with that protocol's bound codec on a duplicate of
     the buffer, and treats it as the packet it is: kept, dropped while hidden and replayed as a packet object when shown. Bytes
-    that do not decode to exactly one packet, and every connection ViaVersion translates (`via-encoder` not passing: the bytes
-    are in the client's version, not the server's), are left alone, so **PacketEvents on a server a ViaVersion client of
-    another version joins still shows its boss bars and action bars at a page** (a bot cannot test a native 26.x client, so
-    it is only measured on 1.21.11).
+    that do not decode to exactly one packet are left alone. **PacketEvents writes the server's protocol whichever version the
+    client is, and ViaVersion translates after this handler**: measured with a 1.21.8 client on Paper 1.21.11 (the bytes'
+    action bar id is 85, 1.21.11's, where 1.21.8's is 80), so a connection Via translates is decoded like any other. An
+    earlier version of this note said such bytes were in the client's version and left them alone; that was a guess, and the
+    boss bar and action bar came through at a page until it was checked.
   - **What it cannot hide:** a HUD a pack draws itself from the player's own game state; the tab list and the text under
-    names (`LIST`, `BELOW_NAME`); chat; titles and subtitles; a raw PacketEvents send to an older client through ViaVersion
-    (above); and anything written to the connection from a context nearer the wire than this handler (it sits before
+    names (`LIST`, `BELOW_NAME`); chat; titles and subtitles; and anything written to the connection from a context nearer the wire than this handler (it sits before
     `packet_handler`). The game's own send, `connection.send`, a write from the pipeline's tail, **ProtocolLib's
     `sendServerPacket` and PacketEvents' `sendPacket` all pass it and are hidden**. A boss bar or sidebar the player was sent
     before MC GUI enabled (a reload) is read from the server only if it is the player's Bukkit scoreboard's or a keyed boss
@@ -795,11 +795,12 @@ Reading a position, a world or a UUID is fine from anywhere. How MC GUI copes, a
     before it opens, so nothing was hidden; a sibling pack that buries ours with a page open closes it and the screen comes
     back. `hide-hud` all false: nothing changes at a page and no clearing packet is sent (4 each); `boss-bars: false`
     alone: only that stays (4). `libs` (the `HudProbeLibs` plugin sends a boss bar, its update and an action bar through
-    ProtocolLib and through PacketEvents): 14 of 14 on Paper 1.21.11; on Spigot 1.21.11 too (14 of 14, the probe using Spigot's own names for ProtocolLib's boss bar); `pesidebar` (a sidebar made
-    of PacketEvents packets alone: objective, score, display) 7 of 7 on Paper and Folia 1.21.11, which is the only sidebar
-    Folia can have; on 26.x the
-    bot is a ViaVersion client, which PacketEvents' raw bytes are left alone for (above), so the PacketEvents half fails
-    there by design. **Spigot 26.3** (BuildTools `--rev 26.3`, kept in `rigs/compat/hide-hud/jars/`): `all` 32,
+    ProtocolLib and through PacketEvents): 14 of 14 on Paper 1.21.11 and 26.2, Spigot 1.21.11, 26.1.2 and 26.2 (ProtocolLib's
+    Spigot build, `ProtocolLib-Spigot.jar` of its dev builds: its Paper build needs Paper's `BasicCommand`), and Paper 1.21.11
+    with a 1.21.8 client through ViaVersion; PacketEvents alone 7 of 7 on Paper and Spigot 26.3 (ProtocolLib has no 26.3 build
+    yet: its update is an open pull request). On 26.x the bot is a 1.21.11 client through ViaVersion, so those runs also
+    cover raw bytes on a translated connection. `pesidebar` (a sidebar made of PacketEvents packets alone: objective, score,
+    display) 7 of 7 on Paper and Folia 1.21.11, which is the only sidebar Folia can have. **Spigot 26.3** (BuildTools `--rev 26.3`, kept in `rigs/compat/hide-hud/jars/`): `all` 32,
     `actions` 5, `crowd` 9. **Shared compression** (`sharedcomp`, `PACKMODE=external` so that no handler of ours that watches
     packs refuses it, a sibling pack standing for ours): the open trace says "connection compressed from 256 bytes, shared
     compression used", 98 of 144 patches compressed once for all, with `uiengine_hud` in the pipeline; with the pack served
