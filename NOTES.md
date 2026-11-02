@@ -724,8 +724,18 @@ Reading a position, a world or a UUID is fine from anywhere. How MC GUI copes, a
   plugin's `position_tex_color`/text shaders on top (a server owner's Dialog Engine merged into ItemsAdder) the scoreboard, boss
   bars and action bar drew over pages. Packets, not the Bukkit scoreboard API, so TAB and anything that sends packets
   directly are covered and nothing fights over a scoreboard.
+  - **Which parts a view hides is the view's choice, the config its default** (`api/HudParts`, `ViewOptions.hud`, null for the
+    config's `views.hide-hud`; `Views.open` passes `options.hud()` or `Settings.hideHud` to `Pipeline.hideHud(player, parts)`,
+    `restore` calls `showHud`). The handler therefore tracks all three always and drops only what the open page asked to hide
+    (`Hud.hiding`), and it is put in for every player even with the config all false. No player command: owner's decision
+    (2026-11-02), config and API only. `ViewOptions` keeps its three-argument constructor for plugins built before. Checked
+    through the API by the rig's `api` scenario (`probe apiopen <player> none|bars|sidebar|all|default`, a view opened through
+    `UIFramework.openView`): each mode shows exactly what it does not name, edits made at the view stay hidden, and on
+    sneaking out she has all three as the control player does, 15 of 15 on Paper 1.21.11 and 26.2, Spigot 1.21.11 and Folia
+    1.21.11 (no sidebar there); with the config all off or `boss-bars` off alone, as before (4 each); `HudTest` has
+    `aPageHidesOnlyWhatItAsksFor`.
   - **A `Hud` handler (`uiengine_hud`) sits in every connection from join** (`Framework.onJoinFirst`, LOWEST, and the enable
-    loop for players already on) when any part is on, because it has to have seen what was sent before a page opened. It
+    loop for players already on), because it has to have seen what was sent before a page opened. It
     keeps the last `set_display_objective` per sidebar slot (`SIDEBAR` and the 16 `TEAM_*` colours; never `LIST` or
     `BELOW_NAME`) and each boss bar's packets by id (the add, and the latest progress, name, style and properties), always.
     `Views.open` calls `Pipeline.hideHud(p, true)` beside `conceal`, `Views.restore` (every way a view ends goes through

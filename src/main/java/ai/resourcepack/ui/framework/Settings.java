@@ -1,5 +1,6 @@
 package ai.resourcepack.ui.framework;
 
+import ai.resourcepack.ui.framework.api.HudParts;
 import org.bukkit.configuration.file.FileConfiguration;
 
 import java.util.Locale;
@@ -7,13 +8,6 @@ import java.util.Locale;
 /** One reading of config.yml. */
 public final class Settings {
     public enum PackMode { UPLOAD, SERVE, EXTERNAL, OFF }
-
-    /** The parts of the HUD that plugins draw (the sidebar scoreboard, boss bars, the action bar) that are hidden at a page. */
-    public record Hidden(boolean scoreboard, boolean bossBars, boolean actionBar) {
-        public boolean any() {
-            return scoreboard || bossBars || actionBar;
-        }
-    }
 
     public final PackMode packMode;
     public final String packBind;
@@ -52,7 +46,8 @@ public final class Settings {
      * What the server takes off a player's screen while they have a page open (packets, so whatever pack's shaders are in
      * use): see {@link Hidden}.
      */
-    public final Hidden hideHud;
+    /** What a view hides of the HUD plugins draw, unless its options say otherwise. */
+    public final HudParts hideHud;
     public final int mapIdBase;
     /** Threads for all CPU-heavy work (0: the cores minus one); see {@link ai.resourcepack.ui.framework.api.Cpu}. */
     public final int cpuThreads;
@@ -75,7 +70,7 @@ public final class Settings {
         debugPointer = c.getBoolean("views.debug-pointer", false);
         shadersNotice = c.getString("views.shaders-notice",
                 "This menu can't be shown while shaders are on. Turn them off (Iris: press K; OptiFine: Video Settings, Shaders, OFF), then open it again.");
-        hideHud = new Hidden(c.getBoolean("views.hide-hud.scoreboard", true), c.getBoolean("views.hide-hud.boss-bars", true),
+        hideHud = new HudParts(c.getBoolean("views.hide-hud.scoreboard", true), c.getBoolean("views.hide-hud.boss-bars", true),
                 c.getBoolean("views.hide-hud.action-bar", true));
         mapIdBase = c.getInt("map-id-base", 2_000_000_000);
         cpuThreads = Math.max(0, c.getInt("cpu-threads", 0));

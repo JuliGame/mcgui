@@ -1,6 +1,6 @@
 package ai.resourcepack.ui.framework.net;
 
-import ai.resourcepack.ui.framework.Settings;
+import ai.resourcepack.ui.framework.api.HudParts;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.buffer.ByteBuf;
 import io.netty.util.ReferenceCountUtil;
@@ -36,24 +36,23 @@ final class Hud extends ChannelOutboundHandlerAdapter implements SharedCompressi
 
     private final Pipeline owner;
     private final HudPackets packets;
-    private final Settings.Hidden parts;
     private final UUID id;
     private final Logger log;
     private final Map<Object, Object> sidebars = new LinkedHashMap<>();
     private final Map<UUID, Bar> bars = new LinkedHashMap<>();
     private volatile ChannelHandlerContext ctx;
-    private boolean hidden;
+    /** What a page has taken off the client now, or null while none is open. */
+    private HudParts hiding;
     private boolean warned;
 
     /** [sidebars] and [bars] are what the connection already carries (see {@link HudPackets#sidebars}). */
-    Hud(Pipeline owner, HudPackets packets, Settings.Hidden parts, UUID id, Logger log, Map<Object, Object> sidebars, Map<UUID, Object> bars) {
+    Hud(Pipeline owner, HudPackets packets, UUID id, Logger log, Map<Object, Object> sidebars, Map<UUID, Object> bars) {
         this.owner = owner;
         this.packets = packets;
-        this.parts = parts;
         this.id = id;
         this.log = log;
-        if (parts.scoreboard()) this.sidebars.putAll(sidebars);
-        if (parts.bossBars()) bars.forEach((bar, add) -> this.bars.put(bar, new Bar(add)));
+        this.sidebars.putAll(sidebars);
+        bars.forEach((bar, add) -> this.bars.put(bar, new Bar(add)));
     }
 
     Pipeline owner() {
@@ -100,26 +99,25 @@ final class Hud extends ChannelOutboundHandlerAdapter implements SharedCompressi
 
     /** Takes [msg] into account; whether it is to be dropped (it would draw a hidden part). */
     private boolean watch(Object msg) {
-        if (parts.scoreboard()) {
-            if (packets.isDisplay(msg)) {
-                Object slot = packets.sidebarSlot(msg);
-                if (slot == null) return false;
-                if (packets.objectiveOf(msg).isEmpty()) sidebars.remove(slot);
-                else sidebars.put(slot, msg);
-                return hidden;
-            }
-            String removed = packets.removedObjective(msg);
-            if (removed != null) {
-                // The client takes the objective off every slot it was in; showing it again would show nothing.
-                sidebars.values().removeIf(shown -> packets.objectiveOf(shown).equals(removed));
-                return false;
-            }
+        HudParts now = hiding;
+        if (packets.isDisplay(msg)) {
+            Object slot = packets.sidebarSlot(msg);
+            if (slot == null) return false;
+            if (packets.objectiveOf(msg).isEmpty()) sidebars.remove(slot);
+            else sidebars.put(slot, msg);
+            return now != null && now.scoreboard();
         }
-        if (parts.bossBars() && packets.isBoss(msg)) {
+        String removed = packets.removedObjective(msg);
+        if (removed != null) {
+            // The client takes the objective off every slot it was in; showing it again would show nothing.
+            sidebars.values().removeIf(shown -> packets.objectiveOf(shown).equals(removed));
+            return false;
+        }
+        if (packets.isBoss(msg)) {
             track(msg);
-            return hidden;
+            return now != null && now.bossBars();
         }
-        if (parts.actionBar() && hidden) {
+        if (now != null && now.actionBar()) {
             String text = packets.actionBarText(msg);
             return text != null && !OwnBars.take(id, text);
         }
@@ -147,10 +145,10 @@ final class Hud extends ChannelOutboundHandlerAdapter implements SharedCompressi
         }
     }
 
-    /** Take what a page covers off the client. */
-    void hide() {
-        if (hidden) return;
-        hidden = true;
+    /** Take [parts] off the client, for as long as a page covers them. */
+    void hide(HudParts parts) {
+        if (hiding != null) return;
+        hiding = parts;
         ChannelHandlerContext c = ctx;
         if (c == null || !c.channel().isActive()) return;
         if (parts.scoreboard()) for (Object slot : sidebars.keySet()) c.write(packets.clearing(slot));
@@ -161,12 +159,13 @@ final class Hud extends ChannelOutboundHandlerAdapter implements SharedCompressi
 
     /** Put back what [hide] took off, as the server last sent it. */
     void show() {
-        if (!hidden) return;
-        hidden = false;
+        HudParts was = hiding;
+        if (was == null) return;
+        hiding = null;
         ChannelHandlerContext c = ctx;
         if (c == null || !c.channel().isActive()) return;
-        if (parts.scoreboard()) for (Object shown : sidebars.values()) c.write(shown);
-        if (parts.bossBars()) {
+        if (was.scoreboard()) for (Object shown : sidebars.values()) c.write(shown);
+        if (was.bossBars()) {
             for (Bar b : bars.values()) {
                 c.write(b.add);
                 for (Object update : new Object[] {b.progress, b.name, b.style, b.properties}) if (update != null) c.write(update);

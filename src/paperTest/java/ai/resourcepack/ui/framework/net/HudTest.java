@@ -1,6 +1,6 @@
 package ai.resourcepack.ui.framework.net;
 
-import ai.resourcepack.ui.framework.Settings;
+import ai.resourcepack.ui.framework.api.HudParts;
 import io.netty.channel.embedded.EmbeddedChannel;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ClientboundBossEventPacket;
@@ -32,9 +32,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * classes: the client must end with the state the server last meant, whatever happened while the page was up.
  */
 class HudTest {
-    private static final Settings.Hidden ALL = new Settings.Hidden(true, true, true);
+    private static final HudParts ALL = HudParts.ALL;
     /** Hiding also sends an empty action bar; the tests that count packets leave it out. */
-    private static final Settings.Hidden NO_BAR = new Settings.Hidden(true, true, false);
+    private static final HudParts NO_BAR = new HudParts(true, true, false);
     private static HudPackets packets;
     private final UUID player = UUID.randomUUID();
     private final Scoreboard board = new Scoreboard();
@@ -48,8 +48,16 @@ class HudTest {
         hud = hud(NO_BAR);
     }
 
-    private Hud hud(Settings.Hidden parts) {
-        Hud h = new Hud(null, packets, parts, player, Logger.getAnonymousLogger(), Map.of(), Map.of());
+    /** What a page hides in the test at hand: what [hide] asks the handler for. */
+    private HudParts parts = NO_BAR;
+
+    private void hide() {
+        hud.hide(parts);
+    }
+
+    private Hud hud(HudParts parts) {
+        this.parts = parts;
+        Hud h = new Hud(null, packets, player, Logger.getAnonymousLogger(), Map.of(), Map.of());
         channel = new EmbeddedChannel(h);
         return h;
     }
@@ -83,7 +91,7 @@ class HudTest {
         channel.writeOutbound(shown);
         assertEquals(List.of(shown), sent(), "a sidebar passes while no page is up");
 
-        hud.hide();
+        hide();
         List<Object> cleared = sent();
         assertEquals(1, cleared.size());
         var clear = (ClientboundSetDisplayObjectivePacket) cleared.get(0);
@@ -103,7 +111,7 @@ class HudTest {
         Objective o = objective("o");
         channel.writeOutbound(new ClientboundSetDisplayObjectivePacket(DisplaySlot.SIDEBAR, o));
         sent();
-        hud.hide();
+        hide();
         sent();
         channel.writeOutbound(new ClientboundSetDisplayObjectivePacket(DisplaySlot.SIDEBAR, null));
         hud.show();
@@ -115,7 +123,7 @@ class HudTest {
         Objective o = objective("gone");
         channel.writeOutbound(new ClientboundSetDisplayObjectivePacket(DisplaySlot.SIDEBAR, o));
         sent();
-        hud.hide();
+        hide();
         sent();
         var removal = new ClientboundSetObjectivePacket(o, ClientboundSetObjectivePacket.METHOD_REMOVE);
         channel.writeOutbound(removal);
@@ -130,7 +138,7 @@ class HudTest {
         var list = new ClientboundSetDisplayObjectivePacket(DisplaySlot.LIST, o);
         var below = new ClientboundSetDisplayObjectivePacket(DisplaySlot.BELOW_NAME, o);
         channel.writeOutbound(list);
-        hud.hide();
+        hide();
         assertEquals(List.of(list), sent(), "nothing is cleared for the tab list");
         channel.writeOutbound(below);
         assertEquals(List.of(below), sent(), "and what is set for them at a page goes through");
@@ -141,7 +149,7 @@ class HudTest {
         Objective o = objective("team");
         channel.writeOutbound(new ClientboundSetDisplayObjectivePacket(DisplaySlot.TEAM_RED, o));
         sent();
-        hud.hide();
+        hide();
         var clear = (ClientboundSetDisplayObjectivePacket) sent().get(0);
         assertEquals(DisplaySlot.TEAM_RED, clear.getSlot());
     }
@@ -151,7 +159,7 @@ class HudTest {
         ServerBossEvent kept = bar("kept"), removed = bar("removed"), added = bar("added");
         channel.writeOutbound(ClientboundBossEventPacket.createAddPacket(kept), ClientboundBossEventPacket.createAddPacket(removed));
         sent();
-        hud.hide();
+        hide();
         List<Object> out = sent();
         assertEquals(2, out.size(), "a removal for each bar the client has");
 
@@ -184,7 +192,7 @@ class HudTest {
         channel.writeOutbound(bar);
         assertEquals(List.of(bar), sent(), "an action bar passes while no page is up");
 
-        hud.hide();
+        hide();
         List<Object> hidden = sent();
         assertEquals(1, hidden.size());
         assertEquals("", ((ClientboundSetActionBarTextPacket) hidden.get(0)).text().getString(), "an empty one clears what shows");
@@ -212,13 +220,14 @@ class HudTest {
     @Test
     void finishedPacketsAreReadAsThePacketsTheyAre() throws Exception {
         EmbeddedChannel ch = PaperNet.server(256, null);
-        ch.pipeline().addBefore("packet_handler", "uiengine_hud", hud = new Hud(null, packets, ALL, player, Logger.getAnonymousLogger(), Map.of(), Map.of()));
+        ch.pipeline().addBefore("packet_handler", "uiengine_hud", hud = new Hud(null, packets, player, Logger.getAnonymousLogger(), Map.of(), Map.of()));
+        parts = ALL;
         ServerBossEvent event = bar("raw bar");
         ch.writeOutbound(finished(ClientboundBossEventPacket.createAddPacket(event)), finished(new ClientboundSetActionBarTextPacket(Component.literal("raw"))));
         assertEquals(2, ch.outboundMessages().size(), "bytes of a boss bar and an action bar go on while no page is up");
         ch.releaseOutbound();
 
-        hud.hide();
+        hide();
         ch.runPendingTasks();
         int clearing = ch.outboundMessages().size();
         assertEquals(2, clearing, "a boss bar sent as bytes was known, and is removed, with the empty action bar");
@@ -237,14 +246,48 @@ class HudTest {
     }
 
     @Test
+    void aPageHidesOnlyWhatItAsksFor() {
+        Objective o = objective("o");
+        var sidebar = new ClientboundSetDisplayObjectivePacket(DisplaySlot.SIDEBAR, o);
+        var bar = ClientboundBossEventPacket.createAddPacket(barSafe("kept"));
+        channel.writeOutbound(sidebar, bar);
+        sent();
+
+        hud.hide(HudParts.NONE.bossBars(true));
+        assertEquals(1, sent().size(), "only the boss bar is taken off");
+        channel.writeOutbound(sidebar);
+        assertEquals(List.of(sidebar), sent(), "the sidebar goes on being sent at that page");
+        hud.show();
+        assertEquals(List.of(bar), sent(), "and only the boss bar is sent again: the sidebar was never taken off");
+
+        hud.hide(HudParts.NONE);
+        assertEquals(List.of(), sent(), "a page that hides nothing sends nothing");
+        hud.show();
+        assertEquals(List.of(), sent());
+
+        hud.hide(HudParts.NONE.scoreboard(true));
+        assertEquals(1, sent().size(), "the next page may ask for another part");
+        hud.show();
+        assertEquals(List.of(sidebar), sent());
+    }
+
+    private static ServerBossEvent barSafe(String name) {
+        try {
+            return bar(name);
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    @Test
     void whatIsOffStaysOn() {
-        hud = hud(new Settings.Hidden(false, true, false));
+        hud = hud(new HudParts(false, true, false));
         Objective o = objective("o");
         var sidebar = new ClientboundSetDisplayObjectivePacket(DisplaySlot.SIDEBAR, o);
         var bar = new ClientboundSetActionBarTextPacket(Component.literal("stays"));
         channel.writeOutbound(sidebar);
         sent();
-        hud.hide();
+        hide();
         channel.writeOutbound(sidebar, bar);
         assertEquals(List.of(sidebar, bar), sent(), "no clearing, and the sidebar and action bar go on being sent");
     }

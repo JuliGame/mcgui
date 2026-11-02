@@ -169,6 +169,7 @@ views:
   # with any plugin that draws them (TAB, boss bar plugins, anything sending packets). MC GUI's own messages still show. Read
   # when the server starts. Each is on by default: with MC GUI's shaders in use the player sees no difference, and where they are
   # not it is the fix; turn one off if you want a plugin's scoreboard, bar or action bar to stay on screen at pages.
+  # A plugin that opens a view through the API can choose its own set (ViewOptions.hud); this is what a view gets when it does not.
   hide-hud:
     scoreboard: true
     boss-bars: true

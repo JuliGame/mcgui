@@ -211,7 +211,8 @@ anything that draws them, as it reads packets and not the scoreboard API, so it 
 scoreboard plugin.
 
 All three are on by default: with MC GUI's shaders in use nobody sees a difference, and where they are not it is the fix.
-Turn one off to keep that plugin's sidebar, bar or action bar on screen at pages. MC GUI's own action bar messages (a
+Turn one off to keep that plugin's sidebar, bar or action bar on screen at pages. Another plugin's view can choose for itself
+(`ViewOptions.hud`, see "For plugin developers"); this is what a view gets when it does not, and what MC GUI's own pages use. MC GUI's own action bar messages (a
 page that cannot be found) still show. The tab list and the text under names are not touched. These are read when the
 server starts.
 
@@ -785,6 +786,12 @@ A canvas with `canvas.transparency(true)` lets the world show through where an
 image's alpha is under half, and `canvas.tint(argb)` is what a view lays over
 the world there; `ViewOptions.DEFAULT.blur(true)` blurs the world round the
 opaque part too (1.21.11 and newer clients).
+
+A view hides the sidebar, boss bars and action bar other plugins draw, by default
+whatever the server's `views.hide-hud` says (all three). A view of your own can ask
+for another set: `ViewOptions.DEFAULT.hud(HudParts.NONE)` leaves them all on screen,
+`HudParts.ALL.actionBar(false)` hides all but the action bar. This is the only way to
+choose per view; there is no command for players.
 
 The [examples](examples/) are whole plugins built this way:
 [arcade](examples/arcade/) (thirteen games, on cabinets and fullscreen),

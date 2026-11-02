@@ -13,21 +13,33 @@ package ai.resourcepack.ui.framework.api;
  *                    was, and the world round the panel is the picture of it their client took as the view opened,
  *                    kept still (and frozen) until it closes, under the canvas's tint, while the pointer follows the
  *                    mouse at frame rate.
+ * @param hud         what to hide of the sidebar, boss bars and action bar other plugins draw while the view is open, or
+ *                    null for the server's {@code views.hide-hud} setting (all three by default).
  */
-public record ViewOptions(int pointerSize, boolean blur, boolean overlay) {
+public record ViewOptions(int pointerSize, boolean blur, boolean overlay, HudParts hud) {
     public static final ViewOptions DEFAULT = new ViewOptions(0, false, false);
 
     public ViewOptions {
         pointerSize = Math.max(0, pointerSize);
     }
 
+    /** These options, with the server's setting for what to hide of the HUD. */
+    public ViewOptions(int pointerSize, boolean blur, boolean overlay) {
+        this(pointerSize, blur, overlay, null);
+    }
+
     /** These options with [blur]. */
     public ViewOptions blur(boolean blur) {
-        return new ViewOptions(pointerSize, blur, overlay);
+        return new ViewOptions(pointerSize, blur, overlay, hud);
     }
 
     /** These options with [overlay]. */
     public ViewOptions overlay(boolean overlay) {
-        return new ViewOptions(pointerSize, blur, overlay);
+        return new ViewOptions(pointerSize, blur, overlay, hud);
+    }
+
+    /** These options hiding [hud] while the view is open, whatever the server's setting ({@link HudParts#NONE}: nothing). */
+    public ViewOptions hud(HudParts hud) {
+        return new ViewOptions(pointerSize, blur, overlay, hud);
     }
 }

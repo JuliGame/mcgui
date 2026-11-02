@@ -1,6 +1,6 @@
 package ai.resourcepack.ui.framework.net;
 
-import ai.resourcepack.ui.framework.Settings;
+import ai.resourcepack.ui.framework.api.HudParts;
 import ai.resourcepack.ui.framework.world.MapWall;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelDuplexHandler;
@@ -69,17 +69,14 @@ public final class Pipeline {
         }
     }
 
-    /** Which parts of the HUD are hidden at a page (the config's views.hide-hud). */
-    private final Settings.Hidden hidden;
     /** Each connection's HUD watcher, once it is in (see {@link #trackHud}). */
     private final Map<UUID, Hud> huds = new ConcurrentHashMap<>();
 
     private final Logger log;
 
-    public Pipeline(Nms nms, Logger log, Settings.Hidden hidden) {
+    public Pipeline(Nms nms, Logger log) {
         this.nms = nms;
         this.log = log;
-        this.hidden = hidden;
     }
 
     /** A seated player's mouse. Every method runs on the netty thread, as the packet arrives. */
@@ -173,20 +170,20 @@ public final class Pipeline {
      * Put in [player]'s connection what watches the sidebar, boss bars and action bar the server sends them, from now on:
      * what a page covers is taken off with {@link #hideHud} and put back as it was sent last. At join, before any other
      * plugin's join handler sends them one; what the server itself sent before that (a scoreboard's sidebar, a command's
-     * boss bars) is read from the server. Nothing is put in when the config hides none.
+     * boss bars) is read from the server. Put in for every player whatever the config says: a view may ask for any part.
      */
     public void trackHud(Player player) {
-        if (!hidden.any() || huds.containsKey(player.getUniqueId())) return;
+        if (huds.containsKey(player.getUniqueId())) return;
         Channel channel = nms.channel(player);
         if (channel == null) return;
         UUID id = player.getUniqueId();
-        Map<Object, Object> sidebars = hidden.scoreboard() ? nms.hud.sidebars(player) : Map.of();
-        Map<UUID, Object> bars = hidden.bossBars() ? nms.hud.bars(player) : Map.of();
+        Map<Object, Object> sidebars = nms.hud.sidebars(player);
+        Map<UUID, Object> bars = nms.hud.bars(player);
         try {
             channel.eventLoop().execute(() -> {
                 ChannelPipeline p = channel.pipeline();
                 if (ours(p.get(HUD)) && huds.containsKey(id)) return;
-                Hud hud = new Hud(this, nms.hud, hidden, id, log, sidebars, bars);
+                Hud hud = new Hud(this, nms.hud, id, log, sidebars, bars);
                 if (install(p, HUD, hud)) huds.put(id, hud);
             });
         } catch (RejectedExecutionException e) {
@@ -195,14 +192,20 @@ public final class Pipeline {
     }
 
     /**
-     * While [on], [player] is sent none of the sidebar, boss bars or action bar the config hides ({@code views.hide-hud}): the
-     * client is told to drop what it shows, and what the server sends meanwhile is kept and not passed on; off, what was kept
-     * is sent, so they see what they would have. MC GUI's own action bar messages ({@link OwnBars}) are still shown. Needs
+     * While a page is open, [player] is sent none of [parts] (the sidebar, boss bars, action bar): the client is told to drop
+     * what it shows, and what the server sends meanwhile is kept and not passed on. {@link #showHud} sends what was kept, so
+     * they see what they would have. MC GUI's own action bar messages ({@link OwnBars}) are still shown. Needs
      * {@link #trackHud}; for a player it was never done for, nothing happens.
      */
-    public void hideHud(Player player, boolean on) {
+    public void hideHud(Player player, HudParts parts) {
         Hud hud = huds.get(player.getUniqueId());
-        if (hud != null) hud.run(on ? hud::hide : hud::show);
+        if (hud != null && parts.any()) hud.run(() -> hud.hide(parts));
+    }
+
+    /** Ends {@link #hideHud}: what was kept is sent. */
+    public void showHud(Player player) {
+        Hud hud = huds.get(player.getUniqueId());
+        if (hud != null) hud.run(hud::show);
     }
 
     /**

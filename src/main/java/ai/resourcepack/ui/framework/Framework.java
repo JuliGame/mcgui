@@ -147,7 +147,7 @@ public final class Framework implements UIFramework, Listener {
         } catch (Exception e) {
             plugin.getLogger().log(Level.SEVERE, "Could not build or serve the resource pack", e);
         }
-        pipeline = new Pipeline(nms, plugin.getLogger(), settings.hideHud);
+        pipeline = new Pipeline(nms, plugin.getLogger());
         wire = new ServerWire(nms, pipeline, settings.sharedCompression ? SharedCompression.create(ServerWire.packets(nms), plugin.getLogger()) : null);
         sender = new MapSender(wire, settings.bytesPerSecond, plugin.getLogger());
         OpenTrace.start(plugin.getLogger(), nms, wire, sender);

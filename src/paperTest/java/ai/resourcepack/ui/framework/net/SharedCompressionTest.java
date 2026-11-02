@@ -208,7 +208,7 @@ class SharedCompressionTest {
     void theHudWatcherLeavesItOn() throws Exception {
         try (SharedCompression s = shared()) {
             EmbeddedChannel ch = PaperNet.server(THRESHOLD, null);
-            ch.pipeline().addBefore("packet_handler", "uiengine_hud", new Hud(null, new HudPackets(), new ai.resourcepack.ui.framework.Settings.Hidden(true, true, true),
+            ch.pipeline().addBefore("packet_handler", "uiengine_hud", new Hud(null, new HudPackets(),
                     java.util.UUID.randomUUID(), LOG, java.util.Map.of(), java.util.Map.of()));
             assertNotNull(s.patch(ch, 1, 0, 0, 128, 128, tile(1), true), "a watcher of three kinds of packet that leaves map pictures alone");
         }
