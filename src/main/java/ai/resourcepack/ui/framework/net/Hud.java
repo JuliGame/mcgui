@@ -44,6 +44,8 @@ final class Hud extends ChannelOutboundHandlerAdapter implements SharedCompressi
     /** What a page has taken off the client now, or null while none is open. */
     private HudParts hiding;
     private boolean warned;
+    /** True while this handler's own write goes down the pipeline: the bytes it becomes were judged here already. */
+    private boolean passing;
 
     /** [sidebars] and [bars] are what the connection already carries (see {@link HudPackets#sidebars}). */
     Hud(Pipeline owner, HudPackets packets, UUID id, Logger log, Map<Object, Object> sidebars, Map<UUID, Object> bars) {
@@ -94,7 +96,12 @@ final class Hud extends ChannelOutboundHandlerAdapter implements SharedCompressi
             if (!warned) log.log(Level.WARNING, "Could not read a HUD packet sent to a player", e);
             warned = true;
         }
-        ctx.write(msg, promise);
+        passing = true;
+        try {
+            ctx.write(msg, promise);
+        } finally {
+            passing = false;
+        }
     }
 
     /** Takes [msg] into account; whether it is to be dropped (it would draw a hidden part). */
@@ -151,9 +158,15 @@ final class Hud extends ChannelOutboundHandlerAdapter implements SharedCompressi
         hiding = parts;
         ChannelHandlerContext c = ctx;
         if (c == null || !c.channel().isActive()) return;
-        if (parts.scoreboard()) for (Object slot : sidebars.keySet()) c.write(packets.clearing(slot));
-        if (parts.bossBars()) for (UUID bar : bars.keySet()) c.write(packets.removal(bar));
-        if (parts.actionBar()) c.write(packets.emptyBar);
+        if (owner != null) owner.wire(c.pipeline(), this);
+        passing = true;
+        try {
+            if (parts.scoreboard()) for (Object slot : sidebars.keySet()) c.write(packets.clearing(slot));
+            if (parts.bossBars()) for (UUID bar : bars.keySet()) c.write(packets.removal(bar));
+            if (parts.actionBar()) c.write(packets.emptyBar);
+        } finally {
+            passing = false;
+        }
         c.flush();
     }
 
@@ -164,13 +177,38 @@ final class Hud extends ChannelOutboundHandlerAdapter implements SharedCompressi
         hiding = null;
         ChannelHandlerContext c = ctx;
         if (c == null || !c.channel().isActive()) return;
-        if (was.scoreboard()) for (Object shown : sidebars.values()) c.write(shown);
-        if (was.bossBars()) {
-            for (Bar b : bars.values()) {
-                c.write(b.add);
-                for (Object update : new Object[] {b.progress, b.name, b.style, b.properties}) if (update != null) c.write(update);
+        passing = true;
+        try {
+            if (was.scoreboard()) for (Object shown : sidebars.values()) c.write(shown);
+            if (was.bossBars()) {
+                for (Bar b : bars.values()) {
+                    c.write(b.add);
+                    for (Object update : new Object[] {b.progress, b.name, b.style, b.properties}) if (update != null) c.write(update);
+                }
             }
+        } finally {
+            passing = false;
         }
         c.flush();
+    }
+
+    /** Whether the write now going down the pipeline is one this handler judged and passed (see {@link HudWire}). */
+    boolean passing() {
+        return passing;
+    }
+
+    /**
+     * Whether [bytes], written by someone nearer the wire than this handler, are a finished packet that draws a part a page
+     * hides (the bytes are then dropped). Also takes it into account, as {@link #write} does.
+     */
+    boolean dropsRaw(io.netty.channel.Channel channel, ByteBuf bytes) {
+        try {
+            Object decoded = packets.decodeRaw(channel, bytes);
+            return decoded != null && watch(decoded);
+        } catch (RuntimeException e) {
+            if (!warned) log.log(Level.WARNING, "Could not read a HUD packet sent to a player", e);
+            warned = true;
+            return false;
+        }
     }
 }

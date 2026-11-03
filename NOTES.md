@@ -778,6 +778,19 @@ Reading a position, a world or a UUID is fine from anywhere. How MC GUI copes, a
     action bar id is 85, 1.21.11's, where 1.21.8's is 80), so a connection Via translates is decoded like any other. An
     earlier version of this note said such bytes were in the client's version and left them alone; that was a guess, and the
     boss bar and action bar came through at a page until it was checked.
+  - **PacketEvents' silent sends have a second watcher** (`HudWire`, `uiengine_hud_wire`; AuraSkills' action bar, 2026-11-02).
+    `PacketEvents.getPlayerManager().sendPacketSilently` writes its finished bytes from `pe-encoder`'s own place in the
+    pipeline, on the wire side of `uiengine_hud`, so they never passed it: AuraSkills' action bar (it sends this way, with
+    ProtocolLib's `sendServerPacket` or Spigot's as fallbacks) showed over a page, reproduced in the rig (`silent` scenario, 3
+    action bars at a page before, 0 after). `Pipeline.wire` puts `HudWire` immediately wire-side of the first handler named
+    `pe-encoder*`, at join and again when a page hides (PacketEvents may have come later), only where PacketEvents is; it hands
+    the bytes to `Hud.dropsRaw`, which reads them as `decodeRaw` does. Everything `Hud` itself writes (what it passed, its
+    clearing packets, the replay) reaches `HudWire` too, as bytes, so `Hud.passing` is set around those writes (the encoder is
+    synchronous on the same event loop) and `HudWire` lets them by: nothing is judged twice, and MC GUI's own one-shot action bar
+    is not eaten by the second look. Shared compression writes start at `compress`, wire-side of `HudWire`, and never reach it.
+    Measured on Paper 1.21.11 (also with a 1.21.8 client through ViaVersion), 26.2 and 26.3, Spigot 1.21.11 and 26.2 and Folia
+    1.21.11 (`silent` 4 of 4 each); `HudTest.silentBytesFromPacketEventsAreHiddenToo`. With PacketEvents installed shared
+    compression is off anyway (`pe-encoder` sees every packet and is not ours to mark).
   - **What it cannot hide:** a HUD a pack draws itself from the player's own game state; the tab list and the text under
     names (`LIST`, `BELOW_NAME`); chat; titles and subtitles; and anything written to the connection from a context nearer the wire than this handler (it sits before
     `packet_handler`). The game's own send, `connection.send`, a write from the pipeline's tail, **ProtocolLib's

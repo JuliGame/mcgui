@@ -58,6 +58,7 @@ public final class Pipeline {
     /** Players behind a kept overlay, who are sent nothing that only makes particles (see {@link #hideParticles}). */
     private final Set<UUID> particlesHidden = ConcurrentHashMap.newKeySet();
     private static final String HUD = "uiengine_hud";
+    private static final String HUD_WIRE = "uiengine_hud_wire";
 
     /** A held player's entity id, and the walking speed their client was last told (what their movement speed is told against). */
     private static final class Held {
@@ -184,7 +185,10 @@ public final class Pipeline {
                 ChannelPipeline p = channel.pipeline();
                 if (ours(p.get(HUD)) && huds.containsKey(id)) return;
                 Hud hud = new Hud(this, nms.hud, id, log, sidebars, bars);
-                if (install(p, HUD, hud)) huds.put(id, hud);
+                if (install(p, HUD, hud)) {
+                    huds.put(id, hud);
+                    wire(p, hud);
+                }
             });
         } catch (RejectedExecutionException e) {
             // The event loop is shutting down with the server.
@@ -200,6 +204,24 @@ public final class Pipeline {
     public void hideHud(Player player, HudParts parts) {
         Hud hud = huds.get(player.getUniqueId());
         if (hud != null && parts.any()) hud.run(() -> hud.hide(parts));
+    }
+
+    /**
+     * Puts the second HUD watcher ({@link HudWire}) just on the wire side of PacketEvents' encoder, if the connection has one
+     * and ours is not in yet: what PacketEvents writes silently starts there, past {@link Hud}. On the connection's thread.
+     */
+    void wire(ChannelPipeline p, Hud hud) {
+        if (ours(p.get(HUD_WIRE))) return;
+        String encoder = null;
+        for (String name : p.names()) {
+            if (name.startsWith("pe-encoder")) {
+                encoder = name;
+                break;
+            }
+        }
+        if (encoder == null) return;
+        if (p.get(HUD_WIRE) != null) p.remove(HUD_WIRE);
+        p.addBefore(encoder, HUD_WIRE, new HudWire(this, hud));
     }
 
     /** Ends {@link #hideHud}: what was kept is sent. */
@@ -378,6 +400,7 @@ public final class Pipeline {
         if (handler instanceof Uses u) return u.owner() == this;
         if (handler instanceof Pushes s) return s.owner() == this;
         if (handler instanceof Hud h) return h.owner() == this;
+        if (handler instanceof HudWire w) return w.owner() == this;
         return handler instanceof Pongs g && g.owner() == this;
     }
 
@@ -408,7 +431,7 @@ public final class Pipeline {
             try {
                 channel.eventLoop().execute(() -> {
                     ChannelPipeline p = channel.pipeline();
-                    for (String name : List.of(FILTER, PONGS, FRAMES, USES, PUSHES, HUD)) {
+                    for (String name : List.of(FILTER, PONGS, FRAMES, USES, PUSHES, HUD_WIRE, HUD)) {
                         if (!ours(p.get(name))) continue;
                         // A page still open (the plugin is stopping with it up) gets its sidebar and bars back.
                         if (p.get(name) instanceof Hud hud) hud.show();

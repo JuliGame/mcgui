@@ -279,6 +279,51 @@ class HudTest {
         }
     }
 
+    /**
+     * PacketEvents' sendPacketSilently (AuraSkills' action bar) writes from its own encoder's place, nearer the wire than
+     * the HUD handler: the watcher just wire-side of that encoder sees it, and lets by what the HUD handler already judged.
+     */
+    @Test
+    void silentBytesFromPacketEventsAreHiddenToo() throws Exception {
+        EmbeddedChannel ch = PaperNet.server(256, null);
+        ch.pipeline().addBefore("encoder", "pe-encoder-test", new io.netty.channel.ChannelOutboundHandlerAdapter());
+        ch.pipeline().addBefore("packet_handler", "uiengine_hud", hud = new Hud(null, packets, player, Logger.getAnonymousLogger(), Map.of(), Map.of()));
+        ch.pipeline().addBefore("pe-encoder-test", "uiengine_hud_wire", new HudWire(null, hud));
+        io.netty.channel.ChannelHandlerContext pe = ch.pipeline().context("pe-encoder-test");
+        parts = ALL;
+
+        pe.write(finished(new ClientboundSetActionBarTextPacket(Component.literal("silent"))));
+        ch.flush();
+        assertEquals(1, ch.outboundMessages().size(), "a silent action bar goes on while no page is up");
+        ch.releaseOutbound();
+
+        hud.hide(ALL);
+        ch.runPendingTasks();
+        assertEquals(1, ch.outboundMessages().size(), "the empty action bar the HUD handler sends at a page is not judged again");
+        ch.releaseOutbound();
+
+        pe.write(finished(new ClientboundSetActionBarTextPacket(Component.literal("silent again"))));
+        pe.write(finished(new ClientboundSystemChatPacket(Component.literal("silent overlay"), true)));
+        pe.write(finished(new ClientboundSystemChatPacket(Component.literal("chat"), false)));
+        ch.flush();
+        assertEquals(1, ch.outboundMessages().size(), "at a page both silent action bars are dropped and chat is not");
+        ch.releaseOutbound();
+
+        OwnBars.expect(player, "MC GUI says");
+        ch.writeOutbound(new ClientboundSetActionBarTextPacket(Component.literal("MC GUI says")));
+        assertEquals(1, ch.outboundMessages().size(), "MC GUI's own message, passed by the HUD handler, is not dropped at the second place");
+        ch.releaseOutbound();
+
+        ServerBossEvent event = bar("silent bar");
+        pe.write(finished(ClientboundBossEventPacket.createAddPacket(event)));
+        ch.flush();
+        assertEquals(0, ch.outboundMessages().size(), "a boss bar sent silently at a page is dropped");
+        hud.show();
+        ch.runPendingTasks();
+        assertEquals(1, ch.outboundMessages().size(), "and was kept: closing the page sends it");
+        ch.releaseOutbound();
+    }
+
     @Test
     void whatIsOffStaysOn() {
         hud = hud(new HudParts(false, true, false));
