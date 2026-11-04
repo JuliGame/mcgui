@@ -19,23 +19,66 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ShadersTest {
     private static final Palette PALETTE = new Palette(c -> 0xFF000000 | (c * 0x9E3779B1));
 
+    /** Symbol s is the colour the hash sends to s, so the shader's whole lookup is the hash. */
     @Test
-    void everySymbolColourLooksUpToItsSymbol() {
-        SymbolHash hash = new SymbolHash(PALETTE.symbolRgb);
-        for (int s = 0; s < Palette.SYMBOLS; s++) assertEquals(s, hash.lookup(PALETTE.symbolRgb[s]), "symbol " + s);
-        // The shader reads a slot as four bytes of one uint, lowest first.
-        int filled = 0;
-        for (int w : hash.packed) for (int b = 0; b < 4; b++) if ((w >>> (b * 8) & 255) != 0) filled++;
-        assertEquals(Palette.SYMBOLS, filled);
+    void everySymbolColourHashesToItsSymbol() {
+        for (int s = 0; s < Palette.SYMBOLS; s++) assertEquals(s, PALETTE.symbolHash.lookup(PALETTE.symbolRgb[s]), "symbol " + s);
     }
 
+    /** The select tree the shader reads the displacements with gives back every word, at every size it could be. */
     @Test
-    void shadersCarryTheTableAndNoPlaceholders() {
+    void theSelectTreeReadsEveryWord() {
+        for (int n : new int[]{4, 16, 64}) {
+            int[] words = new int[n];
+            for (int i = 0; i < n; i++) words[i] = 0x9E3779B1 * (i + 1);
+            String body = Shaders.selectTree(words);
+            for (int i = 0; i < n; i++) assertEquals(words[i], select(body, i), n + " words, word " + i);
+        }
+    }
+
+    /** Runs a {@link Shaders#selectTree} body for [i]: its lines are uvec4 selects on one bit, then a uvec2, then a uint. */
+    private static int select(String body, int i) {
+        Map<String, int[]> vars = new HashMap<>();
+        Pattern line = Pattern.compile("(uvec4|uvec2) (\\w+) = \\(i & (\\d+)u\\) != 0u \\? (.+) : (.+);");
+        Pattern ret = Pattern.compile("return \\(i & 1u\\) != 0u \\? h\\.y : h\\.x;");
+        for (String l : body.strip().split("\n")) {
+            l = l.strip();
+            Matcher m = line.matcher(l);
+            if (m.matches()) {
+                boolean on = (i & Integer.parseInt(m.group(3))) != 0;
+                vars.put(m.group(2), value(on ? m.group(4) : m.group(5), vars));
+            } else if (ret.matcher(l).matches()) {
+                int[] h = vars.get("h");
+                return (i & 1) != 0 ? h[1] : h[0];
+            } else {
+                throw new AssertionError("unexpected line " + l);
+            }
+        }
+        throw new AssertionError("no return");
+    }
+
+    private static int[] value(String expr, Map<String, int[]> vars) {
+        Matcher swizzle = Pattern.compile("(.+)\\.(xy|zw)").matcher(expr);
+        if (swizzle.matches()) {
+            int[] v = value(swizzle.group(1), vars);
+            return swizzle.group(2).equals("xy") ? new int[]{v[0], v[1]} : new int[]{v[2], v[3]};
+        }
+        if (vars.containsKey(expr)) return vars.get(expr);
+        Matcher lit = Pattern.compile("uvec4\\((\\d+)u, (\\d+)u, (\\d+)u, (\\d+)u\\)").matcher(expr);
+        if (!lit.matches()) throw new AssertionError("unexpected value " + expr);
+        int[] v = new int[4];
+        for (int k = 0; k < 4; k++) v[k] = Integer.parseUnsignedInt(lit.group(k + 1));
+        return v;
+    }
+
+    /** No table read by a computed index: AMD's Windows OpenGL driver makes one cost seconds a frame. */
+    @Test
+    void shadersCarryNoTableAndNoPlaceholders() {
         for (Shaders.Dialect d : Shaders.Dialect.values()) {
             String vsh = Shaders.textVsh(d, PALETTE), fsh = Shaders.textFsh(d, PALETTE);
             for (String s : new String[]{vsh, fsh}) {
                 assertFalse(s.contains("@"), "a placeholder was left in a " + d + " shader");
-                assertTrue(s.contains("const uint MCB_T[" + SymbolHash.SLOTS / 4 + "]"));
+                assertFalse(Pattern.compile("const\\s+\\w+\\s+\\w+\\s*\\[").matcher(s).find(), "a const array in a " + d + " shader");
             }
         }
     }

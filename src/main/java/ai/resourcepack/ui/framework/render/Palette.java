@@ -11,9 +11,10 @@ import java.util.function.IntUnaryOperator;
  *
  * <p><b>HI</b> (needs the resource pack): YCbCr 4:2:0 in 240 distinct map colours. Symbol = luma × 8 +
  * digit: 30 luma levels per pixel, and the four digits of each 2×2 block carry Cb and Cr at 64 levels
- * each. The pack's text shader (every item-frame map is drawn with the text pipeline) turns a symbol
- * back into its meaning through a perfect hash and averages the map pixels under each window pixel,
- * so the picture scales smoothly and keeps its colours day and night. The top-left 2×2 of every map is
+ * each. The pack's text shader (every item-frame map is drawn with the text pipeline) turns a colour
+ * back into its symbol with {@link #symbolHash}, which is what decides which colour is which symbol, and
+ * averages the map pixels under each window pixel, so the picture scales smoothly and keeps its colours
+ * day and night. The top-left 2×2 of every map is
  * a marker made of four more colours, so the shader only ever touches our maps; its bottom two are
  * swapped on a screen that is somebody's own fullscreen view, which the shader draws in front of the
  * world while they are seated.
@@ -38,6 +39,8 @@ public final class Palette {
     public final int[] symbolRgb = new int[SYMBOLS];
     public final byte[] markerId = new byte[4];
     public final int[] markerRgb = new int[4];
+    /** Colour to symbol: symbol s is the colour this hashes to s ({@link SymbolHash}). */
+    public final SymbolHash symbolHash;
     /** The transparent map colour. */
     public static final byte CLEAR_ID = 0;
     private final byte[] plainLut = new byte[32 * 32 * 32];
@@ -66,9 +69,13 @@ public final class Palette {
         if (unique.size() < SYMBOLS + 4) {
             throw new IllegalStateException("Only " + unique.size() + " distinct map colours, need " + (SYMBOLS + 4));
         }
-        for (int s = 0; s < SYMBOLS; s++) {
-            symbolId[s] = (byte) (int) unique.get(s);
-            symbolRgb[s] = rgbById[unique.get(s)];
+        int[] colours = new int[SYMBOLS];
+        for (int s = 0; s < SYMBOLS; s++) colours[s] = rgbById[unique.get(s)];
+        symbolHash = new SymbolHash(colours);
+        for (int i = 0; i < SYMBOLS; i++) {
+            int s = symbolHash.lookup(colours[i]);
+            symbolId[s] = (byte) (int) unique.get(i);
+            symbolRgb[s] = colours[i];
         }
         for (int m = 0; m < 4; m++) {
             markerId[m] = (byte) (int) unique.get(SYMBOLS + m);

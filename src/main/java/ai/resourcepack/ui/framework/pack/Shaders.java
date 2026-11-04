@@ -1,7 +1,10 @@
 package ai.resourcepack.ui.framework.pack;
 
 import ai.resourcepack.ui.framework.render.Palette;
+import ai.resourcepack.ui.framework.render.SymbolHash;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.regex.Pattern;
 
@@ -749,26 +752,38 @@ public final class Shaders {
      * fragment one to decode the picture.
      */
     private static String decoderCore(Palette palette) {
-        SymbolHash hash = new SymbolHash(palette.symbolRgb);
+        SymbolHash hash = palette.symbolHash;
         return """
 
                 // ---- MC GUI hi-colour map decoder ----
-                // Colour -> symbol in one table read: a perfect hash into @SLOTS@ byte slots, four to a uint, each
-                // holding its symbol plus one (SymbolHash builds the table).
-                const uint MCB_T[@WORDS@] = @TABLE@;
+                // Colour -> symbol: the palette gives each symbol the colour that hashes to it (SymbolHash), so the hash
+                // is the whole lookup: a displacement for one of 64 buckets, bytes four to a uint, read with selects
+                // alone. Never a table read by a computed index: AMD's Windows OpenGL driver turns one into seconds a
+                // frame and minutes of compiling (Mr Crash's RX 7700 XT, 2026-11-03: 2 FPS with the old table, 119
+                // without).
+                uint mcb_displacements(uint i) {
+                @DISP@
+                }
+
+                int mcb_symbol_of(vec3 rgb) {
+                    uvec3 c = uvec3(round(rgb * 255.0));
+                    uint k = (c.r << 16u) | (c.g << 8u) | c.b;
+                    uint b = (k * @MUL1@u) >> @BSHIFT@u;
+                    uint s = (((k * @MUL2@u) >> 24u) * @SYMBOLS@u >> 8u) + ((mcb_displacements(b >> 2u) >> ((b & 3u) << 3u)) & 255u);
+                    return int(s >= @SYMBOLS@u ? s - @SYMBOLS@u : s);
+                }
 
                 // Where the map being read starts in Sampler0: (0, 0) unless the texture holds many maps (mcb_texture).
                 ivec2 mcbBase = ivec2(0);
 
                 ivec3 mcb_fetch(ivec2 p) { return ivec3(round(texelFetch(Sampler0, mcbBase + p, 0).rgb * 255.0)); }
 
-                int mcb_symbol_of(vec3 rgb) {
-                    uvec3 c = uvec3(round(rgb * 255.0));
-                    uint slot = (((c.r << 16u) | (c.g << 8u) | c.b) * @MUL@u) >> @SHIFT@u;
-                    return max(int((MCB_T[slot >> 2u] >> ((slot & 3u) << 3u)) & 255u) - 1, 0);
-                }
-
                 int mcb_symbol(ivec2 p) { return mcb_symbol_of(texelFetch(Sampler0, mcbBase + p, 0).rgb); }
+
+                // The symbols of the 2x2 block whose top-left pixel is [p] and has colour [first].
+                ivec4 mcb_symbols(ivec2 p, vec3 first) {
+                    return ivec4(mcb_symbol_of(first), mcb_symbol(p + ivec2(1, 0)), mcb_symbol(p + ivec2(0, 1)), mcb_symbol(p + ivec2(1, 1)));
+                }
 
                 // 1 if Sampler0 is one map's own texture, 2 if it could hold many 128 x 128 maps side by side (ImmediatelyFast's
                 // map atlas, 2048 square by default, but a font page of 256 or 1024 is as square), 0 if it holds none.
@@ -810,8 +825,9 @@ public final class Shaders {
                 // A 2x2 block's mean luma and its chroma, and 1 (0 for all four when it is transparent).
                 vec4 mcb_block(ivec2 b) {
                     ivec2 p = b * 2;
-                    if (texelFetch(Sampler0, mcbBase + p, 0).a < 0.5) return vec4(0.0);
-                    ivec4 s = ivec4(mcb_symbol(p), mcb_symbol(p + ivec2(1, 0)), mcb_symbol(p + ivec2(0, 1)), mcb_symbol(p + ivec2(1, 1)));
+                    vec4 c00 = texelFetch(Sampler0, mcbBase + p, 0);
+                    if (c00.a < 0.5) return vec4(0.0);
+                    ivec4 s = mcb_symbols(p, c00.rgb);
                     ivec4 digit = s & 7;
                     return vec4(dot(vec4(s >> 3), vec4(0.25)) / @LUMAMAX@, float(digit.x * 8 + digit.y - 32) / 63.0,
                                 float(digit.z * 8 + digit.w - 32) / 63.0, 1.0);
@@ -829,11 +845,11 @@ public final class Shaders {
                     return d.x + 0.5 * (d.y + d.z) > 0.06 ? 1.0 : 0.0;
                 }
                 """
-                .replace("@SLOTS@", String.valueOf(SymbolHash.SLOTS))
-                .replace("@WORDS@", String.valueOf(hash.packed.length))
-                .replace("@TABLE@", uints(hash.packed))
-                .replace("@MUL@", Integer.toUnsignedString(hash.mul))
-                .replace("@SHIFT@", String.valueOf(32 - SymbolHash.BITS))
+                .replace("@DISP@", selectTree(hash.displacements))
+                .replace("@MUL1@", Integer.toUnsignedString(hash.mul1))
+                .replace("@MUL2@", Integer.toUnsignedString(hash.mul2))
+                .replace("@BSHIFT@", String.valueOf(32 - SymbolHash.BUCKET_BITS))
+                .replace("@SYMBOLS@", String.valueOf(hash.size))
                 .replace("@SYMMAX@", String.format(Locale.ROOT, "%.1f", (float) (Palette.SYMBOLS - 1)))
                 .replace("@LUMAMAX@", String.format(Locale.ROOT, "%.1f", (float) (Palette.LUMA_LEVELS - 1)))
                 .replace("@M0@", ivec3(palette.markerRgb[0]))
@@ -911,8 +927,7 @@ public final class Shaders {
                         ivec2 src = b.y > 0 || b.x > info ? base : fillRight ? ivec2(2 * info + 2, 0) : ivec2(base.x, 2);
                         vec4 c00 = texelFetch(Sampler0, mcbBase + src, 0);
                         if (c00.a < 0.5) continue;
-                        ivec4 s = ivec4(mcb_symbol_of(c00.rgb), mcb_symbol(src + ivec2(1, 0)),
-                                        mcb_symbol(src + ivec2(0, 1)), mcb_symbol(src + ivec2(1, 1)));
+                        ivec4 s = mcb_symbols(src, c00.rgb);
                         vec4 luma = vec4(s >> 3) / @LUMAMAX@;
                         ivec4 digit = s & 7;
                         vec2 chroma = vec2(float(digit.x * 8 + digit.y - 32), float(digit.z * 8 + digit.w - 32)) / 63.0;
@@ -2039,13 +2054,36 @@ public final class Shaders {
                 """, Dialect.V1_21_11);
     }
 
-    private static String uints(int[] values) {
-        StringBuilder sb = new StringBuilder("uint[").append(values.length).append("](");
-        for (int i = 0; i < values.length; i++) {
-            if (i > 0) sb.append(',');
-            sb.append(Integer.toUnsignedString(values[i])).append('u');
+    /**
+     * The body of a function of {@code uint i} returning {@code words[i]}, by selects alone: whole uvec4s halved on
+     * one bit of i at a time, then a component. words.length - 1 selects; a power of two, 4 or more.
+     */
+    static String selectTree(int[] words) {
+        int n = words.length;
+        if (n < 4 || Integer.bitCount(n) != 1) throw new IllegalArgumentException("Not a power of two from 4: " + n);
+        List<String> groups = new ArrayList<>();
+        for (int g = 0; g < n; g += 4) {
+            groups.add("uvec4(" + Integer.toUnsignedString(words[g]) + "u, " + Integer.toUnsignedString(words[g + 1]) + "u, "
+                    + Integer.toUnsignedString(words[g + 2]) + "u, " + Integer.toUnsignedString(words[g + 3]) + "u)");
         }
-        return sb.append(')').toString();
+        StringBuilder sb = new StringBuilder();
+        int bit = n / 2, level = 0;
+        while (groups.size() > 1) {
+            int half = groups.size() / 2;
+            List<String> next = new ArrayList<>();
+            for (int j = 0; j < half; j++) {
+                String name = "t" + level + "_" + j;
+                sb.append("    uvec4 ").append(name).append(" = (i & ").append(bit).append("u) != 0u ? ")
+                        .append(groups.get(j + half)).append(" : ").append(groups.get(j)).append(";\n");
+                next.add(name);
+            }
+            groups = next;
+            bit >>= 1;
+            level++;
+        }
+        String v = groups.get(0);
+        return sb.append("    uvec2 h = (i & 2u) != 0u ? ").append(v).append(".zw : ").append(v).append(".xy;\n")
+                .append("    return (i & 1u) != 0u ? h.y : h.x;").toString();
     }
 
     private static String ivec3(int rgb) {

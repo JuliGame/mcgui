@@ -468,8 +468,8 @@ the improved-transparency fix are in `rigs/ovl/` (`measure.py`).
 | Path | What |
 |---|---|
 | `api/` | The public surface: `UIFramework`, `Canvas`, `WallContent`/`WallScreen`, `ViewContent`/`View`, `Pointer`, `Click`, `Key` |
-| `render/Palette` | The map colour table, and the HI (YCbCr in 240 colours) and PLAIN encodings |
-| `pack/` | `Shaders` (both GLSL dialects), `SymbolHash` (the shader's colour lookup), `ResourcePack` (build, upload or serve, who has it; the upload is plugin-common's `host/PackUploader`, shared with RP Engine, Dialog Engine and 3D Engine) |
+| `render/Palette` | The map colour table, and the HI (YCbCr in 240 colours) and PLAIN encodings; `render/SymbolHash`, the minimal perfect hash that decides which colour is which symbol |
+| `pack/` | `Shaders` (both GLSL dialects), `ResourcePack` (build, upload or serve, who has it; the upload is plugin-common's `host/PackUploader`, shared with RP Engine, Dialog Engine and 3D Engine) |
 | `net/` | `Nms` (every server internal, by reflection), `MapSender` (diffed map patches, per-player budget, frame re-pointing), `Wire`/`ServerWire` (what the sender writes through), `Pipeline` (ping answers, the hidden inventory, particles kept from an overlay's player, each connection's frame pointing) |
 | `world/` | `MapWall` (the frames), `MapPool` (placed walls whose frames share maps), `Walls` (placed walls and crosshair input), `Views` (seating, camera, pointer, input), `PrivateView` (entities and placed walls in a seated player's way, hidden from them) |
 
@@ -1061,16 +1061,36 @@ Reading a position, a world or a UUID is fine from anywhere. How MC GUI copes, a
   (`mcb_screen_map`), the fill choice above and the view's tint, handed on as
   flat varyings (`mcbMapInfo`, `mcbViewTint`). `text.fsh` only decodes: at most
   2×2 blocks under a pixel's footprint, four texel reads and four lookups a
-  block, and a symbol is one read of a 4,096-slot perfect hash packed four to a
-  uint (`SymbolHash`). Ordinary text costs one flat compare more than vanilla.
+  block. A lookup is a minimal perfect hash of the colour (`SymbolHash`): the
+  palette gives symbol s to the colour that hashes to s, so there is no table
+  of symbols, and the hash's one small table (64 byte displacements, 16 uints)
+  is read with a tree of 15 selects (`Shaders.selectTree`). Ordinary text
+  costs one flat compare more than vanilla.
   Measured on Josh's PC (720p, uncapped): world alone 0.53 ms a frame; the
   market at 16×9 2.5 ms, of which about 1.3 ms is the 144 maps' draw calls (a
   map is its own texture, so its own render pass: nothing the pack does can
   batch them) and about 0.4 ms the decode (about 0.7 ms at 1080p). Map count
   is the lever (see the README's "Frame rate"). Moving the per-map work to the
-  vertex shader and the one-read lookup measured within noise of the old shader
-  at 720p and 1080p (two rounds each); keeping that work per pixel in the
-  fragment shader was the slowest variant at 1080p (284 FPS against 310).
+  vertex shader measured within noise of the old shader at 720p and 1080p (two
+  rounds each); keeping that work per pixel in the fragment shader was the
+  slowest variant at 1080p (284 FPS against 310).
+- **No GLSL array read by a computed index, anywhere** (2026-11-04). Up to 0.7.1
+  the lookup was one read of a `const uint[1024]` (a 4,096-slot hash packed
+  four to a uint). NVIDIA reads that from constant memory for free; **AMD's
+  Windows OpenGL driver made it cost seconds a frame** and compile for 1.5–3
+  minutes on first load: Mr Crash's RX 7700 XT (driver 26.10.1) drew any page
+  at 1–3 FPS at 1080p, and the same pack with only the lookup taken out at
+  119. Cost scaled with window pixels, not maps, which is the tell. AMD's own
+  offline compiler (RGA 2.15, gfx1101) showed nothing wrong with the table, so
+  it cannot stand in for the real driver; only a player's machine could. Two
+  replacements were measured on the RTX 5060 at 1080p against 0.7.1's
+  4.43 ms (226 FPS) on the market page: a rank by 239 compares, 11 ms; the
+  hash into 256 slots with the symbol table also read by selects (63 more),
+  5.9 ms; the minimal hash with no symbol table, 4.55 ms (220 FPS), with the
+  market's picture pixel-identical to 0.7.1's. Making the table non-`const`
+  is not a fix: NVIDIA then refuses the shader (`C5041 ... Possibly large
+  array`) and the client drops the whole pack. The rig is
+  `rigs/fpsx/` (`pc/fx.py`, servers `main` and `fix`).
 - **An overlay keeps the world it opened on** (`ViewOptions.overlay`, every
   `ui:overlay` page; 26.2 and 26.3). Its camera is the player's own eye where it was
   (`Views.overlayEye`, their rotation untouched) and its pointer the client's,
