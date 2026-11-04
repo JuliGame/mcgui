@@ -738,6 +738,12 @@ Other core shaders and post effects (`position_tex_color`, the outline or blur
 post effect) are not merged: two plugins replacing one of those cannot both
 work, and the game uses whichever pack is on top.
 
+A shader built on MC GUI's still counts as MC GUI's: MC GUI's own file with its
+`main` renamed (say `mcgui_main`), your code added, and a new `main` that calls
+both. MC GUI's check in the console recognises it ("with its own code merged
+into MC GUI's text.vsh"), and says when it was merged from an older MC GUI and
+needs merging again. It cannot tell whether your merge compiles.
+
 ### Client mods
 
 Client mods checked in a real client (Fabric; 1.21.11, 26.1.2, 26.2 and 26.3, on Paper and, for 1.21.11, also through
