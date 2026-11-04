@@ -757,10 +757,10 @@ public final class Shaders {
 
                 // ---- MC GUI hi-colour map decoder ----
                 // Colour -> symbol: the palette gives each symbol the colour that hashes to it (SymbolHash), so the hash
-                // is the whole lookup: a displacement for one of 64 buckets, bytes four to a uint, read with selects
-                // alone. Never a table read by a computed index: AMD's Windows OpenGL driver turns one into seconds a
-                // frame and minutes of compiling (Mr Crash's RX 7700 XT, 2026-11-03: 2 FPS with the old table, 119
-                // without).
+                // is the whole lookup: a displacement for one of 64 buckets (128 for an odd palette), bytes four to a
+                // uint, read with selects alone. Never a table read by a computed index: AMD's Windows OpenGL driver
+                // turns one into seconds a frame and minutes of compiling (Mr Crash's RX 7700 XT, 2026-11-03: 2 FPS
+                // with the old table, 119 without).
                 uint mcb_displacements(uint i) {
                 @DISP@
                 }
@@ -848,7 +848,7 @@ public final class Shaders {
                 .replace("@DISP@", selectTree(hash.displacements))
                 .replace("@MUL1@", Integer.toUnsignedString(hash.mul1))
                 .replace("@MUL2@", Integer.toUnsignedString(hash.mul2))
-                .replace("@BSHIFT@", String.valueOf(32 - SymbolHash.BUCKET_BITS))
+                .replace("@BSHIFT@", String.valueOf(32 - hash.bucketBits))
                 .replace("@SYMBOLS@", String.valueOf(hash.size))
                 .replace("@SYMMAX@", String.format(Locale.ROOT, "%.1f", (float) (Palette.SYMBOLS - 1)))
                 .replace("@LUMAMAX@", String.format(Locale.ROOT, "%.1f", (float) (Palette.LUMA_LEVELS - 1)))

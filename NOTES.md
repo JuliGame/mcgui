@@ -1063,9 +1063,10 @@ Reading a position, a world or a UUID is fine from anywhere. How MC GUI copes, a
   2×2 blocks under a pixel's footprint, four texel reads and four lookups a
   block. A lookup is a minimal perfect hash of the colour (`SymbolHash`): the
   palette gives symbol s to the colour that hashes to s, so there is no table
-  of symbols, and the hash's one small table (64 byte displacements, 16 uints)
-  is read with a tree of 15 selects (`Shaders.selectTree`). Ordinary text
-  costs one flat compare more than vanilla.
+  of symbols, and the hash's one small table (64 byte displacements in 16
+  uints, or 128 in 32 for a palette that does not fit 64) is read with a
+  tree of selects, one per uint less one (`Shaders.selectTree`). Ordinary
+  text costs one flat compare more than vanilla.
   Measured on Josh's PC (720p, uncapped): world alone 0.53 ms a frame; the
   market at 16×9 2.5 ms, of which about 1.3 ms is the 144 maps' draw calls (a
   map is its own texture, so its own render pass: nothing the pack does can
@@ -1074,7 +1075,7 @@ Reading a position, a world or a UUID is fine from anywhere. How MC GUI copes, a
   vertex shader measured within noise of the old shader at 720p and 1080p (two
   rounds each); keeping that work per pixel in the fragment shader was the
   slowest variant at 1080p (284 FPS against 310).
-- **No GLSL array read by a computed index, anywhere** (2026-11-04). Up to 0.7.1
+- **No large GLSL array read by a computed index in the text shaders** (2026-11-04). Up to 0.7.1
   the lookup was one read of a `const uint[1024]` (a 4,096-slot hash packed
   four to a uint). NVIDIA reads that from constant memory for free; **AMD's
   Windows OpenGL driver made it cost seconds a frame** and compile for 1.5–3
@@ -1082,15 +1083,19 @@ Reading a position, a world or a UUID is fine from anywhere. How MC GUI copes, a
   at 1–3 FPS at 1080p, and the same pack with only the lookup taken out at
   119. Cost scaled with window pixels, not maps, which is the tell. AMD's own
   offline compiler (RGA 2.15, gfx1101) showed nothing wrong with the table, so
-  it cannot stand in for the real driver; only a player's machine could. Two
-  replacements were measured on the RTX 5060 at 1080p against 0.7.1's
-  4.43 ms (226 FPS) on the market page: a rank by 239 compares, 11 ms; the
-  hash into 256 slots with the symbol table also read by selects (63 more),
-  5.9 ms; the minimal hash with no symbol table, 4.55 ms (220 FPS), with the
-  market's picture pixel-identical to 0.7.1's. Making the table non-`const`
-  is not a fix: NVIDIA then refuses the shader (`C5041 ... Possibly large
-  array`) and the client drops the whole pack. The rig is
-  `rigs/fpsx/` (`pc/fx.py`, servers `main` and `fix`).
+  it cannot stand in for the real driver; only a player's machine could.
+  Replacements measured on the RTX 5060 at 1080p against 0.7.1's 4.43 ms
+  (226 FPS) on the market page: a rank by 239 compares, 11 ms; the hash into
+  256 slots with the symbol table also read by selects (63 more), 5.9 ms; the
+  minimal hash with no symbol table, 4.55 ms (220 FPS) with 64 buckets and
+  4.79 ms (208) with 128. The market's picture is pixel-identical to 0.7.1's.
+  64 buckets are hard to fill (a random search took 44,000 tries, 1.6 s at
+  startup, for the vanilla palette, and found none for 9% of random ones), so
+  `SymbolHash` tries vanilla's multipliers first, then a short search, then
+  128 buckets. Making the table non-`const` is not a fix: NVIDIA then refuses
+  the shader (`C5041 ... Possibly large array`) and the client drops the
+  whole pack. The rig is `rigs/fpsx/` (`pc/fx.py`, servers `main` and
+  `fix`).
 - **An overlay keeps the world it opened on** (`ViewOptions.overlay`, every
   `ui:overlay` page; 26.2 and 26.3). Its camera is the player's own eye where it was
   (`Views.overlayEye`, their rotation untouched) and its pointer the client's,

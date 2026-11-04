@@ -19,16 +19,40 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ShadersTest {
     private static final Palette PALETTE = new Palette(c -> 0xFF000000 | (c * 0x9E3779B1));
 
-    /** Symbol s is the colour the hash sends to s, so the shader's whole lookup is the hash. */
+    /**
+     * Every symbol colour, put through the hash and displacement tree each text shader really carries, comes back as
+     * its symbol: the palette and the shaders agree, whichever side is edited.
+     */
     @Test
-    void everySymbolColourHashesToItsSymbol() {
-        for (int s = 0; s < Palette.SYMBOLS; s++) assertEquals(s, PALETTE.symbolHash.lookup(PALETTE.symbolRgb[s]), "symbol " + s);
+    void everySymbolColourDecodesToItsSymbolInTheShaders() {
+        Pattern disp = Pattern.compile("uint mcb_displacements\\(uint i\\) \\{\n(.*?)\n}", Pattern.DOTALL);
+        Pattern bucket = Pattern.compile("uint b = \\(k \\* (\\d+)u\\) >> (\\d+)u;");
+        Pattern slot = Pattern.compile("uint s = \\(\\(\\(k \\* (\\d+)u\\) >> 24u\\) \\* (\\d+)u >> 8u\\) \\+ "
+                + "\\(\\(mcb_displacements\\(b >> 2u\\) >> \\(\\(b & 3u\\) << 3u\\)\\) & 255u\\);");
+        Pattern wrap = Pattern.compile("return int\\(s >= (\\d+)u \\? s - (\\d+)u : s\\);");
+        for (Shaders.Dialect d : Shaders.Dialect.values()) {
+            for (String src : new String[]{Shaders.textVsh(d, PALETTE), Shaders.textFsh(d, PALETTE)}) {
+                Matcher md = disp.matcher(src), mb = bucket.matcher(src), ms = slot.matcher(src), mw = wrap.matcher(src);
+                assertTrue(md.find() && mb.find() && ms.find() && mw.find(), d + ": the decoder's shape changed; update this test");
+                long mul1 = Long.parseLong(mb.group(1)), mul2 = Long.parseLong(ms.group(1)), n = Long.parseLong(ms.group(2));
+                int shift = Integer.parseInt(mb.group(2));
+                assertEquals(n, Long.parseLong(mw.group(1)));
+                assertEquals(n, Long.parseLong(mw.group(2)));
+                for (int sym = 0; sym < Palette.SYMBOLS; sym++) {
+                    long k = PALETTE.symbolRgb[sym];
+                    int b = (int) ((k * mul1 & 0xFFFFFFFFL) >>> shift);
+                    long word = select(md.group(1), b >> 2) & 0xFFFFFFFFL;
+                    long s = (((k * mul2 & 0xFFFFFFFFL) >>> 24) * n >>> 8) + (word >>> ((b & 3) << 3) & 255);
+                    assertEquals(sym, s >= n ? s - n : s, d + ": symbol " + sym);
+                }
+            }
+        }
     }
 
     /** The select tree the shader reads the displacements with gives back every word, at every size it could be. */
     @Test
     void theSelectTreeReadsEveryWord() {
-        for (int n : new int[]{4, 16, 64}) {
+        for (int n : new int[]{4, 16, 32, 128}) {
             int[] words = new int[n];
             for (int i = 0; i < n; i++) words[i] = 0x9E3779B1 * (i + 1);
             String body = Shaders.selectTree(words);
@@ -71,14 +95,16 @@ class ShadersTest {
         return v;
     }
 
-    /** No table read by a computed index: AMD's Windows OpenGL driver makes one cost seconds a frame. */
+    /** No large table read by a computed index in the text shaders: AMD's Windows OpenGL driver makes one cost seconds a frame. */
     @Test
-    void shadersCarryNoTableAndNoPlaceholders() {
+    void textShadersCarryNoTableAndNoPlaceholders() {
+        Pattern array = Pattern.compile("\\[\\s*(\\d+)\\s*]");
         for (Shaders.Dialect d : Shaders.Dialect.values()) {
             String vsh = Shaders.textVsh(d, PALETTE), fsh = Shaders.textFsh(d, PALETTE);
             for (String s : new String[]{vsh, fsh}) {
                 assertFalse(s.contains("@"), "a placeholder was left in a " + d + " shader");
-                assertFalse(Pattern.compile("const\\s+\\w+\\s+\\w+\\s*\\[").matcher(s).find(), "a const array in a " + d + " shader");
+                Matcher m = array.matcher(s);
+                while (m.find()) assertTrue(Integer.parseInt(m.group(1)) < 32, "an array of " + m.group(1) + " in a " + d + " text shader");
             }
         }
     }
