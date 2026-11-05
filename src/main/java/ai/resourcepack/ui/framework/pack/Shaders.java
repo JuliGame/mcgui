@@ -393,358 +393,674 @@ public final class Shaders {
                 .replace("@FRACTION@", f6(FLAG_PHASE / FLAG_STEP));
     }
 
-    // ---------------------------------------------------------------- position_tex_color
+    // ---------------------------------------------------------------- merge markers
 
-    public static String positionTexColorVsh(Dialect d) {
-        return emit("""
-                #version 330
-                #extension GL_ARB_separate_shader_objects : require
+    /**
+     * The marker lines plugin-common's {@code ShaderMerge} reads (Studio writes the same): every addition to vanilla's
+     * text shader is between them, so another plugin's text shader (BetterHud's, HUDEngine's, ItemsAdder's text effects)
+     * can be given the same additions and both draw. The format is versioned by the {@code v1} on every begin line;
+     * changing what a block means is a {@code v2}, never an edit, as packs built with v1 are on servers.
+     */
+    static final String MERGE_MARKER = "// rpai-merge:";
 
-                """ + dynamicTransforms(d) + PROJECTION + globals(d) + """
+    /** What vanilla's {@code main} becomes in our text shaders, so ours can call it first. */
+    static final String VERTEX_BASE = "mcgui_text_vertex", FRAGMENT_BASE = "mcgui_text_fragment";
 
-                layout(location = 0) in vec3 Position;
-                layout(location = 1) in vec2 UV0;
-                layout(location = 2) in vec4 Color;
+    private static String mergeBlock(String name, String body) {
+        String b = body.isEmpty() || body.endsWith("\n") ? body : body + "\n";
+        return MERGE_MARKER + "begin " + name + " v1\n" + b + MERGE_MARKER + "end " + name + "\n";
+    }
 
-                layout(location = 0) out vec2 texCoord0;
-                layout(location = 1) out vec4 vertexColor;
-                layout(location = 2) out vec2 mcbPos;
-                layout(location = 3) flat out vec2 mcbSize;
-                layout(location = 4) flat out float mcbSeated;
+    /**
+     * Vanilla's own top-level imports and declarations, every one outside any {@code #if}, commented out: what our code
+     * may lean on that vanilla's file supplies, for a merge into a file that lacks one (Studio's {@code vanillaInterface}).
+     */
+    static String vanillaInterface(String src) {
+        Pattern declaration = Pattern.compile("^(?:layout\\s*\\([^)]*\\)\\s*)?(?:(?:flat|uniform|in|out|const)\\s+)+\\w+\\s+\\w+\\s*(?:\\[[^\\]]*\\])?\\s*;$");
+        StringBuilder out = new StringBuilder();
+        int depth = 0, conditions = 0;
+        for (String raw : src.split("\n")) {
+            String line = raw.replaceAll("//.*$", "").strip();
+            if (line.matches("^#\\s*(if|ifdef|ifndef)\\b.*")) conditions++;
+            else if (line.matches("^#\\s*endif\\b.*")) conditions = Math.max(0, conditions - 1);
+            else if (depth == 0 && conditions == 0 && (line.matches("^#\\s*(?:moj_import|include)\\b.*") || declaration.matcher(line).matches())) {
+                out.append("// ").append(line).append('\n');
+            }
+            for (char c : line.toCharArray()) depth += c == '{' ? 1 : c == '}' ? -1 : 0;
+        }
+        return out.toString();
+    }
 
-                """ + helpers(VERTEX_HELPERS) + """
+    /**
+     * Vanilla's file with its {@code main} renamed [base] and ours after it: [declarations] (before the renamed main,
+     * where a merge puts them in another plugin's file), then vanilla's interface and [epilogue], which holds our
+     * functions and the new {@code main} that calls [base].
+     */
+    private static String marked(String vanilla, String stage, String base, String declarations, String epilogue) {
+        int at = vanilla.indexOf("\nvoid main()");
+        if (at < 0) throw new IllegalStateException("vanilla's " + stage + " shader has no main");
+        return vanilla.substring(0, at + 1)
+                + mergeBlock(stage + "-declarations", declarations)
+                + vanilla.substring(at + 1).replaceFirst("void main\\(\\)", "void " + base + "()")
+                + mergeBlock(stage + "-vanilla", vanillaInterface(vanilla))
+                + mergeBlock(stage + "-epilogue", MERGE_MARKER + "renames main " + base + "\n" + epilogue);
+    }
+
+    private static String include(Dialect d, String file) {
+        return (d == Dialect.V26_3 ? "#include" : "#moj_import") + " <minecraft:" + file + ">\n";
+    }
+
+    // ---------------------------------------------------------------- vanilla's own files, per version
+
+    /** Vanilla's text vertex shader for a dialect, as the client jar has it. */
+    static String vanillaTextVsh(Dialect d) {
+        return switch (d) {
+            case V26_3 -> """
+                    #version 330
+                    #extension GL_ARB_separate_shader_objects : require
+
+                    #if !defined(IS_GUI) && !defined(IS_SEE_THROUGH)
+                    #include <minecraft:fog.glsl>
+                    #include <minecraft:sample_lightmap.glsl>
+                    #endif
+
+                    #include <minecraft:dynamictransforms.glsl>
+                    #include <minecraft:projection.glsl>
+
+                    layout(location = 0) in vec3 Position;
+                    layout(location = 1) in vec4 Color;
+                    layout(location = 2) in vec2 UV0;
+                    #if !defined(IS_GUI) && !defined(IS_SEE_THROUGH)
+                    layout(location = 3) in ivec2 UV2;
+                    #endif
+
+                    #if !defined(IS_GUI) && !defined(IS_SEE_THROUGH)
+                    uniform sampler2D Sampler2;
+                    layout(location = 0) out float sphericalVertexDistance;
+                    layout(location = 1) out float cylindricalVertexDistance;
+                    #endif
+
+                    layout(location = 2) out vec4 vertexColor;
+                    layout(location = 3) out vec2 texCoord0;
+
+                    void main() {
+                        gl_Position = ProjMat * ModelViewMat * vec4(Position, 1.0);
+
+                    #if !defined(IS_GUI) && !defined(IS_SEE_THROUGH)
+                        sphericalVertexDistance = fog_spherical_distance(Position);
+                        cylindricalVertexDistance = fog_cylindrical_distance(Position);
+                        vertexColor = Color * sample_lightmap(Sampler2, UV2);
+                    #else
+                        vertexColor = Color;
+                    #endif
+                        texCoord0 = UV0;
+                    }
+                    """;
+            case V26_2 -> """
+                    #version 330
+
+                    #if !defined(IS_GUI) && !defined(IS_SEE_THROUGH)
+                    #moj_import <minecraft:fog.glsl>
+                    #moj_import <minecraft:sample_lightmap.glsl>
+                    #endif
+
+                    #moj_import <minecraft:dynamictransforms.glsl>
+                    #moj_import <minecraft:projection.glsl>
+
+                    in vec3 Position;
+                    in vec4 Color;
+                    in vec2 UV0;
+                    #if !defined(IS_GUI) && !defined(IS_SEE_THROUGH)
+                    in ivec2 UV2;
+                    #endif
+
+                    #if !defined(IS_GUI) && !defined(IS_SEE_THROUGH)
+                    uniform sampler2D Sampler2;
+                    out float sphericalVertexDistance;
+                    out float cylindricalVertexDistance;
+                    #endif
+
+                    out vec4 vertexColor;
+                    out vec2 texCoord0;
+
+                    void main() {
+                        gl_Position = ProjMat * ModelViewMat * vec4(Position, 1.0);
+
+                    #if !defined(IS_GUI) && !defined(IS_SEE_THROUGH)
+                        sphericalVertexDistance = fog_spherical_distance(Position);
+                        cylindricalVertexDistance = fog_cylindrical_distance(Position);
+                        vertexColor = Color * sample_lightmap(Sampler2, UV2);
+                    #else
+                        vertexColor = Color;
+                    #endif
+                        texCoord0 = UV0;
+                    }
+                    """;
+            case V26_1, V1_21_11 -> """
+                    #version 330
+
+                    #moj_import <minecraft:fog.glsl>
+                    #moj_import <minecraft:dynamictransforms.glsl>
+                    #moj_import <minecraft:projection.glsl>
+                    """ + (d == Dialect.V26_1 ? "#moj_import <minecraft:sample_lightmap.glsl>\n" : "") + """
+
+                    in vec3 Position;
+                    in vec4 Color;
+                    in vec2 UV0;
+                    in ivec2 UV2;
+
+                    uniform sampler2D Sampler2;
+
+                    out float sphericalVertexDistance;
+                    out float cylindricalVertexDistance;
+                    out vec4 vertexColor;
+                    out vec2 texCoord0;
+
+                    void main() {
+                        gl_Position = ProjMat * ModelViewMat * vec4(Position, 1.0);
+
+                        sphericalVertexDistance = fog_spherical_distance(Position);
+                        cylindricalVertexDistance = fog_cylindrical_distance(Position);
+                    """ + (d == Dialect.V26_1 ? "    vertexColor = Color * sample_lightmap(Sampler2, UV2);\n"
+                    : "    vertexColor = Color * texelFetch(Sampler2, UV2 / 16, 0);\n") + """
+                        texCoord0 = UV0;
+                    }
+                    """;
+        };
+    }
+
+    /** Vanilla's text fragment shader for a dialect, as the client jar has it. */
+    static String vanillaTextFsh(Dialect d) {
+        return switch (d) {
+            case V26_3 -> """
+                    #version 330
+                    #extension GL_ARB_separate_shader_objects : require
+
+                    #if !defined(IS_GUI) && !defined(IS_SEE_THROUGH)
+                    #include <minecraft:fog.glsl>
+                    #endif
+
+                    #include <minecraft:dynamictransforms.glsl>
+                    #include <minecraft:oit.glsl>
+
+                    uniform sampler2D Sampler0;
+
+                    #if !defined(IS_GUI) && !defined(IS_SEE_THROUGH)
+                    layout(location = 0) in float sphericalVertexDistance;
+                    layout(location = 1) in float cylindricalVertexDistance;
+                    #endif
+
+                    layout(location = 2) in vec4 vertexColor;
+                    layout(location = 3) in vec2 texCoord0;
+
+                    #ifndef OIT_ALPHA_ONLY
+                    layout(location = 0) out vec4 fragColor;
+                    #endif
+
+                    vec4 calculateFinalColor(vec4 color) {
+                        #ifdef OIT_ACCUMULATE
+                        color = sampleColorForAccumulation(color);
+                        #endif
+
+                        #if !defined(IS_SEE_THROUGH) && !defined(IS_GUI)
+
+                        #ifdef OIT_ACCUMULATE
+                        vec4 fogColor = vec4(FogColor.rgb * color.a, FogColor.a);
+                        #else
+                        vec4 fogColor = FogColor;
+                        #endif
+
+                        color = apply_fog(color, sphericalVertexDistance, cylindricalVertexDistance, FogEnvironmentalStart, FogEnvironmentalEnd, FogRenderDistanceStart, FogRenderDistanceEnd, fogColor);
+                        #endif
+
+                        return color;
+                    }
+
+                    void main() {
+                        #ifdef IS_GRAYSCALE
+                        vec4 texColor = texture(Sampler0, texCoord0).rrrr;
+                        #else
+                        vec4 texColor = texture(Sampler0, texCoord0);
+                        #endif
+
+                        vec4 color = texColor * vertexColor * ColorModulator;
+
+                        if (color.a < 0.1) {
+                            discard;
+                        }
+
+                        #ifdef OIT_ALPHA_ONLY
+                        executeAlphaOnlyPhase(gl_FragCoord.z, color.a);
+                        #else
+                        fragColor = calculateFinalColor(color);
+                        #endif
+                    }
+                    """;
+            case V26_2 -> """
+                    #version 330
+
+                    #if !defined(IS_GUI) && !defined(IS_SEE_THROUGH)
+                    #moj_import <minecraft:fog.glsl>
+                    #endif
+
+                    #moj_import <minecraft:dynamictransforms.glsl>
+
+                    uniform sampler2D Sampler0;
+
+                    #if !defined(IS_GUI) && !defined(IS_SEE_THROUGH)
+                    in float sphericalVertexDistance;
+                    in float cylindricalVertexDistance;
+                    #endif
+
+                    in vec4 vertexColor;
+                    in vec2 texCoord0;
+
+                    out vec4 fragColor;
+
+                    void main() {
+                    #ifdef IS_GRAYSCALE
+                        vec4 texColor = texture(Sampler0, texCoord0).rrrr;
+                    #else
+                        vec4 texColor = texture(Sampler0, texCoord0);
+                    #endif
+
+                    #ifdef IS_SEE_THROUGH
+                        vec4 color = texColor * vertexColor;
+                    #else
+                        vec4 color = texColor * vertexColor * ColorModulator;
+                    #endif
+                        if (color.a < 0.1) {
+                            discard;
+                        }
+
+                    #ifdef IS_SEE_THROUGH
+                        fragColor = color * ColorModulator;
+                    #elif defined(IS_GUI)
+                        fragColor = color;
+                    #else
+                        fragColor = apply_fog(color, sphericalVertexDistance, cylindricalVertexDistance, FogEnvironmentalStart, FogEnvironmentalEnd, FogRenderDistanceStart, FogRenderDistanceEnd, FogColor);
+                    #endif
+                    }
+                    """;
+            case V26_1, V1_21_11 -> """
+                    #version 330
+
+                    #moj_import <minecraft:fog.glsl>
+                    #moj_import <minecraft:dynamictransforms.glsl>
+
+                    uniform sampler2D Sampler0;
+
+                    in float sphericalVertexDistance;
+                    in float cylindricalVertexDistance;
+                    in vec4 vertexColor;
+                    in vec2 texCoord0;
+
+                    out vec4 fragColor;
+
+                    void main() {
+                        vec4 color = texture(Sampler0, texCoord0) * vertexColor * ColorModulator;
+                        if (color.a < 0.1) {
+                            discard;
+                        }
+                        fragColor = apply_fog(color, sphericalVertexDistance, cylindricalVertexDistance, FogEnvironmentalStart, FogEnvironmentalEnd, FogRenderDistanceStart, FogRenderDistanceEnd, FogColor);
+                    }
+                    """;
+        };
+    }
+
+    /** Vanilla's {@code position_tex_color.vsh}: it cannot import (it is used during startup), so it inlines its blocks. */
+    static String vanillaPositionTexColorVsh(Dialect d) {
+        boolean v263 = d == Dialect.V26_3;
+        return "#version 330\n" + (v263 ? "#extension GL_ARB_separate_shader_objects : require\n" : "") + "\n"
+                + "// Can't moj_import in things used during startup, when resource packs don't exist.\n"
+                + "// This is a copy of dynamicimports.glsl and projection.glsl\n"
+                + dynamicTransforms(d) + PROJECTION + "\n"
+                + (v263 ? """
+                        layout(location = 0) in vec3 Position;
+                        layout(location = 1) in vec2 UV0;
+                        layout(location = 2) in vec4 Color;
+
+                        layout(location = 0) out vec2 texCoord0;
+                        layout(location = 1) out vec4 vertexColor;
+                        """ : """
+                        in vec3 Position;
+                        in vec2 UV0;
+                        in vec4 Color;
+
+                        out vec2 texCoord0;
+                        out vec4 vertexColor;
+                        """) + """
 
                 void main() {
                     gl_Position = ProjMat * ModelViewMat * vec4(Position, 1.0);
+
                     texCoord0 = UV0;
                     vertexColor = Color;
-                    mcbPos = (ModelViewMat * vec4(Position, 1.0)).xy;
-                    mcbSize = mcb_gui_size();
-                    mcbSeated = mcb_seated_now();
-                    // The game's screen effects (ScreenEffectRenderer: the inside-a-block, underwater and fire overlays) are
-                    // the only draws here in perspective within two blocks of the eye. They follow the player, not the
-                    // camera, and a view's player can be held inside a wall (Views: the seat behind a camera with no room
-                    // round it): on a flagged camera they would cover the view, so nothing of them is drawn.
-                    if (ProjMat[3][3] != 1.0 && mcb_flag_axis() >= 0 && length((ModelViewMat * vec4(Position, 1.0)).xyz) < 2.0) {
+                }
+                """;
+    }
+
+    // ---------------------------------------------------------------- position_tex_color
+
+    /**
+     * Vanilla's {@code position_tex_color.vsh} and, after it, what hides the HUD for a seated player and the screen
+     * effects for a flagged camera. It writes only vanilla's outputs (the fragment shader is the game's own, or whoever's
+     * pack has one), so it pairs with any {@code position_tex_color.fsh}: a pack that brings its own (Dialog Engine's
+     * drawn dialogs) cannot leave the two halves unable to link, which drops the whole server pack. What it hides it
+     * hides by giving every vertex of the quad alpha 0, which the fragment shader discards.
+     */
+    public static String positionTexColorVsh(Dialect d) {
+        String declarations = globals(d) + "uniform sampler2D Sampler0;\n";
+        String epilogue = helpers(VERTEX_HELPERS) + FRAGMENT_HELPERS + """
+
+                void main() {
+                    mcgui_position_tex_color_vertex();
+                    if (ProjMat[3][3] == 1.0) {
+                        if (mcb_seated_flag() > 0.5) {
+                            // A seated player's HUD: the hotbar, hearts and the rest round it, the vignette, the crosshair.
+                            vec2 mcbPos = (ModelViewMat * vec4(Position, 1.0)).xy;
+                            vec2 mcbSize = mcb_gui_size();
+                            ivec2 mcbTexSize = textureSize(Sampler0, 0);
+                            bool mcbHide = false;
+                            // 16x16 textures are the dimmed tiles behind menus (Esc, options): never cut.
+                            if (mcbTexSize != ivec2(16, 16)) {
+                                // The vignette is the only standalone 256x256 texture the HUD draws.
+                                if (mcbTexSize == ivec2(256, 256)) mcbHide = true;
+                                // Atlases and the game's HUD textures are powers of two. A picture drawn into a target first
+                                // is the size of what it shows: a minimap mod's (Xaero's picture-in-picture, JourneyMap's
+                                // window-sized layer) and the game's own pictures-in-picture.
+                                if ((mcbTexSize.x & (mcbTexSize.x - 1)) != 0 || (mcbTexSize.y & (mcbTexSize.y - 1)) != 0) mcbHide = true;
+                                if (mcb_hud(mcbPos, mcbSize)) mcbHide = true;
+                            }
+                            // The crosshair is drawn white; a menu button in the middle of the window is far bigger.
+                            if (mcb_crosshair(mcbPos, mcbSize) && all(greaterThan(Color.rgb, vec3(0.99)))) mcbHide = true;
+                            if (mcbHide) vertexColor.a = 0.0;
+                        }
+                    } else if (mcb_flag_axis() >= 0 && length((ModelViewMat * vec4(Position, 1.0)).xyz) < 2.0) {
+                        // The game's screen effects (ScreenEffectRenderer: the inside-a-block, underwater and fire overlays)
+                        // are the only draws here in perspective within two blocks of the eye. They follow the player, not
+                        // the camera, and a view's player can be held inside a wall (Views: the seat behind a camera with no
+                        // room round it): on a flagged camera they would cover the view, so nothing of them is drawn.
                         gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
                     }
                 }
-                """, d);
+                """;
+        String vanilla = vanillaPositionTexColorVsh(d);
+        int at = vanilla.indexOf("\nvoid main()");
+        return emitAsIs(vanilla.substring(0, at + 1) + declarations
+                + vanilla.substring(at + 1).replaceFirst("void main\\(\\)", "void mcgui_position_tex_color_vertex()")
+                + epilogue);
     }
 
-    public static String positionTexColorFsh(Dialect d) {
-        return emit("""
-                #version 330
-                #extension GL_ARB_separate_shader_objects : require
-
-                """ + dynamicTransforms(d) + """
-
-                uniform sampler2D Sampler0;
-
-                layout(location = 0) in vec2 texCoord0;
-                layout(location = 1) in vec4 vertexColor;
-                layout(location = 2) in vec2 mcbPos;
-                layout(location = 3) flat in vec2 mcbSize;
-                layout(location = 4) flat in float mcbSeated;
-
-                layout(location = 0) out vec4 fragColor;
-
-                """ + FRAGMENT_HELPERS + """
-
-                void main() {
-                    // 16x16 textures are the dimmed tiles behind menus (Esc, options): never cut.
-                    if (mcbSeated > 0.5 && textureSize(Sampler0, 0) != ivec2(16, 16)) {
-                        ivec2 mcbTexSize = textureSize(Sampler0, 0);
-                        // The vignette is the only standalone 256x256 texture the HUD draws.
-                        if (mcbTexSize == ivec2(256, 256)) discard;
-                        // Atlases and the game's HUD textures are powers of two. A picture drawn into a target first
-                        // is the size of what it shows: a minimap mod's (Xaero's picture-in-picture, JourneyMap's
-                        // window-sized layer) and the game's own pictures-in-picture.
-                        if ((mcbTexSize.x & (mcbTexSize.x - 1)) != 0 || (mcbTexSize.y & (mcbTexSize.y - 1)) != 0) discard;
-                        if (mcb_hud(mcbPos, mcbSize)) discard;
-                    }
-                    vec4 color = texture(Sampler0, texCoord0) * vertexColor;
-                    // The crosshair is pure white; a menu button in the middle of the window is not.
-                    if (mcbSeated > 0.5 && mcb_crosshair(mcbPos, mcbSize) && all(greaterThan(color.rgb, vec3(0.99)))) discard;
-                    if (color.a == 0.0) {
-                        discard;
-                    }
-                    fragColor = color * ColorModulator;
-                }
-                """, d);
+    /** A shader written for its dialect already: only the lines are trimmed, as {@link #emit} does. */
+    private static String emitAsIs(String src) {
+        return src.lines().map(String::strip).reduce((a, b) -> a + "\n" + b).orElse("") + "\n";
     }
 
     // ---------------------------------------------------------------- text
 
+    /**
+     * What {@code text.vsh} tells {@code text.fsh}, it tells in vanilla's own {@code vertexColor}, in values vanilla never
+     * gives it: text.vsh writes nothing vanilla's does not, so our fragment shader links with anybody's vertex shader and
+     * our vertex shader with anybody's fragment shader. A pack whose two halves do not link is dropped whole by the client
+     * ("Failed to reload resources"), which is what another plugin's text.vsh beside ours used to do (HUDEngine's, merged
+     * with MC GUI's by Nexo). Every value is the same at all four vertices of its quad, so interpolation hands it on intact;
+     * each field is kept well under 2^17, where a float's error is far below the 0.5 that rounding forgives.
+     *
+     * <ul>
+     *   <li>alpha from {@link #ENCODED_POINTER} to below 48: a seated player's pointer, 16 times its kind (1 the server's,
+     *   2 the client's), plus 8 when depth is reversed, plus its opacity; red, green and blue its light.</li>
+     *   <li>alpha from {@link #ENCODED_VIEW}: a map of someone's own view. Red: its kind (3, or 5 an overlay's signature, 6
+     *   an overlay's panel, 7 a hover layer), 8 for its fill (mcb_fill_right), 16 times a hover layer's priority plus one
+     *   (0: not shown), 1024 when depth is reversed. Green: where it starts in Sampler0, in maps, x plus 64 times y.
+     *   Blue: its tint's first two symbols, 256 times the first plus the second; alpha past {@link #ENCODED_VIEW} the
+     *   other two.</li>
+     * </ul>
+     *
+     * A map on a wall carries nothing: text.fsh finds those itself, so walls draw under anybody's text.vsh.
+     */
+    static final float ENCODED_POINTER = 16f, ENCODED_VIEW = 65536f;
+
+    /**
+     * {@code text.vsh}: vanilla's, then ours ({@link #marked}), which places a seated player's own view and pointer in
+     * their window, hides what must not show while seated, and hands text.fsh the rest in {@code vertexColor}
+     * ({@link #ENCODED_VIEW}).
+     */
     public static String textVsh(Dialect d, Palette palette) {
-        return emit("""
-                #version 330
-                #extension GL_ARB_separate_shader_objects : require
-
-                #if !defined(IS_GUI) && !defined(IS_SEE_THROUGH)
-                #include <minecraft:fog.glsl>
-                #include <minecraft:sample_lightmap.glsl>
-                #endif
-
-                #include <minecraft:dynamictransforms.glsl>
-                #include <minecraft:projection.glsl>
-                #include <minecraft:globals.glsl>
-
-                layout(location = 0) in vec3 Position;
-                layout(location = 1) in vec4 Color;
-                layout(location = 2) in vec2 UV0;
-                #if !defined(IS_GUI) && !defined(IS_SEE_THROUGH)
-                layout(location = 3) in ivec2 UV2;
-                #endif
-
-                uniform sampler2D Sampler0;
-
-                #if !defined(IS_GUI) && !defined(IS_SEE_THROUGH)
-                uniform sampler2D Sampler2;
-                layout(location = 0) out float sphericalVertexDistance;
-                layout(location = 1) out float cylindricalVertexDistance;
-                #endif
-
-                layout(location = 2) out vec4 vertexColor;
-                layout(location = 3) out vec2 texCoord0;
-                layout(location = 4) out vec2 mcbPos;
-                layout(location = 5) flat out vec2 mcbSize;
-                layout(location = 6) flat out float mcbSeated;
-                layout(location = 7) flat out float mcbPointer;
-                layout(location = 8) flat out float mcbReversed;
-                // Which of our maps this is (mcb_screen_map) and how its data blocks are filled (mcb_fill_right), and
-                // for someone's own view its tint: worked out here once per vertex rather than in every pixel.
-                layout(location = 9) flat out vec2 mcbMapInfo;
-                layout(location = 10) flat out vec4 mcbViewTint;
-                // Where the map starts in Sampler0, in pixels: (0, 0) for a map that is its own texture, its place in a
-                // texture of many maps when text.vsh found it (mcb_locate), (-1, -1) when text.fsh must find it.
-                layout(location = 11) flat out vec2 mcbMapBase;
-
-                """ + helpers(VERTEX_HELPERS) + decoderCore(palette) + """
-
-                #if !defined(IS_GUI)
-                // A point at normalised device coordinates [ndc], one block in front of the camera: in the
-                // clip volume whatever the projection, at the same depth for every vertex (no perspective
-                // warp across a quad). The fragment shader sets the real depth.
-                vec4 mcb_flat(vec2 ndc) {
-                    vec4 c = ProjMat * vec4(0.0, 0.0, -1.0, 1.0);
-                    return vec4(ndc * c.w, c.z, c.w);
-                }
-
-                // Where the pointer the seated player's client places itself is on a view [size] pixels big: the
-                // view's centre plus [speed] (pixels per degree of turn) times how far the camera has turned from
-                // [ahead] (the axis towards the view), held inside the view. The server works the cursor out the
-                // same way from the rotations the client sends. [hint] is the player's own turn from [ahead] in degrees
-                // as the server last heard it (Views.sendTurnHint), or below -360 for none: F5's view from the front
-                // points the camera exactly the other way to the player (its yaw half round, its pitch negated), which
-                // the camera alone cannot tell from the player having turned round. The player's own look is whichever
-                // of the two is within a quarter turn of the hint; a hint that far out would take a whole quarter turn
-                // inside one round trip, and the server turns the player back at the picture's edge.
-                vec2 mcb_hot(vec2 size, vec3 ahead, float speed, float hint) {
-                    vec3 right = vec3(-ahead.z, 0.0, ahead.x);
-                    // ModelViewMat is the camera's rotation alone; its third row is minus the look direction.
-                    vec3 look = normalize(-vec3(ModelViewMat[0][2], ModelViewMat[1][2], ModelViewMat[2][2]));
-                    if (hint > -360.0) {
-                        float h = radians(hint);
-                        if (dot(look, ahead * cos(h) + right * sin(h)) < 0.0) look = -look;
-                    }
-                    vec2 turn = degrees(vec2(atan(dot(look, right), dot(look, ahead)), asin(clamp(-look.y, -1.0, 1.0))));
-                    return clamp(size * 0.5 + turn * speed, vec2(0.0), size - 1.0);
-                }
-
-                // The pointer the seated player's client places itself, on a view [size] pixels big. Its text
-                // sits ahead of the camera on the flagged axis, towards the view, 0.5 + speed / 512 blocks away
-                // (speed in pixels per degree of turn), square to that axis: so a vertex's offset across the axis
-                // is the glyph's own, from its hot pixel (mcb_hot), at 128 pixels to a block.
-                // On an overlay (flag 1) every axis is flagged: the text's own offset says which is ahead, as the glyph
-                // is far smaller than its distance.
-                vec2 mcb_client_pointer(vec2 size) {
-                    int flagAxis = mcb_flag_axis();
-                    bool alongX = flagAxis == 0 || (flagAxis == 1 && abs(Position.x) > abs(Position.z));
-                    vec3 axis = alongX ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 0.0, 1.0);
-                    float along = dot(Position, axis);
-                    vec3 ahead = axis * sign(along);
-                    vec3 right = vec3(-ahead.z, 0.0, ahead.x);
-                    // Its text's opacity is the hint (Shaders.turnHint): 128 plus the sector, anything else none.
-                    int sector = int(round(Color.a * 255.0)) - 128;
-                    float hint = sector >= 0 && sector < @SECTORS@ ? float(sector) * (360.0 / float(@SECTORS@)) : -1000.0;
-                    vec2 hot = mcb_hot(size, ahead, (abs(along) - 0.5) * 512.0, hint);
-                    vec2 px = hot + vec2(dot(Position, right), -Position.y) * 128.0;
-                    return vec2(px.x / size.x * 2.0 - 1.0, 1.0 - px.y / size.y * 2.0);
-                }
-
-                // A hover layer's rectangle in canvas pixels, [left, right) x [top, bottom), from the four 2x2 blocks'
-                // worth of symbols from x = [at] (Palette.markLayer): each edge two symbols, high then low.
-                float mcb_layer_edge(int x, int y) { return float(mcb_symbol(ivec2(x, y)) * @SYMBOLS@ + mcb_symbol(ivec2(x + 1, y))); }
-                vec4 mcb_layer_rect(int at) { return vec4(mcb_layer_edge(at, 0), mcb_layer_edge(at, 1), mcb_layer_edge(at + 2, 0), mcb_layer_edge(at + 2, 1)); }
-                bool mcb_layer_in(vec2 p, vec4 r) { return p.x >= r.x && p.y >= r.y && p.x < r.z && p.y < r.w; }
-
-                // Whether a hover layer shows now: the client's pointer, worked out as the pointer's own from the speed,
-                // axis and side the layer carries ([flags]: 2 for z, 1 for facing it from the positive side), is inside
-                // its include rectangle and outside its exclude one.
-                bool mcb_layer_on(vec2 size, int flags) {
-                    float speed = float((mcb_symbol(ivec2(4, 0)) * @SYMBOLS@ + mcb_symbol(ivec2(5, 0))) * @SYMBOLS@ + mcb_symbol(ivec2(4, 1))) / @LAYERSPEED@;
-                    vec3 axis = (flags & 2) == 0 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 0.0, 1.0);
-                    // The quarter-turn hint (Palette.markLayer, Shaders.turnQuarter): 0 for none.
-                    int quarter = mcb_symbol(ivec2(14, 1));
-                    vec2 hot = mcb_hot(size, (flags & 1) == 1 ? -axis : axis, speed, quarter > 0 ? float(quarter - 1) * 90.0 : -1000.0);
-                    return mcb_layer_in(hot, mcb_layer_rect(6)) && !mcb_layer_in(hot, mcb_layer_rect(10));
-                }
-                #endif
-
-                // Which of our maps this vertex's quad shows (mcb_screen_map), with mcbBase set to where that map starts in
-                // Sampler0 and mcbUv to which of its corners this vertex is. ImmediatelyFast (a client mod) draws every
-                // map from one big texture by default ("map_atlas_generation"), each 128 x 128 square of it a map, the
-                // quad's texture coordinates that square's: a corner there is a corner of up to four maps. A view's maps
-                // all hang in the camera's block, on its floor or ceiling (MapWall.Stack), so which corner of the block a
-                // vertex is says which of its map it is: u runs along x on both, v along z on the floor and against it
-                // on the ceiling (ItemFrameRenderer, rotation 0). Any other map of ours in such a texture (a wall's)
-                // is -1: drawn where it hangs, it needs nothing from here, and text.fsh finds it pixel by pixel.
-                vec2 mcbUv;
-                int mcb_locate() {
-                    mcbUv = UV0;
-                    int textureKind = mcb_texture();
-                    if (textureKind != 2) return textureKind == 1 ? mcb_screen_map() : 0;
-                    ivec2 size = textureSize(Sampler0, 0);
-                    vec2 at = UV0 * vec2(size) / 128.0, k = round(at);
-                    if (any(greaterThan(abs(at - k), vec2(0.001)))) return 0;
-                    vec3 rel = Position - CameraOffset;
-                    if (mcb_flag_axis() >= 0 && all(greaterThan(rel, vec3(-0.01))) && all(lessThan(rel, vec3(1.01)))) {
-                        vec2 corner = vec2(rel.x > 0.5 ? 1.0 : 0.0, (rel.y < 0.5) == (rel.z > 0.5) ? 1.0 : 0.0);
-                        mcbBase = ivec2(k - corner) * 128;
-                        if (mcb_in_texture(mcbBase, size)) {
-                            int kind = mcb_screen_map();
-                            if (kind >= 3) {
-                                mcbUv = corner;
-                                return kind;
-                            }
-                        }
-                    }
-                    for (int i = 0; i < 4; i++) {
-                        mcbBase = ivec2(k - vec2(float(i & 1), float(i >> 1))) * 128;
-                        if (mcb_in_texture(mcbBase, size) && mcb_screen_map() > 0) {
-                            mcbBase = ivec2(-1);
-                            return -1;
-                        }
-                    }
-                    mcbBase = ivec2(0);
-                    return 0;
-                }
-
-                void main() {
-                    gl_Position = ProjMat * ModelViewMat * vec4(Position, 1.0);
-                    mcbReversed = mcb_reversed();
-                    texCoord0 = UV0;
-                    mcbPos = (ModelViewMat * vec4(Position, 1.0)).xy;
-                    mcbSize = mcb_gui_size();
-                    mcbPointer = 0.0;
-                #ifdef IS_GRAYSCALE
-                    int mcbMap = 0;
-                #else
-                    int mcbMap = mcb_locate();
-                #endif
-                    mcbMapInfo = vec2(float(mcbMap), mcbMap > 0 && mcbMap != 7 ? mcb_fill_right(mcb_info(mcbMap)) : 0.0);
-                    mcbViewTint = mcbMap >= 2 && mcbMap != 7 ? mcb_tint() : vec4(0.0);
-                    mcbMapBase = vec2(mcbBase);
-                #ifdef IS_GUI
-                    mcbSeated = mcb_seated_now();
-                    vertexColor = Color;
-                #if !defined(IS_GUI) && !defined(IS_SEE_THROUGH)
-                    // Before 26.2 this one shader draws GUI text too (see presplit): no fog there.
-                    sphericalVertexDistance = 0.0;
-                    cylindricalVertexDistance = 0.0;
-                #endif
-                #else
-                    mcbSeated = mcb_seated_flag();
-                    vec4 mcbTint = Color;
-                    if (mcbSeated > 0.5) {
-                        // The pointer: text in the pointer's red, its view's columns and rows in green and blue. Drawn white.
-                        ivec3 mcbRgb = ivec3(round(Color.rgb * 255.0));
-                        vec2 mcbGrid = vec2(0.0);
-                        if (mcbRgb.r == @PR@ && mcbRgb.g > 0 && mcbRgb.b > 0) {
-                            mcbPointer = 1.0;
-                            mcbGrid = vec2(mcbRgb.gb);
-                            mcbTint = vec4(1.0, 1.0, 1.0, Color.a);
-                            // It lies ahead of the camera, a level mannequin (Views.spawnCamera). Behind it, F5's view
-                            // from the front has turned that camera exactly half round about the vertical: the pointer is
-                            // turned with it, which puts it where the camera facing the picture would see it.
-                            vec3 mcbLook = -vec3(ModelViewMat[0][2], ModelViewMat[1][2], ModelViewMat[2][2]);
-                            if (dot(Position, mcbLook) < 0.0) gl_Position = ProjMat * ModelViewMat * vec4(-Position.x, Position.y, -Position.z, 1.0);
-                        } else if (mcbRgb.r == @PC@ && mcbRgb.g > 0 && mcbRgb.b > 0) {
-                            // The pointer this client places itself, from where the camera looks.
-                            mcbPointer = 2.0;
-                            // Its alpha is the turn hint (see mcb_client_pointer), not a fade.
-                            mcbTint = vec4(1.0);
-                            gl_Position = mcb_flat(mcb_client_pointer(vec2(mcbRgb.gb) * 128.0));
-                        } else if (mcbMap == 3) {
-                            // Their own view: each map carries its view's columns and rows and its own column and
-                            // row, and goes to its place in the window by those and its corner (the map quad's
-                            // texture coordinates are exactly 0 and 1), wherever its frame is and wherever the
-                            // camera looks. An overlay sends only the maps its panel covers, so nothing is drawn
-                            // round them.
-                            vec2 mcbViewGrid = vec2(float(mcb_symbol(ivec2(2, 0))), float(mcb_symbol(ivec2(3, 0))));
-                            vec2 mcbTile = vec2(float(mcb_symbol(ivec2(2, 1))), float(mcb_symbol(ivec2(3, 1))));
-                            if (mcbTile == vec2(@SIGTILE@)) {
-                                // An overlay's signature map (Palette.markSignature): over the window's four
-                                // bottom-left pixels, which text.fsh writes for the post effect to read.
-                                mcbMapInfo.x = 5.0;
-                                gl_Position = mcb_flat(vec2(-1.0) + vec2(mcbUv.x * 8.0, (1.0 - mcbUv.y) * 2.0) / ScreenSize);
-                            } else {
-                                if (mcb_flag_axis() == 1) mcbMapInfo.x = 6.0;
-                                vec2 mcbAt = (mcbTile + mcbUv) / mcbViewGrid;
-                                gl_Position = mcb_flat(vec2(mcbAt.x * 2.0 - 1.0, 1.0 - mcbAt.y * 2.0));
-                            }
-                        } else if (mcbMap == 7) {
-                            // A hover layer (Palette.markLayer): placed by the canvas pixel its third row starts at, 128
-                            // canvas pixels to its side, but only while this client's pointer is over its element, and
-                            // then with its priority plus one in place of the fill flag, for text.fsh's depth. Otherwise
-                            // it goes behind the far plane, below.
-                            int mcbFlags = mcb_symbol(ivec2(5, 1));
-                            vec2 mcbViewGrid = vec2(float(mcb_symbol(ivec2(2, 0))), float(mcb_symbol(ivec2(3, 0))));
-                            if (mcb_layer_on(mcbViewGrid * 128.0, mcbFlags)) {
-                                mcbMapInfo.y = float(mcbFlags >> 2) + 1.0;
-                                vec2 mcbOrigin = vec2(mcb_layer_edge(2, 1), mcb_layer_edge(14, 0) - 2.0);
-                                vec2 mcbAt = (mcbOrigin + mcbUv * 128.0) / (mcbViewGrid * 128.0);
-                                gl_Position = mcb_flat(vec2(mcbAt.x * 2.0 - 1.0, 1.0 - mcbAt.y * 2.0));
-                            }
-                        }
-                        // Both fill the window whatever its shape and whatever the player's FOV. The picture is centred
-                        // on the camera's axis and square to it, so how far a vertex is from that axis, in blocks, as a
-                        // fraction of half the picture's size, is where it goes in the window.
-                        if (mcbGrid.x > 0.0 && mcbGrid.y > 0.0) {
-                            vec2 mcbBlocks = gl_Position.xy / vec2(ProjMat[0][0], ProjMat[1][1]);
-                            gl_Position.xy = mcbBlocks / (mcbGrid * 0.5) * gl_Position.w;
-                        }
-                    }
-                    // A hover layer not shown, or not seated: every vertex behind the far plane, so it draws no pixel.
-                    if (mcbMap == 7 && mcbMapInfo.y < 0.5) gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
-                    // A view's own maps (3 and up) show only to its seated camera. They lie on the floor or ceiling of
-                    // the camera's block (MapWall.Stack), so a camera not flagged (the frames there a moment before the
-                    // eye is, or a moment after it is put back) drew them where they lie: pieces of the picture, huge,
-                    // round the camera.
-                    if (mcbMap >= 3 && mcbSeated < 0.5) gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
-                    // A view's notice for players whose shaders replace these (Shaders.NOTICE_RGB, NOTICE_ALPHA): never drawn here.
-                    if (ivec4(round(Color * 255.0)) == ivec4(@NOTICE@)) gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
-                #ifdef IS_SEE_THROUGH
-                    // See-through text (text displays with see_through, name tags' faint pass) is drawn with no depth
-                    // test, so over a seated camera's view too, and an overlay keeps what lies on its panel as its own:
-                    // there it moved with the pointer. None for a seated camera (its pointer is not see-through).
-                    if (mcbSeated > 0.5 && mcbPointer < 0.5) gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
-                    vertexColor = mcbTint;
-                #else
-                    sphericalVertexDistance = fog_spherical_distance(Position);
-                    cylindricalVertexDistance = fog_cylindrical_distance(Position);
-                    vertexColor = mcbTint * sample_lightmap(Sampler2, UV2);
-                #endif
-                #endif
-                }
-                """.replace("@PR@", String.valueOf(POINTER_RED)).replace("@PC@", String.valueOf(CLIENT_POINTER_RED))
+        String declarations = include(d, "globals.glsl") + "uniform sampler2D Sampler0;\n";
+        declarations = MERGE_MARKER + "provides CameraBlockPos GlintAlpha CameraOffset GameTime ScreenSize MenuBlurRadius UseRgss\n" + declarations;
+        String gui = d.presplit() ? "    if (mcb_gui()) {\n" : "#ifdef IS_GUI\n";
+        String world = d.presplit() ? "    } else {\n" : "#else\n";
+        String end = d.presplit() ? "    }\n" : "#endif\n";
+        String epilogue = helpers(VERTEX_HELPERS) + FRAGMENT_HELPERS + decoderCore(palette)
+                + (d.presplit() ? "\nbool mcb_gui() { return ProjMat[3][3] == 1.0; }\n" : "")
+                + VERTEX_VIEW.replace("@GRAY@", d.presplit() ? "" : "#ifndef IS_GRAYSCALE\n")
+                        .replace("@ENDGRAY@", d.presplit() ? "" : "#endif\n")
+                        .replace("@SEE@", d.presplit() ? "" : "#ifdef IS_SEE_THROUGH\n")
+                        .replace("@ENDSEE@", d.presplit() ? "" : "#endif\n")
+                        // Before 26.2 see-through text has shaders of its own (seeThroughVsh), never this one.
+                        .replace("@SEEBODY@", d.presplit() ? "" : "    if (mcbSeated > 0.5 && mcbPointer == 0) gl_Position = vec4(0.0, 0.0, 2.0, 1.0);\n")
+                + "\nvoid main() {\n    " + VERTEX_BASE + "();\n" + gui + "    mcb_gui_vertex();\n" + world + "    mcb_world_vertex();\n" + end + "}\n";
+        epilogue = epilogue.replace("@PR@", String.valueOf(POINTER_RED)).replace("@PC@", String.valueOf(CLIENT_POINTER_RED))
                 .replace("@NOTICE@", (NOTICE_RGB >> 16) + ", " + (NOTICE_RGB >> 8 & 255) + ", " + (NOTICE_RGB & 255) + ", " + NOTICE_ALPHA)
                 .replace("@SIGTILE@", SIGNATURE_TILE + ".0")
                 .replace("@SYMBOLS@", String.valueOf(Palette.SYMBOLS))
                 .replace("@SECTORS@", String.valueOf(TURN_SECTORS))
-                .replace("@LAYERSPEED@", String.format(Locale.ROOT, "%.1f", (double) LAYER_SPEED_SCALE)), d);
+                .replace("@LAYERSPEED@", String.format(Locale.ROOT, "%.1f", (double) LAYER_SPEED_SCALE))
+                .replace("@EPOINTER@", String.format(Locale.ROOT, "%.1f", ENCODED_POINTER))
+                .replace("@EVIEW@", String.format(Locale.ROOT, "%.1f", ENCODED_VIEW));
+        return emitAsIs(marked(vanillaTextVsh(d), "vertex", VERTEX_BASE, declarations, epilogue));
     }
+
+    /** text.vsh's own part, after vanilla's main has run: everything a seated player's view and pointer need. */
+    private static final String VERTEX_VIEW = """
+
+            // A point at normalised device coordinates [ndc], one block in front of the camera: in the
+            // clip volume whatever the projection, at the same depth for every vertex (no perspective
+            // warp across a quad). The fragment shader sets the real depth.
+            vec4 mcb_flat(vec2 ndc) {
+                vec4 c = ProjMat * vec4(0.0, 0.0, -1.0, 1.0);
+                return vec4(ndc * c.w, c.z, c.w);
+            }
+
+            // Where the pointer the seated player's client places itself is on a view [size] pixels big: the
+            // view's centre plus [speed] (pixels per degree of turn) times how far the camera has turned from
+            // [ahead] (the axis towards the view), held inside the view. The server works the cursor out the
+            // same way from the rotations the client sends. [hint] is the player's own turn from [ahead] in degrees
+            // as the server last heard it (Views.sendTurnHint), or below -360 for none: F5's view from the front
+            // points the camera exactly the other way to the player (its yaw half round, its pitch negated), which
+            // the camera alone cannot tell from the player having turned round. The player's own look is whichever
+            // of the two is within a quarter turn of the hint; a hint that far out would take a whole quarter turn
+            // inside one round trip, and the server turns the player back at the picture's edge.
+            vec2 mcb_hot(vec2 size, vec3 ahead, float speed, float hint) {
+                vec3 right = vec3(-ahead.z, 0.0, ahead.x);
+                // ModelViewMat is the camera's rotation alone; its third row is minus the look direction.
+                vec3 look = normalize(-vec3(ModelViewMat[0][2], ModelViewMat[1][2], ModelViewMat[2][2]));
+                if (hint > -360.0) {
+                    float h = radians(hint);
+                    if (dot(look, ahead * cos(h) + right * sin(h)) < 0.0) look = -look;
+                }
+                vec2 turn = degrees(vec2(atan(dot(look, right), dot(look, ahead)), asin(clamp(-look.y, -1.0, 1.0))));
+                return clamp(size * 0.5 + turn * speed, vec2(0.0), size - 1.0);
+            }
+
+            // The pointer the seated player's client places itself, on a view [size] pixels big. Its text
+            // sits ahead of the camera on the flagged axis, towards the view, 0.5 + speed / 512 blocks away
+            // (speed in pixels per degree of turn), square to that axis: so a vertex's offset across the axis
+            // is the glyph's own, from its hot pixel (mcb_hot), at 128 pixels to a block.
+            // On an overlay (flag 1) every axis is flagged: the text's own offset says which is ahead, as the glyph
+            // is far smaller than its distance.
+            vec2 mcb_client_pointer(vec2 size) {
+                int flagAxis = mcb_flag_axis();
+                bool alongX = flagAxis == 0 || (flagAxis == 1 && abs(Position.x) > abs(Position.z));
+                vec3 axis = alongX ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 0.0, 1.0);
+                float along = dot(Position, axis);
+                vec3 ahead = axis * sign(along);
+                vec3 right = vec3(-ahead.z, 0.0, ahead.x);
+                // Its text's opacity is the hint (Shaders.turnHint): 128 plus the sector, anything else none.
+                int sector = int(round(Color.a * 255.0)) - 128;
+                float hint = sector >= 0 && sector < @SECTORS@ ? float(sector) * (360.0 / float(@SECTORS@)) : -1000.0;
+                vec2 hot = mcb_hot(size, ahead, (abs(along) - 0.5) * 512.0, hint);
+                vec2 px = hot + vec2(dot(Position, right), -Position.y) * 128.0;
+                return vec2(px.x / size.x * 2.0 - 1.0, 1.0 - px.y / size.y * 2.0);
+            }
+
+            // A hover layer's rectangle in canvas pixels, [left, right) x [top, bottom), from the four 2x2 blocks'
+            // worth of symbols from x = [at] (Palette.markLayer): each edge two symbols, high then low.
+            float mcb_layer_edge(int x, int y) { return float(mcb_symbol(ivec2(x, y)) * @SYMBOLS@ + mcb_symbol(ivec2(x + 1, y))); }
+            vec4 mcb_layer_rect(int at) { return vec4(mcb_layer_edge(at, 0), mcb_layer_edge(at, 1), mcb_layer_edge(at + 2, 0), mcb_layer_edge(at + 2, 1)); }
+            bool mcb_layer_in(vec2 p, vec4 r) { return p.x >= r.x && p.y >= r.y && p.x < r.z && p.y < r.w; }
+
+            // Whether a hover layer shows now: the client's pointer, worked out as the pointer's own from the speed,
+            // axis and side the layer carries ([flags]: 2 for z, 1 for facing it from the positive side), is inside
+            // its include rectangle and outside its exclude one.
+            bool mcb_layer_on(vec2 size, int flags) {
+                float speed = float((mcb_symbol(ivec2(4, 0)) * @SYMBOLS@ + mcb_symbol(ivec2(5, 0))) * @SYMBOLS@ + mcb_symbol(ivec2(4, 1))) / @LAYERSPEED@;
+                vec3 axis = (flags & 2) == 0 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 0.0, 1.0);
+                // The quarter-turn hint (Palette.markLayer, Shaders.turnQuarter): 0 for none.
+                int quarter = mcb_symbol(ivec2(14, 1));
+                vec2 hot = mcb_hot(size, (flags & 1) == 1 ? -axis : axis, speed, quarter > 0 ? float(quarter - 1) * 90.0 : -1000.0);
+                return mcb_layer_in(hot, mcb_layer_rect(6)) && !mcb_layer_in(hot, mcb_layer_rect(10));
+            }
+
+            // Which of our maps this vertex's quad shows (mcb_screen_map), with mcbBase set to where that map starts in
+            // Sampler0 and mcbUv to which of its corners this vertex is. ImmediatelyFast (a client mod) draws every
+            // map from one big texture by default ("map_atlas_generation"), each 128 x 128 square of it a map, the
+            // quad's texture coordinates that square's: a corner there is a corner of up to four maps. A view's maps
+            // all hang in the camera's block, on its floor or ceiling (MapWall.Stack), so which corner of the block a
+            // vertex is says which of its map it is: u runs along x on both, v along z on the floor and against it
+            // on the ceiling (ItemFrameRenderer, rotation 0). Any other map of ours in such a texture (a wall's)
+            // is -1: drawn where it hangs, it needs nothing from here, and text.fsh finds it pixel by pixel.
+            vec2 mcbUv;
+            int mcb_locate() {
+                mcbUv = UV0;
+                int textureKind = mcb_texture();
+                if (textureKind != 2) return textureKind == 1 ? mcb_screen_map() : 0;
+                ivec2 size = textureSize(Sampler0, 0);
+                vec2 at = UV0 * vec2(size) / 128.0, k = round(at);
+                if (any(greaterThan(abs(at - k), vec2(0.001)))) return 0;
+                vec3 rel = Position - CameraOffset;
+                if (mcb_flag_axis() >= 0 && all(greaterThan(rel, vec3(-0.01))) && all(lessThan(rel, vec3(1.01)))) {
+                    vec2 corner = vec2(rel.x > 0.5 ? 1.0 : 0.0, (rel.y < 0.5) == (rel.z > 0.5) ? 1.0 : 0.0);
+                    mcbBase = ivec2(k - corner) * 128;
+                    if (mcb_in_texture(mcbBase, size)) {
+                        int kind = mcb_screen_map();
+                        if (kind >= 3) {
+                            mcbUv = corner;
+                            return kind;
+                        }
+                    }
+                }
+                mcbBase = ivec2(0);
+                return 0;
+            }
+
+            // The tint's four symbols (Palette.markTint): red, green, blue and alpha in the 2x2 block after the view's size.
+            ivec4 mcb_tint_symbols() {
+                return ivec4(mcb_symbol(ivec2(4, 0)), mcb_symbol(ivec2(5, 0)), mcb_symbol(ivec2(4, 1)), mcb_symbol(ivec2(5, 1)));
+            }
+
+            // GUI text: the XP level over the hotbar is hidden while seated, like the rest of the HUD (position_tex_color).
+            void mcb_gui_vertex() {
+                if (mcb_seated_now() > 0.5) {
+                    vec2 mcbPos = (ModelViewMat * vec4(Position, 1.0)).xy;
+                    vec2 mcbSize = mcb_gui_size();
+                    float cx = floor(mcbSize.x / 2.0);
+                    if (mcb_in(mcbPos, vec2(cx - 40.0, mcbSize.y - 40.0), vec2(cx + 40.0, mcbSize.y - 22.0))) vertexColor.a = 0.0;
+                }
+            }
+
+            void mcb_world_vertex() {
+                float mcbSeated = mcb_seated_flag();
+                bool mcbRev = mcb_reversed() > 0.5;
+                int mcbMap = 0;
+            @GRAY@    mcbMap = mcb_locate();
+            @ENDGRAY@    int mcbKind = mcbMap;
+                int mcbPointer = 0;
+                int mcbPriority = 0;
+                if (mcbSeated > 0.5) {
+                    ivec3 mcbRgb = ivec3(round(Color.rgb * 255.0));
+                    vec2 mcbGrid = vec2(0.0);
+                    if (mcbRgb.r == @PR@ && mcbRgb.g > 0 && mcbRgb.b > 0) {
+                        // The pointer: text in the pointer's red, its view's columns and rows in green and blue. Drawn white.
+                        mcbPointer = 1;
+                        mcbGrid = vec2(mcbRgb.gb);
+                        // It lies ahead of the camera, a level mannequin (Views.spawnCamera). Behind it, F5's view
+                        // from the front has turned that camera exactly half round about the vertical: the pointer is
+                        // turned with it, which puts it where the camera facing the picture would see it.
+                        vec3 mcbLook = -vec3(ModelViewMat[0][2], ModelViewMat[1][2], ModelViewMat[2][2]);
+                        if (dot(Position, mcbLook) < 0.0) gl_Position = ProjMat * ModelViewMat * vec4(-Position.x, Position.y, -Position.z, 1.0);
+                    } else if (mcbRgb.r == @PC@ && mcbRgb.g > 0 && mcbRgb.b > 0) {
+                        // The pointer this client places itself, from where the camera looks.
+                        mcbPointer = 2;
+                        gl_Position = mcb_flat(mcb_client_pointer(vec2(mcbRgb.gb) * 128.0));
+                    } else if (mcbMap == 3) {
+                        // Their own view: each map carries its view's columns and rows and its own column and
+                        // row, and goes to its place in the window by those and its corner (the map quad's
+                        // texture coordinates are exactly 0 and 1), wherever its frame is and wherever the
+                        // camera looks. An overlay sends only the maps its panel covers, so nothing is drawn
+                        // round them.
+                        vec2 mcbViewGrid = vec2(float(mcb_symbol(ivec2(2, 0))), float(mcb_symbol(ivec2(3, 0))));
+                        vec2 mcbTile = vec2(float(mcb_symbol(ivec2(2, 1))), float(mcb_symbol(ivec2(3, 1))));
+                        if (mcbTile == vec2(@SIGTILE@)) {
+                            // An overlay's signature map (Palette.markSignature): over the window's four
+                            // bottom-left pixels, which text.fsh writes for the post effect to read.
+                            mcbKind = 5;
+                            gl_Position = mcb_flat(vec2(-1.0) + vec2(mcbUv.x * 8.0, (1.0 - mcbUv.y) * 2.0) / ScreenSize);
+                        } else {
+                            if (mcb_flag_axis() == 1) mcbKind = 6;
+                            vec2 mcbAt = (mcbTile + mcbUv) / mcbViewGrid;
+                            gl_Position = mcb_flat(vec2(mcbAt.x * 2.0 - 1.0, 1.0 - mcbAt.y * 2.0));
+                        }
+                    } else if (mcbMap == 7) {
+                        // A hover layer (Palette.markLayer): placed by the canvas pixel its third row starts at, 128
+                        // canvas pixels to its side, but only while this client's pointer is over its element, and
+                        // then with its priority plus one, for text.fsh's depth. Otherwise it goes behind the far
+                        // plane, below.
+                        int mcbFlags = mcb_symbol(ivec2(5, 1));
+                        vec2 mcbViewGrid = vec2(float(mcb_symbol(ivec2(2, 0))), float(mcb_symbol(ivec2(3, 0))));
+                        if (mcb_layer_on(mcbViewGrid * 128.0, mcbFlags)) {
+                            mcbPriority = (mcbFlags >> 2) + 1;
+                            vec2 mcbOrigin = vec2(mcb_layer_edge(2, 1), mcb_layer_edge(14, 0) - 2.0);
+                            vec2 mcbAt = (mcbOrigin + mcbUv * 128.0) / (mcbViewGrid * 128.0);
+                            gl_Position = mcb_flat(vec2(mcbAt.x * 2.0 - 1.0, 1.0 - mcbAt.y * 2.0));
+                        }
+                    }
+                    // Both fill the window whatever its shape and whatever the player's FOV. The picture is centred
+                    // on the camera's axis and square to it, so how far a vertex is from that axis, in blocks, as a
+                    // fraction of half the picture's size, is where it goes in the window.
+                    if (mcbGrid.x > 0.0 && mcbGrid.y > 0.0) {
+                        vec2 mcbBlocks = gl_Position.xy / vec2(ProjMat[0][0], ProjMat[1][1]);
+                        gl_Position.xy = mcbBlocks / (mcbGrid * 0.5) * gl_Position.w;
+                    }
+                }
+                // A hover layer not shown, or not seated: every vertex behind the far plane, so it draws no pixel.
+                if (mcbMap == 7 && mcbPriority == 0) gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
+                // A view's own maps (3 and up) show only to its seated camera. They lie on the floor or ceiling of
+                // the camera's block (MapWall.Stack), so a camera not flagged (the frames there a moment before the
+                // eye is, or a moment after it is put back) drew them where they lie: pieces of the picture, huge,
+                // round the camera.
+                if (mcbMap >= 3 && mcbSeated < 0.5) gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
+                // A view's notice for players whose shaders replace these (Shaders.NOTICE_RGB, NOTICE_ALPHA): never drawn here.
+                if (ivec4(round(Color * 255.0)) == ivec4(@NOTICE@)) gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
+            @SEE@    // See-through text (text displays with see_through, name tags' faint pass) is drawn with no depth
+                // test, so over a seated camera's view too, and an overlay keeps what lies on its panel as its own:
+                // there it moved with the pointer. None for a seated camera (its pointer is not see-through).
+            @SEEBODY@@ENDSEE@    if (mcbPointer > 0) {
+                    // Drawn white under whatever light the vertex shader before ours gave the text (its red over the
+                    // text's own), at the server pointer's opacity; the client pointer's opacity is its turn hint.
+                    float mcbLight = clamp(vertexColor.r / max(Color.r, 0.004), 0.0, 1.0);
+                    float mcbAlpha = mcbPointer == 1 ? Color.a : 1.0;
+                    vertexColor = vec4(vec3(mcbLight), @EPOINTER@ * float(mcbPointer) + (mcbRev ? 8.0 : 0.0) + mcbAlpha);
+                } else if (mcbMap >= 3) {
+                    bool mcbFill = mcbMap != 7 && mcb_fill_right(mcb_info(mcbMap)) > 0.5;
+                    ivec4 mcbTint = mcbMap != 7 ? mcb_tint_symbols() : ivec4(0);
+                    int mcbRed = mcbKind | (mcbFill ? 8 : 0) | (mcbPriority << 4) | (mcbRev ? 1024 : 0);
+                    vertexColor = vec4(float(mcbRed), float(mcbBase.x / 128 + 64 * (mcbBase.y / 128)),
+                                       float(mcbTint.x * 256 + mcbTint.y), @EVIEW@ + float(mcbTint.z * 256 + mcbTint.w));
+                }
+            }
+            """;
 
     /**
      * Map colour to symbol, and which maps are ours: both text shaders need it, the vertex one to find
@@ -858,274 +1174,220 @@ public final class Shaders {
                 .replace("@M3@", ivec3(palette.markerRgb[3]));
     }
 
+    /**
+     * {@code text.fsh}: vanilla's, with ours run first ({@link #marked}). Ours draws a map of ours and a seated player's
+     * pointer and returns; anything else is vanilla's (or, merged, the other plugin's) to draw. It reads nothing vanilla's
+     * vertex shader does not write: a view and the pointer come in {@code vertexColor} ({@link #ENCODED_VIEW}), and a map
+     * on a wall is found here, pixel by pixel, by its marker, so walls draw whoever's text.vsh runs.
+     */
     public static String textFsh(Dialect d, Palette palette) {
-        String head = """
-                #version 330
-                #extension GL_ARB_separate_shader_objects : require
-
-                #if !defined(IS_GUI) && !defined(IS_SEE_THROUGH)
-                #include <minecraft:fog.glsl>
+        boolean oit = d == Dialect.V26_3;
+        String emitBody = oit ? """
+                #ifdef OIT_ALPHA_ONLY
+                    executeAlphaOnlyPhase(depth, c.a);
+                #else
+                #ifdef OIT_ACCUMULATE
+                    c = sampleColorForAccumulation(c);
+                #else
+                    if (pointer && c.a > 0.99) c.rgb = mcb_pointer_code(c.rgb);
                 #endif
-
-                #include <minecraft:dynamictransforms.glsl>
-                """ + (d == Dialect.V26_3 ? "#include <minecraft:oit.glsl>\n" : "") + """
-
-                uniform sampler2D Sampler0;
-
-                #if !defined(IS_GUI) && !defined(IS_SEE_THROUGH)
-                layout(location = 0) in float sphericalVertexDistance;
-                layout(location = 1) in float cylindricalVertexDistance;
+                    fragColor = c;
                 #endif
+                """ : """
+                    if (pointer && c.a > 0.99) c.rgb = mcb_pointer_code(c.rgb);
+                    fragColor = c;
+                """;
+        String epilogue = decoderCore(palette) + POINTER_CODE + FRAGMENT_DECODE + """
 
-                layout(location = 2) in vec4 vertexColor;
-                layout(location = 3) in vec2 texCoord0;
-                layout(location = 4) in vec2 mcbPos;
-                layout(location = 5) flat in vec2 mcbSize;
-                layout(location = 6) flat in float mcbSeated;
-                layout(location = 7) flat in float mcbPointer;
-                layout(location = 8) flat in float mcbReversed;
-                layout(location = 9) flat in vec2 mcbMapInfo;
-                layout(location = 10) flat in vec4 mcbViewTint;
-                layout(location = 11) flat in vec2 mcbMapBase;
-
-                """ + (d == Dialect.V26_3 ? """
-                #ifndef OIT_ALPHA_ONLY
-                layout(location = 0) out vec4 fragColor;
-                #endif
-                """ : "out vec4 fragColor;\n");
-
-        String decoder = decoderCore(palette) + """
-
-                // The screen is almost never drawn at one map pixel per window pixel. Instead of the
-                // nearest pixel (uneven, shimmering text), average the map pixels under this window
-                // pixel's footprint, weighted by overlap. Averaging in YCbCr is exact: the conversion to
-                // RGB is linear. Pixels come in 2x2 blocks that share one chroma value; a footprint at most
-                // two pixels across touches at most 2x2 of them. The first [info] + 1 blocks of the top row
-                // hold data, not picture (the marker, a view's size and place, its tint, a blurred view's
-                // panel): they show the block right of them, or each the block below it, as [fillRight] says
-                // (mcb_fill_right). A transparent block (map colours 0-3, alpha 0) adds no colour: alpha is how
-                // much of the footprint the opaque blocks cover, so a picture's edge against the world is smooth.
-                vec4 mcb_sample(vec2 t, vec2 fw, int info, bool fillRight) {
-                    vec2 halfFw = clamp(fw, vec2(0.02), vec2(2.0)) * 0.5;
-                    vec2 lo = clamp(t - halfFw, vec2(0.0), vec2(128.0));
-                    vec2 hi = clamp(t + halfFw, vec2(0.0), vec2(128.0));
-                    ivec2 b0 = clamp(ivec2(floor(lo * 0.5)), ivec2(0), ivec2(63));
-                    ivec2 b1 = clamp(ivec2(floor((hi - 0.0001) * 0.5)), ivec2(0), ivec2(63));
-                    vec3 acc = vec3(0.0);
-                    float total = 0.0;
-                    float covered = 0.0;
-                    for (int i = 0; i < 4; i++) {
-                        ivec2 b = b0 + ivec2(i & 1, i >> 1);
-                        if (b.x > b1.x || b.y > b1.y) continue;
-                        ivec2 base = b * 2;
-                        vec2 p0 = vec2(base);
-                        vec2 ov0 = max(min(hi, p0 + 1.0) - max(lo, p0), 0.0);
-                        vec2 ov1 = max(min(hi, p0 + 2.0) - max(lo, p0 + 1.0), 0.0);
-                        vec4 w = vec4(ov0.x * ov0.y, ov1.x * ov0.y, ov0.x * ov1.y, ov1.x * ov1.y);
-                        float ws = w.x + w.y + w.z + w.w;
-                        total += ws;
-                        ivec2 src = b.y > 0 || b.x > info ? base : fillRight ? ivec2(2 * info + 2, 0) : ivec2(base.x, 2);
-                        vec4 c00 = texelFetch(Sampler0, mcbBase + src, 0);
-                        if (c00.a < 0.5) continue;
-                        ivec4 s = mcb_symbols(src, c00.rgb);
-                        vec4 luma = vec4(s >> 3) / @LUMAMAX@;
-                        ivec4 digit = s & 7;
-                        vec2 chroma = vec2(float(digit.x * 8 + digit.y - 32), float(digit.z * 8 + digit.w - 32)) / 63.0;
-                        acc += vec3(dot(w, luma), chroma * ws);
-                        covered += ws;
-                    }
-                    if (covered <= 0.0) return vec4(0.0);
-                    vec3 ycc = acc / covered;
-                    return vec4(clamp(vec3(ycc.x + 1.402 * ycc.z, ycc.x - 0.344136 * ycc.y - 0.714136 * ycc.z, ycc.x + 1.772 * ycc.y), 0.0, 1.0),
-                                covered / max(total, 1e-6));
-                }
-
-                // An overlay's signature, for the post effect that keeps the world round its panel (Shaders.overlayChain),
-                // written as the window's four bottom-left pixels: a check, the view's tint, its alpha and the flags (the
-                // signature map's own, Palette.markSignature, and whether depth is reversed), and a second check.
-                vec3 mcb_signature(int i) {
-                    ivec4 t = ivec4(round(clamp(mcbViewTint, 0.0, 1.0) * 255.0));
-                    int flags = mcb_symbol(ivec2(6, 0)) | (mcbReversed > 0.5 ? @SREV@ : 0);
-                    ivec3 c = i == 0 ? ivec3(@SIG0@) : i == 1 ? t.rgb : i == 2 ? ivec3(t.a, flags, 0) : ivec3(0, 0, @SIG3@);
-                    return vec3(c) / 255.0;
-                }
-                // ---- end decoder ----
-
-                bool mcb_in(vec2 p, vec2 a, vec2 b) { return p.x >= a.x && p.x <= b.x && p.y >= a.y && p.y <= b.y; }
-                """
-                .replace("@LUMAMAX@", String.format(Locale.ROOT, "%.1f", (float) (Palette.LUMA_LEVELS - 1)))
-                .replace("@SREV@", String.valueOf(SIGNATURE_REVERSED))
-                .replace("@SIG0@", (SIGNATURE_0 >> 16) + "," + (SIGNATURE_0 >> 8 & 255) + "," + (SIGNATURE_0 & 255))
-                .replace("@SIG3@", String.valueOf(SIGNATURE_3));
-
-        String mainHead = """
+                // Our fragment's colour out, at [depth]: improved transparency's phases (26.3) as vanilla's own, and the
+                // pointer's code for the menu blur to find it by (menuBlurChain), never in the accumulate pass, whose
+                // output is a weighted share, not a colour.
+                void mcb_emit(vec4 c, float depth, bool pointer) {
+                """ + emitBody + "}\n"
+                + (d.presplit() ? FRAGMENT_OURS : "#ifndef IS_GUI\n" + FRAGMENT_OURS + "#endif\n") + """
 
                 void main() {
                     // Derivatives before any branch or discard.
                     vec2 mcbFootprint = fwidth(texCoord0 * 128.0);
-                    float mcbDepth = gl_FragCoord.z;
-                #ifndef IS_GUI
-                    // The pointer, the client's or the server's, is as near as depth goes, in front of the picture (a step
-                    // behind it, below) and of everything.
-                    if (mcbSeated > 0.5 && mcbPointer > 0.5) mcbDepth = mcbReversed > 0.5 ? 1.0 : 0.0;
-                    // A shader that writes gl_FragDepth anywhere must write it on every path.
-                    gl_FragDepth = mcbDepth;
-                #else
-                #if !defined(IS_GUI)
-                    // Before 26.2 this one shader draws GUI text too (see presplit), and writes depth there as well.
-                    gl_FragDepth = mcbDepth;
-                #endif
-                #endif
-                #ifdef IS_GUI
-                    // The XP level over the hotbar, hidden while seated like the rest of the HUD.
-                    if (mcbSeated > 0.5) {
-                        float cx = floor(mcbSize.x / 2.0);
-                        if (mcb_in(mcbPos, vec2(cx - 40.0, mcbSize.y - 40.0), vec2(cx + 40.0, mcbSize.y - 22.0))) discard;
-                    }
-                #endif
-                #ifndef IS_GRAYSCALE
-                    int mcbMap = int(round(mcbMapInfo.x));
-                    // Where this pixel is on its map, in map pixels, and how its data blocks are filled (mcb_fill_right).
-                    vec2 mcbTex = texCoord0 * 128.0;
-                    float mcbFill = mcbMapInfo.y;
-                    if (mcbMap != 0) {
-                        // A texture of many maps (ImmediatelyFast's map atlas, see mcb_locate) puts each in a 128 x 128 square.
-                        vec2 mcbScale = vec2(textureSize(Sampler0, 0)) / 128.0;
-                        mcbFootprint *= mcbScale;
-                        if (mcbMap < 0) {
-                            // One text.vsh left to this shader: the map this pixel is on. Only a screen's map (1) is drawn
-                            // where it hangs; a view's that text.vsh could not place in the window shows nothing.
-                            vec2 mcbAt = texCoord0 * 128.0 * mcbScale;
-                            mcbBase = ivec2(floor(mcbAt / 128.0)) * 128;
-                            mcbTex = mcbAt - vec2(mcbBase);
-                            mcbMap = mcb_screen_map();
-                            if (mcbMap > 1) discard;
-                            // Its marker block shows a neighbour's (mcb_sample), worked out only where that is near.
-                            mcbFill = mcbMap == 1 && mcbTex.x < 4.0 && mcbTex.y < 4.0 ? mcb_fill_right(0) : 0.0;
-                        } else {
-                            mcbBase = ivec2(mcbMapBase);
-                            mcbTex = texCoord0 * 128.0 * mcbScale - mcbMapBase;
-                        }
-                    }
-                    if (mcbMap > 0) {
-                        vec4 mcbColor;
-                        if (mcbMap == 5) {
-                            if (gl_FragCoord.y >= 1.0 || gl_FragCoord.x >= 4.0) discard;
-                            mcbColor = vec4(mcb_signature(int(gl_FragCoord.x)), 1.0);
-                        } else {
-                            // A hover layer (7) shows only while text.vsh places it, and never its top two rows, its
-                            // data: there, and wherever it is transparent, the view under it shows.
-                            if (mcbMap == 7 && (mcbMapInfo.y < 0.5 || mcbTex.y < 2.0)) discard;
-                            // A screen emits its own light: no lightmap, tint or fog, so colours are exact day and night.
-                            vec4 mcbPicture = mcb_sample(mcbTex, mcbFootprint, mcb_info(mcbMap), mcbMap != 7 && mcbFill > 0.5);
-                            // An overlay's panel (6) is there or not, never blended with the world behind it: round it the
-                            // post effect shows the world as it was, tinted there. A hover layer likewise over its view.
-                            if (mcbMap >= 6) mcbPicture = mcbPicture.a < 0.5 ? vec4(0.0) : vec4(mcbPicture.rgb, 1.0);
-                            // Where the picture is transparent the world behind shows, on someone's own view under its
-                            // tint: the picture over the tint over the world, as one colour blended over the world.
-                            vec4 mcbTint = mcbMap >= 2 && mcbMap < 6 && mcbPicture.a < 1.0 ? mcbViewTint : vec4(0.0);
-                            float mcbAlpha = 1.0 - (1.0 - mcbPicture.a) * (1.0 - mcbTint.a);
-                            if (mcbAlpha < 0.002) discard;
-                            mcbColor = vec4((mcbPicture.rgb * mcbPicture.a + mcbTint.rgb * (mcbTint.a * (1.0 - mcbPicture.a))) / max(mcbAlpha, 0.002), mcbAlpha);
-                        }
-                #ifndef IS_GUI
-                        if (mcbMap >= 2 && mcbSeated > 0.5) {
-                            // A view (3, 6) is just behind its pointer, in front of all else: its frames are at the
-                            // camera, so its own depth means nothing. A signature (5) is nearest. A hover layer (7) is a
-                            // step or more in front of its view, the higher its priority (mcbMapInfo.y, which is that plus
-                            // one) the nearer, and still behind the pointer, whichever is drawn first. No block between
-                            // the camera and the picture needs clearing.
-                            float mcbStep = mcbMap == 7 ? mcbMapInfo.y * 1.2e-7 : 0.0;
-                            mcbDepth = mcbMap == 5 ? (mcbReversed > 0.5 ? 1.0 : 0.0)
-                                : (mcbReversed > 0.5 ? 0.99999 + mcbStep : 0.00001 - mcbStep);
-                            gl_FragDepth = mcbDepth;
-                        }
-                #endif
-                """;
-
-        String tail = d == Dialect.V26_3 ? """
-                #ifdef OIT_ALPHA_ONLY
-                        executeAlphaOnlyPhase(mcbDepth, mcbColor.a);
-                #else
-                #ifdef OIT_ACCUMULATE
-                        mcbColor = sampleColorForAccumulation(mcbColor);
-                #endif
-                        fragColor = mcbColor;
-                #endif
-                        return;
-                    }
-                #endif
-
-                #ifdef IS_GRAYSCALE
-                    vec4 texColor = texture(Sampler0, texCoord0).rrrr;
-                #else
-                    vec4 texColor = texture(Sampler0, texCoord0);
-                    // The pointer font is stored faint (Shaders.POINTER_ALPHA), so only this shader shows it.
-                    if (mcbPointer > 0.5) texColor.a = min(1.0, texColor.a * @PALPHA@);
-                #endif
-                    vec4 color = texColor * vertexColor * ColorModulator;
-                    if (color.a < 0.1) {
-                        discard;
-                    }
-                #ifdef OIT_ALPHA_ONLY
-                    executeAlphaOnlyPhase(mcbDepth, color.a);
-                #else
-                #ifdef OIT_ACCUMULATE
-                    color = sampleColorForAccumulation(color);
-                #endif
-                #if !defined(IS_SEE_THROUGH) && !defined(IS_GUI)
-                #ifdef OIT_ACCUMULATE
-                    vec4 fogColor = vec4(FogColor.rgb * color.a, FogColor.a);
-                #else
-                    vec4 fogColor = FogColor;
-                #endif
-                    color = apply_fog(color, sphericalVertexDistance, cylindricalVertexDistance, FogEnvironmentalStart, FogEnvironmentalEnd, FogRenderDistanceStart, FogRenderDistanceEnd, fogColor);
-                #endif
-                    fragColor = color;
-                #if !defined(IS_GUI) && !defined(OIT_ACCUMULATE)
-                    // The pointer carries a code the menu blur finds it by, to take it out (menuBlurChain). Not in the
-                    // accumulate pass of improved transparency, whose output is a weighted share, not a colour.
-                    if (mcbPointer > 0.5 && fragColor.a > 0.99) fragColor.rgb = mcb_pointer_code(fragColor.rgb);
-                #endif
-                #endif
-                }
+                """ + (d.presplit() ? """
+                    // Before 26.2 this one shader draws GUI and world text, and writes depth for both: a shader that writes
+                    // gl_FragDepth anywhere must on every path.
+                    gl_FragDepth = gl_FragCoord.z;
+                    if (mcb_fragment(mcbFootprint)) return;
                 """ : """
-                        fragColor = mcbColor;
-                        return;
-                    }
-                #endif
-
-                #ifdef IS_GRAYSCALE
-                    vec4 texColor = texture(Sampler0, texCoord0).rrrr;
-                #else
-                    vec4 texColor = texture(Sampler0, texCoord0);
-                    // The pointer font is stored faint (Shaders.POINTER_ALPHA), so only this shader shows it.
-                    if (mcbPointer > 0.5) texColor.a = min(1.0, texColor.a * @PALPHA@);
-                #endif
-                #ifdef IS_SEE_THROUGH
-                    vec4 color = texColor * vertexColor;
-                #else
-                    vec4 color = texColor * vertexColor * ColorModulator;
-                #endif
-                    if (color.a < 0.1) {
-                        discard;
-                    }
-                #ifdef IS_SEE_THROUGH
-                    fragColor = color * ColorModulator;
-                #elif defined(IS_GUI)
-                    fragColor = color;
-                #else
-                    fragColor = apply_fog(color, sphericalVertexDistance, cylindricalVertexDistance, FogEnvironmentalStart, FogEnvironmentalEnd, FogRenderDistanceStart, FogRenderDistanceEnd, FogColor);
-                #endif
                 #ifndef IS_GUI
-                    // The pointer carries a code the menu blur finds it by, to take it out (menuBlurChain).
-                    if (mcbPointer > 0.5 && fragColor.a > 0.99) fragColor.rgb = mcb_pointer_code(fragColor.rgb);
+                    // A shader that writes gl_FragDepth anywhere must write it on every path.
+                    gl_FragDepth = gl_FragCoord.z;
+                #ifndef IS_GRAYSCALE
+                    if (mcb_fragment(mcbFootprint)) return;
                 #endif
-                }
-                """;
-        return emit(head + decoder + POINTER_CODE + mainHead
-                + tail.replace("@PALPHA@", String.format(Locale.ROOT, "%.4f", 255.0 / POINTER_ALPHA)), d);
+                #endif
+                """) + "    " + FRAGMENT_BASE + "();\n}\n";
+        epilogue = epilogue.replace("@LUMAMAX@", String.format(Locale.ROOT, "%.1f", (float) (Palette.LUMA_LEVELS - 1)))
+                .replace("@SYMMAX@", String.format(Locale.ROOT, "%.1f", (float) (Palette.SYMBOLS - 1)))
+                .replace("@SREV@", String.valueOf(SIGNATURE_REVERSED))
+                .replace("@SIG0@", (SIGNATURE_0 >> 16) + "," + (SIGNATURE_0 >> 8 & 255) + "," + (SIGNATURE_0 & 255))
+                .replace("@SIG3@", String.valueOf(SIGNATURE_3))
+                .replace("@PALPHA@", String.format(Locale.ROOT, "%.4f", 255.0 / POINTER_ALPHA))
+                .replace("@EPOINTER@", String.format(Locale.ROOT, "%.1f", ENCODED_POINTER))
+                .replace("@EVIEW@", String.format(Locale.ROOT, "%.1f", ENCODED_VIEW));
+        return emitAsIs(marked(vanillaTextFsh(d), "fragment", FRAGMENT_BASE, "", epilogue));
     }
+
+    /** text.fsh's decoding: a map's pixels averaged under a window pixel, and an overlay's signature. */
+    private static final String FRAGMENT_DECODE = """
+
+            // The screen is almost never drawn at one map pixel per window pixel. Instead of the
+            // nearest pixel (uneven, shimmering text), average the map pixels under this window
+            // pixel's footprint, weighted by overlap. Averaging in YCbCr is exact: the conversion to
+            // RGB is linear. Pixels come in 2x2 blocks that share one chroma value; a footprint at most
+            // two pixels across touches at most 2x2 of them. The first [info] + 1 blocks of the top row
+            // hold data, not picture (the marker, a view's size and place, its tint, a blurred view's
+            // panel): they show the block right of them, or each the block below it, as [fillRight] says
+            // (mcb_fill_right). A transparent block (map colours 0-3, alpha 0) adds no colour: alpha is how
+            // much of the footprint the opaque blocks cover, so a picture's edge against the world is smooth.
+            vec4 mcb_sample(vec2 t, vec2 fw, int info, bool fillRight) {
+                vec2 halfFw = clamp(fw, vec2(0.02), vec2(2.0)) * 0.5;
+                vec2 lo = clamp(t - halfFw, vec2(0.0), vec2(128.0));
+                vec2 hi = clamp(t + halfFw, vec2(0.0), vec2(128.0));
+                ivec2 b0 = clamp(ivec2(floor(lo * 0.5)), ivec2(0), ivec2(63));
+                ivec2 b1 = clamp(ivec2(floor((hi - 0.0001) * 0.5)), ivec2(0), ivec2(63));
+                vec3 acc = vec3(0.0);
+                float total = 0.0;
+                float covered = 0.0;
+                for (int i = 0; i < 4; i++) {
+                    ivec2 b = b0 + ivec2(i & 1, i >> 1);
+                    if (b.x > b1.x || b.y > b1.y) continue;
+                    ivec2 base = b * 2;
+                    vec2 p0 = vec2(base);
+                    vec2 ov0 = max(min(hi, p0 + 1.0) - max(lo, p0), 0.0);
+                    vec2 ov1 = max(min(hi, p0 + 2.0) - max(lo, p0 + 1.0), 0.0);
+                    vec4 w = vec4(ov0.x * ov0.y, ov1.x * ov0.y, ov0.x * ov1.y, ov1.x * ov1.y);
+                    float ws = w.x + w.y + w.z + w.w;
+                    total += ws;
+                    ivec2 src = b.y > 0 || b.x > info ? base : fillRight ? ivec2(2 * info + 2, 0) : ivec2(base.x, 2);
+                    vec4 c00 = texelFetch(Sampler0, mcbBase + src, 0);
+                    if (c00.a < 0.5) continue;
+                    ivec4 s = mcb_symbols(src, c00.rgb);
+                    vec4 luma = vec4(s >> 3) / @LUMAMAX@;
+                    ivec4 digit = s & 7;
+                    vec2 chroma = vec2(float(digit.x * 8 + digit.y - 32), float(digit.z * 8 + digit.w - 32)) / 63.0;
+                    acc += vec3(dot(w, luma), chroma * ws);
+                    covered += ws;
+                }
+                if (covered <= 0.0) return vec4(0.0);
+                vec3 ycc = acc / covered;
+                return vec4(clamp(vec3(ycc.x + 1.402 * ycc.z, ycc.x - 0.344136 * ycc.y - 0.714136 * ycc.z, ycc.x + 1.772 * ycc.y), 0.0, 1.0),
+                            covered / max(total, 1e-6));
+            }
+
+            // An overlay's signature, for the post effect that keeps the world round its panel (Shaders.overlayChain),
+            // written as the window's four bottom-left pixels: a check, the view's tint, its alpha and the flags (the
+            // signature map's own, Palette.markSignature, and whether depth is reversed), and a second check.
+            vec3 mcb_signature(int i, vec4 tint, bool reversed) {
+                ivec4 t = ivec4(round(clamp(tint, 0.0, 1.0) * 255.0));
+                int flags = mcb_symbol(ivec2(6, 0)) | (reversed ? @SREV@ : 0);
+                ivec3 c = i == 0 ? ivec3(@SIG0@) : i == 1 ? t.rgb : i == 2 ? ivec3(t.a, flags, 0) : ivec3(0, 0, @SIG3@);
+                return vec3(c) / 255.0;
+            }
+            """;
+
+    /** text.fsh's own drawing: the pointer, a view's maps (from vertexColor), a wall's (found by their marker). */
+    private static final String FRAGMENT_OURS = """
+
+            // Draws this fragment if it is ours and says whether it was: a seated player's pointer or a map of their view
+            // (both told by text.vsh in vertexColor, Shaders.ENCODED_VIEW), or a map of a wall (found here by its marker,
+            // whoever's text.vsh ran). Anything else is left to the text shader we were put after.
+            bool mcb_fragment(vec2 mcbFootprint) {
+                vec4 code = vertexColor;
+                if (code.w >= @EPOINTER@ - 0.5 && code.w < @EVIEW@ - 0.5) {
+                    // A seated player's pointer, drawn white, as near as depth goes, in front of the picture and of all else.
+                    int kind = int(floor(code.w / @EPOINTER@));
+                    float rest = code.w - @EPOINTER@ * float(kind);
+                    bool reversed = rest > 4.0;
+                    float alpha = clamp(rest - (reversed ? 8.0 : 0.0), 0.0, 1.0);
+                    vec4 tex = texture(Sampler0, texCoord0);
+                    // The pointer font is stored faint (Shaders.POINTER_ALPHA), so only this shader shows it.
+                    tex.a = min(1.0, tex.a * @PALPHA@);
+                    vec4 color = tex * vec4(code.rgb, alpha) * ColorModulator;
+                    if (color.a < 0.1) discard;
+                    float depth = reversed ? 1.0 : 0.0;
+                    gl_FragDepth = depth;
+                    mcb_emit(color, depth, true);
+                    return true;
+                }
+                int mcbMap;
+                bool mcbFill;
+                int mcbPriority = 0;
+                bool mcbRev = false;
+                vec4 mcbViewTint = vec4(0.0);
+                vec2 mcbScale = vec2(textureSize(Sampler0, 0)) / 128.0;
+                vec2 mcbTex;
+                if (code.w >= @EVIEW@ - 0.5) {
+                    // A map of someone's own view, placed in their window by text.vsh.
+                    int red = int(round(code.r));
+                    int green = int(round(code.g));
+                    int blue = int(round(code.b));
+                    int alpha = int(round(code.w - @EVIEW@));
+                    mcbMap = red & 7;
+                    mcbFill = (red & 8) != 0;
+                    mcbPriority = (red >> 4) & 63;
+                    mcbRev = (red & 1024) != 0;
+                    mcbBase = ivec2(green % 64, green / 64) * 128;
+                    mcbViewTint = vec4(float(blue >> 8), float(blue & 255), float(alpha >> 8), float(alpha & 255)) / @SYMMAX@;
+                    mcbTex = texCoord0 * 128.0 * mcbScale - vec2(mcbBase);
+                } else {
+                    // Maybe a map on a wall. One map's own texture is 128 x 128; a texture of many (ImmediatelyFast's map
+                    // atlas, or a font page as square) puts each in a 128 x 128 square, found pixel by pixel.
+                    int textureKind = mcb_texture();
+                    if (textureKind == 0) return false;
+                    vec2 mcbAt = texCoord0 * 128.0 * mcbScale;
+                    mcbBase = textureKind == 1 ? ivec2(0) : ivec2(floor(mcbAt / 128.0)) * 128;
+                    if (!mcb_in_texture(mcbBase, textureSize(Sampler0, 0))) return false;
+                    mcbMap = mcb_screen_map();
+                    if (mcbMap == 0) return false;
+                    // A view's map that no vertex shader of ours placed (one not seated, or another text.vsh): pieces of
+                    // the picture where its frame lies, never wanted.
+                    if (mcbMap > 1) discard;
+                    mcbTex = mcbAt - vec2(mcbBase);
+                    // Its marker block shows a neighbour's (mcb_sample), worked out only where that is near.
+                    mcbFill = mcbTex.x < 4.0 && mcbTex.y < 4.0 && mcb_fill_right(0) > 0.5;
+                }
+                mcbFootprint *= mcbScale;
+                vec4 mcbColor;
+                float mcbDepth = gl_FragCoord.z;
+                if (mcbMap == 5) {
+                    if (gl_FragCoord.y >= 1.0 || gl_FragCoord.x >= 4.0) discard;
+                    mcbColor = vec4(mcb_signature(int(gl_FragCoord.x), mcbViewTint, mcbRev), 1.0);
+                } else {
+                    // A hover layer (7) shows only while text.vsh places it, and never its top two rows, its
+                    // data: there, and wherever it is transparent, the view under it shows.
+                    if (mcbMap == 7 && (mcbPriority == 0 || mcbTex.y < 2.0)) discard;
+                    // A screen emits its own light: no lightmap, tint or fog, so colours are exact day and night.
+                    vec4 mcbPicture = mcb_sample(mcbTex, mcbFootprint, mcb_info(mcbMap), mcbMap != 7 && mcbFill);
+                    // An overlay's panel (6) is there or not, never blended with the world behind it: round it the
+                    // post effect shows the world as it was, tinted there. A hover layer likewise over its view.
+                    if (mcbMap >= 6) mcbPicture = mcbPicture.a < 0.5 ? vec4(0.0) : vec4(mcbPicture.rgb, 1.0);
+                    // Where the picture is transparent the world behind shows, on someone's own view under its
+                    // tint: the picture over the tint over the world, as one colour blended over the world.
+                    vec4 mcbTint = mcbMap >= 2 && mcbMap < 6 && mcbPicture.a < 1.0 ? mcbViewTint : vec4(0.0);
+                    float mcbAlpha = 1.0 - (1.0 - mcbPicture.a) * (1.0 - mcbTint.a);
+                    if (mcbAlpha < 0.002) discard;
+                    mcbColor = vec4((mcbPicture.rgb * mcbPicture.a + mcbTint.rgb * (mcbTint.a * (1.0 - mcbPicture.a))) / max(mcbAlpha, 0.002), mcbAlpha);
+                }
+                if (mcbMap >= 2) {
+                    // A view (3, 6) is just behind its pointer, in front of all else: its frames are at the
+                    // camera, so its own depth means nothing. A signature (5) is nearest. A hover layer (7) is a
+                    // step or more in front of its view, the higher its priority the nearer, and still behind the
+                    // pointer, whichever is drawn first. No block between the camera and the picture needs clearing.
+                    float mcbStep = mcbMap == 7 ? float(mcbPriority) * 1.2e-7 : 0.0;
+                    mcbDepth = mcbMap == 5 ? (mcbRev ? 1.0 : 0.0) : (mcbRev ? 0.99999 + mcbStep : 0.00001 - mcbStep);
+                    gl_FragDepth = mcbDepth;
+                }
+                mcb_emit(mcbColor, mcbDepth, false);
+                return true;
+            }
+            """;
 
     // ---------------------------------------------------------------- the pointer, out of the menu blur
 

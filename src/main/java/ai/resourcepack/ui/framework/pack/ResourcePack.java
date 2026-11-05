@@ -75,7 +75,15 @@ public final class ResourcePack implements AutoCloseable {
     /** The server's threads: HttpServer.stop() leaves an executor it was given running. */
     private ExecutorService executor;
 
+    /** Whose text shader the pack has merged in, as {@link ForeignShaders#scan} found it, or null. */
+    public final ForeignShaders.Found mergedWith;
+
     public ResourcePack(Settings settings, Palette palette, Path dataFolder, Logger logger) throws IOException {
+        this(settings, palette, dataFolder, logger, List.of());
+    }
+
+    /** [foreign]: other plugins' packs that replace the text shader ({@link ForeignShaders#scan}), merged in if one. */
+    public ResourcePack(Settings settings, Palette palette, Path dataFolder, Logger logger, List<ForeignShaders.Found> foreign) throws IOException {
         this.settings = settings;
         this.logger = logger;
         Path sounds = dataFolder.resolve("sounds");
@@ -83,7 +91,31 @@ public final class ResourcePack implements AutoCloseable {
         Path cursors = dataFolder.resolve("cursors");
         Files.createDirectories(cursors);
         loadCursors(cursors, logger);
-        this.bytes = build(palette, sounds, logger);
+        byte[] built = build(palette, sounds, logger);
+        ForeignShaders.Found with = null;
+        if (settings.mergeShaders && foreign.size() == 1) {
+            ForeignShaders.Found theirs = foreign.get(0);
+            ForeignShaders.Result r = ForeignShaders.merge(built, theirs, FORMAT_OLDEST);
+            if (!r.merged().isEmpty()) {
+                built = r.zip();
+                with = theirs;
+                ai.resourcepack.ui.StartupNotes.say(logger, "Shaders", "Merged with " + theirs.plugin() + "'s, so both draw",
+                        "Merged " + theirs.label() + "'s text shader into MC GUI's pack, so both draw, for "
+                                + String.join(", ", r.merged()) + ".");
+            }
+            for (String why : r.refused()) {
+                logger.warning("Could not merge " + theirs.label() + "'s text shader with MC GUI's for " + why
+                        + " There, a player sees whichever of the two packs is on top: MC GUI's pages or " + theirs.plugin() + "'s text shader, not both.");
+            }
+        } else if (settings.mergeShaders && foreign.size() > 1) {
+            List<String> who = new ArrayList<>();
+            for (ForeignShaders.Found f : foreign) who.add(f.label());
+            ai.resourcepack.ui.StartupNotes.warn(logger, "Shaders", "Several plugins replace the text shader: nothing merged",
+                    "More than one other plugin's pack replaces Minecraft's text shader (" + String.join(", ", who)
+                            + "), and MC GUI can merge its own with one of them, not several. A player sees whichever pack is on top.");
+        }
+        this.mergedWith = with;
+        this.bytes = built;
         this.sha1 = sha1(bytes);
         Files.createDirectories(dataFolder);
         Files.write(dataFolder.resolve("pack.zip"), bytes);
@@ -388,7 +420,7 @@ public final class ResourcePack implements AutoCloseable {
                 """.formatted(FORMAT_OLDEST, FORMAT_26_3, String.join(", ", overlays));
     }
 
-    private static byte[] build(Palette palette, Path sounds, Logger logger) throws IOException {
+    static byte[] build(Palette palette, Path sounds, Logger logger) throws IOException {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         try (ZipOutputStream zip = new ZipOutputStream(out)) {
             Entries e = new Entries(zip);
@@ -400,7 +432,6 @@ public final class ResourcePack implements AutoCloseable {
                     e.put(root + d.textShader() + ".vsh", Shaders.textVsh(d, palette));
                     e.put(root + d.textShader() + ".fsh", Shaders.textFsh(d, palette));
                     e.put(root + "position_tex_color.vsh", Shaders.positionTexColorVsh(d));
-                    e.put(root + "position_tex_color.fsh", Shaders.positionTexColorFsh(d));
                     // The world round an overlay's panel, kept still: passes of the outline post effect, which a glowing
                     // display switches on.
                     String post = assets + "uiengine/shaders/post/";

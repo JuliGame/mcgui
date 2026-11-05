@@ -690,19 +690,46 @@ version gets all of MC GUI's files, and what to do if not.
 
 | Plugin | How to merge | Notes |
 |---|---|---|
-| ItemsAdder | `config.yml`: add `MCGUI/pack` under `resource-pack.zip.merge_other_plugins_resourcepacks_folders`, then `/iazip` | Do not list `DialogEngine/drawn-pack` there: Dialog Engine sends its own pack, and merged into the same pack its `position_tex_color` replaces MC GUI's. Turn off `text_effects`, `hide_scoreboard_numbers` and `hide_scoreboard_numbers_old_clients`: they replace the same text shader. Run `/iazip` again after any change and read what MC GUI says in the console. Needs MC GUI 0.6.7 or newer. |
-| Oraxen | copy `plugins/MCGUI/pack.zip` into `plugins/Oraxen/pack/uploads/`, restart | Animated glyphs (`glyphs/animations.yml`) use the text shader too and stop animating. Keep `remove_core_shaders_from_imported_packs: false`. |
+| ItemsAdder | `config.yml`: add `MCGUI/pack` under `resource-pack.zip.merge_other_plugins_resourcepacks_folders`, then `/iazip` | Do not list `DialogEngine/drawn-pack` there: Dialog Engine sends its own pack, and merged into the same pack its `position_tex_color` replaces MC GUI's. `text_effects`, `hide_scoreboard_numbers` and `hide_scoreboard_numbers_old_clients` replace the same text shader: MC GUI merges ItemsAdder's into its own (see below); if the console says it could not, turn them off. Run `/iazip` again after any change and read what MC GUI says in the console. Needs MC GUI 0.6.7 or newer. |
+| Oraxen | copy `plugins/MCGUI/pack.zip` into `plugins/Oraxen/pack/uploads/`, restart | Animated glyphs (`glyphs/animations.yml`) use the text shader too: MC GUI merges it into its own (see below). Keep `remove_core_shaders_from_imported_packs: false`. |
 | Nexo | put `pack.zip` in `plugins/Nexo/pack/external_packs/` and rebuild Nexo's pack | Not tested (paid plugin). |
 | CraftEngine | `config.yml`: add `MCGUI/pack` under `resource-pack.merge-external-folders`, `/ce reload pack` | |
-| BetterHud | `config.yml`: add `MCGUI/pack` under `merge-other-folders` | BetterHud's HUD is drawn by the same text shader, so its HUD and MC GUI's screens cannot both work. |
+| BetterHud | `config.yml`: add `MCGUI/pack` under `merge-other-folders` | BetterHud's HUD is drawn by the same text shader: MC GUI merges the two (see below), so both work. |
 | RP Engine | copy the folder `plugins/MCGUI/pack` to `plugins/RPEngine/content/mcgui`, `/rp reload` | |
 | ModelEngine, BetterModel | merge their packs into your pack plugin beside MC GUI's as usual | They do not touch MC GUI's shaders. |
 
-Two plugins that replace the same core shader (`text`, `rendertype_text`,
-`position_tex_color`, the outline or blur post effect) cannot both work: the
-game uses one copy and the other plugin's feature draws nothing. If a page
-says "Your game could not load the resource pack of this server", the merged
-pack failed to load in that player's game; the console says why.
+If a page says "Your game could not load the resource pack of this server", the
+merged pack failed to load in that player's game; the console says why.
+
+### Other plugins' text shaders
+
+HUD and text-effect plugins (BetterHud, HUDEngine, ItemsAdder's text effects,
+Oraxen's and Nexo's animated glyphs) draw through Minecraft's text shader, the
+same file MC GUI's pages are drawn with, and a game keeps only one copy of it.
+MC GUI merges the two:
+
+- **At startup it reads the other plugin's pack** from that plugin's folder (or
+  your pack plugin's), merges that plugin's text shader into its own pack, and
+  says so in the console: `Shaders  Merged with HUDEngine's, so both draw`.
+  Every version MC GUI supports is merged, 1.21.11 to 26.3. A plugin that only
+  writes its pack after MC GUI has started is merged on the next restart, and the
+  console says when one turns up.
+- **MC GUI's pack goes on top.** Sent by MC GUI (`upload` or `serve`), it is sent
+  again over another plugin's pack that arrived after it, once, just before the
+  next page opens (a short resource reload). Merged into a pack plugin's, the
+  merged shader is in overlays listed after the others.
+- **Even unmerged, nothing breaks the pack.** MC GUI's text shaders pass nothing
+  between their two halves that the game's own do not, so another plugin's half
+  beside MC GUI's (HUDEngine's `text.vsh` merged by Nexo, say) no longer makes the
+  game drop every server pack ("Failed to reload resources"). Walls still draw;
+  pages need MC GUI's half on top.
+- With two other plugins that both replace the text shader, nothing is merged
+  (one file cannot hold three plugins' code) and the console names them.
+  `resource-pack.merge-shaders: false` turns merging off.
+
+Other core shaders and post effects (`position_tex_color`, the outline or blur
+post effect) are not merged: two plugins replacing one of those cannot both
+work, and the game uses whichever pack is on top.
 
 ### Client mods
 

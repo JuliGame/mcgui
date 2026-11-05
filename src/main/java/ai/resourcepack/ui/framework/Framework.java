@@ -17,6 +17,7 @@ import ai.resourcepack.ui.framework.net.Pipeline;
 import ai.resourcepack.ui.framework.net.ServerWire;
 import ai.resourcepack.ui.framework.net.SharedCompression;
 import ai.resourcepack.ui.framework.pack.MergeCheck;
+import ai.resourcepack.ui.framework.pack.ForeignShaders;
 import ai.resourcepack.ui.framework.pack.ResourcePack;
 import ai.resourcepack.ui.framework.pack.SiblingShaders;
 import ai.resourcepack.ui.framework.pack.Siblings;
@@ -116,7 +117,19 @@ public final class Framework implements UIFramework, Listener {
         }
         palette = new Palette(nms::mapColor);
         try {
-            pack = new ResourcePack(settings, palette, plugin.getDataFolder().toPath(), plugin.getLogger());
+            // Other plugins' packs that replace the text shader, as they lie on disk now (their last start's): one is
+            // merged into ours so both draw (ForeignShaders).
+            java.nio.file.Path plugins = plugin.getDataFolder().toPath().toAbsolutePath().getParent();
+            java.util.List<ForeignShaders.Found> foreign = settings.mergeShaders && settings.packMode != Settings.PackMode.OFF
+                    ? ForeignShaders.scan(ForeignShaders.folders(plugins, plugin.getDataFolder().toPath(), this::installed), plugins)
+                    : java.util.List.of();
+            pack = new ResourcePack(settings, palette, plugin.getDataFolder().toPath(), plugin.getLogger(), foreign);
+            if (settings.mergeShaders && settings.packMode != Settings.PackMode.OFF) {
+                // A plugin that builds its pack as it starts, after MC GUI has, is merged next start: said once it is seen.
+                java.util.Set<String> seen = new java.util.HashSet<>();
+                for (ForeignShaders.Found f : foreign) seen.add(f.key());
+                tasks.add(Threads.asyncTimer(plugin, () -> foreignLater(plugins, seen), 20 * 60, 20 * 60 * 10));
+            }
             ResourcePack built = pack;
             // So Dialog Engine does not send its pack over ours again each time ours is sent (see ResourcePack.raise).
             Siblings.register(plugin);
@@ -171,6 +184,32 @@ public final class Framework implements UIFramework, Listener {
         }
         UIFramework.Holder.set(this);
         return true;
+    }
+
+    /** Whether a plugin of this name (a data folder's) is installed. */
+    private boolean installed(String name) {
+        for (org.bukkit.plugin.Plugin p : Bukkit.getPluginManager().getPlugins()) {
+            if (p != plugin && p.getDataFolder().getName().equals(name)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Another plugin's pack replacing the text shader that was not on disk when MC GUI started (one that builds its pack
+     * as it starts): merged at the next start, said now. [seen]: what was found at the start, and since (async).
+     */
+    private void foreignLater(java.nio.file.Path plugins, java.util.Set<String> seen) {
+        ResourcePack built = pack;
+        if (built == null) return;
+        java.util.List<ForeignShaders.Found> now = ForeignShaders.scan(ForeignShaders.folders(plugins, plugin.getDataFolder().toPath(), this::installed), plugins);
+        for (ForeignShaders.Found f : now) {
+            if (!seen.add(f.key())) continue;
+            boolean same = built.mergedWith != null && built.mergedWith.plugin().equals(f.plugin());
+            plugin.getLogger().warning(f.label() + " replaces Minecraft's text shader, as MC GUI's pack does, and "
+                    + (same ? "has changed since MC GUI merged it in" : "was not there when MC GUI started")
+                    + ". Restart the server and MC GUI merges it into its own pack, so both draw; until then a player sees "
+                    + "whichever pack is on top.");
+        }
     }
 
     /** Stops it: closes every view, takes down every wall, stops serving the pack. */
@@ -409,7 +448,9 @@ public final class Framework implements UIFramework, Listener {
         // ResourcePack.markBuried and raise).
         if (e.getStatus() == PlayerResourcePackStatusEvent.Status.ACCEPTED) {
             if (ours) pack.markAccepted(id);
-            else if (pack.offers() && Siblings.fromSibling(plugin, e.getID())) siblingAccepted(e.getPlayer(), e.getID());
+            // Any other plugin's pack too: one that replaces our text shader (a HUD plugin's, whose shader may be
+            // merged into ours) buries ours just as a sibling's does, and ours is sent again over it before a page.
+            else if (pack.offers()) siblingAccepted(e.getPlayer(), e.getID());
         }
         // Merged into another plugin's pack, ours never arrives under its own id: that pack is ours too.
         if (!ours && !pack.mergedElsewhere()) return;

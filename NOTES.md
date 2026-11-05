@@ -629,9 +629,43 @@ Reading a position, a world or a UUID is fine from anywhere. How MC GUI copes, a
   `post_effect/entity_outline.json` and `post_effect/blur.json`, and in its
   26.2 overlay `rendertype_clouds.vsh` (overlays and menus, below). So do other plugins
   that draw effects through the text shader. Two packs that both replace
-  `text.fsh` (or a post chain) on one client cannot both work: whichever is
-  applied last wins and the other's feature silently draws nothing. Nothing
-  composes them yet.
+  a post chain on one client cannot both work: whichever is applied last wins
+  and the other's feature silently draws nothing. The text shader is the
+  exception: see the next two bullets.
+- **Our text and position_tex_color shaders write and read only vanilla's varyings** (2026-11-05). Both halves of
+  a core shader are separate files, and a pack stack (or a pack plugin's merge) can give a client one pack's
+  `text.vsh` and another's `text.fsh`. 26.3 then refuses the pipeline ("Vertex shader (minecraft:core/text) missing
+  output at location 6 consumed by Fragment shader"), and the client drops EVERY server pack ("Failed to reload
+  resources"): HUDEngine's `text.vsh` merged with ours by Nexo did exactly that (reproduced in a 26.3 client with a
+  stand-in plugin pushing a HUDEngine-shaped pack after ours; older GL drivers refuse such a link too, NVIDIA's GL
+  alone shrugs). So `text.vsh` tells `text.fsh` what it worked out in vanilla's own `vertexColor`, in values vanilla
+  never writes (`Shaders.ENCODED_POINTER`, `ENCODED_VIEW`: alpha 16-41 a pointer, 65536 and up a map of a view, every
+  field an exact small integer, the same at all four vertices so interpolation keeps it), and a map on a WALL is found
+  by `text.fsh` itself, pixel by pixel, by its marker (as the ImmediatelyFast atlas path already did). With somebody
+  else's `text.vsh`, walls still draw and views do not (they need ours to be placed); with somebody else's
+  `text.fsh`, nothing of ours draws; in neither case does the pack fail. `position_tex_color.vsh` hides the HUD by
+  giving a quad's vertices alpha 0 (vanilla's fragment shader discards alpha 0), so the pack ships no
+  `position_tex_color.fsh` at all. `ShadersTest.ourShadersDeclareOnlyVanillasVaryings` holds this.
+- **Our text shaders are vanilla's plus marked additions, and another plugin's is merged in** (`pack/ForeignShaders`,
+  2026-11-05). `Shaders.textVsh`/`textFsh` are each version's vanilla file with `main` renamed (`mcgui_text_vertex`,
+  `mcgui_text_fragment`) and our code in `// rpai-merge:` blocks (declarations, vanilla's interface, an epilogue whose
+  `main` calls vanilla's first, then ours), the format plugin-common's `ShaderMerge` reads (SHADER-MERGE.md in the
+  ResourcePack AI repository; Studio's shader objects use it with RP Engine). At startup `ForeignShaders.scan` reads
+  every other installed plugin's folder for packs (`ShaderClashes.scan`), drops any text shader file of ours or already
+  merged (a pack plugin's output holds ours beside theirs), and counts one shader found in several places once
+  (HUDEngine's folder and a copy in Nexo's external_packs). With exactly one, `merge` makes our additions to it per
+  version (`MergedShaders.plan`) and adds overlays `uiengine_merged_<format>` listed last, both keys on each entry as
+  ours have (plugin-common's own `into` rewrites the pack section, which would let a 1.21.8 client take the pack).
+  Their `main` runs first, then ours: theirs moves its HUD glyphs, ours places views and the pointer. A plugin whose
+  pack appears after MC GUI started is said in the console when a later look (every 10 minutes) finds it, and merged at the next start
+  (the pack is built once, at enable). Sent by us, our pack must be on top: `Framework.onPack` now treats ANY other
+  pack accepted after ours as a sibling's (`SiblingShaders` reads its file names once per hash, `raise` sends ours
+  again before the next page), not only Dialog Engine's. Checked: BetterHud 2.2.0's real pack and HUDEngine 1.1.0's
+  shaders (both MIT, fixtures in `src/test/resources/foreign-shaders/`) merge on 1.21.11, 26.1, 26.2 and 26.3
+  (`ForeignShadersTest`), every merged and unmerged pairing compiles and links on an RTX 4060 Ti in every variant
+  26.2/26.3 compile (OIT ones included), and in real 1.21.11, 26.2 and 26.3 clients a stand-in HUD plugin's text
+  effect and MC GUI's walls, fullscreen pages, overlays (tint and blur) and the pause-menu pointer removal all work
+  at once.
 - **A merged pack (`external`, blank `public-url`) has to survive another plugin's pack.mcmeta** (2026-10-30).
   The game refuses EVERY overlay without the old `"formats"` key as soon as one entry in the list reaches a
   format below 65 (`PackFormat.validateHolderList`, "must be present in all overlays"), and with them the whole
