@@ -52,6 +52,11 @@ public final class ForeignShaders {
             return plugin + " (" + where + ")";
         }
 
+        /** Whether two packs carry the same text shaders (one plugin's pack found in two places). */
+        public boolean sameShaders(Found other) {
+            return textShaders(pack).equals(textShaders(other.pack));
+        }
+
         /** Where it lies and what its text shaders say: changes when either does. */
         public String key() {
             return label() + "#" + Integer.toHexString(textShaders(pack).hashCode());
@@ -190,5 +195,49 @@ public final class ForeignShaders {
             // No folder to read: nothing found.
         }
         return out;
+    }
+
+    // ---------------------------------------------------------------- the server's own resource pack
+
+    /** Where the server's own resource pack (server.properties resource-pack) is kept once fetched. */
+    public static final String SERVER_PACK = "cache/server-pack.zip";
+
+    /** The largest server pack fetched: a bigger one is not read for a text shader. */
+    private static final long SERVER_PACK_MAX = 256L << 20;
+
+    /**
+     * The server's own resource pack, as last fetched ({@link #fetchServerPack}), if it replaces the text shader: a
+     * pack with text effects of its own (wiggling, coloured or animated text) set in server.properties. The game sends
+     * it before any plugin's, so ours is above it and its effects stopped; merged, both draw.
+     */
+    public static Optional<Found> serverPack(Path dataFolder) {
+        Path zip = dataFolder.resolve(SERVER_PACK);
+        if (!Files.isRegularFile(zip)) return Optional.empty();
+        return PackSource.read("server.properties", zip).map(ForeignShaders::withoutOurs).filter(PackSource::hasTextShader)
+                .map(p -> new Found("the server's resource pack", "server.properties resource-pack", p));
+    }
+
+    /**
+     * Fetches the server's own resource pack from [url] into {@link #SERVER_PACK}, and says whether what is kept there
+     * changed. Off the main thread: a pack can take seconds.
+     */
+    public static boolean fetchServerPack(String url, Path dataFolder) throws IOException, InterruptedException {
+        java.net.http.HttpClient http = java.net.http.HttpClient.newBuilder().connectTimeout(java.time.Duration.ofSeconds(10))
+                .followRedirects(java.net.http.HttpClient.Redirect.NORMAL).build();
+        java.net.http.HttpResponse<java.io.InputStream> response = http.send(java.net.http.HttpRequest.newBuilder(java.net.URI.create(url))
+                .timeout(java.time.Duration.ofSeconds(60)).header("User-Agent", "MCGUI").GET().build(), java.net.http.HttpResponse.BodyHandlers.ofInputStream());
+        byte[] bytes;
+        try (java.io.InputStream in = response.body()) {
+            if (response.statusCode() != 200) throw new IOException("HTTP " + response.statusCode());
+            bytes = in.readNBytes((int) SERVER_PACK_MAX + 1);
+        }
+        if (bytes.length > SERVER_PACK_MAX) throw new IOException("bigger than " + (SERVER_PACK_MAX >> 20) + " MB");
+        Path zip = dataFolder.resolve(SERVER_PACK);
+        if (Files.isRegularFile(zip) && java.util.Arrays.equals(Files.readAllBytes(zip), bytes)) return false;
+        Files.createDirectories(zip.getParent());
+        Path tmp = zip.resolveSibling("server-pack.zip.part");
+        Files.write(tmp, bytes);
+        Files.move(tmp, zip, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        return true;
     }
 }

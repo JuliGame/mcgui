@@ -709,8 +709,10 @@ same file MC GUI's pages are drawn with, and a game keeps only one copy of it.
 MC GUI merges the two:
 
 - **At startup it reads the other plugin's pack** from that plugin's folder (or
-  your pack plugin's), merges that plugin's text shader into its own pack, and
-  says so in the console: `Shaders  Merged with HUDEngine's, so both draw`.
+  your pack plugin's), or the server's own pack (`resource-pack` in
+  server.properties, fetched in the background and merged from the next start),
+  merges that text shader into its own pack, and says so in the console:
+  `Shaders  Merged with HUDEngine's, so both draw`.
   Every version MC GUI supports is merged, 1.21.11 to 26.3. A plugin that only
   writes its pack after MC GUI has started is merged on the next restart, and the
   console says when one turns up.

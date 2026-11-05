@@ -658,7 +658,9 @@ Reading a position, a world or a UUID is fine from anywhere. How MC GUI copes, a
   ours have (plugin-common's own `into` rewrites the pack section, which would let a 1.21.8 client take the pack).
   Their `main` runs first, then ours: theirs moves its HUD glyphs, ours places views and the pointer. A plugin whose
   pack appears after MC GUI started is said in the console when a later look (every 10 minutes) finds it, and merged at the next start
-  (the pack is built once, at enable). Sent by us, our pack must be on top: `Framework.onPack` now treats ANY other
+  (the pack is built once, at enable). The server's own pack (server.properties `resource-pack`) counts too: fetched
+  off the main thread into `cache/server-pack.zip` soon after start and every 6 hours, merged from that copy at the next
+  start (checked in a 26.3 client: its text effect off under ours before, both drawing after). Sent by us, our pack must be on top: `Framework.onPack` now treats ANY other
   pack accepted after ours as a sibling's (`SiblingShaders` reads its file names once per hash, `raise` sends ours
   again before the next page), not only Dialog Engine's. Checked: BetterHud 2.2.0's real pack and HUDEngine 1.1.0's
   shaders (both MIT, fixtures in `src/test/resources/foreign-shaders/`) merge on 1.21.11, 26.1, 26.2 and 26.3
