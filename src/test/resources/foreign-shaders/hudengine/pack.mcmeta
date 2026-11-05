@@ -1,0 +1,1 @@
+{"pack": {"description": "HUDEngine", "min_format": 69, "max_format": 99}, "overlays": {"entries": [{"directory": "ubo330", "min_format": 69, "max_format": 83}, {"directory": "lightmap", "min_format": 84, "max_format": 87}, {"directory": "text", "min_format": 88, "max_format": 96}]}}

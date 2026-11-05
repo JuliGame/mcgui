@@ -15,6 +15,8 @@ public final class Settings {
     public final String packPublicUrl;
     public final boolean packRequired;
     public final String packPrompt;
+    /** Whether another plugin's text shader is merged into the pack, so both draw (pack/ForeignShaders). */
+    public final boolean mergeShaders;
     public final int bytesPerSecond;
     public final double viewDistance;
     public final double reach;
@@ -59,6 +61,7 @@ public final class Settings {
         packPublicUrl = c.getString("resource-pack.public-url", "");
         packRequired = c.getBoolean("resource-pack.required", false);
         packPrompt = c.getString("resource-pack.prompt", "This server's screens need a small resource pack for full colour.");
+        mergeShaders = c.getBoolean("resource-pack.merge-shaders", true);
         bytesPerSecond = Math.max(64 * 1024, c.getInt("screens.max-bytes-per-second-per-player", 8_000_000));
         viewDistance = c.getDouble("screens.view-distance", 48);
         reach = c.getDouble("screens.reach", 8);

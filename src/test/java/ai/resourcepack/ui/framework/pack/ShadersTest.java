@@ -121,8 +121,9 @@ class ShadersTest {
     }
 
     /**
-     * Before 26.2 one text shader draws GUI and world text: no IS_GUI is left to the preprocessor, the GUI's parts are
-     * a run-time test of the projection, and the GUI path writes depth too (a shader that writes it must on every path).
+     * Before 26.2 one text shader draws GUI and world text: no IS_GUI is left to the preprocessor, the vertex shader's
+     * GUI part is a run-time test of the projection, and the fragment shader writes depth on every path (a shader that
+     * writes it must).
      */
     @Test
     void theTextShaderBefore262DrawsGuiAndWorldTextAlike() {
@@ -131,30 +132,51 @@ class ShadersTest {
             String vsh = Shaders.textVsh(d, PALETTE), fsh = Shaders.textFsh(d, PALETTE);
             for (String s : new String[]{vsh, fsh}) {
                 assertFalse(s.contains("IS_GUI") || s.contains("IS_SEE_THROUGH") || s.contains("#if"), d + " left a variant to the preprocessor");
-                assertTrue(s.contains("bool mcb_gui()") && s.contains("if (mcb_gui()) {"), d + " has no run-time GUI test");
             }
-            assertTrue(fsh.contains("projection.glsl"), d + "'s fragment shader cannot see the projection");
-            assertTrue(Pattern.compile("} else \\{\n(//[^\n]*\n)*gl_FragDepth = mcbDepth;").matcher(fsh).find(), d + "'s GUI text writes no depth");
+            assertTrue(vsh.contains("bool mcb_gui()") && vsh.contains("if (mcb_gui()) {"), d + " has no run-time GUI test");
+            assertTrue(fsh.contains("void main() {\n// Derivatives before any branch or discard.\nvec2 mcbFootprint = fwidth(texCoord0 * 128.0);\n"
+                    + "// Before 26.2 this one shader draws GUI and world text, and writes depth for both: a shader that writes\n"
+                    + "// gl_FragDepth anywhere must on every path.\ngl_FragDepth = gl_FragCoord.z;"), d + "'s GUI text writes no depth");
             assertFalse(d.compareTo(Shaders.Dialect.V26_1) < 0 && vsh.contains("sample_lightmap"), d + " has no sample_lightmap");
         }
     }
 
-    private static final Pattern VARYING = Pattern.compile("layout\\(location = (\\d+)\\) (flat )?(in|out) (\\w+) (\\w+);");
-
+    /**
+     * Our text and position_tex_color shaders declare exactly vanilla's varyings, every dialect: what text.vsh tells
+     * text.fsh rides in vanilla's own vertexColor (Shaders.ENCODED_VIEW). So either half of ours links with anybody's other
+     * half; a pack whose two halves do not link is dropped whole by the client.
+     */
     @Test
-    void everyVaryingTextFshReadsTextVshWritesAtTheSameLocation() {
-        String vsh = Shaders.textVsh(Shaders.Dialect.V26_3, PALETTE), fsh = Shaders.textFsh(Shaders.Dialect.V26_3, PALETTE);
-        Map<String, String> outs = new HashMap<>();
-        Matcher m = VARYING.matcher(vsh);
-        while (m.find()) if (m.group(3).equals("out")) outs.put(m.group(5), m.group(1) + " " + m.group(2) + m.group(4));
-        m = VARYING.matcher(fsh);
-        int ins = 0;
-        while (m.find()) {
-            if (!m.group(3).equals("in")) continue;
-            ins++;
-            assertEquals(m.group(1) + " " + m.group(2) + m.group(4), outs.get(m.group(5)), m.group(5));
+    void ourShadersDeclareOnlyVanillasVaryings() {
+        for (Shaders.Dialect d : Shaders.Dialect.values()) {
+            assertEquals(varyings(Shaders.vanillaTextVsh(d)), varyings(Shaders.textVsh(d, PALETTE)), d + " text.vsh");
+            assertEquals(varyings(Shaders.vanillaTextFsh(d)), varyings(Shaders.textFsh(d, PALETTE)), d + " text.fsh");
+            assertEquals(varyings(Shaders.vanillaPositionTexColorVsh(d)), varyings(Shaders.positionTexColorVsh(d)), d + " position_tex_color.vsh");
         }
-        assertTrue(ins >= 10, "found " + ins + " inputs");
+    }
+
+    private static final Pattern VARYING_DECL = Pattern.compile("(?m)^(?:layout\\(location = \\d+\\) )?(?:flat )?(in|out) \\w+ \\w+;");
+
+    private static java.util.Set<String> varyings(String src) {
+        java.util.Set<String> out = new java.util.TreeSet<>();
+        Matcher m = VARYING_DECL.matcher(src.lines().map(String::strip).reduce((x, y) -> x + "\n" + y).orElse(""));
+        while (m.find()) out.add(m.group());
+        return out;
+    }
+
+    /** Our text shaders are vanilla's plus marked additions, the form plugin-common's shader merge reads. */
+    @Test
+    void ourTextShadersCarryMergeMarkers() {
+        for (Shaders.Dialect d : Shaders.Dialect.values()) {
+            String vsh = Shaders.textVsh(d, PALETTE), fsh = Shaders.textFsh(d, PALETTE);
+            for (String[] s : new String[][]{{vsh, "vertex", Shaders.VERTEX_BASE}, {fsh, "fragment", Shaders.FRAGMENT_BASE}}) {
+                assertTrue(s[0].contains("// rpai-merge:begin " + s[1] + "-declarations v1\n"), d + " " + s[1]);
+                assertTrue(s[0].contains("// rpai-merge:begin " + s[1] + "-vanilla v1\n"), d + " " + s[1]);
+                assertTrue(s[0].contains("// rpai-merge:begin " + s[1] + "-epilogue v1\n// rpai-merge:renames main " + s[2] + "\n"), d + " " + s[1]);
+                assertTrue(s[0].contains("void " + s[2] + "() {"), d + " " + s[1]);
+                assertEquals(1, s[0].split("void main\\(\\)", -1).length - 1, d + " " + s[1] + ": one main");
+            }
+        }
     }
 
     /**
@@ -331,7 +353,23 @@ class ShadersTest {
                 assertEquals(d == Shaders.Dialect.V26_3, s.contains("layout(location = 0) in vec2 texCoord;"), s);
             }
             // The code goes on the pointer in both versions, outside 26.3's order-independent transparency.
-            assertTrue(Shaders.textFsh(d, PALETTE).contains("mcb_pointer_code(fragColor.rgb)"));
+            assertTrue(Shaders.textFsh(d, PALETTE).contains("c.rgb = mcb_pointer_code(c.rgb);"));
+        }
+    }
+
+    /**
+     * Writes every text and position_tex_color shader, per dialect, to build/shader-dump/, for a compile and link on a
+     * real driver (the GPU check described in NOTES.md); asserts nothing itself.
+     */
+    @Test
+    void writesTheShadersForTheGpuCheck() throws java.io.IOException {
+        java.nio.file.Path dir = java.nio.file.Path.of("build", "shader-dump");
+        for (Shaders.Dialect d : Shaders.Dialect.values()) {
+            java.nio.file.Path out = dir.resolve(d.name());
+            java.nio.file.Files.createDirectories(out);
+            java.nio.file.Files.writeString(out.resolve("text.vsh"), Shaders.textVsh(d, PALETTE));
+            java.nio.file.Files.writeString(out.resolve("text.fsh"), Shaders.textFsh(d, PALETTE));
+            java.nio.file.Files.writeString(out.resolve("position_tex_color.vsh"), Shaders.positionTexColorVsh(d));
         }
     }
 }

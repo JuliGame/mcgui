@@ -114,7 +114,7 @@ public final class SiblingShaders implements AutoCloseable {
                 return replaces(ours, new ZipInputStream(new Capped(body)));
             }
         } catch (IOException | IllegalArgumentException e) {
-            logger.info("Could not read the pack another ResourcePack AI plugin sent (" + e.getMessage() + "), so it counts as replacing MC GUI's"
+            logger.info("Could not read a pack another plugin sent (" + e.getMessage() + "), so it counts as replacing MC GUI's"
                     + " shaders: a page opened after it sends MC GUI's pack again first.");
             throw new java.util.concurrent.CompletionException(e);
         } catch (InterruptedException e) {
