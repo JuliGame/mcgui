@@ -118,6 +118,15 @@ class RepaintTest {
         assertEquals(w.steps, w.partials, "samples/menu hovers that were not partial");
     }
 
+    /** The radial menu samples: hexagons cut by clip-path, and drawn as SVG polygons the page's CSS fills. */
+    @Test
+    void radialMenuHoversMatch() throws IOException {
+        for (String name : new String[]{"samples/radial-clip.html", "samples/radial-svg.html"}) {
+            Walk w = walk(file(name));
+            assertTrue(w.worst <= 1, name + ": " + w.where);
+        }
+    }
+
     /** Something under two nested backdrops changes on hover, as does a button inside the inner one and the outer panel itself. */
     static final String NESTED = "<html><head><style>body{margin:0;background:linear-gradient(90deg,#f06,#06f 50%,#0c6)}"
             + "div{position:absolute;box-sizing:border-box}"

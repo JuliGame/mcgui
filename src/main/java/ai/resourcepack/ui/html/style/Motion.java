@@ -41,7 +41,8 @@ public final class Motion {
             "border-top-color", "border-right-color", "border-bottom-color", "border-left-color", "width", "height",
             "top", "right", "bottom", "left", "margin-top", "margin-right", "margin-bottom", "margin-left",
             "padding-top", "padding-right", "padding-bottom", "padding-left", "box-shadow", "text-shadow", "filter",
-            "letter-spacing", "font-size", "border-radius", "outline-color", "fill", "stroke");
+            "letter-spacing", "font-size", "border-radius", "outline-color", "fill", "stroke", "fill-opacity", "stroke-opacity",
+            "stroke-width", "clip-path");
 
     /**
      * What a keyframe that does not give a property starts or ends at when the element does not declare it either: the

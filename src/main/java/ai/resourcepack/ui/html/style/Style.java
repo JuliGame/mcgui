@@ -23,6 +23,12 @@ public final class Style {
             "text-decoration-thickness", "direction", "white-space-collapse", "text-wrap", "font-variant", "tab-size", "text-align-last",
             "text-underline-offset", "-webkit-text-stroke-color", "-webkit-text-stroke-width", "quotes", "hyphens");
 
+    /** The SVG presentation properties the page's CSS can set on an inline SVG's elements, kept as written in {@link #svg}. */
+    public static final Set<String> SVG = Set.of("fill", "fill-opacity", "fill-rule", "stroke", "stroke-width", "stroke-opacity",
+            "stroke-linecap", "stroke-linejoin", "stroke-dasharray", "stroke-dashoffset", "stroke-miterlimit", "stop-color", "stop-opacity",
+            "clip-rule", "paint-order", "vector-effect", "shape-rendering", "text-anchor", "dominant-baseline", "flood-color", "flood-opacity",
+            "lighting-color", "marker-start", "marker-mid", "marker-end");
+
     /** Initial values, for {@code initial} and for {@code unset} on a property that is not inherited. */
     static final Map<String, String> INITIAL = new HashMap<>();
 
@@ -32,7 +38,7 @@ public final class Style {
                 "padding-top", "0", "padding-right", "0", "padding-bottom", "0", "padding-left", "0", "top", "auto", "right", "auto",
                 "bottom", "auto", "left", "auto", "background-color", "transparent", "background-image", "none", "opacity", "1",
                 "flex-grow", "0", "flex-shrink", "1", "flex-basis", "auto", "z-index", "auto", "overflow-x", "visible", "overflow-y", "visible",
-                "transform", "none", "box-shadow", "none", "color", "black", "font-size", "16px", "font-weight", "400", "font-style", "normal",
+                "transform", "none", "clip-path", "none", "box-shadow", "none", "color", "black", "font-size", "16px", "font-weight", "400", "font-style", "normal",
                 "line-height", "normal", "text-align", "start", "white-space", "normal", "visibility", "visible", "letter-spacing", "normal",
                 "text-transform", "none", "text-decoration-line", "none", "flex-direction", "row", "flex-wrap", "nowrap",
                 "justify-content", "normal", "align-items", "normal", "align-self", "auto", "align-content", "normal", "order", "0",
@@ -119,6 +125,13 @@ public final class Style {
     // Other
     public String transform = "none";
     public String transformOrigin = "50% 50%";
+    /**
+     * The SVG paint properties ({@link #SVG}) this element's cascade declares, as written, in declaration order; empty for
+     * none. Only an inline SVG's elements read them: written onto its copy for the SVG renderer (see BoxBuilder).
+     */
+    public Map<String, String> svg = Map.of();
+    /** clip-path as written ("none" for none): the paint package reads the shape out of it per box. */
+    public String clipPath = "none";
     public String objectFit = "fill", objectPosition = "50% 50%";
     public String content = "normal";
     public String tableLayout = "auto", borderCollapse = "separate";
@@ -204,7 +217,7 @@ public final class Style {
     private static final Set<String> PAINT_ONLY = Set.of("opacity", "visibility", "backgroundColor", "backgroundImages",
             "backgroundPositions", "backgroundSizes", "backgroundRepeats", "backgroundClips", "boxShadow", "filter", "backdropFilter",
             "color", "textDecorationColor", "textShadow", "textFillColor", "cursor", "cursorImage", "pointerEvents", "borderColor", "borderColorSet",
-            "radius", "zIndex", "transform", "transformOrigin", "objectPosition");
+            "radius", "zIndex", "transform", "transformOrigin", "objectPosition", "clipPath", "svg");
     /** Every other field: what a layout reads. Not the parent, which is compared as an element of its own. */
     private static final java.lang.reflect.Field[] LAYOUT = layoutFields();
 
@@ -312,6 +325,14 @@ public final class Style {
     void apply(String p, String raw) {
         String v = raw.trim();
         String l = v.toLowerCase(Locale.ROOT);
+        if (SVG.contains(p)) {
+            // Kept as written for the SVG renderer; the CSS-wide keywords leave it to the SVG's own inheritance.
+            if (!v.isEmpty() && !l.equals("initial") && !l.equals("inherit") && !l.equals("unset") && !l.equals("revert") && !l.equals("revert-layer")) {
+                if (svg.isEmpty()) svg = new java.util.LinkedHashMap<>();
+                svg.put(p, v);
+            }
+            return;
+        }
         if (l.equals("initial") || l.equals("revert") || l.equals("revert-layer") || (l.equals("unset") && !INHERITED.contains(p))) {
             String init = INITIAL.get(p);
             if (init == null) return;
@@ -509,6 +530,7 @@ public final class Style {
             case "translate" -> transform = (transform.equals("none") ? "" : transform + " ") + "translate(" + v.replace(" ", ",") + ")";
             case "scale" -> transform = (transform.equals("none") ? "" : transform + " ") + "scale(" + v.replace(" ", ",") + ")";
             case "rotate" -> transform = (transform.equals("none") ? "" : transform + " ") + "rotate(" + v + ")";
+            case "clip-path", "-webkit-clip-path" -> clipPath = l.equals("none") ? "none" : v;
             case "object-fit" -> objectFit = l;
             case "object-position" -> objectPosition = v;
             case "content" -> content = v;
@@ -593,6 +615,6 @@ public final class Style {
 
     public boolean createsStackingContext() {
         return (isPositioned() && zIndex != null) || opacity < 1 || !transform.equals("none") || position.equals("fixed")
-                || !filter.equals("none");
+                || !filter.equals("none") || !clipPath.equals("none");
     }
 }

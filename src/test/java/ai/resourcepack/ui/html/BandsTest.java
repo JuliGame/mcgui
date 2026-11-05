@@ -17,7 +17,7 @@ class BandsTest {
         return ((DataBufferInt) f.image().getRaster().getDataBuffer()).getData();
     }
 
-    private static void assertBandsAgree(String html) {
+    static void assertBandsAgree(String html) {
         Page page = Page.of(html, Path.of("bands.html").toAbsolutePath(), new Page.Loader(false, null));
         int before = HtmlRenderer.maxBands;
         try {

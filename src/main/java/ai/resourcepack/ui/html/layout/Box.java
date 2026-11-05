@@ -37,6 +37,8 @@ public final class Box {
 
     // Replaced boxes
     public Picture picture;
+    /** For an inline SVG: the standalone document its picture was drawn from (BoxBuilder.svgMarkup). */
+    public String svgSource;
     /** A form control, drawn by the painter: "text", "checkbox", "radio", "range", "select", "button", "progress". */
     public String control;
     public String controlText;

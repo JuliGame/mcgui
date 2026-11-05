@@ -209,16 +209,29 @@ public final class Painter {
             pageTx = new AffineTransform(pageTx);
             pageTx.concatenate(t);
         }
-        boolean layer = s.opacity < 1 || !s.filter.equals("none");
+        // clip-path cuts the box and everything in it, hit regions too: a point outside the shape is not on them.
+        Shape cut = ClipPaths.shape(box, x, y);
+        if (cut != null) {
+            Shape onPage = pageTx.createTransformedShape(cut);
+            pageClip = pageClip == null ? onPage : intersect(pageClip, onPage);
+        }
+        boolean layer = s.opacity < 1 || !s.filter.equals("none") || cut != null;
         if (layer && s.opacity <= 0) {
             g.setTransform(savedTx);
             pageTx = savedPage;
+            pageClip = savedPageClip;
             return;
         }
         if (layer && layers < MAX_LAYERS) {
             layers++;
-            layered(g, box, x, y);
+            layered(g, box, x, y, cut);
             layers--;
+        } else if (cut != null) {
+            // Too deep for a layer of its own: a plain clip, not antialiased, rather than nothing at all.
+            Shape old = g.getClip();
+            Shapes.clip(g, cut);
+            contextBody(g, box, x, y);
+            g.setClip(old);
         } else {
             contextBody(g, box, x, y);
         }
@@ -289,8 +302,11 @@ public final class Painter {
     /** The part of [surface] (device px) actually kept, within [needed], or null for all of [needed]: see {@link #kept}. */
     private java.awt.Rectangle kept;
 
-    /** Opacity and filters: the subtree painted on a layer of its own, then blended in. */
-    private void layered(Graphics2D g, Box box, double x, double y) {
+    /**
+     * Opacity, filters and clip-path: the subtree painted on a layer of its own, then filtered, cut to [cut] (null for
+     * none), and blended in at its opacity, in that order (CSS Masking: filter, clipping, masking, opacity).
+     */
+    private void layered(Graphics2D g, Box box, double x, double y, Shape cut) {
         AffineTransform dev = g.getTransform();
         // The layer covers what the subtree can paint, within the surface being painted (the screen, or an
         // enclosing layer) and the clip: not the whole surface for every translucent badge.
@@ -301,6 +317,12 @@ public final class Painter {
         }
         Reach reach = new Reach();
         reach(box, x, y, reach);
+        if (cut != null && reach.area != null) {
+            // Nothing of it shows outside the shape (a pixel of antialiasing to spare).
+            Rectangle2D within = cut.getBounds2D();
+            Rectangle2D.intersect(reach.area, new Rectangle2D.Double(within.getX() - 1, within.getY() - 1, within.getWidth() + 2, within.getHeight() + 2), reach.area);
+            if (reach.area.isEmpty()) reach.area = new Rectangle2D.Double(within.getX(), within.getY(), 0, 0);
+        }
         java.awt.Rectangle painted = null;
         // A backdrop-filter inside reads what is painted round it, which a smaller layer would cut off.
         if (!reach.backdrop) {
@@ -333,7 +355,8 @@ public final class Painter {
             }
         }
         double grid = Filters.gridBlur(box.style.filter, box.style, deviceScale);
-        if (grid > 0 && painted != null && fromKept(g, box, x, y, r, part, painted, grid)) return;
+        // A layer cut by a clip-path is not one of the page's kept blurred layers (those are a background alone).
+        if (grid > 0 && cut == null && painted != null && fromKept(g, box, x, y, r, part, painted, grid)) return;
         // Colour filters work on straight colour, so a filtered layer stays plain ARGB; opacity alone blends faster premultiplied.
         // From this thread's pool, handed back once blended in: nothing keeps a layer.
         int type = box.style.filter.equals("none") ? BufferedImage.TYPE_INT_ARGB_PRE : BufferedImage.TYPE_INT_ARGB;
@@ -379,13 +402,91 @@ public final class Painter {
             BufferedImage small = gridBlurred(img, ox, oy, grid);
             PixelPool.give(img);
             int k = Blur.step(grid), gx = Math.floorDiv(originX + ox, k) * k - originX, gy = Math.floorDiv(originY + oy, k) * k - originY;
-            blend(g, small, gx, gy, small.getWidth() * k, small.getHeight() * k, (float) box.style.opacity);
+            if (cut == null) {
+                blend(g, small, gx, gy, small.getWidth() * k, small.getHeight() * k, (float) box.style.opacity);
+            } else {
+                // Scaled up as blend would, then cut, then blended.
+                BufferedImage big = PixelPool.image(small.getWidth() * k, small.getHeight() * k, BufferedImage.TYPE_INT_ARGB_PRE);
+                Graphics2D bg = big.createGraphics();
+                bg.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+                bg.setComposite(AlphaComposite.Src);
+                bg.drawImage(small, 0, 0, big.getWidth(), big.getHeight(), null);
+                bg.dispose();
+                cut(big, gx, gy, dev, cut, g);
+                blend(g, big, gx, gy, big.getWidth(), big.getHeight(), (float) box.style.opacity);
+                PixelPool.give(big);
+            }
             PixelPool.give(small);
             return;
         }
         Filters.apply(img, box.style.filter, deviceScale, box.style, budget);
+        if (cut != null) cut(img, ox, oy, dev, cut, g);
         blend(g, img, ox, oy, img.getWidth(), img.getHeight(), (float) box.style.opacity);
         PixelPool.give(img);
+    }
+
+    /** Past this many pixels, a clip-path's coverage is worked out only over the layer, not over the whole shape. */
+    private static final long MAX_CUT_PIXELS = 16_000_000L;
+
+    /**
+     * Cuts [img], a layer whose top-left is at ([ox], [oy]) on the surface, to [shape] (user space of [dev]): every pixel
+     * scaled by how much of it the shape covers, antialiased as a fill of the shape is (a Java2D clip is not), so a cut
+     * edge looks like a border's or a rounded corner's. The coverage is a fill of the whole shape on the page's own pixel
+     * grid (from {@link #originX}), whatever part of it this layer is: Java2D rounds a shape it has to cut at an image's
+     * edge differently (a curve's top by up to 30 levels), so a band, a repaint and a whole picture would not agree.
+     */
+    private void cut(BufferedImage img, int ox, int oy, AffineTransform dev, Shape shape, Graphics2D like) {
+        int w = img.getWidth(), h = img.getHeight();
+        AffineTransform onPage = AffineTransform.getTranslateInstance(originX, originY);
+        onPage.concatenate(dev);
+        java.awt.Rectangle all = onPage.createTransformedShape(shape).getBounds();
+        all.grow(1, 1);
+        // Where the mask's top-left is on the page (device px); the layer's is at (originX + ox, originY + oy).
+        java.awt.Rectangle at = (long) all.width * all.height <= MAX_CUT_PIXELS ? all
+                : new java.awt.Rectangle(originX + ox, originY + oy, w, h).intersection(all);
+        if (at.isEmpty()) {
+            java.util.Arrays.fill(pixels(img), 0, w * h, 0);
+            return;
+        }
+        BufferedImage mask = PixelPool.image(at.width, at.height, BufferedImage.TYPE_INT_ARGB_PRE);
+        Graphics2D mg = mask.createGraphics();
+        mg.setRenderingHints(like.getRenderingHints());
+        mg.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        mg.translate(-at.x, -at.y);
+        mg.transform(onPage);
+        mg.setColor(Color.WHITE);
+        mg.fill(shape);
+        mg.dispose();
+        int[] px = pixels(img), m = pixels(mask);
+        boolean pre = img.getType() == BufferedImage.TYPE_INT_ARGB_PRE;
+        int dx = originX + ox - at.x, dy = originY + oy - at.y;
+        // Pooled arrays can be longer than the image: only its own w x h pixels.
+        for (int j = 0; j < h; j++) {
+            int my = j + dy, row = j * w;
+            boolean inRow = my >= 0 && my < at.height;
+            for (int i = 0; i < w; i++) {
+                int mx = i + dx;
+                int a = inRow && mx >= 0 && mx < at.width ? m[my * at.width + mx] >>> 24 : 0;
+                if (a == 255) continue;
+                int k = row + i, c = px[k];
+                if (a == 0 || c == 0) {
+                    px[k] = 0;
+                    continue;
+                }
+                int ca = (c >>> 24) * a + 127;
+                ca = (ca + (ca >> 8)) >> 8;
+                if (pre) {
+                    int r = ((c >> 16) & 255) * a + 127, gg = ((c >> 8) & 255) * a + 127, b = (c & 255) * a + 127;
+                    r = (r + (r >> 8)) >> 8;
+                    gg = (gg + (gg >> 8)) >> 8;
+                    b = (b + (b >> 8)) >> 8;
+                    px[k] = ca << 24 | r << 16 | gg << 8 | b;
+                } else {
+                    px[k] = ca << 24 | (c & 0xFFFFFF);
+                }
+            }
+        }
+        PixelPool.give(mask);
     }
 
     /** Draws [img] at ([x], [y]) on the surface, [w] x [h] (scaled up smoothly if bigger), at [opacity]. */
@@ -608,6 +709,12 @@ public final class Painter {
             }
         }
         reachChildren(box, x, y, own);
+        Shape cut = ClipPaths.shape(box, x, y);
+        if (cut != null) {
+            Rectangle2D within = cut.getBounds2D();
+            Rectangle2D.intersect(own.area, new Rectangle2D.Double(within.getX() - SLACK, within.getY() - SLACK, within.getWidth() + 2 * SLACK, within.getHeight() + 2 * SLACK), own.area);
+            if (own.area.isEmpty()) own.area = new Rectangle2D.Double(within.getX(), within.getY(), 0, 0);
+        }
         reach.backdrop |= own.backdrop;
         reach.add(own.area, 0);
         // A filter blur (sigma, device px) spreads everything inside, blurs included, about three sigma further;

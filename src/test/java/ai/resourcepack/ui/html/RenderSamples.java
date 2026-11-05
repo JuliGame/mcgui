@@ -10,7 +10,8 @@ import java.util.stream.Stream;
 
 /**
  * Renders every .html in a folder to PNGs (1024×576 at 1x, and at 2x), with load problems and
- * timings printed: how the renderer is judged, by eye. Run with {@code ./gradlew renderSamples}.
+ * timings printed: how the renderer is judged, by eye. Run with {@code ./gradlew renderSamples}; {@code -Phover=<selector>}
+ * also draws each page with the first element it matches hovered ({@code <name>-hover.png}).
  */
 public final class RenderSamples {
     public static void main(String[] args) throws Exception {
@@ -36,6 +37,13 @@ public final class RenderSamples {
             if (f.maxScroll() > 0) {
                 HtmlRenderer.Frame end = HtmlRenderer.render(page, page.document, 1024, 576, 1, f.maxScroll(), Selector.State.NONE, null, null, 0);
                 ImageIO.write(end.image(), "png", out.resolve(name + "-end.png").toFile());
+            }
+            // -Phover=<css selector>: also the page with its first match hovered, at 1x.
+            String hover = System.getProperty("hover", "");
+            org.jsoup.nodes.Element hovered = hover.isBlank() ? null : page.document.selectFirst(hover);
+            if (hovered != null) {
+                HtmlRenderer.Frame h = HtmlRenderer.render(page, page.document, 1024, 576, 1, 0, HtmlRenderer.state(hovered, null), null, null, 0);
+                ImageIO.write(h.image(), "png", out.resolve(name + "-hover.png").toFile());
             }
             System.out.printf("%-24s load %4d ms  1x %4d ms  2x %4d ms  page height %.0f  %s%n", name, (t1 - t0) / 1_000_000,
                     (t2 - t1) / 1_000_000, (t3 - t2) / 1_000_000, f.pageHeight(), page.problems);

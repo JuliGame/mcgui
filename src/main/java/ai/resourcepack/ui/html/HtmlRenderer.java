@@ -329,7 +329,7 @@ public final class HtmlRenderer {
         if (to.isEmpty()) return true;
         // A style two elements shared that only one of them keeps cannot be told apart on their boxes.
         for (Style s : same) if (to.containsKey(s)) return false;
-        if (!boxesKept(last.root, to)) return false;
+        if (!boxesKept(last.root, to, now.styles)) return false;
         restyle(last.root, to);
         return true;
     }
@@ -351,16 +351,17 @@ public final class HtmlRenderer {
     }
 
     /**
-     * Whether no box under [b] was built or laid out from what [to] changes of its style: an inline SVG's colour, or
-     * whether there is a transform at all on a box that holds absolutely placed boxes (it is where they are placed from).
+     * Whether no box under [b] was built or laid out from what [to] changes of its style: an inline SVG's picture (its
+     * colour, and the page's CSS written onto its elements, which [now] may have changed with nothing else), or whether
+     * there is a transform at all on a box that holds absolutely placed boxes (it is where they are placed from).
      */
-    private static boolean boxesKept(Box b, Map<Style, Style> to) {
+    private static boolean boxesKept(Box b, Map<Style, Style> to, Map<Element, Style> now) {
+        if (b.svgSource != null && !b.svgSource.equals(BoxBuilder.svgMarkup(b.element, now))) return false;
         Style n = to.get(b.style);
         if (n != null) {
-            if (b.element != null && b.picture != null && b.element.normalName().equals("svg") && n.color != b.style.color) return false;
             if (n.transform.equals("none") != b.style.transform.equals("none") && placesAny(b)) return false;
         }
-        for (Box c : b.children) if (!boxesKept(c, to)) return false;
+        for (Box c : b.children) if (!boxesKept(c, to, now)) return false;
         return true;
     }
 

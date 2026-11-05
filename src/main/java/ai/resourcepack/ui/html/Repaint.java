@@ -498,6 +498,7 @@ public final class Repaint {
      * be repainted in part (a blur reads past the picture's edge, see the class).
      */
     static Region region(HtmlRenderer.Frame f, Set<Element> changed, Set<Element> order, List<Rectangle2D> extra, double room) {
+        changed = withSvgs(changed);
         Rectangle2D area = null, seed = null;
         double reach = room;
         int first = Integer.MAX_VALUE;
@@ -633,6 +634,25 @@ public final class Repaint {
             paint = reads.createIntersection(view);
         }
         return new Region(whole(commit, f, view), whole(paint, f, view), Why.PARTIAL);
+    }
+
+    /**
+     * [changed], with the outermost inline svg round any of them: an element inside an svg has no box or hit region of
+     * its own, it is part of the svg's picture (a transition on a polygon's fill repaints the svg).
+     */
+    private static Set<Element> withSvgs(Set<Element> changed) {
+        Set<Element> out = null;
+        for (Element e : changed) {
+            Element svg = null;
+            for (Element p = e.parent(); p != null; p = p.parent()) if (p.normalName().equals("svg")) svg = p;
+            if (svg == null || changed.contains(svg)) continue;
+            if (out == null) {
+                out = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+                out.addAll(changed);
+            }
+            out.add(svg);
+        }
+        return out == null ? changed : out;
     }
 
     /** Whether [layer] and every element in [changed] are apart: none of them is [layer], inside it, or round it. */

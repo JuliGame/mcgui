@@ -320,7 +320,10 @@ public final class BoxBuilder {
                 box.picture = src.isBlank() ? null : res.image(CssParser.resolve(base, src));
             }
             case "video" -> box.picture = e.hasAttr("poster") ? res.image(CssParser.resolve(base, e.attr("poster"))) : null;
-            case "svg" -> box.picture = res.svg(svgMarkup(e, box.style.color));
+            case "svg" -> {
+                box.svgSource = svgMarkup(e, styler.styles);
+                box.picture = res.svg(box.svgSource);
+            }
             case "object", "embed" -> {
                 String src = e.hasAttr("data") ? e.attr("data") : e.attr("src");
                 box.picture = src.isBlank() ? null : res.image(CssParser.resolve(base, src));
@@ -385,16 +388,140 @@ public final class BoxBuilder {
         }
     }
 
-    /** An inline SVG as a standalone document: namespace added, currentColor made the element's colour. */
-    private static String svgMarkup(Element e, int color) {
-        String hex = String.format("#%06x", color & 0xFFFFFF);
+    /**
+     * An inline SVG as a standalone document: namespace added, currentColor made the element's colour, and what the page's
+     * CSS says of each element inside it written onto that element (see {@link #cascade}), since the SVG renderer sees
+     * none of the page's sheets. Works on a copy: the document is never edited. [styles] are the page's computed styles.
+     */
+    public static String svgMarkup(Element e, Map<Element, Style> styles) {
+        Style own = styles.get(e);
+        int color = own == null ? 0xFF000000 : own.color;
+        String hex = hex(color);
         double alpha = (color >>> 24) / 255.0;
         Element copy = e.clone();
         if (!copy.hasAttr("xmlns")) copy.attr("xmlns", "http://www.w3.org/2000/svg");
-        borrowDefs(e, copy);
+        cascade(e, copy, styles, color, true);
+        borrowDefs(e, copy, styles, color);
         String markup = copy.outerHtml().replace("currentColor", hex).replace("currentcolor", hex);
         if (alpha < 1) markup = markup.replaceFirst("<svg", "<svg opacity=\"" + alpha + "\"");
         return markup;
+    }
+
+    private static String hex(int color) {
+        return String.format("#%06x", color & 0xFFFFFF);
+    }
+
+    /** The SVG paint properties an element does not inherit from its parent (the rest of {@link Style#SVG} it does). */
+    private static final Set<String> SVG_NOT_INHERITED = Set.of("stop-color", "stop-opacity", "vector-effect", "flood-color", "flood-opacity",
+            "lighting-color");
+
+    /**
+     * Writes onto [to], the copy of [from], and its descendants what the page's cascade declares for them, as a
+     * {@code style} attribute after the element's own (so, as in a browser, a sheet's rule beats a presentation attribute,
+     * and the element's own style attribute, already part of the cascade, still beats a sheet's rule): the SVG paint
+     * properties, and display, visibility, opacity and transform where the CSS changes them. Inheritance inside the SVG
+     * is left to the SVG renderer; the [root] also takes what it inherits from the HTML round it. currentColor is each
+     * element's own colour; [rootColor] is what the rest of the markup's currentColor becomes.
+     */
+    private static void cascade(Element from, Element to, Map<Element, Style> styles, int rootColor, boolean root) {
+        Style st = styles.get(from);
+        if (st != null) {
+            StringBuilder css = new StringBuilder();
+            for (Map.Entry<String, String> d : st.svg.entrySet()) css.append(d.getKey()).append(':').append(svgValue(d.getValue(), st.color)).append(';');
+            if (root) {
+                // What the svg inherits from the page round it, unless it says otherwise itself.
+                for (String prop : Style.SVG) {
+                    if (SVG_NOT_INHERITED.contains(prop) || st.svg.containsKey(prop) || from.hasAttr(prop)) continue;
+                    for (Element a = from.parent(); a != null; a = a.parent()) {
+                        Style as = styles.get(a);
+                        String v = as == null ? null : as.svg.get(prop);
+                        if (v == null) continue;
+                        css.append(prop).append(':').append(svgValue(v, as.color)).append(';');
+                        break;
+                    }
+                }
+            } else {
+                Style parent = styles.get(from.parent());
+                if (st.display.equals("none")) css.append("display:none;");
+                if (parent != null && !st.visibility.equals(parent.visibility)) css.append("visibility:").append(st.visibility).append(';');
+                if (st.opacity < 1) css.append("opacity:").append(st.opacity).append(';');
+                if (!st.transform.equals("none")) {
+                    String t = svgTransform(st.transform);
+                    if (t != null) to.attr("transform", t);
+                }
+                if (st.color != rootColor) {
+                    // Its own colour, not the svg's, for its currentColor.
+                    for (Attribute a : to.attributes()) {
+                        String v = a.getValue();
+                        if (v.contains("currentColor") || v.contains("currentcolor")) a.setValue(v.replace("currentColor", hex(st.color)).replace("currentcolor", hex(st.color)));
+                    }
+                }
+            }
+            if (!css.isEmpty()) {
+                String was = to.attr("style").trim();
+                to.attr("style", was.isEmpty() ? css.toString() : was + (was.endsWith(";") ? "" : ";") + css);
+            }
+        }
+        List<Element> a = from.children(), b = to.children();
+        if (a.size() != b.size()) return;
+        for (int i = 0; i < a.size(); i++) cascade(a.get(i), b.get(i), styles, rootColor, false);
+    }
+
+    /** A url() the CSS parser made absolute against the page (url("file:/.../page.html#g")) back to the fragment the SVG means. */
+    private static final Pattern RESOLVED_URL = Pattern.compile("url\\(\\s*[\"']?[^\"')]*#([^\"')\\s]+)[\"']?\\s*\\)", Pattern.CASE_INSENSITIVE);
+
+    private static String svgValue(String v, int color) {
+        String out = v.contains("url(") ? RESOLVED_URL.matcher(v).replaceAll("url(#$1)") : v;
+        return out.replaceAll("(?i)currentcolor", hex(color)).replace(";", "");
+    }
+
+    private static final Pattern TRANSFORM_FN = Pattern.compile("([a-zA-Z]+)\\(([^)]*)\\)");
+
+    /**
+     * A CSS transform as an SVG transform attribute: px and deg dropped, translateX and the like written out. Null when
+     * it uses anything an SVG attribute cannot say (percentages, em, turns).
+     */
+    static String svgTransform(String css) {
+        Matcher m = TRANSFORM_FN.matcher(css);
+        StringBuilder out = new StringBuilder();
+        int end = 0;
+        while (m.find()) {
+            if (!css.substring(end, m.start()).isBlank()) return null;
+            end = m.end();
+            String fn = m.group(1).toLowerCase(Locale.ROOT);
+            List<String> args = new ArrayList<>();
+            for (String a : m.group(2).split("[,\\s]+")) {
+                if (a.isBlank()) continue;
+                String l = a.trim().toLowerCase(Locale.ROOT);
+                String n = l.endsWith("px") ? l.substring(0, l.length() - 2) : l.endsWith("deg") ? l.substring(0, l.length() - 3) : l;
+                try {
+                    Double.parseDouble(n);
+                } catch (NumberFormatException ex) {
+                    return null;
+                }
+                args.add(n);
+            }
+            if (args.isEmpty()) return null;
+            String a0 = args.get(0), a1 = args.size() > 1 ? args.get(1) : null;
+            String piece = switch (fn) {
+                case "translate" -> "translate(" + a0 + " " + (a1 == null ? "0" : a1) + ")";
+                case "translatex" -> "translate(" + a0 + " 0)";
+                case "translatey" -> "translate(0 " + a0 + ")";
+                case "scale" -> "scale(" + a0 + " " + (a1 == null ? a0 : a1) + ")";
+                case "scalex" -> "scale(" + a0 + " 1)";
+                case "scaley" -> "scale(1 " + a0 + ")";
+                case "rotate" -> args.size() == 1 ? "rotate(" + a0 + ")" : null;
+                case "skewx" -> "skewX(" + a0 + ")";
+                case "skewy" -> "skewY(" + a0 + ")";
+                case "matrix" -> args.size() == 6 ? "matrix(" + String.join(" ", args) + ")" : null;
+                default -> null;
+            };
+            if (piece == null) return null;
+            if (!out.isEmpty()) out.append(' ');
+            out.append(piece);
+        }
+        if (!css.substring(end).isBlank() || out.isEmpty()) return null;
+        return out.toString();
     }
 
     /** {@code href="#x"}, or any {@code url(#x)} inside an attribute: what an SVG can point at by id. */
@@ -406,7 +533,7 @@ public final class BoxBuilder {
      * {@code fill="url(#x)"} against the whole document, so a page may define its symbols and gradients once in a
      * hidden SVG and use them from every other; drawn on its own, an SVG would find none of them.
      */
-    private static void borrowDefs(Element original, Element copy) {
+    private static void borrowDefs(Element original, Element copy, Map<Element, Style> styles, int rootColor) {
         Document doc = original.ownerDocument();
         if (doc == null) return;
         Set<String> have = new HashSet<>();
@@ -425,6 +552,7 @@ public final class BoxBuilder {
                         if (found == null) continue;
                         if (defs == null) defs = copy.prependElement("defs");
                         Element taken = found.clone();
+                        cascade(found, taken, styles, rootColor, false);
                         for (Element inner : taken.getAllElements()) if (inner.hasAttr("id")) have.add(inner.id());
                         defs.appendChild(taken);
                         scan.add(taken);

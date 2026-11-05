@@ -69,7 +69,8 @@ included, which other plugins can see.
     (checked by reflection, so a new `Style` field counts as layout until named
     there), it swaps the new styles into the boxes and skips building and layout.
     Not when a transform appears or goes on a box holding absolute boxes, or an
-    inline SVG's colour moves (baked into its picture).
+    inline SVG's picture would come out differently (its markup is made again from
+    the new styles and compared with `Box.svgSource`).
   - **Two clocks.** Transitions and animations that end run on the viewer's
     clock (from when the page was shown); animations that repeat for ever on the
     page's (the server tick), so while only those move (`Motion.personal()` false)
@@ -331,6 +332,26 @@ included, which other plugins can see.
   each have a page of hard-edged stripes.
 - **Gradient text is a mask**, not a clip: Java2D clips are not antialiased,
   and clipping a gradient to glyph outlines gave jagged letters.
+- **`clip-path` is a mask too** (`paint/ClipPaths` reads the shape, `Painter.cut` applies it): a box with one is
+  painted on a layer of its own like an opacity layer, then, after its filter and before its opacity (CSS Masking's
+  order), every pixel is scaled by the coverage of the shape filled antialiased. So its edges look like a border's, which a
+  `g.clip` would not. The coverage is a fill of the WHOLE shape on the page's device grid, not of the part the layer
+  covers: Java2D rounds a curve it has to cut at an image's edge differently (a circle's top came out 30 levels apart
+  between a band and a whole picture), and `ClipPathTest.bandsAgreeOnACut` holds it to none. The shape is in the box's own space, so it turns and scales with its transform. It also
+  narrows `pageClip`, so hit regions inside are cut by it and a point outside the shape falls through to what is
+  under it. Too deep for a layer (`MAX_LAYERS`), it falls back to a plain, jagged clip. A value it cannot read
+  (`url()`, `path()`) draws uncut. It is `Style.PAINT_ONLY`, and transitions between shapes of one kind move their
+  numbers (`Motion.mix` works token by token).
+- **An inline SVG is drawn by JSVG from a copy of its markup** (`BoxBuilder.svgMarkup`), which sees none of the page's
+  sheets, so the page's cascade is written onto the copy: the Styler styles SVG elements like any other, keeping the
+  SVG paint properties (`Style.SVG`: fill, stroke and the rest) as written in `Style.svg`, and each copied element gets
+  them, and display, visibility, opacity and transform where the CSS changes them, appended to its `style` attribute
+  (which beats presentation attributes in JSVG as in browsers; the element's own `style=""` is already part of the
+  cascade, so its winner is what is written). The svg itself also takes what it inherits from the HTML round it;
+  inside, inheritance is JSVG's. A url() the CSS parser made absolute is turned back into `url(#id)`. An SVG element
+  has no box or hit region: `Repaint.region` stands its outermost svg in for it, and a paint-only motion frame
+  rebuilds the boxes when the markup comes out different (`HtmlRenderer.boxesKept`). Hovering an element inside an
+  svg is not possible (the svg is one hit region); hovering the svg or anything round it is.
 - **Map pixels are not screen pixels.** A view is 16×9 maps (2048×1152) by
   default and the page is laid out at 576 CSS px tall, so it is drawn at 2x.
   Small text stays legible because the framework's shader averages the map

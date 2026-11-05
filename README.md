@@ -425,8 +425,13 @@ inline layout with margin collapsing, flexbox, grid (`repeat(auto-fill,
 minmax())`, `fr`, areas, spans), tables, absolute/fixed/relative positioning,
 `z-index`, `overflow`, `border-radius`, borders, `box-shadow`, `text-shadow`,
 linear/radial/conic gradients, `background-clip: text`, background images,
-`opacity`, `transform`, `filter`, `backdrop-filter: blur()`, `object-fit`,
-`text-overflow: ellipsis`, `-webkit-line-clamp`, inline SVG and SVG images,
+`opacity`, `transform`, `filter`, `backdrop-filter: blur()`, `clip-path` (the
+basic shapes `polygon() circle() ellipse() inset()`, with `at` and `round`, against
+`border-box`, `padding-box`, `content-box` or `margin-box`; it cuts what the pointer
+hits too; `url()` and `path()` draw uncut), `object-fit`,
+`text-overflow: ellipsis`, `-webkit-line-clamp`, inline SVG (styled by the page's
+CSS too: `fill`, `stroke` and the other SVG paint properties, `:hover` rules
+included) and SVG images,
 PNG/JPEG/GIF images, form controls drawn as in a browser, and CSS animations
 (`@keyframes`, `animation`) and transitions (`transition`): numbers, lengths,
 colours and transforms move smoothly, anything else changes halfway. While
