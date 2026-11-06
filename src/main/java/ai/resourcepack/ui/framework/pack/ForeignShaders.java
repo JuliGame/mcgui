@@ -129,14 +129,20 @@ public final class ForeignShaders {
         Map<String, byte[]> files = unzip(zip);
         MergedShaders.Plan plan = MergedShaders.plan(List.of(PackSource.ofBytes("MC GUI", files)), theirs.pack(), minFormat);
         List<String> merged = new ArrayList<>(), refused = new ArrayList<>();
+        List<MergedShaders.Outcome> usable = new ArrayList<>();
         for (MergedShaders.Outcome o : plan.outcomes()) {
-            if (o.merged()) merged.add(o.versions());
-            else refused.add(o.versions() + ": " + o.refused());
+            String why = o.merged() ? unusable(o) : o.refused();
+            if (why == null) {
+                merged.add(o.versions());
+                usable.add(o);
+            } else {
+                refused.add(o.versions() + ": " + why);
+            }
         }
-        if (plan.isEmpty()) return new Result(zip, merged, refused);
+        if (usable.isEmpty()) return new Result(zip, merged, refused);
         JsonObject meta = JsonParser.parseString(new String(files.get("pack.mcmeta"), StandardCharsets.UTF_8)).getAsJsonObject();
         JsonArray entries = meta.getAsJsonObject("overlays").getAsJsonArray("entries");
-        for (MergedShaders.Outcome o : plan.merged()) {
+        for (MergedShaders.Outcome o : usable) {
             String directory = DIRECTORY + o.minFormat();
             // Both keys, as every entry of ours has them (ResourcePack.mcmeta), listed last: the last overlay that applies wins.
             JsonObject entry = new JsonObject();
@@ -151,9 +157,48 @@ public final class ForeignShaders {
             for (Map.Entry<String, String> f : o.files().entrySet()) {
                 files.put(directory + "/" + f.getKey(), f.getValue().getBytes(StandardCharsets.UTF_8));
             }
+            // Their includes that their own pack carries (BetterHud's 1.21.11 sample_lightmap.glsl, which that version's
+            // game lacks): a player with our pack and not theirs would otherwise fail to compile the merged shader.
+            for (String include : includes(o)) {
+                theirs.pack().resolve(include, o.minFormat())
+                        .ifPresent(text -> files.put(directory + "/" + include, text.getBytes(StandardCharsets.UTF_8)));
+            }
         }
         files.put("pack.mcmeta", (new GsonBuilder().disableHtmlEscaping().create().toJson(meta) + "\n").getBytes(StandardCharsets.UTF_8));
         return new Result(zip(files), merged, refused);
+    }
+
+    private static final java.util.regex.Pattern IMPORT =
+            java.util.regex.Pattern.compile("(?m)^\\s*#\\s*(?:moj_import|include)\\s*<(?:([a-z0-9_.-]+):)?([^>]+)>");
+
+    /** The pack paths of every file the merged shaders import. */
+    static java.util.Set<String> includes(MergedShaders.Outcome o) {
+        java.util.Set<String> out = new java.util.TreeSet<>();
+        for (String text : o.files().values()) {
+            java.util.regex.Matcher m = IMPORT.matcher(text);
+            while (m.find()) out.add("assets/" + (m.group(1) == null ? "minecraft" : m.group(1)) + "/shaders/include/" + m.group(2).trim());
+        }
+        return out;
+    }
+
+    /** A varying or attribute at the top level of a shader, with no layout qualifier. */
+    private static final java.util.regex.Pattern UNPLACED =
+            java.util.regex.Pattern.compile("(?m)^\\s*(?:(?:flat|noperspective|smooth)\\s+)?(?:in|out)\\s+\\w+\\s+\\w+\\s*;");
+
+    /**
+     * Why a merged version cannot be used, or null. 26.3 compiles every shader as Vulkan GLSL, where each varying and
+     * attribute needs a {@code layout(location)}: a shader written for 26.2 that a pack still lists for 26.3 (ItemsAdder's
+     * do) does not compile there, and with it merged the client would drop the whole pack where ours alone draws.
+     */
+    static String unusable(MergedShaders.Outcome o) {
+        if (o.maxFormat() < Shaders.Dialect.V26_3.minFormat) return null;
+        for (Map.Entry<String, String> f : o.files().entrySet()) {
+            if (!f.getKey().endsWith(".vsh") && !f.getKey().endsWith(".fsh")) continue;
+            if (UNPLACED.matcher(f.getValue()).find()) {
+                return "their " + f.getKey().substring(f.getKey().lastIndexOf('/') + 1) + " is written for an older version (a varying with no layout(location)), and would not compile";
+            }
+        }
+        return null;
     }
 
     static Map<String, byte[]> unzip(byte[] zip) throws IOException {

@@ -123,5 +123,30 @@ class ForeignShadersTest {
             Files.writeString(dump.resolve(d.name()).resolve("text.vsh"), vsh, StandardCharsets.UTF_8);
             Files.writeString(dump.resolve(d.name()).resolve("text.fsh"), fsh, StandardCharsets.UTF_8);
         }
+        // Every file the merged shaders import that BetterHud's pack carries is in our merged overlay too (its 1.21.11
+        // sample_lightmap.glsl, which that game lacks), so a player without BetterHud's pack still compiles them.
+        Map<String, byte[]> out = ForeignShaders.unzip(r.zip());
+        int copied = 0;
+        for (String f : out.keySet()) {
+            if (f.startsWith(ForeignShaders.DIRECTORY) && f.contains("/shaders/include/")) copied++;
+        }
+        boolean importsLightmap = merged.resolve("assets/minecraft/shaders/core/rendertype_text.vsh", Shaders.Dialect.V1_21_11.minFormat)
+                .orElseThrow().contains("sample_lightmap.glsl");
+        if (importsLightmap) {
+            assertTrue(out.containsKey(ForeignShaders.DIRECTORY + Shaders.Dialect.V1_21_11.minFormat + "/assets/minecraft/shaders/include/sample_lightmap.glsl"),
+                    "includes copied: " + copied);
+        }
+    }
+
+    /** A foreign shader in 26.2's form (no layout(location), as ItemsAdder lists for 26.3 too) is not merged for 26.3. */
+    @Test
+    void anOlderFormShaderIsNotMergedFor263() {
+        String old = "#version 330\nin vec3 Position;\nout vec4 vertexColor;\nvoid main() {}\n";
+        String placed = "#version 330\nlayout(location = 0) in vec3 Position;\nlayout(location = 1) out vec4 vertexColor;\nvoid main() {}\n";
+        int f263 = Shaders.Dialect.V26_3.minFormat, f262 = Shaders.Dialect.V26_2.minFormat;
+        String path = "assets/minecraft/shaders/core/text.vsh";
+        assertTrue(ForeignShaders.unusable(new ai.resourcepack.common.shader.MergedShaders.Outcome(f263, f263, "26.3", Map.of(path, old), null)) != null);
+        assertEquals(null, ForeignShaders.unusable(new ai.resourcepack.common.shader.MergedShaders.Outcome(f263, f263, "26.3", Map.of(path, placed), null)));
+        assertEquals(null, ForeignShaders.unusable(new ai.resourcepack.common.shader.MergedShaders.Outcome(f262, f262 + 8, "26.2", Map.of(path, old), null)));
     }
 }

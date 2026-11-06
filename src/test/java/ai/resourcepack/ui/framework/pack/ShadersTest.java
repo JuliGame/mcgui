@@ -142,16 +142,33 @@ class ShadersTest {
     }
 
     /**
-     * Our text and position_tex_color shaders declare exactly vanilla's varyings, every dialect: what text.vsh tells
-     * text.fsh rides in vanilla's own vertexColor (Shaders.ENCODED_VIEW). So either half of ours links with anybody's other
-     * half; a pack whose two halves do not link is dropped whole by the client.
+     * Our text shaders declare exactly vanilla's varyings, every dialect: what text.vsh tells text.fsh rides in vanilla's
+     * own vertexColor (Shaders.ENCODED_VIEW). So either half of ours links with anybody's other half; a pack whose two
+     * halves do not link is dropped whole by the client. position_tex_color has varyings of its own, so both its halves
+     * always ship, and they must agree with each other.
      */
     @Test
     void ourShadersDeclareOnlyVanillasVaryings() {
         for (Shaders.Dialect d : Shaders.Dialect.values()) {
             assertEquals(varyings(Shaders.vanillaTextVsh(d)), varyings(Shaders.textVsh(d, PALETTE)), d + " text.vsh");
             assertEquals(varyings(Shaders.vanillaTextFsh(d)), varyings(Shaders.textFsh(d, PALETTE)), d + " text.fsh");
-            assertEquals(varyings(Shaders.vanillaPositionTexColorVsh(d)), varyings(Shaders.positionTexColorVsh(d)), d + " position_tex_color.vsh");
+            assertEquals(varyings(Shaders.positionTexColorVsh(d)).stream().filter(v -> v.matches(".*\\bout\\b.*")).map(v -> v.replaceFirst("\\bout\\b", "in")).toList(),
+                    varyings(Shaders.positionTexColorFsh(d)).stream().filter(v -> !v.contains("fragColor")).toList(),
+                    d + " position_tex_color's halves");
+        }
+    }
+
+    /** Both halves of position_tex_color are in the pack for every dialect, so Dialog Engine's pair never meets half of ours. */
+    @Test
+    void positionTexColorShipsBothHalves(@org.junit.jupiter.api.io.TempDir java.nio.file.Path dir) throws Exception {
+        byte[] zip = ResourcePack.build(PALETTE, java.nio.file.Files.createDirectories(dir.resolve("sounds")), java.util.logging.Logger.getLogger("test"));
+        java.util.Map<String, byte[]> files = ForeignShaders.unzip(zip);
+        for (Shaders.Dialect d : Shaders.Dialect.values()) {
+            String prefix = ResourcePack.overlayOf(d) + "/";
+            for (String half : java.util.List.of("vsh", "fsh")) {
+                String path = prefix + "assets/minecraft/shaders/core/position_tex_color." + half;
+                assertTrue(files.containsKey(path), d + " lacks " + path + " in " + files.keySet());
+            }
         }
     }
 
@@ -370,6 +387,7 @@ class ShadersTest {
             java.nio.file.Files.writeString(out.resolve("text.vsh"), Shaders.textVsh(d, PALETTE));
             java.nio.file.Files.writeString(out.resolve("text.fsh"), Shaders.textFsh(d, PALETTE));
             java.nio.file.Files.writeString(out.resolve("position_tex_color.vsh"), Shaders.positionTexColorVsh(d));
+            java.nio.file.Files.writeString(out.resolve("position_tex_color.fsh"), Shaders.positionTexColorFsh(d));
         }
     }
 }

@@ -432,6 +432,7 @@ public final class ResourcePack implements AutoCloseable {
                     e.put(root + d.textShader() + ".vsh", Shaders.textVsh(d, palette));
                     e.put(root + d.textShader() + ".fsh", Shaders.textFsh(d, palette));
                     e.put(root + "position_tex_color.vsh", Shaders.positionTexColorVsh(d));
+                    e.put(root + "position_tex_color.fsh", Shaders.positionTexColorFsh(d));
                     // The world round an overlay's panel, kept still: passes of the outline post effect, which a glowing
                     // display switches on.
                     String post = assets + "uiengine/shaders/post/";

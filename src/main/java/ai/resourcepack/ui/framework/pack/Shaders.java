@@ -743,53 +743,88 @@ public final class Shaders {
     // ---------------------------------------------------------------- position_tex_color
 
     /**
-     * Vanilla's {@code position_tex_color.vsh} and, after it, what hides the HUD for a seated player and the screen
-     * effects for a flagged camera. It writes only vanilla's outputs (the fragment shader is the game's own, or whoever's
-     * pack has one), so it pairs with any {@code position_tex_color.fsh}: a pack that brings its own (Dialog Engine's
-     * drawn dialogs) cannot leave the two halves unable to link, which drops the whole server pack. What it hides it
-     * hides by giving every vertex of the quad alpha 0, which the fragment shader discards.
+     * {@code position_tex_color}, both halves, which always ship together: a pack that brings its own pair (Dialog
+     * Engine's drawn dialogs read a varying of their own) then never meets one half of ours, so the two always link.
+     * The HUD is hidden per pixel in the fragment shader: hidden per vertex, the alpha fades across any quad that has
+     * a corner in the hidden area (a menu's buttons round the crosshair), and the hotbar stayed on 26.3.
      */
     public static String positionTexColorVsh(Dialect d) {
-        String declarations = globals(d) + "uniform sampler2D Sampler0;\n";
-        String epilogue = helpers(VERTEX_HELPERS) + FRAGMENT_HELPERS + """
+        return emit("""
+                #version 330
+                #extension GL_ARB_separate_shader_objects : require
+
+                """ + dynamicTransforms(d) + PROJECTION + globals(d) + """
+
+                layout(location = 0) in vec3 Position;
+                layout(location = 1) in vec2 UV0;
+                layout(location = 2) in vec4 Color;
+
+                layout(location = 0) out vec2 texCoord0;
+                layout(location = 1) out vec4 vertexColor;
+                layout(location = 2) out vec2 mcbPos;
+                layout(location = 3) flat out vec2 mcbSize;
+                layout(location = 4) flat out float mcbSeated;
+
+                """ + helpers(VERTEX_HELPERS) + """
 
                 void main() {
-                    mcgui_position_tex_color_vertex();
-                    if (ProjMat[3][3] == 1.0) {
-                        if (mcb_seated_flag() > 0.5) {
-                            // A seated player's HUD: the hotbar, hearts and the rest round it, the vignette, the crosshair.
-                            vec2 mcbPos = (ModelViewMat * vec4(Position, 1.0)).xy;
-                            vec2 mcbSize = mcb_gui_size();
-                            ivec2 mcbTexSize = textureSize(Sampler0, 0);
-                            bool mcbHide = false;
-                            // 16x16 textures are the dimmed tiles behind menus (Esc, options): never cut.
-                            if (mcbTexSize != ivec2(16, 16)) {
-                                // The vignette is the only standalone 256x256 texture the HUD draws.
-                                if (mcbTexSize == ivec2(256, 256)) mcbHide = true;
-                                // Atlases and the game's HUD textures are powers of two. A picture drawn into a target first
-                                // is the size of what it shows: a minimap mod's (Xaero's picture-in-picture, JourneyMap's
-                                // window-sized layer) and the game's own pictures-in-picture.
-                                if ((mcbTexSize.x & (mcbTexSize.x - 1)) != 0 || (mcbTexSize.y & (mcbTexSize.y - 1)) != 0) mcbHide = true;
-                                if (mcb_hud(mcbPos, mcbSize)) mcbHide = true;
-                            }
-                            // The crosshair is drawn white; a menu button in the middle of the window is far bigger.
-                            if (mcb_crosshair(mcbPos, mcbSize) && all(greaterThan(Color.rgb, vec3(0.99)))) mcbHide = true;
-                            if (mcbHide) vertexColor.a = 0.0;
-                        }
-                    } else if (mcb_flag_axis() >= 0 && length((ModelViewMat * vec4(Position, 1.0)).xyz) < 2.0) {
-                        // The game's screen effects (ScreenEffectRenderer: the inside-a-block, underwater and fire overlays)
-                        // are the only draws here in perspective within two blocks of the eye. They follow the player, not
-                        // the camera, and a view's player can be held inside a wall (Views: the seat behind a camera with no
-                        // room round it): on a flagged camera they would cover the view, so nothing of them is drawn.
+                    gl_Position = ProjMat * ModelViewMat * vec4(Position, 1.0);
+                    texCoord0 = UV0;
+                    vertexColor = Color;
+                    mcbPos = (ModelViewMat * vec4(Position, 1.0)).xy;
+                    mcbSize = mcb_gui_size();
+                    mcbSeated = mcb_seated_now();
+                    // The game's screen effects (ScreenEffectRenderer: the inside-a-block, underwater and fire overlays) are
+                    // the only draws here in perspective within two blocks of the eye. They follow the player, not the
+                    // camera, and a view's player can be held inside a wall (Views: the seat behind a camera with no room
+                    // round it): on a flagged camera they would cover the view, so nothing of them is drawn.
+                    if (ProjMat[3][3] != 1.0 && mcb_flag_axis() >= 0 && length((ModelViewMat * vec4(Position, 1.0)).xyz) < 2.0) {
                         gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
                     }
                 }
-                """;
-        String vanilla = vanillaPositionTexColorVsh(d);
-        int at = vanilla.indexOf("\nvoid main()");
-        return emitAsIs(vanilla.substring(0, at + 1) + declarations
-                + vanilla.substring(at + 1).replaceFirst("void main\\(\\)", "void mcgui_position_tex_color_vertex()")
-                + epilogue);
+                """, d);
+    }
+
+    public static String positionTexColorFsh(Dialect d) {
+        return emit("""
+                #version 330
+                #extension GL_ARB_separate_shader_objects : require
+
+                """ + dynamicTransforms(d) + """
+
+                uniform sampler2D Sampler0;
+
+                layout(location = 0) in vec2 texCoord0;
+                layout(location = 1) in vec4 vertexColor;
+                layout(location = 2) in vec2 mcbPos;
+                layout(location = 3) flat in vec2 mcbSize;
+                layout(location = 4) flat in float mcbSeated;
+
+                layout(location = 0) out vec4 fragColor;
+
+                """ + FRAGMENT_HELPERS + """
+
+                void main() {
+                    // 16x16 textures are the dimmed tiles behind menus (Esc, options): never cut.
+                    if (mcbSeated > 0.5 && textureSize(Sampler0, 0) != ivec2(16, 16)) {
+                        ivec2 mcbTexSize = textureSize(Sampler0, 0);
+                        // The vignette is the only standalone 256x256 texture the HUD draws.
+                        if (mcbTexSize == ivec2(256, 256)) discard;
+                        // Atlases and the game's HUD textures are powers of two. A picture drawn into a target first
+                        // is the size of what it shows: a minimap mod's (Xaero's picture-in-picture, JourneyMap's
+                        // window-sized layer) and the game's own pictures-in-picture.
+                        if ((mcbTexSize.x & (mcbTexSize.x - 1)) != 0 || (mcbTexSize.y & (mcbTexSize.y - 1)) != 0) discard;
+                        if (mcb_hud(mcbPos, mcbSize)) discard;
+                    }
+                    vec4 color = texture(Sampler0, texCoord0) * vertexColor;
+                    // The crosshair is pure white; a menu button in the middle of the window is not.
+                    if (mcbSeated > 0.5 && mcb_crosshair(mcbPos, mcbSize) && all(greaterThan(color.rgb, vec3(0.99)))) discard;
+                    if (color.a == 0.0) {
+                        discard;
+                    }
+                    fragColor = color * ColorModulator;
+                }
+                """, d);
     }
 
     /** A shader written for its dialect already: only the lines are trimmed, as {@link #emit} does. */

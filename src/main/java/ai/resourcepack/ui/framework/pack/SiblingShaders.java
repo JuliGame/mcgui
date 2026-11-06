@@ -109,9 +109,19 @@ public final class SiblingShaders implements AutoCloseable {
         try {
             HttpResponse<InputStream> response = http.send(HttpRequest.newBuilder(URI.create(p.url())).timeout(Duration.ofSeconds(60)).GET().build(),
                     HttpResponse.BodyHandlers.ofInputStream());
-            try (InputStream body = response.body()) {
-                if (response.statusCode() != 200) throw new IOException("HTTP " + response.statusCode());
-                return replaces(ours, new ZipInputStream(new Capped(body)));
+            java.nio.file.Path tmp = java.nio.file.Files.createTempFile("mcgui-sibling", ".zip");
+            try {
+                try (InputStream body = response.body()) {
+                    if (response.statusCode() != 200) throw new IOException("HTTP " + response.statusCode());
+                    java.nio.file.Files.copy(new Capped(body), tmp, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                }
+                // Read by its central directory, as the game does: a protected pack (ItemsAdder's) scrambles its local
+                // headers, and read front to back it shows a hundred of its ten thousand files.
+                try (java.util.zip.ZipFile zip = new java.util.zip.ZipFile(tmp.toFile())) {
+                    return replaces(ours, zip);
+                }
+            } finally {
+                java.nio.file.Files.deleteIfExists(tmp);
             }
         } catch (IOException | IllegalArgumentException e) {
             logger.info("Could not read a pack another plugin sent (" + e.getMessage() + "), so it counts as replacing MC GUI's"
@@ -129,6 +139,11 @@ public final class SiblingShaders implements AutoCloseable {
             if (!e.isDirectory() && ours.contains(logical(e.getName()))) return true;
         }
         return false;
+    }
+
+    /** Whether the pack [zip] has any of [ours], read by its central directory. */
+    static boolean replaces(Set<String> ours, java.util.zip.ZipFile zip) {
+        return zip.stream().anyMatch(e -> !e.isDirectory() && ours.contains(logical(e.getName())));
     }
 
     /** The files of the pack [zip] under assets/minecraft/, as a game finds them: overlay directories taken off. */
