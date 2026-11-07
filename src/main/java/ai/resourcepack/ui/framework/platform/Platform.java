@@ -1,5 +1,6 @@
 package ai.resourcepack.ui.framework.platform;
 
+import ai.resourcepack.common.scheduler.Tasks;
 import ai.resourcepack.ui.framework.net.Reflect;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.serializer.gson.GsonComponentSerializer;
@@ -83,17 +84,96 @@ public final class Platform {
     /**
      * Teleports [entity] to [to]: at once, except on Folia, which refuses {@code teleport} and moves an entity with
      * {@code teleportAsync} (Paper API), done when the future completes.
+     *
+     * <p>On Folia one entity has at most one of OUR teleports in flight. Some forks (Canvas) throw when a second
+     * {@code teleportAsync} starts before the first has handed the entity over, and MC GUI asks twice in a row
+     * routinely (the join's return, then the view's seat a tick later). So a teleport asked for while one is in
+     * flight waits for it, the newest destination replacing any that was waiting, and its future is that one's.
+     * A fork that is still busy with somebody else's teleport (a command, another plugin) is asked again next tick.
      */
-    @SuppressWarnings("unchecked")
     public static java.util.concurrent.CompletableFuture<Boolean> teleport(org.bukkit.entity.Entity entity, org.bukkit.Location to) {
         if (Threads.folia() && TELEPORT_ASYNC != null) {
-            try {
-                return (java.util.concurrent.CompletableFuture<Boolean>) TELEPORT_ASYNC.invoke(entity, to);
-            } catch (Throwable t) {
-                throw rethrow(t);
+            synchronized (MOVING) {
+                Moving m = MOVING.get(entity);
+                if (m != null) {
+                    m.next = to.clone();
+                    if (m.nextDone == null) m.nextDone = new java.util.concurrent.CompletableFuture<>();
+                    return m.nextDone;
+                }
+                MOVING.put(entity, new Moving());
             }
+            java.util.concurrent.CompletableFuture<Boolean> done = new java.util.concurrent.CompletableFuture<>();
+            begin(entity, to.clone(), done, 0);
+            return done;
         }
         return java.util.concurrent.CompletableFuture.completedFuture(entity.teleport(to));
+    }
+
+    /** How many ticks a teleport the server calls busy is asked again before it is given up as not done. */
+    private static final int BUSY_TRIES = 40;
+
+    /** An entity with one of our teleports in flight, and the one to do after it, if any. */
+    private static final class Moving {
+        org.bukkit.Location next;
+        java.util.concurrent.CompletableFuture<Boolean> nextDone;
+    }
+
+    /** Weak, so an entity whose last teleport never finished (it left) does not stay here. */
+    private static final java.util.Map<org.bukkit.entity.Entity, Moving> MOVING =
+            java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>());
+
+    @SuppressWarnings("unchecked")
+    private static void begin(org.bukkit.entity.Entity entity, org.bukkit.Location to,
+                              java.util.concurrent.CompletableFuture<Boolean> done, int tries) {
+        java.util.concurrent.CompletableFuture<Boolean> f;
+        try {
+            f = (java.util.concurrent.CompletableFuture<Boolean>) TELEPORT_ASYNC.invoke(entity, to);
+        } catch (IllegalStateException busy) {
+            // Somebody else's handoff is in progress: ask again next tick, on the entity's own thread.
+            if (tries < BUSY_TRIES) {
+                later(entity, () -> begin(entity, to, done, tries + 1), done);
+            } else {
+                done.complete(false);
+                settled(entity);
+            }
+            return;
+        } catch (Throwable t) {
+            done.completeExceptionally(t);
+            settled(entity);
+            return;
+        }
+        f.whenComplete((ok, err) -> {
+            if (err != null) done.completeExceptionally(err);
+            else done.complete(ok);
+            settled(entity);
+        });
+    }
+
+    /** [entity]'s teleport is over: the one waiting behind it starts next tick, once the handoff has been cleared. */
+    private static void settled(org.bukkit.entity.Entity entity) {
+        org.bukkit.Location next;
+        java.util.concurrent.CompletableFuture<Boolean> done;
+        synchronized (MOVING) {
+            Moving m = MOVING.get(entity);
+            if (m == null || m.next == null) {
+                MOVING.remove(entity);
+                return;
+            }
+            next = m.next;
+            done = m.nextDone;
+            m.next = null;
+            m.nextDone = null;
+        }
+        later(entity, () -> begin(entity, next, done, 0), done);
+    }
+
+    /**
+     * [task] next tick on [entity]'s thread. If the entity has gone by then the task never runs and [done] never
+     * completes, which is right: nothing should follow a teleport of somebody who left. The map entry is weak.
+     */
+    private static void later(org.bukkit.entity.Entity entity, Runnable task, java.util.concurrent.CompletableFuture<Boolean> done) {
+        org.bukkit.plugin.Plugin plugin = org.bukkit.plugin.java.JavaPlugin.getProvidingPlugin(Platform.class);
+        Tasks.onLater(plugin, entity, task, 1);
     }
 
     // ------------------------------------------------------------------ the tick
