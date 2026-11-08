@@ -217,8 +217,9 @@ resource-pack:
   # Another plugin that draws through Minecraft's text shader (BetterHud, HUDEngine, ItemsAdder's text
   # effects, Oraxen's animated glyphs) replaces the same shader file MC GUI's pages are drawn with, and a
   # game keeps only one copy. With this on, MC GUI reads that plugin's pack at startup and merges its text
-  # shader into its own, so both work. A plugin that only writes its pack after MC GUI starts is merged
-  # on the next restart; the console says what was merged.
+  # shader into its own, so both work. A plugin that only writes its pack after MC GUI starts (a pack
+  # plugin) is merged within a minute of writing it and players online are sent the pack again (serve
+  # and upload; with external, on the next restart). The console says what was merged.
   merge-shaders: true
 
 screens:

@@ -58,8 +58,18 @@ public final class ResourcePack implements AutoCloseable {
 
     private final Settings settings;
     private final Logger logger;
-    public final byte[] bytes;
-    public final String sha1;
+    /** The pack as players are sent it, and its sha1: replaced together when another plugin's shader is merged in late ({@link #remerge}). */
+    public volatile byte[] bytes;
+    public volatile String sha1;
+    /** The pack as built, before any other plugin's text shader is merged in. */
+    private final byte[] own;
+    private final Path dataFolder;
+    /** Mode upload: what puts the pack on the pack host, once started. */
+    private volatile PackUploader uploader;
+    /** The other plugins' packs the pack was last merged with, as {@link ForeignShaders.Found#key} says them. */
+    private volatile List<String> mergedFrom;
+    /** What {@link #remerge} was last given, as keys. */
+    private List<String> lastLook;
     private final Set<UUID> loaded = ConcurrentHashMap.newKeySet();
     /** Players a pack was declined by (true) or failed for (false), with none loaded since. */
     private final Map<UUID, Boolean> refused = new ConcurrentHashMap<>();
@@ -76,7 +86,7 @@ public final class ResourcePack implements AutoCloseable {
     private ExecutorService executor;
 
     /** Whose text shader the pack has merged in, as {@link ForeignShaders#scan} found it, or null. */
-    public final ForeignShaders.Found mergedWith;
+    public volatile ForeignShaders.Found mergedWith;
 
     public ResourcePack(Settings settings, Palette palette, Path dataFolder, Logger logger) throws IOException {
         this(settings, palette, dataFolder, logger, List.of());
@@ -91,13 +101,33 @@ public final class ResourcePack implements AutoCloseable {
         Path cursors = dataFolder.resolve("cursors");
         Files.createDirectories(cursors);
         loadCursors(cursors, logger);
-        byte[] built = build(palette, sounds, logger);
-        ForeignShaders.Found with = null;
+        this.own = build(palette, sounds, logger);
+        this.dataFolder = dataFolder;
+        Merged m = mergeIn(foreign);
+        this.mergedWith = m.with();
+        this.mergedFrom = keys(foreign);
+        this.lastLook = mergedFrom;
+        this.bytes = m.zip();
+        this.sha1 = sha1(bytes);
+        Files.createDirectories(dataFolder);
+        Files.write(dataFolder.resolve("pack.zip"), bytes);
+        // ItemsAdder merges another plugin's pack from a folder, never a zip (merge_other_plugins_resourcepacks_folders).
+        if (settings.packMode == Settings.PackMode.EXTERNAL) unpack(bytes, dataFolder.resolve(FOLDER), logger);
+        ai.resourcepack.ui.StartupNotes.say(logger, "Pack", "Built, " + Math.max(1, bytes.length / 1024) + " KB (pack.zip)",
+                "Resource pack built: " + bytes.length + " bytes, sha1 " + sha1 + " (also written to pack.zip)");
+    }
+
+    private record Merged(byte[] zip, ForeignShaders.Found with) {}
+
+    /** {@link #own} with [foreign]'s text shader merged in, if there is exactly one and it merges anywhere; said in the console. */
+    private Merged mergeIn(List<ForeignShaders.Found> foreign) throws IOException {
         if (settings.mergeShaders && foreign.size() == 1) {
             ForeignShaders.Found theirs = foreign.get(0);
-            ForeignShaders.Result r = ForeignShaders.merge(built, theirs, FORMAT_OLDEST);
+            ForeignShaders.Result r = ForeignShaders.merge(own, theirs, FORMAT_OLDEST);
+            ForeignShaders.Found with = null;
+            byte[] zip = own;
             if (!r.merged().isEmpty()) {
-                built = r.zip();
+                zip = r.zip();
                 with = theirs;
                 ai.resourcepack.ui.StartupNotes.say(logger, "Shaders", "Merged with " + theirs.plugin() + "'s, so both draw",
                         "Merged " + theirs.label() + "'s text shader into MC GUI's pack, so both draw, for "
@@ -107,22 +137,65 @@ public final class ResourcePack implements AutoCloseable {
                 logger.warning("Could not merge " + theirs.label() + "'s text shader with MC GUI's for " + why
                         + " There, a player sees whichever of the two packs is on top: MC GUI's pages or " + theirs.plugin() + "'s text shader, not both.");
             }
-        } else if (settings.mergeShaders && foreign.size() > 1) {
+            return new Merged(zip, with);
+        }
+        if (settings.mergeShaders && foreign.size() > 1) {
             List<String> who = new ArrayList<>();
             for (ForeignShaders.Found f : foreign) who.add(f.label());
             ai.resourcepack.ui.StartupNotes.warn(logger, "Shaders", "Several plugins replace the text shader: nothing merged",
                     "More than one other plugin's pack replaces Minecraft's text shader (" + String.join(", ", who)
                             + "), and MC GUI can merge its own with one of them, not several. A player sees whichever pack is on top.");
         }
-        this.mergedWith = with;
-        this.bytes = built;
-        this.sha1 = sha1(bytes);
-        Files.createDirectories(dataFolder);
+        return new Merged(own, null);
+    }
+
+    private static List<String> keys(List<ForeignShaders.Found> foreign) {
+        return foreign.stream().map(ForeignShaders.Found::key).sorted().toList();
+    }
+
+    /**
+     * Whether the pack can be merged again while the server runs ({@link #remerge}): only while this server serves it
+     * or puts it on the pack host. Mode external hands the pack to somebody else (a pack plugin that zipped it already,
+     * or whoever hosts public-url), who would go on sending the old one.
+     */
+    public boolean remergesLive() {
+        return settings.mergeShaders && (settings.packMode == Settings.PackMode.SERVE || settings.packMode == Settings.PackMode.UPLOAD);
+    }
+
+    /**
+     * Merges [foreign] in again: other plugins' packs as they lie on disk now, when they differ from what the pack was
+     * built with. A pack plugin builds its pack as it starts, after MC GUI (which has to start first for that plugin to
+     * bundle MC GUI's pack), so what MC GUI found at its own start was the pack of the run before. In mode upload the new
+     * pack is on the pack host before anything changes, so a player is never sent a link and a hash that disagree.
+     * True if the pack changed: send it to the players online. Off the server thread: the pack host can take seconds.
+     */
+    public synchronized boolean remerge(List<ForeignShaders.Found> foreign) throws IOException, InterruptedException {
+        if (!remergesLive()) return false;
+        List<String> now = keys(foreign);
+        // Only what two looks in a row agree on: a pack plugin part way through writing its zip shows none for a moment.
+        List<String> before = lastLook;
+        lastLook = now;
+        if (now.equals(mergedFrom) || !now.equals(before)) return false;
+        Merged m = mergeIn(foreign);
+        String newSha = sha1(m.zip());
+        if (newSha.equals(sha1)) {
+            mergedFrom = now;
+            return false;
+        }
+        // A failed upload leaves mergedFrom as it was, so the next look tries again.
+        if (settings.packMode == Settings.PackMode.UPLOAD && http == null) {
+            PackUploader up = uploader;
+            if (up == null) throw new IOException("the pack host has not been reached yet");
+            hosted = up.ensure(newSha, m.zip(), "the MC GUI pack");
+        }
+        bytes = m.zip();
+        sha1 = newSha;
+        mergedWith = m.with();
+        mergedFrom = now;
         Files.write(dataFolder.resolve("pack.zip"), bytes);
-        // ItemsAdder merges another plugin's pack from a folder, never a zip (merge_other_plugins_resourcepacks_folders).
-        if (settings.packMode == Settings.PackMode.EXTERNAL) unpack(bytes, dataFolder.resolve(FOLDER), logger);
-        ai.resourcepack.ui.StartupNotes.say(logger, "Pack", "Built, " + Math.max(1, bytes.length / 1024) + " KB (pack.zip)",
-                "Resource pack built: " + bytes.length + " bytes, sha1 " + sha1 + " (also written to pack.zip)");
+        logger.info("Resource pack rebuilt with what other plugins' packs hold now: " + bytes.length + " bytes, sha1 " + sha1
+                + ". Players online are sent it again.");
+        return true;
     }
 
     /**
@@ -141,6 +214,7 @@ public final class ResourcePack implements AutoCloseable {
             }
             case UPLOAD -> {
                 PackUploader uploader = new PackUploader(PackUploader.HOST, agent);
+                this.uploader = uploader;
                 uploads = Executors.newSingleThreadScheduledExecutor(r -> {
                     Thread t = new Thread(r, "MCGUI-upload");
                     t.setDaemon(true);
@@ -164,9 +238,13 @@ public final class ResourcePack implements AutoCloseable {
     /** Makes sure the pack host has the pack; if it cannot, serves it from here meanwhile (port and public-url). */
     private void host(PackUploader uploader, Runnable onHosted) {
         try {
-            String link = uploader.ensure(sha1, bytes, "the MC GUI pack");
-            boolean first = hosted == null;
-            hosted = link;
+            boolean first;
+            // Under the same lock as remerge, which swaps the pack and its link together.
+            synchronized (this) {
+                String link = uploader.ensure(sha1, bytes, "the MC GUI pack");
+                first = hosted == null;
+                hosted = link;
+            }
             if (first) {
                 if (http != null) logger.info("The resource pack is on packs.resourcepack.ai now: players are sent it from there.");
                 onHosted.run();
@@ -203,9 +281,10 @@ public final class ResourcePack implements AutoCloseable {
                 }
                 ex.getResponseHeaders().add("Content-Type", "application/zip");
                 ex.getResponseHeaders().add("Cache-Control", "no-store");
-                ex.sendResponseHeaders(200, bytes.length);
+                byte[] zip = bytes;
+                ex.sendResponseHeaders(200, zip.length);
                 try (OutputStream out = ex.getResponseBody()) {
-                    out.write(bytes);
+                    out.write(zip);
                 }
             }
         });

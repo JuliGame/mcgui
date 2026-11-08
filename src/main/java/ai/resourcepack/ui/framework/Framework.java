@@ -120,20 +120,19 @@ public final class Framework implements UIFramework, Listener {
             // Other plugins' packs that replace the text shader, as they lie on disk now (their last start's): one is
             // merged into ours so both draw (ForeignShaders).
             java.nio.file.Path plugins = plugin.getDataFolder().toPath().toAbsolutePath().getParent();
-            java.util.List<ForeignShaders.Found> foreign = new java.util.ArrayList<>();
-            if (settings.mergeShaders && settings.packMode != Settings.PackMode.OFF) {
-                // The server's own pack (server.properties) as fetched last time, then every other plugin's.
-                ForeignShaders.serverPack(plugin.getDataFolder().toPath()).ifPresent(foreign::add);
-                for (ForeignShaders.Found f : ForeignShaders.scan(ForeignShaders.folders(plugins, plugin.getDataFolder().toPath(), this::installed), plugins)) {
-                    if (foreign.stream().noneMatch(g -> g.sameShaders(f))) foreign.add(f);
-                }
-            }
+            java.util.List<ForeignShaders.Found> foreign = settings.mergeShaders && settings.packMode != Settings.PackMode.OFF
+                    ? foreignNow(plugins) : java.util.List.of();
             pack = new ResourcePack(settings, palette, plugin.getDataFolder().toPath(), plugin.getLogger(), foreign);
             if (settings.mergeShaders && settings.packMode != Settings.PackMode.OFF) {
-                // A plugin that builds its pack as it starts, after MC GUI has, is merged next start: said once it is seen.
-                java.util.Set<String> seen = new java.util.HashSet<>();
+                // A plugin that builds its pack as it starts, after MC GUI has (a pack plugin, which MC GUI starts
+                // before so it can bundle ours): served or uploaded from here, ours is merged again and sent again
+                // once that pack is seen, so a changed shader needs one restart and not two (and Nexo's or
+                // ItemsAdder's own reload command, none). Anywhere else the pack is out of our hands: said instead,
+                // for the next start. Looked at every 30 seconds while ours can follow it, and acted on once two looks agree.
+                java.util.Set<String> seen = java.util.concurrent.ConcurrentHashMap.newKeySet();
                 for (ForeignShaders.Found f : foreign) seen.add(f.key());
-                tasks.add(Threads.asyncTimer(plugin, () -> foreignLater(plugins, seen), 20 * 60, 20 * 60 * 10));
+                boolean live = pack.remergesLive();
+                tasks.add(Threads.asyncTimer(plugin, () -> foreignLater(plugins, seen), live ? 20 * 30 : 20 * 60, live ? 20 * 30 : 20 * 60 * 10));
                 // The server's own pack: fetched now (off the main thread) for the next start, said if it changed.
                 String serverPack = Bukkit.getServer().getResourcePack();
                 if (serverPack != null && !serverPack.isBlank()) {
@@ -205,12 +204,40 @@ public final class Framework implements UIFramework, Listener {
     }
 
     /**
+     * Every pack that replaces the text shader and could be merged into ours, one per distinct shader: the server's own
+     * (server.properties) as last fetched, then every other plugin's as it lies on disk.
+     */
+    private java.util.List<ForeignShaders.Found> foreignNow(java.nio.file.Path plugins) {
+        java.util.List<ForeignShaders.Found> foreign = new java.util.ArrayList<>();
+        ForeignShaders.serverPack(plugin.getDataFolder().toPath()).ifPresent(foreign::add);
+        for (ForeignShaders.Found f : ForeignShaders.scan(ForeignShaders.folders(plugins, plugin.getDataFolder().toPath(), this::installed), plugins)) {
+            if (foreign.stream().noneMatch(g -> g.sameShaders(f))) foreign.add(f);
+        }
+        return foreign;
+    }
+
+    /**
      * Another plugin's pack replacing the text shader that was not on disk when MC GUI started (one that builds its pack
-     * as it starts): merged at the next start, said now. [seen]: what was found at the start, and since (async).
+     * as it starts), or has changed since: merged into ours now and ours sent again where it can be
+     * ({@link ResourcePack#remerge}), else merged at the next start and said now. [seen]: what was found at the start,
+     * and since (async).
      */
     private void foreignLater(java.nio.file.Path plugins, java.util.Set<String> seen) {
         ResourcePack built = pack;
         if (built == null) return;
+        if (built.remergesLive()) {
+            java.util.List<ForeignShaders.Found> now = foreignNow(plugins);
+            try {
+                if (built.remerge(now)) resend(built);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } catch (Exception e) {
+                plugin.getLogger().warning("Another plugin's pack that replaces Minecraft's text shader has changed since MC GUI started,"
+                        + " and MC GUI could not rebuild its pack with it (" + e.getMessage() + "). It tries again shortly;"
+                        + " a restart also does it.");
+            }
+            return;
+        }
         java.util.List<ForeignShaders.Found> now = ForeignShaders.scan(ForeignShaders.folders(plugins, plugin.getDataFolder().toPath(), this::installed), plugins);
         for (ForeignShaders.Found f : now) {
             if (!seen.add(f.key())) continue;
@@ -226,6 +253,11 @@ public final class Framework implements UIFramework, Listener {
     private void fetchServerPack(String url, java.util.Set<String> seen) {
         try {
             if (!ForeignShaders.fetchServerPack(url, plugin.getDataFolder().toPath())) return;
+            ResourcePack built = pack;
+            if (built != null && built.remergesLive()) {
+                foreignLater(plugin.getDataFolder().toPath().toAbsolutePath().getParent(), seen);
+                return;
+            }
             ForeignShaders.serverPack(plugin.getDataFolder().toPath()).ifPresent(f -> {
                 if (!seen.add(f.key())) return;
                 plugin.getLogger().warning("The server's resource pack (server.properties) replaces Minecraft's text shader, as MC GUI's pack"
@@ -234,6 +266,19 @@ public final class Framework implements UIFramework, Listener {
             });
         } catch (Exception e) {
             plugin.getLogger().info("Could not fetch the server's resource pack (server.properties) to merge its text shader: " + e.getMessage());
+        }
+    }
+
+    /** Sends [built], merged again, to every player online who has not declined MC GUI's pack: theirs is the old one. */
+    private void resend(ResourcePack built) {
+        try {
+            Threads.global(plugin, () -> {
+                for (Player p : Bukkit.getOnlinePlayers()) {
+                    if (!Bedrock.is(p) && !built.declined(p.getUniqueId())) Threads.on(plugin, p, () -> built.send(p));
+                }
+            });
+        } catch (IllegalStateException | IllegalArgumentException disabled) {
+            // MC GUI stopped meanwhile.
         }
     }
 
