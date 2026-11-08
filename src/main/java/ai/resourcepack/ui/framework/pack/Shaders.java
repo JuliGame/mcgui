@@ -1104,7 +1104,7 @@ public final class Shaders {
      */
     private static String decoderCore(Palette palette) {
         SymbolHash hash = palette.symbolHash;
-        return """
+        return MUL_GLSL + """
 
                 // ---- MC GUI hi-colour map decoder ----
                 // Colour -> symbol: the palette gives each symbol the colour that hashes to it (SymbolHash), so the hash
@@ -1119,8 +1119,8 @@ public final class Shaders {
                 int mcb_symbol_of(vec3 rgb) {
                     uvec3 c = uvec3(round(rgb * 255.0));
                     uint k = (c.r << 16u) | (c.g << 8u) | c.b;
-                    uint b = (k * @MUL1@u) >> @BSHIFT@u;
-                    uint s = (((k * @MUL2@u) >> 24u) * @SYMBOLS@u >> 8u) + ((mcb_displacements(b >> 2u) >> ((b & 3u) << 3u)) & 255u);
+                    uint b = mcb_mul(k, @MUL1@u) >> @BSHIFT@u;
+                    uint s = ((mcb_mul(k, @MUL2@u) >> 24u) * @SYMBOLS@u >> 8u) + ((mcb_displacements(b >> 2u) >> ((b & 3u) << 3u)) & 255u);
                     return int(s >= @SYMBOLS@u ? s - @SYMBOLS@u : s);
                 }
 
@@ -1424,6 +1424,22 @@ public final class Shaders {
             }
             """;
 
+    /**
+     * A 32 x 32-bit uint multiply (the low 32 bits, as GLSL's own) built from 16-bit halves. Intel's Mesa compiler
+     * (iris, and Zink over ANV) gets a full 32 x 32 multiply wrong on GPUs without a native one, such as Meteor Lake's
+     * Arc iGPU, which scrambled every hash here: views drawn in the wrong places and in the wrong colours (joleif,
+     * Mesa 26.2, 2026-11-07). Each partial product here is 16 x 16 bits, which every GPU gets right, and the answer
+     * is the same everywhere, so {@link SymbolHash} still agrees with it bit for bit. Every constant multiply by a
+     * full 32-bit number in these shaders goes through it; a small one (a symbol count, 240) does not need to.
+     */
+    static final String MUL_GLSL = """
+
+            uint mcb_mul(uint a, uint b) {
+                uint al = a & 65535u, ah = a >> 16u, bl = b & 65535u, bh = b >> 16u;
+                return al * bl + ((al * bh + ah * bl) << 16u);
+            }
+            """;
+
     // ---------------------------------------------------------------- the pointer, out of the menu blur
 
     /**
@@ -1435,9 +1451,9 @@ public final class Shaders {
     private static final String CODE_GLSL = """
 
             ivec3 mcb_code(ivec2 p) {
-                uint h = uint(p.x) * 0x9E3779B1u ^ uint(p.y) * 0x85EBCA77u;
+                uint h = mcb_mul(uint(p.x), 0x9E3779B1u) ^ mcb_mul(uint(p.y), 0x85EBCA77u);
                 h ^= h >> 15;
-                h *= 0x2C1B3C6Du;
+                h = mcb_mul(h, 0x2C1B3C6Du);
                 h ^= h >> 12;
                 int e = int(h >> 26);
                 return ivec3(e & 3, (e >> 2) & 3, (e >> 4) & 3);
@@ -1527,7 +1543,7 @@ public final class Shaders {
 
     /** {@link #menuBlurChain}'s first pass: the frame, alpha 1 where it is the pointer. */
     public static String pointerFindFsh(Dialect d) {
-        return emit(POINTER_HEAD + CODE_GLSL + """
+        return emit(POINTER_HEAD + MUL_GLSL + CODE_GLSL + """
 
                 bool coded(ivec2 p) {
                     return (ivec3(round(texelFetch(InSampler, p, 0).rgb * 255.0)) & 3) == mcb_code(p);

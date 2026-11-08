@@ -26,8 +26,8 @@ class ShadersTest {
     @Test
     void everySymbolColourDecodesToItsSymbolInTheShaders() {
         Pattern disp = Pattern.compile("uint mcb_displacements\\(uint i\\) \\{\n(.*?)\n}", Pattern.DOTALL);
-        Pattern bucket = Pattern.compile("uint b = \\(k \\* (\\d+)u\\) >> (\\d+)u;");
-        Pattern slot = Pattern.compile("uint s = \\(\\(\\(k \\* (\\d+)u\\) >> 24u\\) \\* (\\d+)u >> 8u\\) \\+ "
+        Pattern bucket = Pattern.compile("uint b = mcb_mul\\(k, (\\d+)u\\) >> (\\d+)u;");
+        Pattern slot = Pattern.compile("uint s = \\(\\(mcb_mul\\(k, (\\d+)u\\) >> 24u\\) \\* (\\d+)u >> 8u\\) \\+ "
                 + "\\(\\(mcb_displacements\\(b >> 2u\\) >> \\(\\(b & 3u\\) << 3u\\)\\) & 255u\\);");
         Pattern wrap = Pattern.compile("return int\\(s >= (\\d+)u \\? s - (\\d+)u : s\\);");
         for (Shaders.Dialect d : Shaders.Dialect.values()) {
@@ -45,6 +45,32 @@ class ShadersTest {
                     long s = (((k * mul2 & 0xFFFFFFFFL) >>> 24) * n >>> 8) + (word >>> ((b & 3) << 3) & 255);
                     assertEquals(sym, s >= n ? s - n : s, d + ": symbol " + sym);
                 }
+            }
+        }
+    }
+
+    /**
+     * mcb_mul, the multiply from 16-bit halves that Intel's Mesa compiler gets right where it gets a 32 x 32 one wrong,
+     * is the plain wrapping multiply (run as written: Java's int arithmetic is GLSL's uint), and no shader multiplies
+     * by a full 32-bit constant without it.
+     */
+    @Test
+    void theHalvesMultiplyIsTheWrappingMultiply() {
+        assertTrue(Shaders.MUL_GLSL.contains("return al * bl + ((al * bh + ah * bl) << 16u);"), "mcb_mul changed; update this test");
+        int[] edge = {0, 1, 2, 0xFFFF, 0x10000, 0x7FFFFFFF, 0x80000000, 0xFFFFFFFF, 1372926309, (int) 3137834733L,
+                0x9E3779B1, 0x85EBCA77, 0x2C1B3C6D};
+        java.util.Random rnd = new java.util.Random(1);
+        for (int i = 0; i < 100_000; i++) {
+            boolean e = i < edge.length * edge.length;
+            int a = e ? edge[i / edge.length] : rnd.nextInt(), b = e ? edge[i % edge.length] : rnd.nextInt();
+            int al = a & 0xFFFF, ah = a >>> 16, bl = b & 0xFFFF, bh = b >>> 16;
+            assertEquals(a * b, al * bl + ((al * bh + ah * bl) << 16), Integer.toHexString(a) + " x " + Integer.toHexString(b));
+        }
+        Pattern direct = Pattern.compile("\\*=? *(0x[0-9A-Fa-f]{5,}|\\d{6,})u");
+        for (Shaders.Dialect d : Shaders.Dialect.values()) {
+            for (String src : new String[]{Shaders.textVsh(d, PALETTE), Shaders.textFsh(d, PALETTE), Shaders.pointerFindFsh(d)}) {
+                assertEquals(1, src.split("uint mcb_mul\\(", -1).length - 1, d + ": mcb_mul defined once");
+                assertFalse(direct.matcher(src).find(), d + ": a 32-bit constant multiplied directly");
             }
         }
     }
