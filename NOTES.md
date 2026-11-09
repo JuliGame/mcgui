@@ -79,6 +79,17 @@ included, which other plugins can see.
     is shared for good: its drawer copies it before painting over it
     (`retireShared`), as with a first picture.
 
+- **A GIF that moves is one more thing a `Motion` moves** (`html/res/AnimatedPicture`). Every frame is
+  held whole (composited, at most 64 MB and 1024 frames, more dropped evenly with their time kept) on the
+  `Page`, so nothing is per viewer. `Page.moves()` is true for a page that loaded one, and the `Styler`
+  tells the motion each element showing one (`Motion.picture`), so it is drawn like any element that moves:
+  a repaint of that element, no new layout. Which frame comes from `Motion.current()` as it is painted, so a
+  band on a pool thread has the motion set around it (`HtmlRenderer.paintBands`). One that loops for ever
+  runs on the page's clock and is shared between viewers (`AnimFrames`); one that ends runs on its
+  viewer's and stops being active on its last frame. A script's `drawImage` asks for the frame by the
+  script's own clock; a GIF only a script reads is kept on the `Page` too (`scriptPicture`), counted against
+  the page's picture budget.
+
 - **Coordinates in the box tree are relative to the box that laid a box out**:
   its nearest ancestor that is not an inline box. Inline boxes have no
   rectangle, only per-line fragments relative to the block owning the lines.

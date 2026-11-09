@@ -7,6 +7,8 @@ import ai.resourcepack.ui.html.css.Matcher;
 import ai.resourcepack.ui.html.css.Selector;
 import ai.resourcepack.ui.html.css.Shorthands;
 import ai.resourcepack.ui.html.css.Stylesheet;
+import ai.resourcepack.ui.html.res.AnimatedPicture;
+import ai.resourcepack.ui.html.res.Resources;
 
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
@@ -66,6 +68,8 @@ public final class Styler {
 
     /** The motion of the picture being drawn, or null: nothing moves. */
     private final Motion motion = Motion.current();
+    /** Where to look up pictures that may move ({@link #showing}), or null where none does. */
+    private Resources pictures;
 
     public Styler(Stylesheet ua, Stylesheet author, double vw, double vh, Selector.State state, URI base, RenderBudget budget) {
         this.ua = ua;
@@ -97,6 +101,45 @@ public final class Styler {
             // An abandoned pass leaves the last whole one, which still fits the document.
             Memo.keep(root, done ? memo : previous);
         }
+    }
+
+    /** Elements that show an animated picture of [res] move, and are told to the motion, in the passes to come. */
+    public void showing(Resources res) {
+        pictures = res;
+    }
+
+    /** Tells the motion if [e], styled [s], shows an animated picture: as its content, or behind it. */
+    private void notePictures(Element e, Style s) {
+        String src = switch (e.normalName()) {
+            case "img" -> e.hasAttr("src") ? e.attr("src") : e.attr("srcset").trim().split("[\\s,]")[0];
+            case "input", "embed" -> e.attr("src");
+            case "video" -> e.attr("poster");
+            case "object" -> e.attr("data");
+            default -> "";
+        };
+        if (!src.isBlank()) note(e, CssParser.resolve(base, src));
+        notePictures(e, s.backgroundImages, s.content);
+        Style b = before.get(e), a = after.get(e);
+        if (b != null) notePictures(e, b.backgroundImages, b.content);
+        if (a != null) notePictures(e, a.backgroundImages, a.content);
+    }
+
+    private void notePictures(Element e, List<String> layers, String content) {
+        for (String layer : layers) note(e, url(layer));
+        if (content != null) note(e, url(content));
+    }
+
+    private void note(Element e, String uri) {
+        if (uri != null && pictures.image(uri) instanceof AnimatedPicture a) motion.picture(e, a);
+    }
+
+    /** The picture a background layer or a {@code content} names, or null. */
+    private static String url(String value) {
+        int at = value.toLowerCase(Locale.ROOT).indexOf("url(");
+        int close = at < 0 ? -1 : value.indexOf(')', at);
+        if (close < 0) return null;
+        String u = value.substring(at + 4, close).trim();
+        return u.length() >= 2 && (u.charAt(0) == '"' || u.charAt(0) == '\'') ? u.substring(1, u.length() - 1) : u;
     }
 
     private void walk(Element e, Element parent, boolean parentKept) {
@@ -157,6 +200,7 @@ public final class Styler {
             pseudo(e, Stylesheet.AFTER, s, own, decl, after, old, node, kept);
             if (e.hasAttr("placeholder")) pseudo(e, Stylesheet.PLACEHOLDER, s, own, decl, placeholder, old, node, kept);
             if (s.display.equals("list-item")) pseudo(e, Stylesheet.MARKER, s, own, decl, marker, old, node, kept);
+            if (pictures != null && motion != null) notePictures(e, s);
             matcher.ancestors.push(e);
             for (Element child : e.children()) walk(child, e, kept);
             matcher.ancestors.pop(e);

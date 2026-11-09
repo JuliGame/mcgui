@@ -82,7 +82,7 @@ park-pictures-after: 5
 # of your own, "uiengine:<file>" for plugins/MCGUI/sounds/<file>.ogg). A page can set its own with <meta name="ui:click-sound">.
 click-sound: true
 
-# Pictures a second of a page while something on it animates (CSS animation or transition), 1 to 20. Each
+# Pictures a second of a page while something on it animates (CSS animation or transition, or a GIF), 1 to 20. Each
 # is a whole picture of the page, drawn for each player watching it, and only the parts that changed are
 # sent: an animation costs CPU for as long as it runs, so a page that animates for ever costs it for ever.
 animation-fps: 10

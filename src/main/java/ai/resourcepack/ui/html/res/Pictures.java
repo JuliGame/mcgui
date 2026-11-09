@@ -20,7 +20,7 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.Iterator;
 
-/** Decoding images: bitmaps through ImageIO, SVG through JSVG. */
+/** Decoding images: bitmaps through ImageIO (a GIF that moves as an {@link AnimatedPicture}), SVG through JSVG. */
 public final class Pictures {
     private Pictures() {}
 
@@ -31,10 +31,19 @@ public final class Pictures {
 
     /** A picture from file bytes, or null if they are neither a bitmap Java reads nor an SVG. */
     public static Picture decode(byte[] data, String nameHint) {
+        return decode(data, nameHint, true);
+    }
+
+    /** As {@link #decode}, but a GIF that moves is only its first frame. */
+    public static Picture still(byte[] data, String nameHint) {
+        return decode(data, nameHint, false);
+    }
+
+    private static Picture decode(byte[] data, String nameHint, boolean moving) {
         if (data == null || data.length == 0) return null;
         if (looksLikeSvg(data, nameHint)) return svg(new String(data, StandardCharsets.UTF_8));
         try {
-            return bitmap(data);
+            return bitmap(data, moving);
         } catch (IOException | RuntimeException | OutOfMemoryError e) {
             return null;
         }
@@ -45,7 +54,11 @@ public final class Pictures {
      * and decode to gigabytes. Large photos come out subsampled to under {@link #MAX_PIXELS}, keeping
      * their stated size as their natural size, so a page lays them out and crops them as a browser would.
      */
-    static Raster bitmap(byte[] data) throws IOException {
+    private static Picture bitmap(byte[] data, boolean moving) throws IOException {
+        if (moving && AnimatedPicture.isGif(data)) {
+            AnimatedPicture frames = AnimatedPicture.read(data);
+            if (frames != null) return frames;
+        }
         try (ImageInputStream in = memory(data)) {
             Iterator<ImageReader> readers = ImageIO.getImageReaders(in);
             if (!readers.hasNext()) return null;
@@ -84,6 +97,8 @@ public final class Pictures {
      */
     public static long decodedBytes(byte[] data, String nameHint) {
         if (data == null || data.length == 0 || looksLikeSvg(data, nameHint)) return 0;
+        long frames = AnimatedPicture.isGif(data) ? AnimatedPicture.weigh(data) : 0;
+        if (frames > 0) return frames;
         try (ImageInputStream in = memory(data)) {
             Iterator<ImageReader> readers = ImageIO.getImageReaders(in);
             if (!readers.hasNext()) return 0;
@@ -100,6 +115,11 @@ public final class Pictures {
         } catch (IOException | RuntimeException e) {
             return 0;
         }
+    }
+
+    /** About how many bytes the frames of [data] take decoded, from its headers alone; 0 for anything but a GIF that moves. */
+    public static long animatedBytes(byte[] data) {
+        return data != null && AnimatedPicture.isGif(data) ? AnimatedPicture.weigh(data) : 0;
     }
 
     private static boolean looksLikeSvg(byte[] data, String name) {

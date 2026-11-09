@@ -4,6 +4,7 @@ import ai.resourcepack.ui.html.css.CssParser;
 import ai.resourcepack.ui.html.css.Declaration;
 import ai.resourcepack.ui.html.css.FontFace;
 import ai.resourcepack.ui.html.css.Stylesheet;
+import ai.resourcepack.ui.html.res.AnimatedPicture;
 import ai.resourcepack.ui.html.res.Picture;
 import ai.resourcepack.ui.html.res.Pictures;
 import ai.resourcepack.ui.html.res.Resources;
@@ -43,6 +44,7 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -321,6 +323,11 @@ public final class Page implements Resources {
     public final Fonts fonts;
     public final TextShaper shaper;
     private final Map<String, Picture> images = new ConcurrentHashMap<>();
+    /** Moving GIFs only a script asked for ({@link #scriptPicture}), by file and date. */
+    private final Map<String, Picture> scriptGifs = new ConcurrentHashMap<>();
+    /** Bytes the decoded pictures of this page take: at most {@link #MAX_IMAGE_BYTES}. */
+    private final AtomicLong imageBytes = new AtomicLong();
+    private volatile boolean animated;
     /**
      * Pictures from somewhere other than files and the web, by URI scheme ({@code head:} for a player's
      * face): looked up as the page is drawn, since what they name is often filled in per player. Each
@@ -568,7 +575,6 @@ public final class Page implements Resources {
         for (Element e : document.select("[style]")) {
             for (Declaration d : CssParser.declarations(e.attr("style"), uri)) urls(d.value(), wanted);
         }
-        long used = 0;
         int over = 0;
         for (String u : wanted) {
             if (images.containsKey(u)) continue;
@@ -584,7 +590,7 @@ public final class Page implements Resources {
             byte[] data = loader.fetch(target, null);
             // Weighed from the header before decoding, so the bytes past the budget are never allocated at all.
             long size = Pictures.decodedBytes(data, u);
-            if (size > 0 && used + size > MAX_IMAGE_BYTES) {
+            if (size > 0 && imageBytes.get() + size > MAX_IMAGE_BYTES) {
                 over++;
                 // Kept as a failure, so drawing does not decode a data: one after all.
                 images.put(u, NONE_PICTURE);
@@ -593,7 +599,8 @@ public final class Page implements Resources {
             Picture p = Pictures.decode(data, u);
             if (p != null) {
                 images.put(u, p);
-                used += size;
+                imageBytes.addAndGet(size);
+                animated |= p instanceof AnimatedPicture;
             } else if (!u.startsWith("data:")) {
                 problems.add("Could not load image " + u);
             }
@@ -697,7 +704,7 @@ public final class Page implements Resources {
     public boolean moves() {
         Boolean m = moves;
         if (m == null) {
-            m = !styles.keyframes.isEmpty();
+            m = animatedPictures() || !styles.keyframes.isEmpty();
             for (Stylesheet.Rule r : styles.rules()) {
                 if (m) break;
                 for (Declaration d : r.declarations()) if (d.property().startsWith("transition") || d.property().startsWith("animation")) m = true;
@@ -706,6 +713,29 @@ public final class Page implements Resources {
             moves = m;
         }
         return m;
+    }
+
+    /** Whether a picture the page loaded is a GIF that moves. */
+    public boolean animatedPictures() {
+        return animated;
+    }
+
+    /**
+     * The picture in the file [p], which a script asked for and the page did not load. A GIF that moves is kept for
+     * every viewer's script, its frames being tens of megabytes, while the page's budget lasts; past it, it is a still.
+     */
+    public Picture scriptPicture(Path p) throws IOException {
+        byte[] data = Files.readAllBytes(p);
+        long size = Pictures.animatedBytes(data);
+        if (size == 0) return Pictures.decode(data, p.toString());
+        // The file's date in the key: a page is not loaded again for a picture only its script reads.
+        String key = p + "@" + Files.getLastModifiedTime(p).toMillis();
+        Picture kept = scriptGifs.computeIfAbsent(key, k -> {
+            if (imageBytes.addAndGet(size) <= MAX_IMAGE_BYTES) return Pictures.decode(data, k);
+            imageBytes.addAndGet(-size);
+            return null;
+        });
+        return kept != null ? kept : Pictures.still(data, p.toString());
     }
 
     /** Whether the page draws pictures of the {@link #SCHEMES}, which can arrive (and change) after it has loaded. */

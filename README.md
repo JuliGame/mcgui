@@ -432,7 +432,7 @@ hits too; `url()` and `path()` draw uncut), `object-fit`,
 `text-overflow: ellipsis`, `-webkit-line-clamp`, inline SVG (styled by the page's
 CSS too: `fill`, `stroke` and the other SVG paint properties, `:hover` rules
 included) and SVG images,
-PNG/JPEG/GIF images, form controls drawn as in a browser, and CSS animations
+PNG/JPEG/GIF images (animated GIFs play), form controls drawn as in a browser, and CSS animations
 (`@keyframes`, `animation`) and transitions (`transition`): numbers, lengths,
 colours and transforms move smoothly, anything else changes halfway. While
 something moves, the page is drawn `animation-fps` times a second (10 by

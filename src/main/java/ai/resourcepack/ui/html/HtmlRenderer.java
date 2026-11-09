@@ -300,6 +300,7 @@ public final class HtmlRenderer {
         Object kept = motion == null ? null : motion.takeLayout();
         Laid last = kept instanceof Laid l && l.html == html && l.page == page && l.vw == vw && l.vh == vh && !page.schemed() ? l : null;
         Styler styler = new Styler(Page.UA, page.styles, vw, vh, state, page.uri, budget);
+        if (page.animatedPictures()) styler.showing(page);
         styler.run(html);
         Laid laid;
         if (last != null && restyled(last, styler)) {
@@ -474,6 +475,8 @@ public final class HtmlRenderer {
         // Without a backdrop-filter nothing reads the margins as painted, only filter blurs, which each
         // layer reaches out for itself: then filtered layers are worked out only round the band's rows.
         boolean backdrops = Painter.backdrops(root);
+        // An animated picture asks the motion which frame it is at, and a band may be painted on another thread.
+        Motion motion = Motion.current();
         for (int b = 0; b < bands; b++) {
             int y0 = height * b / bands, y1 = height * (b + 1) / bands;
             // Twice the reach: a blur in the margin itself reads up to one reach further out.
@@ -482,6 +485,9 @@ public final class HtmlRenderer {
             ForkJoinTask<List<Painter.Hit>> task = ForkJoinTask.adapt(() -> {
                 if (!gate.enter()) return null;
                 BufferedImage band = null;
+                // Put back: a pool thread can be in the middle of drawing another picture when it helps with this one.
+                Motion was = Motion.current();
+                if (was != motion) Motion.set(motion);
                 try {
                     // Not cleared: Painter.paint sets every pixel of it first.
                     band = PixelPool.uncleared(width, bottom - top, BufferedImage.TYPE_INT_ARGB_PRE);
@@ -501,6 +507,10 @@ public final class HtmlRenderer {
                     System.arraycopy(((DataBufferInt) band.getRaster().getDataBuffer()).getData(), (y0 - top) * width, out, y0 * width, (y1 - y0) * width);
                     return painter.hits;
                 } finally {
+                    if (was != motion) {
+                        if (was == null) Motion.clear();
+                        else Motion.set(was);
+                    }
                     PixelPool.give(band);
                     gate.leave();
                 }

@@ -4,7 +4,6 @@ import ai.resourcepack.ui.framework.api.Canvas;
 import ai.resourcepack.ui.html.HtmlRenderer;
 import ai.resourcepack.ui.html.Page;
 import ai.resourcepack.ui.html.res.Picture;
-import ai.resourcepack.ui.html.res.Pictures;
 import ai.resourcepack.ui.script.Script;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
@@ -466,13 +465,13 @@ public final class PageScript implements Script {
             if (i < 0 || i >= canvases.size()) return null;
             ScriptCanvas sc = canvases.get(i);
             String id = i < onPage ? page.document.select("canvas").get(i).id() : "";
-            return c.newArray(scope, new Object[]{new ScriptCanvas.Handle(sc, null), id, (double) sc.width, (double) sc.height});
+            return c.newArray(scope, new Object[]{new ScriptCanvas.Handle(sc, null, null), id, (double) sc.width, (double) sc.height});
         });
         fn(n, "create", (c, a) -> {
             if (canvases.size() >= 256) throw Context.reportRuntimeError("Too many canvases");
             ScriptCanvas sc = new ScriptCanvas(canvases.size(), false, (int) Context.toNumber(a[0]), (int) Context.toNumber(a[1]), scale);
             canvases.add(sc);
-            return c.newArray(scope, new Object[]{new ScriptCanvas.Handle(sc, null), "", (double) sc.width, (double) sc.height});
+            return c.newArray(scope, new Object[]{new ScriptCanvas.Handle(sc, null, null), "", (double) sc.width, (double) sc.height});
         });
         fn(n, "resize", (c, a) -> {
             ScriptCanvas sc = handle(a[0]);
@@ -571,12 +570,12 @@ public final class PageScript implements Script {
                 Path folder = page.file.toAbsolutePath().getParent().normalize();
                 Path p = Path.of(u).toAbsolutePath().normalize();
                 // A script reads pictures from its page's folder and those under it, nothing else on the server.
-                if (p.startsWith(folder) && Files.isRegularFile(p) && Files.size(p) < 8 * 1024 * 1024) pic = Pictures.decode(Files.readAllBytes(p), p.toString());
+                if (p.startsWith(folder) && Files.isRegularFile(p) && Files.size(p) < 8 * 1024 * 1024) pic = page.scriptPicture(p);
             }
         } catch (IllegalArgumentException | IOException e) {
             pic = null;
         }
-        h = pic == null ? null : new ScriptCanvas.Handle(null, pic);
+        h = pic == null ? null : new ScriptCanvas.Handle(null, pic, () -> now() / 1000);
         if (images.size() < 512) images.put(src, h);
         return h;
     }

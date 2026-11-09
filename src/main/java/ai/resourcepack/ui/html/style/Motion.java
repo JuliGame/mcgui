@@ -2,6 +2,7 @@ package ai.resourcepack.ui.html.style;
 
 import ai.resourcepack.ui.html.css.Stylesheet;
 import ai.resourcepack.ui.html.css.Values;
+import ai.resourcepack.ui.html.res.AnimatedPicture;
 import org.jsoup.nodes.Element;
 
 import java.util.ArrayList;
@@ -220,6 +221,18 @@ public final class Motion {
         active = moving;
         personal = own;
         moved = Collections.unmodifiableSet(movingNow);
+    }
+
+    /** Seconds an animated picture that loops [forever] or not is at, in the picture being drawn. Read while painting. */
+    public double pictureAt(boolean forever) {
+        return forever ? pageNow : now;
+    }
+
+    /** [e] shows [picture]: while it plays, [e] moves, and on the clock it runs on. */
+    void picture(Element e, AnimatedPicture picture) {
+        if (!picture.playing(pictureAt(picture.forever()))) return;
+        moved(picture.forever());
+        movingNow.add(e);
     }
 
     private static Set<Element> newSet() {

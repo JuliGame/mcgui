@@ -1,5 +1,6 @@
 package ai.resourcepack.ui.script.engine;
 
+import ai.resourcepack.ui.html.res.AnimatedPicture;
 import ai.resourcepack.ui.html.res.Picture;
 import org.mozilla.javascript.Scriptable;
 import org.mozilla.javascript.ScriptableObject;
@@ -8,6 +9,7 @@ import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.awt.image.DataBufferInt;
+import java.util.function.DoubleSupplier;
 
 /**
  * One {@code <canvas>} a script draws on (or one it made with {@code document.createElement}): [width] × [height]
@@ -102,11 +104,14 @@ final class ScriptCanvas {
     static final class Handle extends ScriptableObject {
         final ScriptCanvas canvas;
         final Picture picture;
+        /** Seconds since the script began, which says what frame a GIF that moves is at. */
+        private final DoubleSupplier seconds;
         private BufferedImage pixels;
 
-        Handle(ScriptCanvas canvas, Picture picture) {
+        Handle(ScriptCanvas canvas, Picture picture, DoubleSupplier seconds) {
             this.canvas = canvas;
             this.picture = picture;
+            this.seconds = seconds;
         }
 
         @Override
@@ -114,8 +119,9 @@ final class ScriptCanvas {
             return "Handle";
         }
 
-        /** The picture at its own size, drawn once. */
+        /** The picture at its own size, drawn once; a GIF that moves, its frame of this moment. */
         BufferedImage pixels() {
+            if (picture instanceof AnimatedPicture moving) return moving.image(seconds.getAsDouble());
             if (pixels == null) {
                 int w = Math.max(1, (int) Math.round(picture.width() > 0 ? picture.width() : 300));
                 int h = Math.max(1, (int) Math.round(picture.height() > 0 ? picture.height() : 150));
