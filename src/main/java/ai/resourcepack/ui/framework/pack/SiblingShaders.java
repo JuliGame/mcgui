@@ -107,7 +107,8 @@ public final class SiblingShaders implements AutoCloseable {
 
     private boolean fetch(Push p) {
         try {
-            HttpResponse<InputStream> response = http.send(HttpRequest.newBuilder(URI.create(p.url())).timeout(Duration.ofSeconds(60)).GET().build(),
+            HttpResponse<InputStream> response = http.send(HttpRequest.newBuilder(URI.create(p.url())).timeout(Duration.ofSeconds(60))
+                            .header("User-Agent", PackFetch.USER_AGENT).GET().build(),
                     HttpResponse.BodyHandlers.ofInputStream());
             java.nio.file.Path tmp = java.nio.file.Files.createTempFile("mcgui-sibling", ".zip");
             try {

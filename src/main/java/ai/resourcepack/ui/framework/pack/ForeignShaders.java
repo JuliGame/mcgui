@@ -270,7 +270,7 @@ public final class ForeignShaders {
         java.net.http.HttpClient http = java.net.http.HttpClient.newBuilder().connectTimeout(java.time.Duration.ofSeconds(10))
                 .followRedirects(java.net.http.HttpClient.Redirect.NORMAL).build();
         java.net.http.HttpResponse<java.io.InputStream> response = http.send(java.net.http.HttpRequest.newBuilder(java.net.URI.create(url))
-                .timeout(java.time.Duration.ofSeconds(60)).header("User-Agent", "MCGUI").GET().build(), java.net.http.HttpResponse.BodyHandlers.ofInputStream());
+                .timeout(java.time.Duration.ofSeconds(60)).header("User-Agent", PackFetch.USER_AGENT).GET().build(), java.net.http.HttpResponse.BodyHandlers.ofInputStream());
         byte[] bytes;
         try (java.io.InputStream in = response.body()) {
             if (response.statusCode() != 200) throw new IOException("HTTP " + response.statusCode());
