@@ -1,0 +1,29 @@
+# Dependabot opens pull requests into dev for outdated or vulnerable libraries and Actions, once a week,
+# grouped so it is a few pull requests and not one a library. Titles read "build(deps): ...".
+version: 2
+updates:
+  - package-ecosystem: gradle
+    directories: ['/', '/examples/arcade', '/examples/atlas']
+    target-branch: dev
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build
+      include: scope
+    groups:
+      libraries:
+        patterns: ['*']
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: dev
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
+      include: scope
+    groups:
+      actions:
+        patterns: ['*']
+    open-pull-requests-limit: 5

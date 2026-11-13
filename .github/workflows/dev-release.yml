@@ -1,0 +1,50 @@
+# Every push to dev publishes the plugin jar as the one rolling pre-release "dev-latest", for trying a change
+# before it is released. Real releases are made from a version tag on main, by hand (CONTRIBUTING.md).
+name: dev build
+
+on:
+  push:
+    branches: [dev]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dev-build
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    name: publish dev-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+      - name: Name the build
+        id: name
+        run: |
+          released=$(sed -n "s/^version = '\(.*\)'$/\1/p" build.gradle)
+          [ -n "$released" ] || { echo '::error::no version line in build.gradle'; exit 1; }
+          echo "version=$released+dev.$GITHUB_RUN_NUMBER.$(git rev-parse --short=7 HEAD)" >> "$GITHUB_OUTPUT"
+      # The tests ran on the pull request that brought this commit in (checks.yml), and run again on this push.
+      - name: Build the jar
+        run: sh gradlew build -x test -PbuildVersion='${{ steps.name.outputs.version }}'
+      - name: Replace the dev-latest pre-release
+        env:
+          VERSION: ${{ steps.name.outputs.version }}
+        run: |
+          jar="build/libs/MCGUI-$VERSION.jar"
+          ls -l "$jar"
+          gh release delete dev-latest --cleanup-tag --yes 2>/dev/null || true
+          gh release create dev-latest "$jar" \
+            --prerelease \
+            --target "$GITHUB_SHA" \
+            --title "Dev build $VERSION" \
+            --notes "Built from dev at $GITHUB_SHA. Not a release: it has passed the fast checks only, not the full regression and performance runs a release goes through. The plugin reports its version as \`$VERSION\`."

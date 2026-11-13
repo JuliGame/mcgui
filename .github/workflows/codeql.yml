@@ -1,0 +1,41 @@
+# Static analysis of the Java code and of these workflows: on every pull request, on what lands, and weekly for
+# new queries. Findings show under the repository's Security tab and on the pull request.
+name: codeql
+
+on:
+  pull_request:
+    branches: [dev, main]
+  push:
+    branches: [dev, main]
+  schedule:
+    - cron: '17 4 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: analyze (${{ matrix.language }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [java-kotlin, actions]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          languages: ${{ matrix.language }}
+          # Java is read from source without building it, which is all its queries need here.
+          build-mode: none
+      - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          category: /language:${{ matrix.language }}

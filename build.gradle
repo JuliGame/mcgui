@@ -6,6 +6,9 @@ plugins {
 
 group = 'ai.resourcepack'
 version = '0.8.6'
+// A build from the dev branch names itself, so a bug report says which build it was:
+// -PbuildVersion=0.8.6+dev.42.abc1234 (.github/workflows/dev-release.yml).
+if (findProperty('buildVersion')) version = findProperty('buildVersion')
 
 java {
     toolchain {
