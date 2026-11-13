@@ -144,14 +144,23 @@ public final class ForeignShaders {
         JsonArray entries = meta.getAsJsonObject("overlays").getAsJsonArray("entries");
         for (MergedShaders.Outcome o : usable) {
             String directory = DIRECTORY + o.minFormat();
+            // Wider than the overlays it must beat: mergers that sort overlays (Nexo, BetterHud) put the narrower range
+            // first, so a merged overlay as narrow as its version would land BEFORE the other plugin's and ours for
+            // the same versions and lose. Running up to the next outcome's first format (the last one: open-ended),
+            // it sorts after them, and that next outcome's own overlay, starting later, takes over from there.
+            int next = Integer.MAX_VALUE;
+            for (MergedShaders.Outcome other : plan.outcomes()) {
+                if (other.minFormat() > o.minFormat()) next = Math.min(next, other.minFormat());
+            }
+            int max = next == Integer.MAX_VALUE ? 65535 : Math.max(o.maxFormat(), next);
             // Both keys, as every entry of ours has them (ResourcePack.mcmeta), listed last: the last overlay that applies wins.
             JsonObject entry = new JsonObject();
             entry.addProperty("directory", directory);
             entry.addProperty("min_format", o.minFormat());
-            entry.addProperty("max_format", o.maxFormat());
+            entry.addProperty("max_format", max);
             JsonArray formats = new JsonArray();
             formats.add(o.minFormat());
-            formats.add(o.maxFormat());
+            formats.add(max);
             entry.add("formats", formats);
             entries.add(entry);
             for (Map.Entry<String, String> f : o.files().entrySet()) {
@@ -159,9 +168,26 @@ public final class ForeignShaders {
             }
             // Their includes that their own pack carries (BetterHud's 1.21.11 sample_lightmap.glsl, which that version's
             // game lacks): a player with our pack and not theirs would otherwise fail to compile the merged shader.
+            // In an overlay of their own, as narrow as the version: in the widened one above they would also apply on
+            // the next version's first format, where the game's own include differs (26.1's sample_lightmap), and every
+            // item and entity shader that imports it would draw wrong (black or invisible items in the inventory).
+            Map<String, byte[]> own = new LinkedHashMap<>();
             for (String include : includes(o)) {
                 theirs.pack().resolve(include, o.minFormat())
-                        .ifPresent(text -> files.put(directory + "/" + include, text.getBytes(StandardCharsets.UTF_8)));
+                        .ifPresent(text -> own.put(include, text.getBytes(StandardCharsets.UTF_8)));
+            }
+            if (!own.isEmpty()) {
+                String incDirectory = directory + "_include";
+                JsonObject inc = new JsonObject();
+                inc.addProperty("directory", incDirectory);
+                inc.addProperty("min_format", o.minFormat());
+                inc.addProperty("max_format", o.maxFormat());
+                JsonArray incFormats = new JsonArray();
+                incFormats.add(o.minFormat());
+                incFormats.add(o.maxFormat());
+                inc.add("formats", incFormats);
+                entries.add(inc);
+                own.forEach((path, bytes) -> files.put(incDirectory + "/" + path, bytes));
             }
         }
         files.put("pack.mcmeta", (new GsonBuilder().disableHtmlEscaping().create().toJson(meta) + "\n").getBytes(StandardCharsets.UTF_8));
