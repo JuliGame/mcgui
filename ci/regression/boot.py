@@ -58,7 +58,9 @@ MINE = re.compile(r"ai\.resourcepack|MCGUI|MC GUI", re.I)
 ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*\x07")
 # [12:00:00 INFO]: text  (Paper, Folia)   or   [12:00:00] [Server thread/INFO]: text  (Spigot, Paper's older form)
 RECORD = re.compile(r"^\[\d\d:\d\d:\d\d(?: |\] \[[^\]/]*/)(\w+)\]:? ?(.*)$")
-EXCEPTION = re.compile(r"\b[\w.$]*(?:Exception|Error)\b(?::|\s*$)|^\s+at [\w.$<>]+\(|^Caused by:")
+# What a logged throwable looks like on the lines after a record's first: a stack frame, a cause, or the throwable's own
+# line. (An INFO line that merely names an exception class in a sentence is not one.)
+EXCEPTION = re.compile(r"^\s+at [\w.$<>/]+\(|^Caused by:|^[\w.$]+(?:Exception|Error)\b")
 
 
 def log(msg):
@@ -501,7 +503,7 @@ def run(args):
     for lvl, text in records:
         if not MINE.search(text):
             continue
-        has_exception = any(EXCEPTION.search(l) for l in text.splitlines())
+        has_exception = any(EXCEPTION.search(l) for l in text.splitlines()[1:])
         if lvl in ("ERROR", "SEVERE", "FATAL") or has_exception:
             bad.append(text)
         elif lvl in ("WARN", "WARNING"):

@@ -23,13 +23,13 @@ render() {
         echo "render.sh: $dir has no pages in this checkout, skipped"
         return 0
     fi
-    rm -rf "$tree/build/samples" "$out/$label"
+    rm -rf "${tree:?}/build/samples" "${out:?}/${label:?}"
     # shellcheck disable=SC2086
     (cd "$tree" && sh gradlew ${GRADLE_FLAGS:-} -q -I "$here/hermetic.init.gradle" renderSamples "-Pdir=$dir")
     mkdir -p "$out/$label"
     cp "$tree"/build/samples/*.png "$out/$label/"
     rm -rf "$tree/build/samples"
-    echo "render.sh: $dir -> $label ($(ls "$out/$label" | wc -l) pictures)"
+    echo "render.sh: $dir -> $label ($(find "$out/$label" -name "*.png" | wc -l) pictures)"
 }
 
 render samples examples/samples
