@@ -1,5 +1,7 @@
 package ai.resourcepack.ui.framework.pack;
 
+import com.google.gson.JsonArray;
+
 import java.io.ByteArrayInputStream;
 import java.io.FilterInputStream;
 import java.io.IOException;
@@ -9,6 +11,8 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.Arrays;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
@@ -28,6 +32,8 @@ import java.util.zip.ZipInputStream;
  * and the first time one of a sibling's turns up, it is fetched from the link the client got and its file names read.
  * Dialog Engine's drawn-dialog pack carries our text shader and {@code position_tex_color}; RP Engine's packs usually
  * carry none of ours (it merges a text shader only into a bundle that already has one, and then it does count).
+ * A copy of one of our shaders that another plugin's code was merged into, and that still carries all of ours for a
+ * client version ({@link ShaderCode}), buries nothing for that version: on top of ours it draws what ours would.
  * Verdicts are kept by the pack's hash, so each version of a pack is fetched once. A pack whose push was not seen, or
  * that cannot be fetched or read, counts as replacing ours: a page costs a resource reload it may not have needed,
  * never a page drawn without the pack.
@@ -38,6 +44,9 @@ public final class SiblingShaders implements AutoCloseable {
 
     /** Our files under assets/minecraft/, as a game finds them (overlay directories taken off). */
     private final Set<String> ours;
+    /** Our pack's files, and its overlays: which copy of each file a client version reads. */
+    private final Map<String, byte[]> ourFiles;
+    private final JsonArray ourOverlays;
     private final Logger logger;
     /** The last push of each pack id to each player. */
     private final Map<UUID, Map<UUID, Push>> pushes = new ConcurrentHashMap<>();
@@ -59,6 +68,8 @@ public final class SiblingShaders implements AutoCloseable {
 
     public SiblingShaders(byte[] ourZip, Logger logger) throws IOException {
         this.ours = minecraftFiles(new ZipInputStream(new ByteArrayInputStream(ourZip)));
+        this.ourFiles = MergeCheck.unzip(new ZipInputStream(new ByteArrayInputStream(ourZip)));
+        this.ourOverlays = MergeCheck.overlays(MergeCheck.meta(ourFiles));
         this.logger = logger;
     }
 
@@ -119,7 +130,7 @@ public final class SiblingShaders implements AutoCloseable {
                 // Read by its central directory, as the game does: a protected pack (ItemsAdder's) scrambles its local
                 // headers, and read front to back it shows a hundred of its ten thousand files.
                 try (java.util.zip.ZipFile zip = new java.util.zip.ZipFile(tmp.toFile())) {
-                    return replaces(ours, zip);
+                    return replaces(ours, ourFiles, ourOverlays, zip);
                 }
             } finally {
                 java.nio.file.Files.deleteIfExists(tmp);
@@ -134,17 +145,63 @@ public final class SiblingShaders implements AutoCloseable {
         }
     }
 
-    /** Whether the pack [zip] has any of [ours] (files as {@link #minecraftFiles} gives them), in its root or any overlay. */
-    static boolean replaces(Set<String> ours, ZipInputStream zip) throws IOException {
+    /**
+     * Whether the pack [zip] replaces any of [ours] (files as {@link #minecraftFiles} gives them) for some client version
+     * with a copy that is not ours: a different file, or a shader that does not carry all of ours ({@link ShaderCode}).
+     * [ourFiles] and [ourOverlays] are our pack, for which copy of each file a version reads.
+     */
+    static boolean replaces(Set<String> ours, Map<String, byte[]> ourFiles, JsonArray ourOverlays, ZipInputStream zip) throws IOException {
+        Map<String, byte[]> theirs = new HashMap<>();
+        boolean any = false;
         for (ZipEntry e; (e = zip.getNextEntry()) != null; ) {
-            if (!e.isDirectory() && ours.contains(logical(e.getName()))) return true;
+            if (e.isDirectory()) continue;
+            boolean one = ours.contains(logical(e.getName()));
+            any |= one;
+            if (compared(one, e.getName())) theirs.put(e.getName(), zip.readAllBytes());
         }
-        return false;
+        return any && differs(ours, ourFiles, ourOverlays, theirs);
     }
 
-    /** Whether the pack [zip] has any of [ours], read by its central directory. */
-    static boolean replaces(Set<String> ours, java.util.zip.ZipFile zip) {
-        return zip.stream().anyMatch(e -> !e.isDirectory() && ours.contains(logical(e.getName())));
+    /** The same, with the pack read by its central directory, as the game reads it. */
+    static boolean replaces(Set<String> ours, Map<String, byte[]> ourFiles, JsonArray ourOverlays, java.util.zip.ZipFile zip) throws IOException {
+        Map<String, byte[]> theirs = new HashMap<>();
+        boolean any = false;
+        for (ZipEntry e : java.util.Collections.list(zip.entries())) {
+            if (e.isDirectory()) continue;
+            boolean one = ours.contains(logical(e.getName()));
+            any |= one;
+            if (compared(one, e.getName())) {
+                try (InputStream in = zip.getInputStream(e)) {
+                    theirs.put(e.getName(), in.readAllBytes());
+                }
+            }
+        }
+        return any && differs(ours, ourFiles, ourOverlays, theirs);
+    }
+
+    /** Only what the comparison reads: the pack can be hundreds of MB of textures. */
+    private static boolean compared(boolean ours, String name) {
+        return ours || name.equals("pack.mcmeta") || name.contains("/shaders/include/");
+    }
+
+    private static boolean differs(Set<String> ours, Map<String, byte[]> ourFiles, JsonArray ourOverlays, Map<String, byte[]> theirs) {
+        JsonArray theirOverlays = MergeCheck.overlays(MergeCheck.meta(theirs));
+        for (int[] format : MergeCheck.FORMATS) {
+            for (String path : MergeCheck.logical(ourFiles.keySet(), ourOverlays)) {
+                if (!ours.contains(path)) continue;
+                byte[] want = MergeCheck.resolve(ourFiles, ourOverlays, format, path).bytes();
+                byte[] got = want == null ? null : MergeCheck.resolve(theirs, theirOverlays, format, path).bytes();
+                if (got == null || Arrays.equals(got, want)) continue;
+                if (MergeCheck.isShader(path) && ShaderCode.carries(MergeCheck.text(want), MergeCheck.text(got), id -> {
+                    // An include the client reads from their pack, else from ours beneath it.
+                    String include = ShaderCode.includePath(id);
+                    byte[] b = MergeCheck.resolve(theirs, theirOverlays, format, include).bytes();
+                    return MergeCheck.text(b != null ? b : MergeCheck.resolve(ourFiles, ourOverlays, format, include).bytes());
+                }) == null) continue;
+                return true;
+            }
+        }
+        return false;
     }
 
     /** The files of the pack [zip] under assets/minecraft/, as a game finds them: overlay directories taken off. */
