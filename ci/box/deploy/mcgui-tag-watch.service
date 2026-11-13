@@ -1,0 +1,24 @@
+[Unit]
+Description=MC GUI tag watcher: ask SteveClaude to build and publish each new v<major>.<minor>.<patch> tag
+Documentation=https://github.com/resourcepack-ai/mcgui/tree/main/ci/box
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# The fixed deployed copy, root-owned. It reads tags and build.gradle as data and runs no repository code; it posts
+# through Backchannel's own agent MCP server, so that code's secret scan and guards apply to the post.
+ExecStart=/usr/bin/python3 /opt/mcgui-ci/tag_watch.py tick
+EnvironmentFile=/etc/mcgui-ci.env
+Environment=HOME=/root PYTHONUNBUFFERED=1
+Slice=atlas-mcgui.slice
+TimeoutStartSec=5min
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/mcgui-ci/state /var/lib/mcgui-ci/tagwatch
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+MemoryHigh=384M
+MemoryMax=512M

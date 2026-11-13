@@ -1,0 +1,13 @@
+# The MC GUI bench box's CI: the two pollers and the sandboxed bench units they start (mcgui-bench-*.service).
+# A child of atlas.slice, so it stays under the ceiling for all agent work, but not of atlas-jobs.slice: that slice
+# holds every agent job to 3.5 GB together, and the bench's Paper server alone has a 3 GB heap.
+[Unit]
+Description=MC GUI CI - server-bench gate and tag watcher, capped apart from the agents
+Before=slices.target
+
+[Slice]
+MemoryHigh=5632M
+MemoryMax=6G
+MemorySwapMax=1G
+CPUWeight=25
+IOWeight=25

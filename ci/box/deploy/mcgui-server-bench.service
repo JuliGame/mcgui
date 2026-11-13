@@ -1,0 +1,23 @@
+[Unit]
+Description=MC GUI server-bench gate: bench the dev -> main promotion PR and post its commit status
+Documentation=https://github.com/resourcepack-ai/mcgui/tree/main/ci/box
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# The fixed deployed copy, root-owned; it never runs code from a checkout. Repository code at the commit under test
+# runs only in the transient mcgui-bench-*.service units it starts, as the unprivileged CI user.
+ExecStart=/usr/bin/python3 /opt/mcgui-ci/server_bench.py tick
+EnvironmentFile=/etc/mcgui-ci.env
+Environment=HOME=/root PYTHONUNBUFFERED=1
+Slice=atlas-mcgui.slice
+# Two benches (base and head, about 18 minutes each) plus up to two waits for a quiet box.
+TimeoutStartSec=3h
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+MemoryHigh=256M
+MemoryMax=512M
