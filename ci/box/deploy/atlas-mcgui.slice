@@ -6,8 +6,8 @@ Description=MC GUI CI - server-bench gate and tag watcher, capped apart from the
 Before=slices.target
 
 [Slice]
-MemoryHigh=5G
-MemoryMax=5632M
+MemoryHigh=5632M
+MemoryMax=6G
 MemorySwapMax=1G
 CPUWeight=25
 IOWeight=25

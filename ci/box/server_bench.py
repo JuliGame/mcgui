@@ -50,8 +50,9 @@ CFG = {
     'max_attempts': int(E('MCGUI_CI_MAX_ATTEMPTS', '3')),
     'user': E('MCGUI_CI_USER', 'mcgui-ci'),
     'slice': E('MCGUI_CI_SLICE', 'atlas-mcgui.slice'),
-    'memory_high': E('MCGUI_CI_MEMORY_HIGH', '4608M'),
-    'memory_max': E('MCGUI_CI_MEMORY_MAX', '5G'),
+    # The full bench peaked at 4.2 GB (4.0 GB of it the server JVM, 3 GB heap) on the box: throttle past 4.75, kill at 5.25.
+    'memory_high': E('MCGUI_CI_MEMORY_HIGH', '4864M'),
+    'memory_max': E('MCGUI_CI_MEMORY_MAX', '5376M'),
     'build_timeout': E('MCGUI_CI_BUILD_TIMEOUT', '25min'),
     'bench_timeout': E('MCGUI_CI_BENCH_TIMEOUT', '40min'),
     'build_lock': E('MCGUI_CI_BUILD_LOCK', ''),
@@ -109,7 +110,7 @@ def gh_env():
 def gh(path, method='GET', body=None, paginate=False):
     cmd = ['gh', 'api', '-X', method, path, '-H', 'Accept: application/vnd.github+json']
     if paginate:
-        cmd.append('--paginate')
+        cmd += ['--paginate', '--slurp']
     if body is not None:
         cmd += ['--input', '-']
     for attempt in range(3):
@@ -117,9 +118,9 @@ def gh(path, method='GET', body=None, paginate=False):
                            env=gh_env())
         if r.returncode == 0:
             out = r.stdout.strip()
-            if paginate and out.startswith('['):
-                # --paginate prints one JSON array per page, back to back.
-                return [x for page in json.loads('[' + re.sub(r'\]\s*\[', '],[', out) + ']') for x in page]
+            if paginate:
+                # --slurp: one array of every page's array.
+                return [x for page in json.loads(out) for x in page]
             return json.loads(out) if out else None
         time.sleep(2 * (attempt + 1))
     raise RunFault(f'GitHub: {method} {path.split("?")[0]} failed: {r.stderr.strip()[:200]}')
@@ -166,7 +167,9 @@ def head_rules(sha):
     try:
         meta = gh(f'repos/{CFG["repo"]}/contents/ci/box/gates.json?ref={sha}')
         text, where = base64.b64decode(meta['content']).decode(), f'ci/box/gates.json at {sha[:7]}'
-    except RunFault:
+    except RunFault as e:
+        if 'HTTP 404' not in e.reason:
+            raise
         text, where = open(os.path.join(HERE, 'gates.json')).read(), 'the deployed gates.json'
     try:
         return check_rules(json.loads(text)), where
@@ -226,6 +229,11 @@ def unit(name, args, logfile, timeout):
         'PrivateTmp': 'yes', 'PrivateDevices': 'yes', 'NoNewPrivileges': 'yes', 'RestrictSUIDSGID': 'yes',
         'ProtectKernelTunables': 'yes', 'ProtectKernelModules': 'yes', 'ProtectControlGroups': 'yes',
         'CapabilityBoundingSet': '', 'UMask': '0022',
+        # Other users' processes hidden; /proc/loadavg stays (bench.py reads it).
+        'ProtectProc': 'invisible', 'ProtectClock': 'yes', 'ProtectKernelLogs': 'yes', 'ProtectHostname': 'yes',
+        'RestrictNamespaces': 'yes', 'RestrictRealtime': 'yes', 'LockPersonality': 'yes',
+        'SystemCallArchitectures': 'native', 'SystemCallFilter': '@system-service',
+        'RestrictAddressFamilies': 'AF_UNIX AF_INET AF_INET6 AF_NETLINK',
         'StandardOutput': f'append:{logfile}', 'StandardError': f'append:{logfile}',
     }
     cmd = ['systemd-run', f'--unit={name}', f'--slice={CFG["slice"]}', '--collect', '--wait', '--service-type=exec']
@@ -241,6 +249,8 @@ def unit(name, args, logfile, timeout):
         why = {'oom-kill': 'out of memory (MemoryMax ' + CFG['memory_max'] + ')',
                'timeout': 'out of time (RuntimeMaxSec ' + props['RuntimeMaxSec'] + ')',
                'signal': 'killed by a signal', 'exit-code': 'exited with an error'}.get(result, result)
+        if not m:
+            why = 'could not be started: ' + ' '.join(out.split())[:200]
         tail = last_lines(logfile, 4)
         raise RunFault(f'{name.split("-")[-1]} {why}' + (f': {tail}' if tail else ''),
                        head_code=result == 'exit-code' and name.endswith('build'))
@@ -261,7 +271,6 @@ def result_path(sha):
 
 def bench_sha(sha, out=None):
     """Builds and benches [sha] in the sandbox; the stored result (with its log path and time taken added)."""
-    os.makedirs(os.path.join(WORK, 'out'), exist_ok=True)
     logfile = os.path.join(LOGS, f'{time.strftime("%Y%m%d-%H%M%S")}-{sha[:12]}.log')
     open(logfile, 'a').close()
     log(f'benching {sha[:7]}, log {logfile}')
@@ -401,7 +410,9 @@ def change(o, n):
 
 
 def rule_text(r):
-    if not r or r['kind'] == 'report':
+    if not r:
+        return 'the cell must run'
+    if r['kind'] == 'report':
         return 'report'
     sign = '+' if r['worse'] == 'higher' else '-'
     s = f'{r["kind"]}: {sign}{float(r["rel"]) * 100:.0f}%'
@@ -481,13 +492,15 @@ def check_pr(pr):
     a = read_attempts(head_sha)
     if a['n'] >= CFG['max_attempts']:
         post_status(head_sha, 'failure' if a.get('head_code') else 'error',
-                    f'gave up after {a["n"]} attempts: {a["last"]}')
+                    f'gave up after {a["n"]} attempts: {a["last"] or "each was killed before it finished"}')
         return
     if st:
         log(f'#{number} head {head_sha[:7]} has a stale pending from an earlier run ({st["description"]}): retrying')
+    post_status(head_sha, 'pending', f'attempt {a["n"] + 1}/{CFG["max_attempts"]}: benching base {base_sha[:7]} and head {head_sha[:7]}')
+    # Counted before the run: an attempt killed half way (a reboot, OOM) still counts towards the cap.
     a['n'] += 1
+    a['last'] = f'attempt {a["n"]} was killed before it finished'
     write_attempts(head_sha, a)
-    post_status(head_sha, 'pending', f'attempt {a["n"]}/{CFG["max_attempts"]}: benching base {base_sha[:7]} and head {head_sha[:7]}')
     try:
         rules, where = head_rules(head_sha)
         base = stored_or_bench(base_sha)

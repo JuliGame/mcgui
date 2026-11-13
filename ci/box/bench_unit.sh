@@ -48,6 +48,7 @@ EOF
   ;;
 bench)
   out=$3
+  mkdir -p "$(dirname "$out")"
   cd "$CO"
   head=$(git rev-parse HEAD)
   if [ "$head" != "$sha" ]; then
