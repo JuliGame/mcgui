@@ -58,8 +58,44 @@ honest way through:
 - **A page looks different on purpose.** Add the label `render-change`. The comparison still runs and still
   shows the before and after pictures; it stops failing on them.
 - **A change is meant to cost something.** The limits of the performance checks are files in this
-  repository. Raise the one limit in the same pull request and say why, so the cost is seen and agreed
-  rather than waved through.
+  repository: `ci/perf/thresholds.json` for `perf` and `ci/box/gates.json` for `server-bench`. Raise the one
+  limit in the same pull request and say why, so the cost is seen and agreed rather than waved through.
+- **A check failed for no reason of yours** (a runner fell over, a test that depends on timing). Run the
+  failed job again from the run's page. That is not skipping it: it still has to pass.
+
+### The checks in detail
+
+**`perf`.** Builds your branch and the commit it started from, runs the headless benches on both in turn
+on one machine, and compares the medians. The table is in the job summary and in one comment on the pull
+request that is updated on each push. Bytes, packets and bytes allocated may rise by a few per cent at
+most. The main timings may rise by 15% at most (20% for one hover timing, 10% for scroll CPU). Other
+timings are shown and never fail. A timing that goes over is measured again before the check fails. It
+takes about 12 minutes. To try it yourself, build both checkouts, save each one's
+`sh gradlew -q benchClasspath` output to a file, then
+`python3 ci/perf/compare.py --base <dir> --head <dir> --base-cp <file> --head-cp <file>`.
+
+**`regression`** does three things, in about 2 minutes once its caches are warm:
+
+1. **Render diff.** Every page in `examples/samples` and `src/main/resources/pages` is drawn as the branch
+   was before your pull request and again with it applied, with the network off, and the pictures are
+   compared pixel for pixel. The before, after and difference pictures are in the `render-diff` download on
+   the run. Yourself: `sh ci/regression/render.sh . <folder>` on each commit, then
+   `sh gradlew renderDiff -Pbefore=<old> -Pafter=<new> -Pout=<folder>`.
+2. **Paper tests.** `sh gradlew paperTest -PpaperServer=<dir>` against a real Paper server.
+   `python3 ci/regression/boot.py fetch --server paper --mc 26.3 --out <dir> --java <jdk25>` makes the folder.
+3. **Boot.** The built jar is started on Paper (1.21.11 and the newest), Folia and Spigot. MC GUI must
+   enable without errors, answer `mcgui list` and `mcgui stats`, and the server must stop cleanly. The test
+   servers are kept from ResourcePack AI's pack host and usage count, and the check fails if the plugin
+   tries to reach them. Yourself: `sh gradlew build -x test`, then
+   `python3 ci/regression/boot.py run --server paper --server-dir <dir> --jar build/libs/MCGUI-<version>.jar`.
+
+**`server-bench`** runs on the maintainers' bench machine, which asks GitHub every two minutes; there is
+no runner for a pull request to reach. On a promotion it runs the whole-server bench (`bench/bench.py`) on
+`main`'s commit, or uses the result it kept for it, and on `dev`'s, and posts one comment with every number
+side by side. It fails when a gated number is worse than its margin: allocation, bytes sent and counts by a
+few per cent, CPU and latency by about 15%. Numbers too noisy on that machine are shown and never fail. A
+result takes 15 to 30 minutes. If the machine itself fails, it tries twice more and then reports `error`
+with the reason, not `failure`. To run it again, push a new commit.
 
 ## Releases
 
