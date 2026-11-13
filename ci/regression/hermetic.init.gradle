@@ -1,0 +1,16 @@
+// Gradle init script (sh gradlew -I ci/regression/hermetic.init.gradle ...): makes every JavaExec task a render
+// that cannot depend on the outside world, for ANY commit it is pointed at (the commit's own build.gradle is not
+// edited). Used by render.sh, so the pictures of a pull request's base and head are drawn under the same conditions.
+//
+// What would otherwise vary between two runs:
+//   * pages that fetch web fonts or images (Page.Loader, examples/samples/landing.html asks Google Fonts for Poppins):
+//     every http(s) request is sent to a proxy that is not there, so it fails at once and the page falls back to the
+//     fonts it has, the same on every run, whatever the network or Google answers that day;
+//   * the locale, the time zone and the file encoding.
+allprojects {
+    tasks.withType(JavaExec).configureEach {
+        jvmArgs '-Dhttp.proxyHost=127.0.0.1', '-Dhttp.proxyPort=9',
+                '-Dhttps.proxyHost=127.0.0.1', '-Dhttps.proxyPort=9',
+                '-Duser.language=en', '-Duser.country=US', '-Duser.timezone=UTC', '-Dfile.encoding=UTF-8'
+    }
+}

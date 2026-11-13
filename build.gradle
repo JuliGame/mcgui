@@ -382,3 +382,19 @@ if (paperServer != null) {
         args((findProperty('benchArgs') ?: '').toString().tokenize())
     }
 }
+
+// ---- CI: regression gates (.github/workflows/regression.yml) ----
+
+// Compares two folders of PNGs from renderSamples pixel for pixel (RenderDiff): a diff picture per changed page and a
+// markdown table, in -Pout. Exits non-zero when any page differs; a page on one side only is reported, not failed.
+// sh gradlew renderDiff -Pbefore=<dir> -Pafter=<dir> -Pout=<dir> [-Ptitle='...']
+tasks.register('renderDiff', JavaExec) {
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'ai.resourcepack.ui.html.RenderDiff'
+    systemProperty 'java.awt.headless', 'true'
+    doFirst {
+        ['before', 'after', 'out'].each { if (!project.hasProperty(it)) throw new GradleException("renderDiff needs -P${it}=<dir>") }
+        args = [file(project.property('before')).absolutePath, file(project.property('after')).absolutePath, file(project.property('out')).absolutePath] +
+                (project.findProperty('title') ? [project.findProperty('title')] : [])
+    }
+}

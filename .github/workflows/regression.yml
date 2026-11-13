@@ -1,0 +1,305 @@
+name: regression
+
+# The heavy gate. Runs on every pull request into `main`, and into `dev` when the PR carries the label
+# `full-regression`; otherwise the jobs below are skipped and the aggregate job `regression` (the check branch
+# rules require) passes at once.
+#
+#   render-diff   every sample and shipped page drawn by the PR's base and by the PR's merge result, on this runner,
+#                 and compared pixel for pixel. A difference fails unless the PR carries the label `render-change`.
+#   paper-tests   `gradlew paperTest` against a real Paper server's own classes.
+#   plugin-jar    builds MCGUI-<version>.jar once, for boot.
+#   boot          starts a real Paper / Folia / Spigot with the jar and checks it comes up and goes down clean.
+#   regression    the aggregate: fails when any job above failed or was cancelled; skipped is a pass.
+#
+# Locally: ci/regression/render.sh and ci/regression/boot.py do the same work (see CONTRIBUTING.md).
+
+on:
+  pull_request:
+    branches: [dev, main]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+env:
+  # The Minecraft version paper-tests runs against (a release number from fill.papermc.io; its newest build is used).
+  # The boot matrix below picks its own: 1.21.11, the newest 26.x Paper publishes, the newest Folia, Spigot 1.21.11.
+  PAPER_TEST_MC: "26.3"
+
+permissions:
+  contents: read
+  # Reading the PR's labels again when a job starts: a re-run of a job keeps the labels it first saw.
+  pull-requests: read
+
+# A new push (or label change) to the same PR replaces the run still going.
+concurrency:
+  group: regression-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  render-diff:
+    name: render-diff
+    if: github.base_ref == 'main' || contains(github.event.pull_request.labels.*.name, 'full-regression')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The checkout is the PR merged into its base: this commit and its two parents are all that is needed.
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          cache-read-only: false
+
+      - name: Check out the base next to the head
+        id: commits
+        run: |
+          head=$(git rev-parse HEAD)
+          if git rev-parse --verify -q 'HEAD^2' >/dev/null; then
+            # The merge ref: first parent is the base branch, second is the PR's own head.
+            base=$(git rev-parse 'HEAD^1')
+          else
+            base='${{ github.event.pull_request.base.sha }}'
+            git cat-file -e "$base^{commit}" 2>/dev/null || git fetch --depth=1 origin "$base"
+          fi
+          git worktree add --detach "$RUNNER_TEMP/base" "$base"
+          echo "head=$head" >> "$GITHUB_OUTPUT"
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          echo "Comparing base $base with the PR merged into it, $head"
+
+      - name: Render the head twice and require identical pictures
+        env:
+          GRADLE_FLAGS: --console=plain
+        run: |
+          set -e
+          sh ci/regression/render.sh . "$RUNNER_TEMP/render/head"
+          sh ci/regression/render.sh . "$RUNNER_TEMP/render/head-again"
+          if ! sh gradlew --console=plain -q renderDiff -Pbefore="$RUNNER_TEMP/render/head" -Pafter="$RUNNER_TEMP/render/head-again" \
+                -Pout="$RUNNER_TEMP/render/determinism" -Ptitle="Determinism: the same commit rendered twice" > "$RUNNER_TEMP/determinism.log" 2>&1; then
+            cat "$RUNNER_TEMP/determinism.log"
+            cat "$RUNNER_TEMP/render/determinism/summary.md" >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+            echo "::error::The renderer is not deterministic: the same commit drawn twice on the same runner gave different pictures, so render-diff cannot judge a change. See the summary, and exclude or fix the page."
+            mkdir -p "$RUNNER_TEMP/render/out"
+            cp -r "$RUNNER_TEMP/render/determinism" "$RUNNER_TEMP/render/out/determinism"
+            exit 1
+          fi
+          rm -rf "$RUNNER_TEMP/render/head-again" "$RUNNER_TEMP/render/determinism"
+
+      - name: Render the base
+        env:
+          GRADLE_FLAGS: --console=plain
+        run: sh ci/regression/render.sh "$RUNNER_TEMP/base" "$RUNNER_TEMP/render/base"
+
+      - name: Compare
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE: ${{ steps.commits.outputs.base }}
+          HEAD: ${{ steps.commits.outputs.head }}
+        run: |
+          # The labels as they are now, not as they were when this run started.
+          labels=$(gh api "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/labels" --jq '.[].name')
+          intended=false
+          if printf '%s\n' "$labels" | grep -qx 'render-change'; then intended=true; fi
+          out="$RUNNER_TEMP/render/out"
+          mkdir -p "$out"
+          set +e
+          sh gradlew --console=plain -q renderDiff -Pbefore="$RUNNER_TEMP/render/base" -Pafter="$RUNNER_TEMP/render/head" \
+            -Pout="$out" -Ptitle="Render diff: base ${BASE:0:7} to ${HEAD:0:7} (the PR merged into its base)"
+          rc=$?
+          set -e
+          if [ ! -f "$out/summary.md" ]; then
+            echo "::error::The comparison itself failed (exit $rc), see the log above"
+            exit 1
+          fi
+          cat "$out/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$rc" -eq 0 ]; then
+            echo "Every picture is identical."
+          elif [ "$intended" = true ]; then
+            echo '> The PR carries the label `render-change`: the differences above are intended, so this passes.' >> "$GITHUB_STEP_SUMMARY"
+            echo "::notice::Pictures differ, and the PR carries render-change: passing"
+          else
+            echo '> Pictures changed and the PR does not carry the label `render-change`. If the change to the output is on purpose, add the label (the images are in the render-diff artifact).' >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::Rendered pictures changed, and the PR does not carry the label render-change. If that is on purpose, add the label; the before, after and diff pictures are in the render-diff artifact."
+            exit 1
+          fi
+
+      - name: Collect the pictures
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/render/out"
+          [ -d "$RUNNER_TEMP/render/base" ] && mv "$RUNNER_TEMP/render/base" "$RUNNER_TEMP/render/out/before" || true
+          [ -d "$RUNNER_TEMP/render/head" ] && mv "$RUNNER_TEMP/render/head" "$RUNNER_TEMP/render/out/after" || true
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: render-diff
+          # before/ (the base), after/ (the PR merged), diff/ (changed pixels in red), summary.md
+          path: ${{ runner.temp }}/render/out
+          if-no-files-found: ignore
+          retention-days: 14
+
+  paper-tests:
+    name: paper-tests
+    if: github.base_ref == 'main' || contains(github.event.pull_request.labels.*.name, 'full-regression')
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Gradle runs on 21; the paperTest tasks are compiled and run by a 25 toolchain, which the build asks for.
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: |
+            25
+            21
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          cache-read-only: false
+      - name: Find the Paper build
+        id: paper
+        run: python3 ci/regression/boot.py resolve --server paper --mc "$PAPER_TEST_MC" >> "$GITHUB_OUTPUT"
+      # The server directory with versions/ and libraries/ unpacked (Paperclip's patch-only run: no world, no start).
+      - name: Cache the unpacked server
+        id: cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/paper-server
+          key: paper-server-${{ steps.paper.outputs.project }}-${{ steps.paper.outputs.version }}-${{ steps.paper.outputs.build }}
+      - name: Unpack the server
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          python3 ci/regression/boot.py fetch --server paper --mc "${{ steps.paper.outputs.version }}" \
+            --build "${{ steps.paper.outputs.build }}" --out "$RUNNER_TEMP/paper-server" --java "$JAVA_HOME_25_X64"
+      - name: paperTest on Paper ${{ steps.paper.outputs.version }} build ${{ steps.paper.outputs.build }}
+        run: |
+          echo "### paper-tests: Paper ${{ steps.paper.outputs.version }} build ${{ steps.paper.outputs.build }} (${{ steps.paper.outputs.channel }})" >> "$GITHUB_STEP_SUMMARY"
+          sh gradlew --console=plain paperTest -PpaperServer="$RUNNER_TEMP/paper-server" -Porg.gradle.java.installations.fromEnv=JAVA_HOME_25_X64
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        with:
+          name: paper-tests-report
+          path: build/reports/tests/paperTest
+          if-no-files-found: ignore
+          retention-days: 14
+
+  plugin-jar:
+    name: plugin-jar
+    if: github.base_ref == 'main' || contains(github.event.pull_request.labels.*.name, 'full-regression')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          cache-read-only: false
+      - name: Build the plugin
+        run: sh gradlew --console=plain build -x test
+      - name: Pick out MCGUI-<version>.jar (not the -dev or -sources jar)
+        run: |
+          mkdir -p "$RUNNER_TEMP/plugin"
+          jar=$(ls build/libs/MCGUI-*.jar | grep -v -e '-dev\.jar$' -e '-sources\.jar$')
+          [ "$(echo "$jar" | wc -l)" -eq 1 ] || { echo "::error::expected one plugin jar, found: $jar"; exit 1; }
+          cp "$jar" "$RUNNER_TEMP/plugin/"
+          ls -l "$RUNNER_TEMP/plugin"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: plugin-jar
+          path: ${{ runner.temp }}/plugin/MCGUI-*.jar
+          if-no-files-found: error
+          retention-days: 7
+
+  boot:
+    name: boot (${{ matrix.name }})
+    needs: plugin-jar
+    if: github.base_ref == 'main' || contains(github.event.pull_request.labels.*.name, 'full-regression')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: paper-1.21.11, server: paper, mc: "1.21.11" }
+          - { name: paper-26.x, server: paper, mc: "26.x" }
+          # The newest Folia that MC GUI supports (README: 1.21.11 or newer).
+          - { name: folia-latest, server: folia, mc: latest, min: "1.21.11" }
+          - { name: spigot-1.21.11, server: spigot, mc: "1.21.11" }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Find the server build
+        id: server
+        run: |
+          python3 ci/regression/boot.py resolve --server "${{ matrix.server }}" --mc "${{ matrix.mc }}" ${{ matrix.min && format('--min {0}', matrix.min) || '' }} >> "$GITHUB_OUTPUT"
+      # The Java the server needs (21 for 1.21.x, 25 for 26.x), as the API says.
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: ${{ steps.server.outputs.java }}
+      - name: Cache the server
+        id: cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/server
+          key: server-${{ steps.server.outputs.project }}-${{ steps.server.outputs.version }}-${{ steps.server.outputs.build }}
+      - name: Get the server
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          start=$(date +%s)
+          python3 ci/regression/boot.py fetch --server "${{ matrix.server }}" --mc "${{ steps.server.outputs.version }}" \
+            --build "${{ steps.server.outputs.build }}" --out "$RUNNER_TEMP/server" --java "$JAVA_HOME"
+          echo "Server fetch took $(( $(date +%s) - start )) s (cold cache)" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: plugin-jar
+          path: plugin
+      - name: Start the server with the plugin
+        run: |
+          echo "### ${{ matrix.server }} ${{ steps.server.outputs.version }} build ${{ steps.server.outputs.build }} (${{ steps.server.outputs.channel }}), Java ${{ steps.server.outputs.java }}" >> "$GITHUB_STEP_SUMMARY"
+          python3 ci/regression/boot.py run --server "${{ matrix.server }}" --server-dir "$RUNNER_TEMP/server" \
+            --jar "$(ls plugin/MCGUI-*.jar)" --java "$JAVA_HOME" --work "$RUNNER_TEMP/run" --label "${{ matrix.name }}"
+      - name: Collect the server's log
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/logs"
+          cp "$RUNNER_TEMP/run/console.log" "$RUNNER_TEMP/run/boot-report.md" "$RUNNER_TEMP/logs/" 2>/dev/null || true
+          cp -r "$RUNNER_TEMP/run/plugins/MCGUI/config.yml" "$RUNNER_TEMP/logs/mcgui-config.yml" 2>/dev/null || true
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: boot-${{ matrix.name }}
+          path: ${{ runner.temp }}/logs
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # The check branch rules require. Skipped jobs (a PR into dev without `full-regression`) count as passed.
+  regression:
+    name: regression
+    if: always()
+    needs: [render-diff, paper-tests, plugin-jar, boot]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every job passed or was skipped
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS" | jq -r 'to_entries[] | "| \(.key) | \(.value.result) |"' | { echo '| job | result |'; echo '|---|---|'; cat; } >> "$GITHUB_STEP_SUMMARY"
+          if echo "$NEEDS" | jq -e 'all(.[]; .result == "skipped")' >/dev/null; then
+            echo "The heavy regression jobs were skipped: this PR is into dev and does not carry the label full-regression." | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+          if echo "$NEEDS" | jq -e 'all(.[]; .result == "success" or .result == "skipped")' >/dev/null; then
+            exit 0
+          fi
+          echo "$NEEDS" | jq -r 'to_entries[] | select(.value.result != "success" and .value.result != "skipped") | "::error::\(.key): \(.value.result)"'
+          exit 1
