@@ -773,6 +773,11 @@ repositories { maven { url 'https://jitpack.io' } }
 dependencies { compileOnly 'com.github.resourcepack-ai:mcgui:<tag>' }
 ```
 
+Your plugin can be closed source and sold: [`NOTICE.md`](NOTICE.md) gives that
+permission to a plugin that holds none of MC GUI's code, says that it uses
+MC GUI (with a link) wherever it is described, and does not claim MC GUI as its
+own. The pages you write are yours too.
+
 On Folia, open a view (`UIFramework.openView`) from the player's own thread, as Folia
 wants anything that changes a player done; `MCGUI.open` can be called from anywhere.
 
@@ -834,6 +839,19 @@ The [examples](examples/) are whole plugins built this way:
 
 ## Licence
 
-AGPL-3.0-or-later, with extra terms. See [`LICENSE`](LICENSE) and
-[`NOTICE.md`](NOTICE.md). The bundled fonts keep their own
-licence, the SIL Open Font License (`src/main/resources/fonts/*-OFL.txt`).
+AGPL-3.0-or-later, with extra terms. Copyright (C) 2026 Josh (@joshdevous) and
+Stephen (@stephendotgg), resourcepack.ai. See [`LICENSE`](LICENSE) and
+[`NOTICE.md`](NOTICE.md), which says in plain words what that asks:
+
+- Running MC GUI as released asks nothing. A copy you give anyone comes with
+  its source, under the same licence.
+- A server that runs its own changed version of MC GUI publishes that
+  version's source.
+- A version based on MC GUI keeps the credit ("Based on MC GUI by
+  resourcepack.ai"), has a name of its own, and is not passed off as an
+  original work.
+- A separate plugin that only uses MC GUI may be closed source, on the
+  conditions above.
+
+The bundled fonts keep their own licence, the SIL Open Font License
+(`src/main/resources/fonts/*-OFL.txt`).
