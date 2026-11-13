@@ -1,0 +1,133 @@
+name: perf
+
+# The perf gate: MC GUI's headless benches (ci/perf/compare.py) run on the PR's head and on the commit it
+# branched from, in one job on one runner, taking turns, and the medians are compared against the limits in
+# ci/perf/thresholds.json. Hosted runners differ by 10-20% from each other, so the two sides are never
+# compared across jobs. The required check is the `perf` job at the end.
+
+on:
+  pull_request:
+    branches: [dev, main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: perf-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  compare:
+    name: perf-compare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+
+      # The commit the PR branched from, not the tip of its base branch: changes that landed on the base
+      # since then are not this PR's doing.
+      - name: Check out the base commit
+        run: |
+          MERGE_BASE=$(git merge-base "$BASE_SHA" "$HEAD_SHA")
+          echo "BASE_COMMIT=$MERGE_BASE" >> "$GITHUB_ENV"
+          git worktree add --detach "$RUNNER_TEMP/base" "$MERGE_BASE"
+
+      - name: Build both sides and print their classpaths
+        run: |
+          set -eu
+          (sh gradlew --no-daemon -q benchClasspath > "$RUNNER_TEMP/head.cp.raw")
+          tail -n 1 "$RUNNER_TEMP/head.cp.raw" > "$RUNNER_TEMP/head.cp"
+          if (cd "$RUNNER_TEMP/base" && sh gradlew --no-daemon -q benchClasspath > "$RUNNER_TEMP/base.cp.raw"); then
+            tail -n 1 "$RUNNER_TEMP/base.cp.raw" > "$RUNNER_TEMP/base.cp"
+          else
+            # A base from before the benchClasspath task: its own classes on the head's libraries.
+            echo "::warning::the base commit has no benchClasspath task; using the head's libraries with the base's classes"
+            (cd "$RUNNER_TEMP/base" && sh gradlew --no-daemon -q testClasses)
+            sed "s#$GITHUB_WORKSPACE#$RUNNER_TEMP/base#g" "$RUNNER_TEMP/head.cp" > "$RUNNER_TEMP/base.cp"
+          fi
+
+      - name: Run the benches, base and head alternately
+        id: cmp
+        continue-on-error: true
+        run: |
+          python3 ci/perf/compare.py \
+            --base "$RUNNER_TEMP/base" --base-cp "$RUNNER_TEMP/base.cp" --base-sha "$BASE_COMMIT" \
+            --head "$GITHUB_WORKSPACE" --head-cp "$RUNNER_TEMP/head.cp" --head-sha "$HEAD_SHA" \
+            --java "$JAVA_HOME/bin/java" --out build/perf --rounds 7 --min-rounds 3 --budget 540 --confirm-rounds 3
+
+      - name: Job summary
+        if: always()
+        run: |
+          if [ -f build/perf/summary.md ]; then
+            cat build/perf/summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "The perf run did not produce a table; see the log of the benches step." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: perf-numbers
+          path: |
+            build/perf/perf.json
+            build/perf/summary.md
+          if-no-files-found: ignore
+
+      # One comment per PR, updated in place. A fork's PR gets a read-only token, so only a PR from this repo posts.
+      - name: Sticky PR comment
+        if: always() && github.event.pull_request.head.repo.full_name == github.repository
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -eu
+          [ -f build/perf/summary.md ] || exit 0
+          head -c 60000 build/perf/summary.md > "$RUNNER_TEMP/comment.md"
+          ID=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+            --jq '.[] | select(.user.login == "github-actions[bot]") | select(.body | startswith("<!-- mcgui-perf -->")) | .id' | sed -n 1p)
+          if [ -n "$ID" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$ID" -F body=@"$RUNNER_TEMP/comment.md" > /dev/null
+          else
+            gh api -X POST "repos/$REPO/issues/$PR/comments" -F body=@"$RUNNER_TEMP/comment.md" > /dev/null
+          fi
+
+      - name: Fail when a metric is worse than its limit
+        if: steps.cmp.outcome == 'failure'
+        run: |
+          echo "::error::perf gate failed; the table is in the job summary"
+          exit 1
+
+  # The one check branch rules require. Skipped counts as a pass; failed and cancelled do not.
+  perf:
+    name: perf
+    needs: [compare]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Every needed job passed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          for r in $RESULTS; do
+            case "$r" in
+              success|skipped) ;;
+              *) echo "::error::a perf job ended as $r"; exit 1 ;;
+            esac
+          done
