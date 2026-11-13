@@ -87,7 +87,7 @@ public final class LoadBench {
         HtmlRenderer.adaptiveBands = Boolean.parseBoolean(System.getProperty("adaptive", "true"));
         String out = System.getProperty("out", "");
         String tag = System.getProperty("tag", "");
-        Path samples = Path.of(System.getProperty("samples", "samples")), shipped = Path.of(System.getProperty("shipped", "src/main/resources/pages"));
+        Path samples = Path.of(System.getProperty("samples", "examples/samples")), shipped = Path.of(System.getProperty("shipped", "src/main/resources/pages"));
         Page.Loader loader = new Page.Loader(true, Path.of("build/samples/cache"));
         Palette palette = new Palette(RenderBench::mapColour);
 

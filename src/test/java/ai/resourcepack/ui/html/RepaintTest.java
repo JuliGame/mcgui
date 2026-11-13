@@ -113,7 +113,7 @@ class RepaintTest {
 
     @Test
     void sampleMenuHoversArePartialAndMatch() throws IOException {
-        Walk w = walk(file("samples/menu.html"));
+        Walk w = walk(file("examples/samples/menu.html"));
         assertTrue(w.worst <= 1, "samples/menu: " + w.where);
         assertEquals(w.steps, w.partials, "samples/menu hovers that were not partial");
     }
@@ -121,7 +121,7 @@ class RepaintTest {
     /** The radial menu samples: hexagons cut by clip-path, and drawn as SVG polygons the page's CSS fills. */
     @Test
     void radialMenuHoversMatch() throws IOException {
-        for (String name : new String[]{"samples/radial-clip.html", "samples/radial-svg.html"}) {
+        for (String name : new String[]{"examples/samples/radial-clip.html", "examples/samples/radial-svg.html"}) {
             Walk w = walk(file(name));
             assertTrue(w.worst <= 1, name + ": " + w.where);
         }

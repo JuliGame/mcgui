@@ -155,7 +155,7 @@ class HoverAheadTest {
 
     @Test
     void sampleMenuDrawnAheadIsTheRepaint() throws IOException {
-        Walk w = walk("samples/menu", file("samples/menu.html"));
+        Walk w = walk("samples/menu", file("examples/samples/menu.html"));
         assertEquals(w.steps, w.taken);
     }
 

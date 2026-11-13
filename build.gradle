@@ -166,12 +166,12 @@ processResources {
     }
 }
 
-// Renders every samples/*.html to build/samples/*.png: how the renderer is checked by eye.
+// Renders every examples/samples/*.html to build/samples/*.png: how the renderer is checked by eye.
 tasks.register('renderSamples', JavaExec) {
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'ai.resourcepack.ui.html.RenderSamples'
     // -Pdir=<folder> renders another folder (src/main/resources/pages, say); -Ponly=<name> one page.
-    def dir = project.findProperty('dir') ?: 'samples'
+    def dir = project.findProperty('dir') ?: 'examples/samples'
     args = [file(dir).absolutePath, layout.buildDirectory.dir('samples').get().asFile.absolutePath] + (project.findProperty('only') ? [project.findProperty('only')] : [])
     systemProperty 'java.awt.headless', 'true'
     // -Phover=<css selector>: also <name>-hover.png, with the first element it matches hovered.
@@ -184,7 +184,7 @@ tasks.register('renderBench', JavaExec) {
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'ai.resourcepack.ui.html.RenderBench'
     def scroll = project.findProperty('scroll') ?: '0'
-    args = [file('samples').absolutePath, file('src/main/resources/pages').absolutePath] + (scroll != '0' ? [file('src/test/resources/scroll').absolutePath] : [])
+    args = [file('examples/samples').absolutePath, file('src/main/resources/pages').absolutePath] + (scroll != '0' ? [file('src/test/resources/scroll').absolutePath] : [])
     systemProperty 'java.awt.headless', 'true'
     systemProperty 'runs', project.findProperty('runs') ?: '20'
     systemProperty 'only', project.findProperty('only') ?: ''
@@ -195,11 +195,11 @@ tasks.register('renderBench', JavaExec) {
 }
 
 // What styling costs per page, cold and on a hover, and a digest of every computed style to compare two builds (StyleBench).
-// -Pdir=<folder or .html> (default samples), -Pruns=<n>, -Ponly=<substring>, -Pout=<tsv>, -Pdump=<dir>, -Ppng=<dir>.
+// -Pdir=<folder or .html> (default examples/samples), -Pruns=<n>, -Ponly=<substring>, -Pout=<tsv>, -Pdump=<dir>, -Ppng=<dir>.
 tasks.register('styleBench', JavaExec) {
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'ai.resourcepack.ui.html.StyleBench'
-    args = [file(project.findProperty('dir') ?: 'samples').absolutePath]
+    args = [file(project.findProperty('dir') ?: 'examples/samples').absolutePath]
     systemProperty 'java.awt.headless', 'true'
     ['runs', 'only', 'out', 'dump', 'png'].each { if (project.findProperty(it)) systemProperty it, project.findProperty(it) }
     maxHeapSize = '2g'
@@ -225,7 +225,7 @@ tasks.register('loadBench', JavaExec) {
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'ai.resourcepack.ui.html.LoadBench'
     systemProperty 'java.awt.headless', 'true'
-    systemProperty 'samples', file('samples').absolutePath
+    systemProperty 'samples', file('examples/samples').absolutePath
     systemProperty 'shipped', file('src/main/resources/pages').absolutePath
     ['pages', 'sessions', 'render', 'modes', 'bands', 'secs', 'warm', 'send', 'out', 'tag', 'nowarmcell', 'adaptive', 'ahead', 'reps', 'verify', 'aheadevery'].each { k ->
         if (project.hasProperty(k)) systemProperty k, project.property(k)
@@ -239,7 +239,7 @@ tasks.register('loadBench', JavaExec) {
 tasks.register('allocBench', JavaExec) {
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'ai.resourcepack.ui.html.AllocBench'
-    args = (project.findProperty('pages') ?: 'src/main/resources/pages/menu.html,samples/landing.html,src/main/resources/pages/shop.html,src/test/resources/scroll/long.html')
+    args = (project.findProperty('pages') ?: 'src/main/resources/pages/menu.html,examples/samples/landing.html,src/main/resources/pages/shop.html,src/test/resources/scroll/long.html')
             .toString().split(',').findAll { it }.collect { file(it).absolutePath }
     systemProperty 'java.awt.headless', 'true'
     ['runs', 'ops'].each { if (project.hasProperty(it)) systemProperty it, project.property(it) }
@@ -292,7 +292,7 @@ tasks.register('hoverCost', JavaExec) {
     mainClass = 'ai.resourcepack.ui.html.HoverCost'
     args = (project.findProperty('pages') ?: '').toString().split(',').findAll { it }
     systemProperty 'java.awt.headless', 'true'
-    systemProperty 'samples', file('samples').absolutePath
+    systemProperty 'samples', file('examples/samples').absolutePath
     systemProperty 'shipped', file('src/main/resources/pages').absolutePath
     systemProperty 'runs', project.findProperty('runs') ?: '5'
     maxHeapSize = '2g'

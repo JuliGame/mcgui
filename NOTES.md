@@ -15,7 +15,7 @@ WebView is a browser with native libraries, and CSSBox (pure Java, claims flex
 and grid) lost variables, grid, the flex header, radii and shadows on an
 ordinary modern page. So jsoup parses and everything after that is ours,
 in `html/`, which has **no Bukkit in it** and is tested on its own:
-`./gradlew renderSamples` renders `samples/*.html` to `build/samples/` at 1x
+`./gradlew renderSamples` renders `examples/samples/*.html` to `build/samples/` at 1x
 and 2x (and scrolled to the end, when a page scrolls). Judge changes there,
 by eye, before going near a server. `-Pdir=src/main/resources/pages` renders
 the example pages the plugin ships; `-Ponly=<name>` one page.

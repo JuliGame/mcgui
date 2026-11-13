@@ -30,7 +30,7 @@ public final class HoverCost {
         List<String> specs = args.length > 0 ? Arrays.asList(args)
                 : List.of("pages:menu", "pages:shop", "samples:menu", "samples:cards", "samples:landing", "samples:typography");
         int runs = Integer.getInteger("runs", 5);
-        Path samples = Path.of(System.getProperty("samples", "samples")), shipped = Path.of(System.getProperty("shipped", "src/main/resources/pages"));
+        Path samples = Path.of(System.getProperty("samples", "examples/samples")), shipped = Path.of(System.getProperty("shipped", "src/main/resources/pages"));
         Page.Loader loader = new Page.Loader(true, Path.of("build/samples/cache"));
         Palette palette = new Palette(RenderBench::mapColour);
         var mx = (com.sun.management.ThreadMXBean) ManagementFactory.getThreadMXBean();

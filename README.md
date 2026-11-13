@@ -18,7 +18,7 @@ it. See [For plugin developers](#for-plugin-developers).
 **Needs** Spigot, Paper or Folia 1.21.11 or newer, one jar for all three (Java 21, or 25 for
 26.x). PlaceholderAPI is optional. Build with `./gradlew build` (JDK 17 or 21 to run Gradle); the plugin is
 `build/libs/MCGUI-<version>.jar`. `./gradlew renderSamples` renders
-`samples/*.html` to `build/samples/` to check the renderer by eye.
+`examples/samples/*.html` to `build/samples/` to check the renderer by eye.
 
 ## How it works
 

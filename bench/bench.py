@@ -125,7 +125,7 @@ def headless(b):
     pages = ['pages:market']
     if a.vanilla and os.path.isdir(a.vanilla):
         pages += [os.path.join(a.vanilla, p + '.html') for p in ('crates', 'auction', 'quests') if os.path.exists(os.path.join(a.vanilla, p + '.html'))]
-    base = [java21(a), '-Xmx2g', '-Djava.awt.headless=true', f'-Dsamples={REPO}/samples', f'-Dshipped={REPO}/src/main/resources/pages']
+    base = [java21(a), '-Xmx2g', '-Djava.awt.headless=true', f'-Dsamples={REPO}/examples/samples', f'-Dshipped={REPO}/src/main/resources/pages']
     out = sh(base + [f'-Druns={3 if a.quick else 5}', '-cp', b.cp, 'ai.resourcepack.ui.html.HoverCost'] + pages, cwd=REPO)
     b.raw['hovercost'] = out
     res = {}
@@ -136,7 +136,7 @@ def headless(b):
             res[f'hover_cpu_ms.{name}'] = float(m.group(3))
             res[f'hover_cpu_ms_p90.{name}'] = float(m.group(4))
     out = sh(base + [f'-Druns={5 if a.quick else 10}', '-Donly=market', '-cp', b.cp, 'ai.resourcepack.ui.html.RenderBench',
-                     f'{REPO}/samples', f'{REPO}/src/main/resources/pages'], cwd=REPO)
+                     f'{REPO}/examples/samples', f'{REPO}/src/main/resources/pages'], cwd=REPO)
     b.raw['renderbench'] = out
     for line in out.splitlines():
         m = re.match(r'(market)\s+full\s+([\d.]+)', line)
