@@ -1,0 +1,37 @@
+{
+  "rules": [
+    {"match": "alloc.*.pool-made-mb", "kind": "exact", "mode": "report", "rel": 0.03, "abs": 0.03},
+    {"match": "alloc.*.total-mb", "kind": "exact", "rel": 0.03, "abs": 0.03},
+    {"match": "hover.*-alloc-mb", "kind": "exact", "rel": 0.03, "abs": 0.1},
+    {"match": "hover.*.tiles", "kind": "exact", "rel": 0, "abs": 0},
+    {"match": "hover.*.not-partial", "kind": "exact", "rel": 0, "abs": 0},
+    {"match": "tile.*.maps", "kind": "exact", "rel": 0.01, "abs": 0.15},
+    {"match": "tile.*.repoints", "kind": "exact", "rel": 0.01, "abs": 0.15},
+    {"match": "tile.*.packets", "kind": "exact", "rel": 0.01, "abs": 0.15},
+    {"match": "tile.*.raw-kb", "kind": "exact", "rel": 0.01, "abs": 0.15},
+    {"match": "tile.*.deflated-kb", "kind": "exact", "rel": 0.01, "abs": 0.15},
+
+    {"match": "tile.*-ms", "kind": "timing", "rel": 0.10, "abs": 0.1},
+    {"match": "hover.pages/market.repaint-cpu-ms", "kind": "timing", "rel": 0.15, "abs": 0.3},
+    {"match": "hover.pages/market.ahead-cpu-ms", "kind": "timing", "rel": 0.15, "abs": 0.3},
+    {"match": "hover.pages/menu.repaint-cpu-ms", "kind": "timing", "rel": 0.20, "abs": 0.3},
+    {"match": "hover.pages/menu.ahead-cpu-ms", "kind": "timing", "rel": 0.15, "abs": 0.3},
+    {"match": "render.pages/menu.full-ms", "kind": "timing", "rel": 0.15, "abs": 0.5},
+    {"match": "render.pages/menu.draw-ms", "kind": "timing", "rel": 0.15, "abs": 0.5},
+    {"match": "render.pages/menu.hover-ms", "kind": "timing", "rel": 0.15, "abs": 0.5},
+    {"match": "render.pages/market.full-ms", "kind": "timing", "rel": 0.15, "abs": 0.5},
+    {"match": "render.samples/landing.full-ms", "kind": "timing", "rel": 0.15, "abs": 0.5},
+
+    {"match": "*-ms", "kind": "timing", "mode": "report", "rel": 0.15, "abs": 0.3}
+  ],
+  "evidence": [
+      "How the limits were chosen. The same commit was benched against itself (base and head both the same commit, 7 interleaved rounds, medians) in 10 separate jobs on GitHub-hosted ubuntu-24.04 runners (4 vCPU; AMD EPYC 7763, 9V74, 9V45 and an Intel Xeon 6975P-C came up), 2026-11-13. A limit sits above the worst rise of head over base seen in those 10 jobs.",
+      "exact, bytes allocated (alloc.*.total-mb): worst rise +0.9% (menu hover 1.17 to 1.19 MB; the bench prints 0.01 MB steps), usually 0.0%. Limit +3% or 0.03 MB. alloc.*.pool-made-mb swings from 0 to 0.4 MB (menu) and 0 to 10 MB (long page) between identical runs, so it is report-only.",
+      "exact, hover allocation (hover.*-alloc-mb): printed to 0.1 MB, so one step is up to 11% of a small page; identical runs differ by 0 or one step. Limit +3% or 0.1 MB. hover.*.tiles and hover.*.not-partial were identical in all 10 jobs: any rise fails.",
+      "exact, scroll notch (tile.*.maps, repoints, packets, raw-kb, deflated-kb): identical in all 10 jobs. Limit +1% or the 0.1 step of the printed number (0.15).",
+      "timing, gated: worst rise of head over base in the 10 jobs (limit): tile.*.cpu-ms and canvas-ms +2.2% (10%); hover market repaint-cpu +3.6%, ahead-cpu +3.3% (15%); hover menu ahead-cpu +5.3% (15%); hover menu repaint-cpu +9.4% (20%); render menu full +4.5%, draw +1.9%, hover +3.8% (15%); render market full +5.2% (15%); render landing full +6.5% (15%). All of them also keep an absolute floor in ms so that a 0.1 ms step of the printed number is never a failure.",
+      "timing, report-only, too noisy on hosted runners to gate at 15%: render.pages/market.draw-ms (+10.4%), render.pages/market.hover-ms (+16.7%), render.*.hover-draw-ms (+9.1%, values under 1.5 ms), render.samples/landing.draw-ms (+10.0%), every hover.*.layout-cpu-ms (+9.3% menu; about 3 ms), and every timing of the shop page (+17% hover repaint, +15% layout; about 10 ms, bimodal from run to run). A first draft also benched render shop and radial-clip: +42% and +36% between identical jobs, so they were dropped. Every timing metric not named in a rule above falls to the last rule and is report-only.",
+      "Timing that goes over a limit is measured again (3 more rounds of that bench) before it fails, so one noisy neighbour cannot fail a PR; a real slowdown is still there. Exact metrics are not measured again.",
+      "To change a limit, edit this file in the PR that needs it: the change is reviewed with the PR. There is no label or comment that overrides the gate."
+  ]
+}
