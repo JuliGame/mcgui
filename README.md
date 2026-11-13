@@ -843,6 +843,12 @@ The [examples](examples/) are whole plugins built this way:
 [atlas](examples/atlas/) (a live world map) and [vanilla](examples/vanilla/)
 (pages in the game's own look).
 
+## Contributing
+
+Changes go into `dev` by pull request and reach `main` when `dev` is promoted, each step behind automated
+checks. [`CONTRIBUTING.md`](CONTRIBUTING.md) has the steps; a first pull request is asked to accept the
+[contributor licence agreement](CLA.md).
+
 ## Licence
 
 AGPL-3.0-or-later, with extra terms. Copyright (C) 2026 Josh (@joshdevous) and
