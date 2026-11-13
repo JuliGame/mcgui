@@ -232,7 +232,9 @@ def unit(name, args, logfile, timeout):
         # Other users' processes hidden; /proc/loadavg stays (bench.py reads it).
         'ProtectProc': 'invisible', 'ProtectClock': 'yes', 'ProtectKernelLogs': 'yes', 'ProtectHostname': 'yes',
         'RestrictNamespaces': 'yes', 'RestrictRealtime': 'yes', 'LockPersonality': 'yes',
-        'SystemCallArchitectures': 'native', 'SystemCallFilter': '@system-service',
+        # No SystemCallFilter: Paper's bundled spark profiler calls perf_event_open at start, outside
+        # @system-service, and the server would be killed (or, with EPERM, measured unlike any real server).
+        'SystemCallArchitectures': 'native',
         'RestrictAddressFamilies': 'AF_UNIX AF_INET AF_INET6 AF_NETLINK',
         'StandardOutput': f'append:{logfile}', 'StandardError': f'append:{logfile}',
     }
@@ -269,8 +271,10 @@ def result_path(sha):
     return os.path.join(RESULTS, f'{sha}.json')
 
 
-def bench_sha(sha, out=None):
-    """Builds and benches [sha] in the sandbox; the stored result (with its log path and time taken added)."""
+def bench_sha(sha, out=None, must_be_whole=False):
+    """Builds and benches [sha] in the sandbox; the stored result (with its log path and time taken added).
+    [must_be_whole] (the base): a run with a failed cell is a fault, kept beside the results but never stored as the
+    result, since everything after would be compared with it."""
     logfile = os.path.join(LOGS, f'{time.strftime("%Y%m%d-%H%M%S")}-{sha[:12]}.log')
     open(logfile, 'a').close()
     log(f'benching {sha[:7]}, log {logfile}')
@@ -296,20 +300,26 @@ def bench_sha(sha, out=None):
         raise RunFault(f'the bench result is for {doc.get("commit")!r}, not {sha[:7]}, or empty; see {logfile}')
     doc['ci'] = {'sha': sha, 'log': logfile, 'build_s': round(build_s), 'bench_s': round(bench_s),
                  'total_s': round(time.time() - t0), 'gate': gate, 'finished': time.strftime('%Y-%m-%d %H:%M:%S')}
+    broken = {c: r['error'] for c, r in doc['results'].items() if isinstance(r, dict) and 'error' in r}
     dest = out or result_path(sha)
+    if broken and must_be_whole:
+        dest += '.broken'
     tmp = dest + '.tmp'
     json.dump(doc, open(tmp, 'w'), indent=1)
     os.replace(tmp, dest)
     log(f'{sha[:7]} benched in {time.time() - t0:.0f} s: {dest}')
+    if broken and must_be_whole:
+        cell, err = next(iter(broken.items()))
+        raise RunFault(f'the run of base {sha[:7]} is broken ({", ".join(broken)} failed, {cell}: {err[:80]}); see {logfile}')
     return doc
 
 
-def stored_or_bench(sha):
+def stored_or_bench(sha, must_be_whole=False):
     p = result_path(sha)
     if os.path.exists(p):
         log(f'stored result for {sha[:7]}: {p}')
         return json.load(open(p))
-    return bench_sha(sha)
+    return bench_sha(sha, must_be_whole=must_be_whole)
 
 
 # ----------------------------------------------------------------------------------------------------- comparing
@@ -503,7 +513,7 @@ def check_pr(pr):
     write_attempts(head_sha, a)
     try:
         rules, where = head_rules(head_sha)
-        base = stored_or_bench(base_sha)
+        base = stored_or_bench(base_sha, must_be_whole=True)
         head = stored_or_bench(head_sha)
         rows, fails = compare(base, head, rules)
         gated = sum(1 for r in rows if r[4] != 'report')
